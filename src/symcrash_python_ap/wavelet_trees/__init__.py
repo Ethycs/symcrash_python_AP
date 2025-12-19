@@ -112,12 +112,66 @@ from .tree_2_texture import build_tree_2_texture
 from .tree_3_transient import build_tree_3_transient
 from .tree_4_drone import build_tree_4_drone
 
+# =============================================================================
+# BASIS IMPORTS
+# =============================================================================
+
+from .equipment_basis import (
+    EquipmentBasis,
+    EquipmentSynthesizer,
+    build_60hz_basis,
+    build_50hz_basis,
+    build_tube_basis,
+    build_tape_basis,
+    build_vinyl_basis,
+    build_digital_basis,
+    build_studio_chain_basis,
+    make_clean_signal,
+    make_tube_warmth,
+    make_hum_60hz,
+    make_tape_saturation,
+    make_vinyl_warmth,
+    MAINS_60HZ,
+    MAINS_50HZ,
+    SAMPLE_RATE,
+    NYQUIST,
+)
+
+from .scale_synthesis import (
+    Scale,
+    ScaleSynthesizer,
+    SCALES,
+    JUST_RATIOS,
+    compute_scale_frequencies,
+    inject_scale_note,
+    inject_chord,
+    make_transpose_permutation,
+    make_inversion_permutation,
+    make_octave_fold_permutation,
+)
+
 __all__ = [
+    # Constants
     'BLOCK_SIZE', 'MAX_DEPTH', 'LEAF_COUNT', 'COEFF_LEN', 'NODE_SIZE', 'NODE_COUNT',
+    # Tree types
     'PacketNode', 'TreeROM', 'enumerate_leaves',
+    # Tree builders
     'build_tree_0_balanced',
     'build_tree_1_harmonic',
     'build_tree_2_texture',
     'build_tree_3_transient',
     'build_tree_4_drone',
+    # Equipment basis
+    'EquipmentBasis', 'EquipmentSynthesizer',
+    'build_60hz_basis', 'build_50hz_basis', 'build_tube_basis',
+    'build_tape_basis', 'build_vinyl_basis', 'build_digital_basis',
+    'build_studio_chain_basis',
+    'make_clean_signal', 'make_tube_warmth', 'make_hum_60hz',
+    'make_tape_saturation', 'make_vinyl_warmth',
+    'MAINS_60HZ', 'MAINS_50HZ', 'SAMPLE_RATE', 'NYQUIST',
+    # Scale synthesis
+    'Scale', 'ScaleSynthesizer', 'SCALES', 'JUST_RATIOS',
+    'compute_scale_frequencies', 'inject_scale_note', 'inject_chord',
+    'make_transpose_permutation', 'make_inversion_permutation',
+    'make_octave_fold_permutation',
 ]
