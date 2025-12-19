@@ -838,18 +838,18 @@ def generate_all_presets(output_dir: str = "."):
     """Generate all 12 presets."""
     
     presets = [
-        ("01_topology_fold", preset_topology_fold, "Harmonic → Metallic lattice"),
+        ("01_topology_fold", preset_topology_fold, "Harmonic to Metallic lattice"),
         ("02_catastrophe_snap", preset_catastrophe_snap, "Character flip, constant volume"),
-        ("03_perfect_morph", preset_perfect_morph, "Organ → Clarinet, no zipper"),
+        ("03_perfect_morph", preset_perfect_morph, "Organ to Clarinet, no zipper"),
         ("04_living_chord", preset_living_chord, "20 voices as one organism"),
         ("05_polyphonic_pressure", preset_polyphonic_pressure, "Simple notes, complex interaction"),
         ("06_intentional_aliasing", preset_intentional_aliasing, "Digital edge, not brittle"),
         ("07_vhs_ghost_choir", preset_vhs_ghost_choir, "Noise that sings"),
         ("08_pressure_field", preset_pressure_field, "Density, not volume"),
         ("09_imminent_failure", preset_imminent_failure, "Always about to break"),
-        ("10_saw_that_learned", preset_saw_that_learned, "Familiar → Alien"),
+        ("10_saw_that_learned", preset_saw_that_learned, "Familiar to Alien"),
         ("11_bass_with_memory", preset_bass_with_memory, "Notes affect future notes"),
-        ("12_single_knob_apocalypse", preset_single_knob_apocalypse, "One knob → everything"),
+        ("12_single_knob_apocalypse", preset_single_knob_apocalypse, "One knob to everything"),
     ]
     
     print("=" * 60)
@@ -871,5 +871,9 @@ def generate_all_presets(output_dir: str = "."):
 
 if __name__ == "__main__":
     import os
-    output_dir = os.path.dirname(__file__) or "."
-    generate_all_presets(output_dir)
+    audio_out = os.path.join(
+        os.path.dirname(os.path.dirname(__file__)) or ".",
+        "audio_out"
+    )
+    os.makedirs(audio_out, exist_ok=True)
+    generate_all_presets(audio_out)

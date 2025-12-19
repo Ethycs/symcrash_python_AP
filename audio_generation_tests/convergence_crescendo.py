@@ -14,7 +14,8 @@ Structure:
 
 import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add src/symcrash_python_ap directory to path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'src', 'symcrash_python_ap'))
 
 import wave
 import struct
@@ -255,10 +256,12 @@ def generate_convergence(output_path: str = None) -> Tuple[List[int], List[int]]
     """Generate the convergence crescendo."""
     
     if output_path is None:
-        output_path = os.path.join(
-            os.path.dirname(__file__) if __file__ else ".",
-            "convergence_crescendo.wav"
+        audio_out = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)) if __file__ else ".",
+            "audio_out"
         )
+        os.makedirs(audio_out, exist_ok=True)
+        output_path = os.path.join(audio_out, "convergence_crescendo.wav")
     
     print("=" * 60)
     print("CONVERGENCE CRESCENDO")

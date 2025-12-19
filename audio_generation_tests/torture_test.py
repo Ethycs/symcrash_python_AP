@@ -15,8 +15,8 @@ Run this file to generate the torture test WAV.
 import sys
 import os
 
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add src/symcrash_python_ap directory to path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'src', 'symcrash_python_ap'))
 
 import wave
 import struct
@@ -231,10 +231,12 @@ def run_torture_test(output_path: str = None) -> Tuple[List[int], List[int]]:
     Run the full torture test with real pipeline.
     """
     if output_path is None:
-        output_path = os.path.join(
-            os.path.dirname(__file__),
-            "cathedral_of_stress.wav"
+        audio_out = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            "audio_out"
         )
+        os.makedirs(audio_out, exist_ok=True)
+        output_path = os.path.join(audio_out, "cathedral_of_stress.wav")
     
     print("=" * 60)
     print("CATHEDRAL OF STRESS - TORTURE TEST (FULL PIPELINE)")
