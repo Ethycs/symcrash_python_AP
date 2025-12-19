@@ -6,9 +6,6 @@ Maintains coefficient states and applies operator algebra.
 Emits VoiceFrames for wavelet synthesis.
 """
 
-import sys
-sys.path.insert(0, '/home/claude')
-
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
 import numpy as np
