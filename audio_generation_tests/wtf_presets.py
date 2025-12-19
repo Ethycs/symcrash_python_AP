@@ -5,28 +5,21 @@ WTF Presets - 12 Identity-Defining Sounds
 Each preset demonstrates something other synths cannot do cleanly.
 """
 
-import wave
-import struct
+import sys
+import os
+
+# Add src/symcrash_python_ap directory to path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'src', 'symcrash_python_ap'))
+
 import numpy as np
-from typing import List, Tuple
-from dataclasses import dataclass
+from typing import Tuple
+
+from audio_io import write_audio
 
 FS = 48000
 BLOCK_SIZE = 64
 
 def sat16(x): return max(-32768, min(32767, int(x)))
-
-def write_wav(path: str, L: np.ndarray, R: np.ndarray):
-    """Write stereo WAV."""
-    with wave.open(path, 'w') as wav:
-        wav.setnchannels(2)
-        wav.setsampwidth(2)
-        wav.setframerate(FS)
-        interleaved = np.empty(len(L) * 2, dtype=np.int16)
-        interleaved[0::2] = np.clip(L, -32768, 32767).astype(np.int16)
-        interleaved[1::2] = np.clip(R, -32768, 32767).astype(np.int16)
-        wav.writeframes(interleaved.tobytes())
-    print(f"  Wrote {path}")
 
 
 # =============================================================================
@@ -834,9 +827,9 @@ def preset_single_knob_apocalypse(duration: float = 12.0) -> Tuple[np.ndarray, n
 # MAIN
 # =============================================================================
 
-def generate_all_presets(output_dir: str = "."):
+def generate_all_presets():
     """Generate all 12 presets."""
-    
+
     presets = [
         ("01_topology_fold", preset_topology_fold, "Harmonic to Metallic lattice"),
         ("02_catastrophe_snap", preset_catastrophe_snap, "Character flip, constant volume"),
@@ -851,18 +844,17 @@ def generate_all_presets(output_dir: str = "."):
         ("11_bass_with_memory", preset_bass_with_memory, "Notes affect future notes"),
         ("12_single_knob_apocalypse", preset_single_knob_apocalypse, "One knob to everything"),
     ]
-    
+
     print("=" * 60)
     print("GENERATING 12 WTF PRESETS")
     print("=" * 60)
     print()
-    
+
     for filename, func, desc in presets:
         print(f"{filename}: {desc}")
         L, R = func()
-        path = f"{output_dir}/{filename}.wav"
-        write_wav(path, L, R)
-    
+        write_audio(filename, L, R, subdirectory="wtf_presets")
+
     print()
     print("=" * 60)
     print("ALL PRESETS GENERATED")
@@ -870,10 +862,4 @@ def generate_all_presets(output_dir: str = "."):
 
 
 if __name__ == "__main__":
-    import os
-    audio_out = os.path.join(
-        os.path.dirname(os.path.dirname(__file__)) or ".",
-        "audio_out"
-    )
-    os.makedirs(audio_out, exist_ok=True)
-    generate_all_presets(audio_out)
+    generate_all_presets()

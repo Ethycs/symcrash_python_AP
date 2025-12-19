@@ -17,8 +17,6 @@ import os
 # Add src/symcrash_python_ap directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'src', 'symcrash_python_ap'))
 
-import wave
-import struct
 import numpy as np
 from typing import List, Tuple, Dict
 from dataclasses import dataclass
@@ -27,12 +25,14 @@ from dataclasses import dataclass
 try:
     from fixed import sat16
     from wavelet_packet_trees import COEFF_LEN
+    from audio_io import write_audio
     HAVE_PIPELINE = True
 except ImportError:
     HAVE_PIPELINE = False
     COEFF_LEN = 256
     def sat16(x):
         return max(-32768, min(32767, int(x)))
+    write_audio = None  # Fallback handled below
 
 
 # =============================================================================
@@ -252,16 +252,8 @@ def synthesize_block(voices: List[Voice], block: int) -> Tuple[np.ndarray, np.nd
 # MAIN
 # =============================================================================
 
-def generate_convergence(output_path: str = None) -> Tuple[List[int], List[int]]:
+def generate_convergence() -> Tuple[List[int], List[int]]:
     """Generate the convergence crescendo."""
-    
-    if output_path is None:
-        audio_out = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)) if __file__ else ".",
-            "audio_out"
-        )
-        os.makedirs(audio_out, exist_ok=True)
-        output_path = os.path.join(audio_out, "convergence_crescendo.wav")
     
     print("=" * 60)
     print("CONVERGENCE CRESCENDO")
@@ -305,21 +297,9 @@ def generate_convergence(output_path: str = None) -> Tuple[List[int], List[int]]
     
     print(f"  100% - complete")
     print()
-    
-    # Write WAV
-    with wave.open(output_path, 'w') as wav:
-        wav.setnchannels(2)
-        wav.setsampwidth(2)
-        wav.setframerate(FS)
-        
-        # Interleave L and R
-        interleaved = np.empty(len(all_L) * 2, dtype=np.int16)
-        interleaved[0::2] = all_L
-        interleaved[1::2] = all_R
-        wav.writeframes(interleaved.tobytes())
-    
-    print(f"Wrote {output_path}")
-    print(f"  Duration: {len(all_L)/FS:.1f}s")
+
+    # Write WAV using audio_io
+    write_audio("convergence_crescendo", all_L, all_R)
     
     # Analysis
     L_arr = all_L.astype(np.float32)

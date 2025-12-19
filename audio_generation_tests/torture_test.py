@@ -18,8 +18,6 @@ import os
 # Add src/symcrash_python_ap directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'src', 'symcrash_python_ap'))
 
-import wave
-import struct
 import numpy as np
 from typing import List, Tuple, Dict
 
@@ -48,6 +46,7 @@ from safety_engine import SafetyEngine
 from frames import ParamFrame, VoiceFrame
 from fixed import sat16, mul_q15_sat
 from wavelet_packet_trees import PacketTreeSet, COEFF_LEN
+from audio_io import write_audio
 
 
 # =============================================================================
@@ -226,17 +225,10 @@ class TortureTestPipeline:
 # MAIN TEST RUNNER
 # =============================================================================
 
-def run_torture_test(output_path: str = None) -> Tuple[List[int], List[int]]:
+def run_torture_test() -> Tuple[List[int], List[int]]:
     """
     Run the full torture test with real pipeline.
     """
-    if output_path is None:
-        audio_out = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)),
-            "audio_out"
-        )
-        os.makedirs(audio_out, exist_ok=True)
-        output_path = os.path.join(audio_out, "cathedral_of_stress.wav")
     
     print("=" * 60)
     print("CATHEDRAL OF STRESS - TORTURE TEST (FULL PIPELINE)")
@@ -290,32 +282,14 @@ def run_torture_test(output_path: str = None) -> Tuple[List[int], List[int]]:
     
     print(f"  Progress: {TOTAL_BLOCKS}/{TOTAL_BLOCKS} (100%)")
     print()
-    
-    # Write WAV
-    write_wav(output_path, all_L, all_R)
-    
+
+    # Write WAV using audio_io
+    write_audio("cathedral_of_stress", all_L, all_R)
+
     # Analysis
     analyze_output(all_L, all_R)
-    
+
     return all_L, all_R
-
-
-def write_wav(path: str, L: List[int], R: List[int]):
-    """Write stereo WAV file."""
-    with wave.open(path, 'w') as wav:
-        wav.setnchannels(2)
-        wav.setsampwidth(2)
-        wav.setframerate(FS)
-        
-        data = []
-        for i in range(len(L)):
-            data.append(struct.pack('<h', int(L[i])))
-            data.append(struct.pack('<h', int(R[i])))
-        wav.writeframes(b''.join(data))
-    
-    print(f"Wrote {path}")
-    print(f"  Samples: {len(L)}")
-    print(f"  Duration: {len(L)/FS:.2f}s")
 
 
 def analyze_output(L: List[int], R: List[int]):
