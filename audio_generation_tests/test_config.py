@@ -3,6 +3,7 @@ Cathedral of Stress - Configuration
 ===================================
 
 Constants, timing, and voice configurations for the 5-second torture test.
+Uses the symcrash_python_ap audio pipeline.
 """
 
 import numpy as np
@@ -36,19 +37,19 @@ class SegmentTiming:
     start_sec: float
     end_sec: float
     description: str
-    
+
     @property
     def start_block(self) -> int:
         return int(self.start_sec * BLOCKS_PER_SEC)
-    
+
     @property
     def end_block(self) -> int:
         return int(self.end_sec * BLOCKS_PER_SEC)
-    
+
     @property
     def n_blocks(self) -> int:
         return self.end_block - self.start_block
-    
+
     def progress(self, block: int) -> float:
         """Return 0-1 progress within this segment."""
         if block < self.start_block:
@@ -75,7 +76,7 @@ SEGMENTS = {
         name='C',
         start_sec=2.00,
         end_sec=3.25,
-        description='Catastrophe corridor: fold → cusp → swallowtail'
+        description='Catastrophe corridor: fold -> cusp -> swallowtail'
     ),
     'D': SegmentTiming(
         name='D',
@@ -131,13 +132,13 @@ class VoiceConfig:
 def build_initial_voices() -> List[VoiceConfig]:
     """
     Build initial voice configuration for segment A.
-    
-    6 voices: harmonic stack (octaves + 5ths) → Tree1 (Harmonic)
-    4 voices: drones/fields → Tree4 (Field)
-    2 voices: quiet noise bed → Tree2 (Texture)
+
+    6 voices: harmonic stack (octaves + 5ths) -> Tree1 (Harmonic)
+    4 voices: drones/fields -> Tree4 (Field)
+    2 voices: quiet noise bed -> Tree2 (Texture)
     """
     voices = []
-    
+
     # Harmonic stack (voices 0-5)
     harmonic_freqs = [
         110.0,   # A2 - fundamental
@@ -156,7 +157,7 @@ def build_initial_voices() -> List[VoiceConfig]:
             amplitude=0x3000,
             pan=int((i - 2.5) * 4000),  # Spread across stereo
         ))
-    
+
     # Drone voices (voices 6-9)
     drone_freqs = [55.0, 82.5, 27.5, 41.25]  # Low A, E, sub-A, sub-E
     for i, freq in enumerate(drone_freqs):
@@ -168,7 +169,7 @@ def build_initial_voices() -> List[VoiceConfig]:
             amplitude=0x2800,
             pan=int((i - 1.5) * 6000),
         ))
-    
+
     # Texture voices (voices 10-11)
     for i in range(2):
         voices.append(VoiceConfig(
@@ -179,7 +180,7 @@ def build_initial_voices() -> List[VoiceConfig]:
             amplitude=0x1000,
             pan=int((i - 0.5) * 16000),  # Wide stereo
         ))
-    
+
     return voices
 
 
