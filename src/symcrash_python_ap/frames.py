@@ -24,10 +24,16 @@ class ParamFrame:
 
 @dataclass
 class VoiceFrame:
-    """Per-voice coefficient frame."""
+    """
+    Per-voice coefficient frame.
+
+    Tree control uses Variant B (two trees + blend) for clean separation:
+    - Voice Engine decides WHEN tree changes happen (musical timing)
+    - Wavelet Engine handles HOW to blend coefficients (numerical)
+    """
     tag: int = 0xA0
     voice_id: int = 0
-    tree_id: int = 0
+    tree_id: int = 0             # Legacy: single tree ID
     flags: int = 0
     gain_q15: int = 0x4000       # Voice gain (0.5 default)
     pan_q15: int = 0             # Pan (-1..+1 as Q1.15)
@@ -36,6 +42,20 @@ class VoiceFrame:
     aux_flags: int = 0
     aux_param_q15: int = 0
     coeff_q15: List[int] = field(default_factory=list)
+
+    # Tree control - Variant B (Voice Engine emits, Wavelet Engine consumes)
+    tree_a: float = 0.5          # First tree beta (0-1)
+    tree_b: float = 0.5          # Second tree beta (0-1)
+    tree_blend: float = 0.0      # 0 = pure A, 1 = pure B
+
+    # Musical envelopes (from Voice Engine ADSR)
+    tilt_env_q15: int = 0x4000   # Brightness/tilt envelope
+    density_env_q15: int = 0x4000  # Coefficient density envelope
+
+    # Voice state (for Safety Engine de-click)
+    is_starting: bool = False    # True on first block after note-on
+    is_stopping: bool = False    # True when transitioning to FREE
+    is_active: bool = True       # False when voice is done
 
 
 @dataclass
