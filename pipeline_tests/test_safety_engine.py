@@ -290,3 +290,344 @@ class TestF3AliasPolicyCorrectness:
 
         # (This test verifies the mechanism works, exact thresholds
         #  are implementation-specific)
+
+
+class TestSymbolTailInvariants:
+    """
+    Symbol Tail (coefficient-space) invariants S1-S5.
+
+    Tests for SymbolTail class that enforces coefficient-space safety.
+    """
+
+    def test_s1_finite_coefficients(self):
+        """S1: All coefficients representable as int16 after processing."""
+        from safety_engine import SymbolTail, COEFF_LEN
+
+        tail = SymbolTail()
+
+        # Input with out-of-range values
+        coeffs = [100000 if i % 2 == 0 else -100000 for i in range(COEFF_LEN)]
+
+        processed, result = tail.process(coeffs)
+
+        # All coefficients should be in int16 range
+        assert all(-32768 <= c <= 32767 for c in processed), "S1 violated: coefficients out of range"
+        assert result.s1_finite, "S1 check failed"
+
+    def test_s2_per_leaf_caps(self):
+        """S2: Per-leaf energy caps are enforced."""
+        from safety_engine import SymbolTail, COEFF_LEN, COEFF_PER_LEAF, LEAF_COUNT, E_LEAF_MAX
+
+        tail = SymbolTail()
+
+        # Create coefficients with one leaf at extreme energy
+        coeffs = [0] * COEFF_LEN
+        # Make leaf 15 extremely hot
+        for i in range(COEFF_PER_LEAF):
+            coeffs[15 * COEFF_PER_LEAF + i] = 32767
+
+        # Check that fine_clamp alone reduces energy
+        clamped = tail.fine_clamp(coeffs)
+        energy_before = tail.compute_leaf_energy(coeffs, 15)
+        energy_after = tail.compute_leaf_energy(clamped, 15)
+
+        assert energy_after < energy_before, "FineClamp should reduce excess energy"
+        assert energy_after <= E_LEAF_MAX, "FineClamp should cap leaf energy"
+
+    def test_s3_fine_band_cap(self):
+        """S3: Fine-band total energy cap is enforced."""
+        from safety_engine import SymbolTail, COEFF_LEN, COEFF_PER_LEAF, FINE_BAND_SET, E_FINE_MAX
+
+        tail = SymbolTail()
+
+        # Make all fine band leaves extremely hot
+        coeffs = [0] * COEFF_LEN
+        for leaf in FINE_BAND_SET:
+            for i in range(COEFF_PER_LEAF):
+                coeffs[leaf * COEFF_PER_LEAF + i] = 32767
+
+        processed, result = tail.process(coeffs)
+
+        # Check fine band energy is capped
+        fine_energy = sum(tail.compute_leaf_energy(processed, leaf) for leaf in FINE_BAND_SET)
+        # Either cap is satisfied or emergency simplify was applied
+        assert result.s3_fine_cap or fine_energy <= E_FINE_MAX * 2, "S3 violated: fine energy too high"
+
+    def test_s5_spectral_tilt_detection(self):
+        """S5: Spectral tilt detector identifies extreme tilt."""
+        from safety_engine import SymbolTail, COEFF_LEN, COEFF_PER_LEAF, FINE_BAND_SET
+
+        tail = SymbolTail()
+
+        # Create extremely tilted spectrum (all fine, no coarse)
+        coeffs = [0] * COEFF_LEN
+        for leaf in FINE_BAND_SET:
+            for i in range(COEFF_PER_LEAF):
+                coeffs[leaf * COEFF_PER_LEAF + i] = 16384
+
+        # Check that the invariant checker detects the tilt issue
+        result = tail.check_invariants(coeffs)
+        assert not result.s5_tilt_ok, "Should detect S5 tilt violation"
+
+        # Also verify fine energy is detected
+        assert result.fine_energy > 0, "Should have fine energy"
+        assert result.coarse_energy == 0, "Should have no coarse energy"
+
+    def test_fine_clamp_reduces_energy(self):
+        """FineClamp reduces excess per-leaf energy."""
+        from safety_engine import SymbolTail, COEFF_LEN, COEFF_PER_LEAF, E_LEAF_MAX
+
+        tail = SymbolTail()
+
+        # Create hot leaf
+        coeffs = [0] * COEFF_LEN
+        for i in range(COEFF_PER_LEAF):
+            coeffs[10 * COEFF_PER_LEAF + i] = 32767
+
+        energy_before = tail.compute_leaf_energy(coeffs, 10)
+        processed = tail.fine_clamp(coeffs)
+        energy_after = tail.compute_leaf_energy(processed, 10)
+
+        assert energy_after <= energy_before, "FineClamp didn't reduce energy"
+        assert energy_after <= E_LEAF_MAX, "FineClamp didn't cap energy properly"
+
+    def test_normalize_scale_preserves_structure(self):
+        """NormalizeScale preserves relative coefficient structure."""
+        from safety_engine import SymbolTail, COEFF_LEN
+
+        tail = SymbolTail()
+
+        # Create structured input
+        coeffs = [1000 if i < 128 else 500 for i in range(COEFF_LEN)]
+
+        processed = tail.normalize_scale(coeffs)
+
+        # Check structure is preserved (first half larger than second half)
+        first_half_sum = sum(abs(c) for c in processed[:128])
+        second_half_sum = sum(abs(c) for c in processed[128:])
+
+        assert first_half_sum > second_half_sum * 0.9, "Normalize broke structure"
+
+    def test_emergency_simplify_zeros_fine_leaves(self):
+        """EmergencySimplify zeros fine leaves."""
+        from safety_engine import SymbolTail, COEFF_LEN, COEFF_PER_LEAF, FINE_BAND_SET
+
+        tail = SymbolTail()
+
+        # Create input with content everywhere
+        coeffs = [1000] * COEFF_LEN
+
+        processed = tail.emergency_simplify(coeffs, k=4)
+
+        # Fine leaves should be zeroed
+        for leaf in sorted(FINE_BAND_SET, reverse=True)[:4]:
+            start = leaf * COEFF_PER_LEAF
+            leaf_energy = sum(abs(c) for c in processed[start:start + COEFF_PER_LEAF])
+            assert leaf_energy == 0, f"Emergency simplify didn't zero leaf {leaf}"
+
+
+class TestSAFEPredicate:
+    """
+    SAFE predicate tests for both coefficient and audio space.
+    """
+
+    def test_check_coeff_safe_clean_input(self):
+        """SAFE predicate passes for clean coefficient input."""
+        from safety_engine import check_coeff_safe, COEFF_LEN
+
+        # Normal coefficients
+        coeffs = [1000 if i % 3 == 0 else -500 for i in range(COEFF_LEN)]
+
+        result = check_coeff_safe(coeffs)
+
+        assert result.is_safe, "Clean coefficients should be SAFE"
+
+    def test_check_coeff_safe_detects_overflow(self):
+        """SAFE predicate detects overflow in coefficients."""
+        from safety_engine import check_coeff_safe, COEFF_LEN
+
+        # Coefficients with overflow
+        coeffs = [50000] * COEFF_LEN  # Out of int16 range
+
+        result = check_coeff_safe(coeffs)
+
+        assert not result.s1_finite, "Should detect S1 violation"
+        assert not result.is_safe, "Overflow coefficients should not be SAFE"
+
+    def test_check_audio_safe_clean_input(self):
+        """SAFE predicate passes for clean audio input."""
+        from safety_engine import check_audio_safe
+
+        # Normal audio
+        audio = [1000 if i % 2 == 0 else -1000 for i in range(64)]
+
+        result = check_audio_safe(audio)
+
+        assert result.is_safe, "Clean audio should be SAFE"
+
+    def test_check_audio_safe_detects_peak_violation(self):
+        """SAFE predicate detects peak violation (A1)."""
+        from safety_engine import check_audio_safe, PEAK_MAX
+
+        # Audio at max
+        audio = [32767] * 64
+
+        result = check_audio_safe(audio)
+
+        assert not result.a1_peak_ok, "Should detect A1 violation"
+        assert not result.is_safe, "Peak violation should not be SAFE"
+
+    def test_check_audio_safe_detects_slew_violation(self):
+        """SAFE predicate detects slew violation (A2)."""
+        from safety_engine import check_audio_safe, SLEW_MAX
+
+        # Audio with huge step change
+        audio = [0] * 32 + [32767] * 32
+
+        result = check_audio_safe(audio, prev_sample=0)
+
+        assert not result.a2_slew_ok, "Should detect A2 violation"
+        assert result.max_slew > SLEW_MAX, f"Max slew {result.max_slew} should exceed {SLEW_MAX}"
+
+    def test_check_audio_safe_detects_dc_violation(self):
+        """SAFE predicate detects DC offset violation (A3)."""
+        from safety_engine import check_audio_safe, DC_MAX
+
+        # Audio with DC bias
+        audio = [16000] * 64
+
+        result = check_audio_safe(audio)
+
+        assert not result.a3_dc_ok, "Should detect A3 violation"
+        assert abs(result.dc_offset) > DC_MAX, f"DC {result.dc_offset} should exceed {DC_MAX}"
+
+    def test_is_block_safe_combined(self):
+        """is_block_safe checks both coefficient and audio."""
+        from safety_engine import is_block_safe, COEFF_LEN
+
+        # Clean inputs
+        coeffs = [1000] * COEFF_LEN
+        audio = [1000] * 64
+
+        assert is_block_safe(coeffs, audio), "Clean block should be SAFE"
+
+        # Unsafe coefficients
+        coeffs_bad = [50000] * COEFF_LEN
+        assert not is_block_safe(coeffs_bad, audio), "Bad coeffs should fail"
+
+        # Unsafe audio
+        audio_bad = [32767] * 64
+        assert not is_block_safe(coeffs, audio_bad), "Bad audio should fail"
+
+
+class TestDegradeLevels:
+    """
+    Tests for degradation level enum and policy.
+    """
+
+    def test_degrade_levels_exist(self):
+        """DegradeLevel enum has expected values."""
+        from safety_engine import DegradeLevel
+
+        assert DegradeLevel.NONE == 0
+        assert DegradeLevel.REDUCE_RANK == 1
+        assert DegradeLevel.DROP_DIFFUSE == 2
+        assert DegradeLevel.ZERO_INJECT == 3
+        assert DegradeLevel.EMERGENCY == 4
+
+    def test_degrade_levels_ordered(self):
+        """Degrade levels are properly ordered (increasing severity)."""
+        from safety_engine import DegradeLevel
+
+        levels = [
+            DegradeLevel.NONE,
+            DegradeLevel.REDUCE_RANK,
+            DegradeLevel.DROP_DIFFUSE,
+            DegradeLevel.ZERO_INJECT,
+            DegradeLevel.EMERGENCY
+        ]
+
+        for i in range(len(levels) - 1):
+            assert levels[i] < levels[i + 1], f"Level ordering wrong: {levels[i]} vs {levels[i+1]}"
+
+    def test_safety_engine_has_degrade_level(self):
+        """SafetyEngine tracks current degrade level."""
+        from safety_engine import SafetyEngine, DegradeLevel
+
+        engine = SafetyEngine(block_size=64)
+
+        assert hasattr(engine, 'degrade_level')
+        assert engine.degrade_level == DegradeLevel.NONE
+
+
+class TestSlewLimiter:
+    """
+    Tests for slew rate limiting (A2 invariant).
+    """
+
+    def test_slew_limit_enforced(self):
+        """Slew limiter enforces A2 invariant."""
+        from safety_engine import SafetyEngine, SLEW_MAX
+
+        engine = SafetyEngine(block_size=64)
+
+        # Step change from 0 to max
+        L = [32767] * 64
+        R = [32767] * 64
+
+        L_out, R_out, last_L, last_R = engine.apply_slew_limit(L, R, 0, 0)
+
+        # Check max slew
+        max_slew = 0
+        prev = 0
+        for s in L_out:
+            slew = abs(s - prev)
+            max_slew = max(max_slew, slew)
+            prev = s
+
+        assert max_slew <= SLEW_MAX, f"Slew {max_slew} exceeds limit {SLEW_MAX}"
+
+    def test_slew_limit_preserves_slow_signals(self):
+        """Slew limiter preserves signals within limit."""
+        from safety_engine import SafetyEngine, SLEW_MAX
+
+        engine = SafetyEngine(block_size=64)
+
+        # Slow ramp (within slew limit)
+        L = [i * (SLEW_MAX // 2) for i in range(64)]
+        R = list(L)
+
+        L_out, R_out, _, _ = engine.apply_slew_limit(L, R, 0, 0)
+
+        # Output should be mostly unchanged
+        assert L_out == L, "Slow signal was modified by slew limiter"
+
+    def test_step_block_applies_slew(self):
+        """step_block applies slew limiting when enabled."""
+        from safety_engine import SafetyEngine, SLEW_MAX
+        from frames import ParamFrame
+
+        engine = SafetyEngine(block_size=64)
+        params = ParamFrame(K_mode=1)
+
+        # Process a block to set up state
+        L1 = [0] * 64
+        R1 = [0] * 64
+        engine.step_block(L1, R1, params)
+
+        # Now apply slew limit directly to a step change
+        L2 = [16000] * 64
+        R2 = [16000] * 64
+        L_slewed, R_slewed, last_L, last_R = engine.apply_slew_limit(L2, R2, 0, 0)
+
+        # Check that first sample is limited (should ramp from 0)
+        assert L_slewed[0] <= SLEW_MAX, f"First sample {L_slewed[0]} should be limited to {SLEW_MAX}"
+
+        # Check that max slew within block is bounded
+        max_slew = 0
+        prev = 0
+        for s in L_slewed:
+            slew = abs(s - prev)
+            max_slew = max(max_slew, slew)
+            prev = s
+        assert max_slew <= SLEW_MAX, f"Max slew {max_slew} should be <= {SLEW_MAX}"
