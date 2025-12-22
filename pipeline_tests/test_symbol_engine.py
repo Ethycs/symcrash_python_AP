@@ -426,3 +426,179 @@ class TestS5EmergencySimplifyCorrectness:
         # Should still be valid
         max_coeff = max(abs(c) for c in c_out)
         assert max_coeff < 40000, "Emergency mode became unstable"
+
+
+# =============================================================================
+# ACCEPTANCE TESTS (extracted from symbol_engine.py)
+# =============================================================================
+
+class TestSymbolExecutorAcceptance:
+    """
+    Symbol Engine Executor Acceptance Tests.
+
+    These tests validate the core invariants:
+    1. Determinism: Same inputs -> same outputs
+    2. Totality: No input produces undefined behavior
+    3. Boundedness: Coefficients remain bounded
+    4. Degradation: Correct family dropping at each level
+    5. Morph: Tree morph sequences don't corrupt state
+    """
+
+    def test_determinism(self, q15_one):
+        """Test 1: Repeated runs produce identical results."""
+        from symcrash_python_ap.symbol_engine import SymbolExecutor, COEFF_LEN
+        from symcrash_python_ap.frames import VoiceFrame
+
+        executor = SymbolExecutor(n_voices=4)
+
+        # Create test VoiceFrame
+        vf = VoiceFrame(
+            voice_id=0,
+            tree_a_id=1,  # Harmonic
+            tree_b_id=3,  # Impact
+            tree_blend_q15=16384,  # 50% blend
+            gain_q15=0x4000,
+            tilt_env_q15=0x6000,
+            density_env_q15=0x5000,
+            material_id=1,
+        )
+
+        # Inject some initial coefficients
+        state = executor.get_voice_state(0)
+        state.c_q15[0] = 16384
+        state.c_q15[8] = 8192
+        state.c_q15[24] = 4096
+
+        # Run 1
+        executor.reset_stats()
+        c1 = executor.step_voice(vf, program_id=0)
+
+        # Reset state and run 2
+        state = executor.get_voice_state(0)
+        state.c_q15 = [0] * COEFF_LEN
+        state.c_q15[0] = 16384
+        state.c_q15[8] = 8192
+        state.c_q15[24] = 4096
+        state.c_prev = [0] * COEFF_LEN
+
+        c2 = executor.step_voice(vf, program_id=0)
+
+        # Compare
+        assert all(c1[i] == c2[i] for i in range(COEFF_LEN)), "Determinism violated"
+
+    def test_totality(self, q15_one):
+        """Test 2: No input produces undefined behavior."""
+        from symcrash_python_ap.symbol_engine import SymbolExecutor, COEFF_LEN
+        from symcrash_python_ap.frames import VoiceFrame
+
+        executor = SymbolExecutor(n_voices=4)
+
+        test_cases = [
+            # Normal case
+            VoiceFrame(voice_id=0),
+            # Edge: all zeros
+            VoiceFrame(voice_id=1, gain_q15=0, tilt_env_q15=0),
+            # Edge: max values
+            VoiceFrame(voice_id=2, gain_q15=q15_one, tree_blend_q15=q15_one),
+            # Edge: invalid material
+            VoiceFrame(voice_id=3, material_id=999),
+        ]
+
+        for i, vf in enumerate(test_cases):
+            c = executor.step_voice(vf, program_id=0)
+            assert len(c) == COEFF_LEN, f"Case {i}: wrong length"
+
+    def test_boundedness(self, q15_one):
+        """Test 3: Coefficients remain bounded after processing."""
+        from symcrash_python_ap.symbol_engine import SymbolExecutor, COEFF_LEN
+        from symcrash_python_ap.frames import VoiceFrame
+
+        executor = SymbolExecutor(n_voices=4)
+
+        # Inject extreme values
+        state = executor.get_voice_state(0)
+        state.c_q15 = [32000] * COEFF_LEN  # Near max
+
+        vf = VoiceFrame(
+            voice_id=0,
+            gain_q15=q15_one,
+            tilt_env_q15=q15_one,
+            density_env_q15=q15_one,
+            aux_flags=0xFF,  # All events
+            aux_param_q15=q15_one,
+        )
+
+        c = executor.step_voice(vf, program_id=0)
+
+        max_val = max(abs(x) for x in c)
+        assert max_val <= 32767, f"Coefficient overflow: {max_val}"
+
+    def test_degradation_levels(self, q15_one):
+        """Test 4: Degradation levels drop correct families."""
+        from symcrash_python_ap.symbol_engine import (
+            SymbolExecutor, ExecutorInput, NUM_FAMILIES,
+            DEGRADE_NONE, DEGRADE_LIGHT, DEGRADE_HEAVY, DEGRADE_EMERGENCY,
+            F_COLOR, F_TRANSPORT, F_LOCAL, F_TOPOLOGY, F_GLUE,
+        )
+
+        executor = SymbolExecutor(n_voices=4)
+        program = executor.programs[0]
+
+        test_cases = [
+            (DEGRADE_NONE, "Core families enabled"),
+            (DEGRADE_LIGHT, "Transport capped"),
+            (DEGRADE_HEAVY, "Transport/Topology disabled"),
+            (DEGRADE_EMERGENCY, "Only tail stages"),
+        ]
+
+        for level, desc in test_cases:
+            inp = ExecutorInput(
+                degradation_level=level,
+                w_family=[q15_one] * NUM_FAMILIES,
+                regime_id=0,  # Use regime 0 (catastrophe disabled by default)
+            )
+
+            enable_mask, w_eff = executor.compute_family_enable(inp, program)
+
+            if level == DEGRADE_NONE:
+                # Core families enabled (F1-F5), F7 disabled in regime 0
+                core_families = (1 << F_COLOR) | (1 << F_TRANSPORT) | (1 << F_LOCAL) | (1 << F_TOPOLOGY) | (1 << F_GLUE)
+                assert (enable_mask & core_families) == core_families, f"Level {level}: core families not enabled"
+            elif level == DEGRADE_LIGHT:
+                assert w_eff[F_TRANSPORT] <= int(0.3 * q15_one), f"Level {level}: transport not capped"
+            elif level == DEGRADE_HEAVY:
+                assert (enable_mask & (1 << F_TRANSPORT)) == 0, f"Level {level}: transport not disabled"
+            else:  # EMERGENCY
+                assert enable_mask == 0, f"Level {level}: enable_mask should be 0"
+
+    def test_morph_correctness(self, q15_one):
+        """Test 5: Tree morph sequences don't corrupt state."""
+        from symcrash_python_ap.symbol_engine import SymbolExecutor, COEFF_LEN
+        from symcrash_python_ap.frames import VoiceFrame
+
+        executor = SymbolExecutor(n_voices=4)
+
+        # Inject initial
+        state = executor.get_voice_state(0)
+        state.c_q15[0] = 16384
+
+        # Sequence: pure A -> morph -> pure B -> back to A
+        blends = [0.0, 0.25, 0.5, 0.75, 1.0, 0.75, 0.5, 0.25, 0.0]
+
+        for blend in blends:
+            blend_q15 = int(blend * q15_one)
+            vf = VoiceFrame(
+                voice_id=0,
+                tree_a_id=1,  # Harmonic
+                tree_b_id=4,  # Drone
+                tree_blend_q15=blend_q15,
+            )
+
+            c = executor.step_voice(vf, program_id=0)
+
+            # Check state consistency
+            state = executor.get_voice_state(0)
+            if blend > 0 and blend < 1:
+                assert state.has_secondary, f"Blend {blend}: no secondary during morph"
+
+            assert len(c) == COEFF_LEN, f"Blend {blend}: wrong length"

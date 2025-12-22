@@ -530,3 +530,419 @@ class TestV5VoiceFrameContractIntegrity:
 
         # Should have transitioned to sustain regime
         assert frame.regime in {Regime.R2_STABLE_TONE, Regime.R3_GRAIN_AIR}
+
+
+# =============================================================================
+# CMMM CONFORMANCE TESTS (V6-V10)
+# =============================================================================
+
+
+class TestV6CMMMLegacyAcceptance:
+    """
+    V6. CMMM Legacy Acceptance Tests
+
+    Requirement:
+    - Core functionality from inline tests must pass
+
+    Test:
+    - Gesture to intent mapping
+    - Family weight computation
+    - Tree morph transitions
+    - All instrument programs load
+    """
+
+    def test_gesture_to_intent(self, q15_one, q15_half):
+        """GestureBasis correctly maps to IntentVector."""
+        from voice_engine import (
+            GestureBasis, default_gesture_to_intent, I_TONE, I_GLITCH, I_GLUE
+        )
+
+        # High pressure gesture
+        g = GestureBasis(gate=True, pressure_q15=q15_one, speed_q15=q15_half)
+        intent = default_gesture_to_intent(g)
+
+        assert intent.bow == q15_one, f"Expected bow={q15_one}, got {intent.bow}"
+        assert intent.tone > 0, "Tone should be positive with gate on"
+
+        # High chaos gesture
+        g2 = GestureBasis(gate=True, chaos_q15=q15_one, pressure_q15=q15_half)
+        intent2 = default_gesture_to_intent(g2)
+
+        assert intent2.glitch > 0, "Glitch should be positive with high chaos"
+        assert intent2.glue < q15_one, "Glue should decrease with chaos"
+
+    def test_regime_transitions(self, voice_engine, q15_half):
+        """Regime FSM transitions correctly."""
+        from voice_engine import GestureBasis, Regime
+
+        vid = voice_engine.allocate_voice(program_id=1001)
+        gesture = GestureBasis(gate=True, pressure_q15=q15_half)
+        voice_engine.note_on(vid, gesture=gesture)
+
+        # Should start in attack regime
+        frame = voice_engine.step_voice(vid)
+        assert frame.regime == Regime.R1_ATTACK_IGNITION
+
+        # Step through attack
+        for _ in range(10):
+            frame = voice_engine.step_voice(vid)
+
+        # Should transition to sustain regime
+        assert frame.regime in {Regime.R2_STABLE_TONE, Regime.R3_GRAIN_AIR}
+
+    def test_family_weights(self, q15_one, q15_half):
+        """Family weights computed correctly from intent."""
+        from voice_engine import (
+            IntentVector, compute_family_weights, Regime,
+            I_TONE, I_BOW, I_GLUE, F_COLOR, F_GLUE, F_CATASTROPHE
+        )
+
+        intent = IntentVector()
+        intent.lanes[I_TONE] = q15_one
+        intent.lanes[I_BOW] = q15_half
+        intent.lanes[I_GLUE] = q15_one
+
+        weights = compute_family_weights(intent, Regime.R2_STABLE_TONE)
+
+        # Color should be high (tone + bow)
+        assert weights[F_COLOR] > q15_half
+        # Glue should be high
+        assert weights[F_GLUE] > q15_half
+        # Catastrophe should be zero (not in R5)
+        assert weights[F_CATASTROPHE] == 0
+
+    def test_tree_morph(self, q15_one):
+        """Tree morph transitions correctly."""
+        from voice_engine import TreeMorphState, update_tree_morph
+
+        state = TreeMorphState(tree_a_id=0)
+
+        # Start morph to tree 2
+        state = update_tree_morph(state, 2)
+        assert state.is_morphing
+        assert state.tree_b_id == 2
+
+        # Step through morph
+        while state.is_morphing:
+            state = update_tree_morph(state, 2)
+
+        # Should complete with A promoted to 2
+        assert state.tree_a_id == 2
+        assert state.blend_q15 == 0
+
+    def test_instrument_programs(self, q15_half):
+        """All four instrument programs load correctly."""
+        from voice_engine import VoiceEngine, GestureBasis
+
+        for program_id in [1001, 1002, 1003, 1004]:
+            engine = VoiceEngine()
+            vid = engine.allocate_voice(program_id=program_id)
+            assert vid is not None
+
+            gesture = GestureBasis(gate=True, pressure_q15=q15_half)
+            engine.note_on(vid, gesture=gesture)
+            frame = engine.step_voice(vid)
+
+            assert frame is not None
+            assert frame.program_id == program_id
+            assert frame.is_active
+
+
+class TestV7CMMStateSnapshot:
+    """
+    V7. CMMM State Snapshot/Restore
+
+    Requirement:
+    - VoiceState can be fully serialized and restored
+    - Restored state produces identical behavior
+
+    Test:
+    - Snapshot at various points in lifecycle
+    - Restore and verify all fields
+    """
+
+    def test_voicestate_snapshot_restore(self, q15_half, q15_one):
+        """VoiceState can be snapshotted and restored for replay."""
+        from voice_engine import (
+            VoiceState, VoicePhase, Regime, GestureBasis, IntentVector,
+            ArcState, TreeMorphState, DegradationLevel, TowerLevel,
+            I_AIR, NUM_INTENTS, MAX_ARCS
+        )
+
+        # Create initial state with all fields populated
+        state = VoiceState(voice_id=42)
+        state.phase = VoicePhase.SUSTAIN
+        state.phase_block = 100
+        state.regime = Regime.R3_GRAIN_AIR
+        state.regime_blocks = 50
+        state.gesture = GestureBasis(gate=True, pressure_q15=q15_half, chaos_q15=1000)
+        state.intent.lanes[I_AIR] = 20000
+        state.arc = ArcState(active=True, arc_id=2, progress_blocks=5, total_blocks=16)
+        state.family_weights = [1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000]
+        state.tree_morph = TreeMorphState(tree_a_id=2, tree_b_id=4, blend_q15=10000, is_morphing=True)
+        state.gain_q15 = 25000
+        state.degradation = DegradationLevel.LIGHT
+        state.tower_level = TowerLevel.L2_SPARSE
+        state.program_id = 1002
+        state.block_count = 500
+
+        # New CMMM fields
+        state.rng_u32 = 0xDEADBEEF
+        state.env_phase = VoicePhase.DECAY
+        state.env_level_q15 = 15000
+        state.env_counter = 25
+        state.dI_q15 = [100, 200, 300, 400, 500, 600, 700, 800]
+        state.arc_phase_q16 = [1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000]
+        state.note_u8 = 72
+        state.cents_i16 = 50
+        state.activity_q15 = 28000
+        state.sendA_q15 = 5000
+        state.sendB_q15 = 3000
+
+        # Snapshot
+        snapshot = state.snapshot()
+
+        # Restore to new state
+        restored = VoiceState.restore(snapshot)
+
+        # Verify core fields match
+        assert restored.voice_id == state.voice_id
+        assert restored.phase == state.phase
+        assert restored.phase_block == state.phase_block
+        assert restored.regime == state.regime
+        assert restored.regime_blocks == state.regime_blocks
+        assert restored.gesture.gate == state.gesture.gate
+        assert restored.gesture.pressure_q15 == state.gesture.pressure_q15
+        assert restored.gesture.chaos_q15 == state.gesture.chaos_q15
+        assert restored.intent.lanes == state.intent.lanes
+        assert restored.arc.active == state.arc.active
+        assert restored.arc.arc_id == state.arc.arc_id
+        assert restored.arc.progress_blocks == state.arc.progress_blocks
+        assert restored.family_weights == state.family_weights
+        assert restored.tree_morph.tree_a_id == state.tree_morph.tree_a_id
+        assert restored.tree_morph.blend_q15 == state.tree_morph.blend_q15
+        assert restored.gain_q15 == state.gain_q15
+        assert restored.degradation == state.degradation
+        assert restored.tower_level == state.tower_level
+        assert restored.program_id == state.program_id
+        assert restored.block_count == state.block_count
+
+        # Verify new CMMM fields
+        assert restored.rng_u32 == state.rng_u32
+        assert restored.env_phase == state.env_phase
+        assert restored.env_level_q15 == state.env_level_q15
+        assert restored.env_counter == state.env_counter
+        assert restored.dI_q15 == state.dI_q15
+        assert restored.arc_phase_q16 == state.arc_phase_q16
+        assert restored.note_u8 == state.note_u8
+        assert restored.cents_i16 == state.cents_i16
+        assert restored.activity_q15 == state.activity_q15
+        assert restored.sendA_q15 == state.sendA_q15
+        assert restored.sendB_q15 == state.sendB_q15
+
+
+class TestV8CMMRegimeGraph:
+    """
+    V8. CMMM Regime Graph Tests
+
+    Requirement:
+    - RegimeGraph correctly checks edge conditions
+    - Transitions respect dwell time and hysteresis
+
+    Test:
+    - High intent triggers correct transition
+    - Dwell time prevents premature transitions
+    """
+
+    def test_regime_graph_transitions(self, q15_one):
+        """RegimeGraph correctly checks EdgeSpec conditions."""
+        from voice_engine import (
+            build_default_regime_graph, IntentVector, Regime, I_GLITCH, I_WARP
+        )
+
+        graph = build_default_regime_graph()
+
+        # Test: High glitch intent should trigger R2->R4 transition
+        intent = IntentVector()
+        intent.lanes[I_GLITCH] = int(q15_one * 0.7)
+
+        target = graph.check_transition(Regime.R2_STABLE_TONE, intent, dwell_blocks=10)
+        assert target == Regime.R4_GLITCH_CHATTER
+
+        # Test: Short dwell time should prevent transition
+        target = graph.check_transition(Regime.R2_STABLE_TONE, intent, dwell_blocks=2)
+        assert target is None
+
+        # Test: From R4, very high glitch triggers R5
+        intent.lanes[I_GLITCH] = int(q15_one * 0.95)
+        target = graph.check_transition(Regime.R4_GLITCH_CHATTER, intent, dwell_blocks=20)
+        assert target == Regime.R5_CATASTROPHE
+
+    def test_arc_modulation(self, voice_engine, q15_half):
+        """ArcSpec modulators apply correctly during transitions."""
+        from voice_engine import GestureBasis
+
+        vid = voice_engine.allocate_voice(program_id=1001)
+        gesture = GestureBasis(gate=True, pressure_q15=q15_half)
+        voice_engine.note_on(vid, gesture=gesture)
+
+        # First frame should have arc active (attack burst)
+        frame = voice_engine.step_voice(vid)
+        state = voice_engine.voices[vid]
+
+        # Attack arc should be active
+        assert state.arc.active
+        assert state.arc.arc_id == 1
+        assert frame.arc_active
+        assert frame.arc_id == 1
+
+        # Step through arc duration
+        for _ in range(5):
+            frame = voice_engine.step_voice(vid)
+
+        # Arc should complete
+        state = voice_engine.voices[vid]
+        assert not state.arc.active
+
+
+class TestV9CMMRegimeSpecPolicies:
+    """
+    V9. CMMM Regime Spec Policies
+
+    Requirement:
+    - Each regime has correct family/event masks
+    - Tower levels assigned correctly
+    - Degradation levels disable correct families
+    """
+
+    def test_regime_spec_policies(self):
+        """RegimeSpec policies correctly influence family weights and events."""
+        from voice_engine import (
+            REGIME_SPECS, Regime, TowerLevel, F_CATASTROPHE
+        )
+
+        # Check R0_IDLE has all families disabled
+        spec_idle = REGIME_SPECS[Regime.R0_IDLE]
+        assert spec_idle.family_enable_mask == 0x00
+        assert spec_idle.event_enable_mask == 0x00
+
+        # Check R5_CATASTROPHE enables catastrophe family
+        spec_cat = REGIME_SPECS[Regime.R5_CATASTROPHE]
+        assert spec_cat.family_enable_mask & (1 << F_CATASTROPHE)
+
+        # Check regime tower levels
+        assert spec_idle.tower_level == TowerLevel.L4_SCALAR
+        assert REGIME_SPECS[Regime.R2_STABLE_TONE].tower_level == TowerLevel.L0_FULL
+
+    def test_degradation_levels(self, voice_engine, q15_half):
+        """Degradation levels correctly disable operator families."""
+        from voice_engine import (
+            GestureBasis, DegradationLevel, F_TRANSPORT, F_TOPOLOGY, F_GLUE, NUM_FAMILIES
+        )
+
+        vid = voice_engine.allocate_voice(program_id=1001)
+        gesture = GestureBasis(gate=True, pressure_q15=q15_half)
+        voice_engine.note_on(vid, gesture=gesture)
+
+        # Step with HEAVY degradation
+        voice_engine.set_degradation_level(DegradationLevel.HEAVY)
+        frame = voice_engine.step_voice(vid)
+
+        # Transport and topology should be disabled
+        assert frame.w_family_q15[F_TRANSPORT] == 0
+        assert frame.w_family_q15[F_TOPOLOGY] == 0
+
+        # Emergency should only keep glue
+        voice_engine.set_degradation_level(DegradationLevel.EMERGENCY)
+        frame = voice_engine.step_voice(vid)
+
+        for i in range(NUM_FAMILIES):
+            if i != F_GLUE:
+                assert frame.w_family_q15[i] == 0
+
+    def test_tower_level_assignment(self, voice_engine, q15_half):
+        """Tower levels are assigned based on regime."""
+        from voice_engine import GestureBasis, TowerLevel, Regime
+
+        vid = voice_engine.allocate_voice(program_id=1001)
+        gesture = GestureBasis(gate=True, pressure_q15=q15_half)
+        voice_engine.note_on(vid, gesture=gesture)
+
+        # Attack should use L1
+        frame = voice_engine.step_voice(vid)
+        assert frame.tower_level == TowerLevel.L1_COARSE
+
+        # Step to sustain (R2)
+        for _ in range(20):
+            frame = voice_engine.step_voice(vid)
+
+        # Stable tone should use L0
+        if frame.regime_id == int(Regime.R2_STABLE_TONE):
+            assert frame.tower_level == TowerLevel.L0_FULL
+
+
+class TestV10CMMVoiceFrameSerialization:
+    """
+    V10. CMMM VoiceFrame Serialization
+
+    Requirement:
+    - VoiceFrameABI can serialize to bytes for FPGA/network
+    - All fields are correctly encoded
+
+    Test:
+    - Serialize a fully populated frame
+    - Verify byte output
+    """
+
+    def test_voiceframe_serialization(self, q15_half):
+        """VoiceFrameABI can serialize to bytes."""
+        from voice_engine import VoiceFrameABI
+
+        frame = VoiceFrameABI(
+            program_id=1001,
+            voice_id=5,
+            regime_id=2,
+            gain_q15=20000,
+            pan_q15=-5000,
+            w_family_q15=[1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000],
+            event_mask=0x05,
+            event_strengths=[100, 0, 200, 0, 0, 0, 0, 0],
+            tree_a_id=1,
+            tree_b_id=3,
+            tree_blend_q15=15000,
+            is_active=True,
+            arc_active=True,
+            arc_id=2,
+        )
+
+        # Should not raise
+        data = frame.to_bytes()
+        assert len(data) > 0
+        assert isinstance(data, bytes)
+
+    def test_voiceframe_abi_fields(self, voice_engine, q15_half):
+        """VoiceFrameABI has all required fields."""
+        from voice_engine import GestureBasis, NUM_TREES, NUM_FAMILIES
+
+        vid = voice_engine.allocate_voice(program_id=1001)
+        gesture = GestureBasis(gate=True, pressure_q15=q15_half, pan_q15=q15_half // 2)
+        voice_engine.note_on(vid, gesture=gesture)
+
+        frame = voice_engine.step_voice(vid)
+
+        # Check all ABI fields are set
+        assert frame.voice_id == vid
+        assert 0 <= frame.tree_a_id < NUM_TREES
+        assert 0 <= frame.tree_b_id < NUM_TREES
+        assert 0 <= frame.tree_blend_q15 <= 32767
+        assert frame.gain_q15 > 0
+        assert len(frame.family_weights) == NUM_FAMILIES
+        assert frame.is_active
+
+        # Check new ABI fields
+        assert hasattr(frame, 'activity_q15')
+        assert hasattr(frame, 'sendA_q15')
+        assert hasattr(frame, 'sendB_q15')
+        assert hasattr(frame, 'note_u8')
+        assert hasattr(frame, 'cents_i16')
+        assert hasattr(frame, 'event_payload_u64')

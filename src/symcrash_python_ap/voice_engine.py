@@ -1,8 +1,9 @@
 """
-Voice Engine CMMM Implementation v2.0
-=====================================
+Voice Engine Instrument Master Implementation v3.0
+===================================================
 
 Implements a Controlled Semi-Markov Mealy Machine (CMMM) for voice control.
+Conforms to Voice Engine Instrument Master Spec v1.0.
 
 Architecture: CMMM
 ------------------
@@ -10,24 +11,32 @@ Architecture: CMMM
 - Semi-Markov: State durations are non-geometric (ADSR envelopes)
 - Mealy: Outputs (VoiceFrame) depend on transitions, not just states
 
-The Voice Engine is the ONLY layer that knows about:
-- Note lifecycle (on/off, legato, retrigger)
-- Musical timing (tempo, phase, "every N blocks")
-- GestureBasis (8 physical gesture inputs)
-- IntentVector (8 semantic intent lanes)
-- RegimeGraph (state machine with EdgeSpec transitions)
-- Tree trajectory over note lifecycle
-- Tower levels (L0-L4) for hierarchical projection
+Requirements:
+- Total: Always produces a valid VoiceFrame
+- Reversible/Replayable: Given seed + inputs, produces identical outputs
+- Time-only state evolution: State depends only on explicit state + inputs + block
+- FPGA-friendly: Bounded memory + predictable runtime
 
-Downstream engines (Symbol, Wavelet, Safety) receive VoiceFrames
-and treat them as stateless inputs - no musical time awareness.
+Key Data Structures (per spec):
+- VoiceBank: Container for programs, presets, control maps
+- InstrumentProgram: Full instrument definition with all policies
+- VoiceState: Complete snapshotable state for replay (includes RNG)
+- GestureBasis: 8 normalized physical gesture inputs
+- IntentVector: 8 semantic intent lanes
+- RegimeGraph: States + edges + hysteresis + dwell
+- EdgeSpec: Transition conditions with HysteresisSpec and OverlaySpec
+- ArcSpec: LFOs, splines, scripts, patterns
+- FamilyPolicySpec: W_q15 matrix mapping intent to family weights
+- TreePolicySpec: Selection/blend rules for tree morphing
+- EventPolicySpec: Per-lane rules for event generation
+- VoiceFrameABI: Complete output per voice per block
 
-Key Data Structures:
-- VoiceState: Full snapshotable state for replay
-- RegimeSpec: Per-regime Family/Tree/Event/Tail policies
-- EdgeSpec: Transition conditions and timing
-- ArcSpec: Per-transition modulators
-- TowerLevel: Hierarchical coefficient projections (L0-L4)
+Tower Compliance (Levels 0-4):
+- L0 Patch: VoiceModel + GestureMap + fixed TreePolicy + static FamilyPolicy
+- L1 Modulation: Add ArcSpec for modulation
+- L2 Instrument: Enable RegimeGraph and per-regime policies
+- L3 Tree morph: Enable full TreePolicy with blending
+- L4 Events: Enable EventPolicy and Arc.EventPattern
 """
 
 from typing import List, Dict, Optional, Tuple, Callable
@@ -52,6 +61,40 @@ NUM_INTENTS = 8
 NUM_FAMILIES = 8
 NUM_EVENTS = 8
 NUM_TREES = 5
+MAX_ARCS = 8          # Maximum arc modulators per voice
+MAX_VOICES = 128      # Maximum polyphony target
+
+
+# =============================================================================
+# DETERMINISTIC RNG (xorshift32 per spec Section 11)
+# =============================================================================
+
+def xorshift32(state: int) -> Tuple[int, int]:
+    """
+    Deterministic xorshift32 RNG.
+
+    Per spec Section 11: All randomness derives from VoiceState.rng_u32.
+    The RNG update is deterministic and documented.
+
+    Returns: (new_state, random_value)
+    """
+    x = state & 0xFFFFFFFF
+    x ^= (x << 13) & 0xFFFFFFFF
+    x ^= (x >> 17) & 0xFFFFFFFF
+    x ^= (x << 5) & 0xFFFFFFFF
+    return x & 0xFFFFFFFF, x & 0xFFFFFFFF
+
+
+def rng_q15(state: int) -> Tuple[int, int]:
+    """Get random Q15 value [0, 32767] from RNG state."""
+    new_state, value = xorshift32(state)
+    return new_state, value & 0x7FFF
+
+
+def rng_bool(state: int, probability_q15: int) -> Tuple[int, bool]:
+    """Get random bool with given probability (Q15) from RNG state."""
+    new_state, value = rng_q15(state)
+    return new_state, value < probability_q15
 
 # =============================================================================
 # TOWER LEVELS (L0-L4) - Hierarchical Coefficient Projections
@@ -116,25 +159,141 @@ class Regime(IntEnum):
 
 
 # =============================================================================
-# EDGE SPEC - Transition Conditions
+# HYSTERESIS SPEC (per spec Section 7.2)
 # =============================================================================
+
+@dataclass
+class HysteresisSpec:
+    """
+    Hysteresis configuration for edge transitions.
+
+    Prevents oscillation between regimes by requiring thresholds
+    to cross with margin before triggering.
+    """
+    # Threshold margin: must exceed threshold by this amount to enter
+    enter_margin_q15: int = 1000  # ~3%
+
+    # Exit margin: must drop below threshold minus this to exit
+    exit_margin_q15: int = 500   # ~1.5%
+
+    # Debounce: minimum blocks between transitions
+    debounce_blocks: int = 4
+
+    # Last transition block (for debounce tracking)
+    last_transition_block: int = 0
+
+
+# =============================================================================
+# OVERLAY SPEC (per spec Section 7.2)
+# =============================================================================
+
+@dataclass
+class OverlaySpec:
+    """
+    Temporary emission modification during transition.
+
+    Applied for duration_blocks after transition starts.
+    """
+    # Duration of overlay effect
+    duration_blocks: int = 8
+
+    # Family slew tightening/loosening (multiplier Q15)
+    family_slew_mod_q15: List[int] = field(default_factory=lambda: [Q15_ONE] * NUM_FAMILIES)
+
+    # Event suppression mask (1 = suppress this event lane)
+    event_suppress_mask: int = 0
+
+    # Event enable mask (1 = force enable this event lane)
+    event_enable_mask: int = 0
+
+    # Tree blend ramp law override
+    tree_blend_law: str = "linear"  # "linear", "ease_in", "ease_out", "s_curve"
+
+    # Tail policy tightening (lower = more aggressive clamping)
+    tail_cap_mod_q15: int = Q15_ONE
+
+
+# =============================================================================
+# EDGE SPEC - Transition Conditions (per spec Section 7.2)
+# =============================================================================
+
+class EdgeType(IntEnum):
+    """Edge transition types per spec."""
+    HARD = 0           # Immediate switch
+    SOFT = 1           # Gradual blend
+    CHAOTIC = 2        # Turbulent transition
+    CORRIDOR_ENTRY = 3 # Entering a transitional regime
+    RECOVERY = 4       # Returning to stability
+
+
+@dataclass
+class ConditionSpec:
+    """
+    Condition specification for edge activation.
+
+    Supports threshold, range, and complex conditions on gesture/intent.
+    """
+    # Intent lane thresholds (must exceed all)
+    intent_thresholds: Dict[int, int] = field(default_factory=dict)
+
+    # Intent lane ranges (must be within range)
+    intent_ranges: Dict[int, Tuple[int, int]] = field(default_factory=dict)
+
+    # Gesture conditions
+    gate_required: Optional[bool] = None
+    gate_rise_required: bool = False
+    gate_fall_required: bool = False
+
+    def check(self, gesture: 'GestureBasis', intent: 'IntentVector') -> bool:
+        """Check if condition is satisfied."""
+        # Check gate conditions
+        if self.gate_required is not None and gesture.gate != self.gate_required:
+            return False
+        if self.gate_rise_required and not getattr(gesture, 'gate_rise', False):
+            return False
+        if self.gate_fall_required and not getattr(gesture, 'gate_fall', False):
+            return False
+
+        # Check intent thresholds
+        for lane_id, threshold in self.intent_thresholds.items():
+            if intent.lanes[lane_id] < threshold:
+                return False
+
+        # Check intent ranges
+        for lane_id, (lo, hi) in self.intent_ranges.items():
+            if not (lo <= intent.lanes[lane_id] <= hi):
+                return False
+
+        return True
+
 
 @dataclass
 class EdgeSpec:
     """
-    Specification for a regime transition edge.
+    Specification for a regime transition edge (per spec Section 7.2).
 
     Defines when and how transitions between regimes can occur.
     """
     from_regime: Regime
     to_regime: Regime
 
-    # Condition thresholds (in Q15)
+    # Edge type
+    edge_type: EdgeType = EdgeType.SOFT
+
+    # Condition (replaces simple thresholds)
+    condition: ConditionSpec = field(default_factory=ConditionSpec)
+
+    # Legacy: simple intent thresholds (for backward compat)
     intent_thresholds: Dict[int, int] = field(default_factory=dict)
-    # e.g., {I_GLITCH: 0x6000} means glitch > 0.75 triggers
+
+    # Hysteresis configuration
+    hysteresis: HysteresisSpec = field(default_factory=HysteresisSpec)
 
     # Minimum dwell time in source regime (blocks)
     min_dwell_blocks: int = 0
+
+    # Duration of transition effect (for SOFT/CHAOTIC)
+    duration_blocks: int = 8
 
     # Priority (higher = checked first)
     priority: int = 0
@@ -142,11 +301,21 @@ class EdgeSpec:
     # Arc modulator to apply during transition
     arc_id: Optional[int] = None
 
-    def check_condition(self, intent: 'IntentVector', dwell_blocks: int) -> bool:
+    # Overlay for temporary modification
+    overlay: Optional[OverlaySpec] = None
+
+    def check_condition(self, intent: 'IntentVector', dwell_blocks: int,
+                       gesture: Optional['GestureBasis'] = None) -> bool:
         """Check if transition condition is met."""
         if dwell_blocks < self.min_dwell_blocks:
             return False
 
+        # Check new-style condition if present
+        if gesture is not None and (self.condition.intent_thresholds or
+                                    self.condition.gate_required is not None):
+            return self.condition.check(gesture, intent)
+
+        # Fall back to legacy thresholds
         for lane_id, threshold in self.intent_thresholds.items():
             if intent.lanes[lane_id] < threshold:
                 return False
@@ -219,6 +388,287 @@ ARC_SPECS: Dict[int, ArcSpec] = {
     2: ARC_CATASTROPHE_ENTRY,
     3: ARC_RECOVERY_SMOOTH,
 }
+
+
+# =============================================================================
+# FAMILY POLICY SPEC (per spec Section 8.1)
+# =============================================================================
+
+class FamilySelectionRule(IntEnum):
+    """How to compute family weights."""
+    FIXED = 0          # Use fixed base weights
+    BY_INTENT = 1      # Linear map from intent vector
+    BY_GESTURE = 2     # Direct from gesture
+    BY_ARC = 3         # Modulated by active arc
+
+
+@dataclass
+class FamilyPolicySpec:
+    """
+    Computes w_family[8] from intents + regime params.
+
+    Per spec Section 8.1.
+    """
+    # Enable mask (1 bit per family)
+    enable_mask: int = 0xFF
+
+    # Base weights (Q15)
+    base_q15: List[int] = field(default_factory=lambda: [0] * NUM_FAMILIES)
+
+    # Linear mapping matrix W[8][8]: w_out = base + W @ intent
+    # Stored as flattened list [row0, row1, ..., row7]
+    W_q15: List[int] = field(default_factory=lambda: [0] * (NUM_FAMILIES * NUM_INTENTS))
+
+    # Bias (added after matrix multiply)
+    bias_q15: List[int] = field(default_factory=lambda: [0] * NUM_FAMILIES)
+
+    # Caps (maximum values)
+    caps_q15: List[int] = field(default_factory=lambda: [Q15_ONE] * NUM_FAMILIES)
+
+    # Slew time constants (blocks)
+    slew_tc_blocks: List[int] = field(default_factory=lambda: [4] * NUM_FAMILIES)
+
+    # Selection rule
+    selection_rule: FamilySelectionRule = FamilySelectionRule.BY_INTENT
+
+    def compute(self, intent: 'IntentVector', current: List[int]) -> List[int]:
+        """
+        Compute family weights from intent vector.
+
+        Applies: base + W @ intent + bias, then clamp to caps, then slew.
+        """
+        result = list(self.base_q15)
+
+        if self.selection_rule == FamilySelectionRule.BY_INTENT:
+            # Matrix multiply: W[8x8] @ intent[8]
+            for f in range(NUM_FAMILIES):
+                acc = 0
+                for i in range(NUM_INTENTS):
+                    w = self.W_q15[f * NUM_INTENTS + i]
+                    acc += mul_q15_sat(w, intent.lanes[i])
+                result[f] = sat16(result[f] + acc + self.bias_q15[f])
+
+        # Apply caps
+        for f in range(NUM_FAMILIES):
+            result[f] = min(result[f], self.caps_q15[f])
+            # Apply enable mask
+            if not (self.enable_mask & (1 << f)):
+                result[f] = 0
+
+        # Apply slew
+        for f in range(NUM_FAMILIES):
+            tc = max(1, self.slew_tc_blocks[f])
+            delta = (result[f] - current[f]) // tc
+            result[f] = current[f] + delta
+
+        return result
+
+
+# =============================================================================
+# TREE POLICY SPEC (per spec Section 8.2)
+# =============================================================================
+
+class TreeSelectionRule(IntEnum):
+    """How to select trees."""
+    FIXED = 0          # Use default trees
+    BY_INTENT = 1      # Select based on intent lanes
+    BY_GESTURE = 2     # Select based on gesture (position)
+    BY_ARC = 3         # Modulated by active arc
+
+
+class TreeBlendRule(IntEnum):
+    """How to compute tree blend."""
+    FIXED = 0          # Fixed blend value
+    GESTURE_POSITION = 1  # Blend from gesture.position
+    INTENT_WARP = 2    # Blend from intent.warp
+    ARC = 3            # Blend from arc modulator
+
+
+@dataclass
+class TreePolicySpec:
+    """
+    Tree selection and blending policy (per spec Section 8.2).
+
+    Output: (tree_a_id, tree_b_id, tree_blend_q15)
+    """
+    # Allowed tree pairs (if empty, all pairs allowed)
+    allowed_pairs: List[Tuple[int, int]] = field(default_factory=list)
+
+    # Selection rule
+    selection_rule: TreeSelectionRule = TreeSelectionRule.BY_INTENT
+
+    # Blend rule
+    blend_rule: TreeBlendRule = TreeBlendRule.INTENT_WARP
+
+    # Blend slew time constant
+    blend_slew_tc: int = 8
+
+    # Default trees
+    default_tree_a: int = 0
+    default_tree_b: int = 0
+
+    # Fixed blend (when blend_rule == FIXED)
+    fixed_blend_q15: int = 0
+
+    def select_trees(self, intent: 'IntentVector', gesture: 'GestureBasis',
+                    current_a: int, current_b: int) -> Tuple[int, int]:
+        """Select tree pair based on policy."""
+        if self.selection_rule == TreeSelectionRule.FIXED:
+            return self.default_tree_a, self.default_tree_b
+
+        elif self.selection_rule == TreeSelectionRule.BY_INTENT:
+            # Use intent to select trees
+            # High tone -> harmonic (1), high air -> texture (2),
+            # high glitch -> transient (3), high calm -> drone (4)
+            scores = [
+                intent.tone,      # Tree 1: Harmonic
+                intent.air,       # Tree 2: Texture
+                intent.snap,      # Tree 3: Transient
+                intent.calm,      # Tree 4: Drone
+            ]
+            best = max(range(len(scores)), key=lambda i: scores[i])
+            target_a = best + 1  # Trees are 1-indexed
+
+            # Second tree based on warp for morphing
+            if intent.warp > Q15_HALF:
+                target_b = (target_a % 4) + 1
+            else:
+                target_b = target_a
+
+            return target_a, target_b
+
+        elif self.selection_rule == TreeSelectionRule.BY_GESTURE:
+            # Use gesture position to select
+            pos = gesture.position_q15
+            tree = (pos * 4) // Q15_ONE
+            return min(4, max(1, tree + 1)), self.default_tree_b
+
+        return current_a, current_b
+
+    def compute_blend(self, intent: 'IntentVector', gesture: 'GestureBasis',
+                     current_blend: int) -> int:
+        """Compute tree blend value based on policy."""
+        if self.blend_rule == TreeBlendRule.FIXED:
+            target = self.fixed_blend_q15
+        elif self.blend_rule == TreeBlendRule.GESTURE_POSITION:
+            target = gesture.position_q15
+        elif self.blend_rule == TreeBlendRule.INTENT_WARP:
+            target = intent.warp
+        else:
+            target = current_blend
+
+        # Slew toward target
+        delta = (target - current_blend) // max(1, self.blend_slew_tc)
+        return current_blend + delta
+
+
+# =============================================================================
+# EVENT POLICY SPEC (per spec Section 8.3)
+# =============================================================================
+
+class LaneRuleType(IntEnum):
+    """How an event lane is triggered."""
+    DISABLED = 0       # Lane disabled
+    GATE_EDGE = 1      # On gate rise/fall
+    THRESHOLD = 2      # When intent exceeds threshold
+    STOCHASTIC = 3     # Random with probability
+    PATTERN = 4        # Pattern-driven by arc
+
+
+@dataclass
+class LaneRuleSpec:
+    """
+    Rule for a single event lane (per spec Section 8.3).
+    """
+    rule_type: LaneRuleType = LaneRuleType.DISABLED
+
+    # For THRESHOLD: intent lane and threshold
+    intent_lane: int = 0
+    threshold_q15: int = Q15_HALF
+
+    # For STOCHASTIC: rate (probability per block, Q15)
+    rate_q15: int = 1000  # ~3% per block
+
+    # For GATE_EDGE: which edge
+    on_rise: bool = True
+    on_fall: bool = False
+
+    # For PATTERN: arc pattern ID
+    pattern_id: int = 0
+
+    # Strength modulation (Q15 multiplier)
+    strength_mod_q15: int = Q15_ONE
+
+    def check(self, intent: 'IntentVector', gesture: 'GestureBasis',
+             rng_state: int) -> Tuple[bool, int, int]:
+        """
+        Check if event should fire.
+
+        Returns: (fire, strength_q15, new_rng_state)
+        """
+        if self.rule_type == LaneRuleType.DISABLED:
+            return False, 0, rng_state
+
+        elif self.rule_type == LaneRuleType.GATE_EDGE:
+            rise = getattr(gesture, 'gate_rise', False)
+            fall = getattr(gesture, 'gate_fall', False)
+            fire = (self.on_rise and rise) or (self.on_fall and fall)
+            return fire, self.strength_mod_q15, rng_state
+
+        elif self.rule_type == LaneRuleType.THRESHOLD:
+            value = intent.lanes[self.intent_lane]
+            if value >= self.threshold_q15:
+                strength = mul_q15_sat(value, self.strength_mod_q15)
+                return True, strength, rng_state
+            return False, 0, rng_state
+
+        elif self.rule_type == LaneRuleType.STOCHASTIC:
+            new_rng, fire = rng_bool(rng_state, self.rate_q15)
+            if fire:
+                new_rng, strength = rng_q15(new_rng)
+                strength = mul_q15_sat(strength, self.strength_mod_q15)
+                return True, strength, new_rng
+            return False, 0, new_rng
+
+        return False, 0, rng_state
+
+
+@dataclass
+class EventPolicySpec:
+    """
+    Event generation policy (per spec Section 8.3).
+
+    Output: (event_mask, event_strength_q15[8], event_payload_u64)
+    """
+    # Enable mask
+    enable_mask: int = 0xFF
+
+    # Per-lane rules
+    lane_rules: List[LaneRuleSpec] = field(
+        default_factory=lambda: [LaneRuleSpec() for _ in range(NUM_EVENTS)]
+    )
+
+    def compute(self, intent: 'IntentVector', gesture: 'GestureBasis',
+               rng_state: int) -> Tuple[int, List[int], int, int]:
+        """
+        Compute event output.
+
+        Returns: (event_mask, strengths[8], payload, new_rng_state)
+        """
+        mask = 0
+        strengths = [0] * NUM_EVENTS
+        payload = 0
+
+        for i, rule in enumerate(self.lane_rules):
+            if not (self.enable_mask & (1 << i)):
+                continue
+
+            fire, strength, rng_state = rule.check(intent, gesture, rng_state)
+            if fire:
+                mask |= (1 << i)
+                strengths[i] = strength
+
+        return mask, strengths, payload, rng_state
 
 
 # =============================================================================
@@ -966,45 +1416,166 @@ def update_tree_morph(state: TreeMorphState, target_tree: int) -> TreeMorphState
 
 
 # =============================================================================
-# INSTRUMENT PROGRAMS (1001-1004)
+# VOICEBANK CONTAINER (per spec Section 2)
+# =============================================================================
+
+@dataclass
+class ControlMap:
+    """
+    Control source to gesture mapping.
+
+    Maps MIDI CCs, aftertouch, pitch bend, etc. to GestureBasis fields.
+    """
+    # CC mappings: cc_number -> (gesture_field, scale_q15, offset_q15)
+    cc_mappings: Dict[int, Tuple[str, int, int]] = field(default_factory=dict)
+
+    # Pitch bend range in semitones
+    pitch_bend_range: int = 2
+
+    # Aftertouch destination
+    aftertouch_dest: str = "pressure_q15"
+    aftertouch_scale_q15: int = Q15_ONE
+
+    # Mod wheel destination
+    modwheel_dest: str = "chaos_q15"
+    modwheel_scale_q15: int = Q15_ONE
+
+
+@dataclass
+class VoiceBank:
+    """
+    Container for instrument programs, presets, and control maps.
+
+    Per spec Section 2: VoiceBank contains:
+    - Multiple InstrumentPrograms
+    - Control maps (MIDI CC to gesture)
+    - Preset definitions
+    - Global settings
+    """
+    bank_id: int = 0
+    name: str = "Default Bank"
+
+    # Programs indexed by program_id
+    programs: Dict[int, 'InstrumentProgram'] = field(default_factory=dict)
+
+    # Control map (shared or per-program)
+    control_map: ControlMap = field(default_factory=ControlMap)
+
+    # Preset definitions: preset_id -> program_id + parameter overrides
+    presets: Dict[int, Dict] = field(default_factory=dict)
+
+    # Global bank settings
+    master_tune_cents: int = 0
+    transpose_semitones: int = 0
+    velocity_curve: str = "linear"  # linear, soft, hard, fixed
+
+    # Polyphony settings
+    max_polyphony: int = MAX_VOICES
+    voice_stealing: str = "oldest"  # oldest, quietest, lowest, highest
+
+    def get_program(self, program_id: int) -> Optional['InstrumentProgram']:
+        """Get program by ID, or None if not found."""
+        return self.programs.get(program_id)
+
+    def add_program(self, program: 'InstrumentProgram') -> None:
+        """Add or replace a program in the bank."""
+        self.programs[program.program_id] = program
+
+    def get_preset(self, preset_id: int) -> Optional[Dict]:
+        """Get preset definition by ID."""
+        return self.presets.get(preset_id)
+
+
+# =============================================================================
+# INSTRUMENT PROGRAMS (per spec Section 3)
 # =============================================================================
 
 @dataclass
 class InstrumentProgram:
     """
-    Compiled instrument program specification.
+    Complete instrument program specification per spec Section 3.
 
-    Defines how gesture maps to intent, regime transitions,
-    family weights, and tree selection.
+    Defines:
+    - VoiceModel: Family policy, tree policy, event policy
+    - GestureMap: Gesture to intent mapping
+    - RegimeGraph: State machine with edges and arcs
+    - Tail policies for output processing
     """
     program_id: int = 0
     name: str = "Default"
 
-    # Gesture to intent mapper (can be customized per instrument)
+    # Tower level compliance (L0-L4)
+    tower_level: TowerLevel = TowerLevel.L0_FULL
+
+    # ==========================================================================
+    # GESTURE MAP (per spec Section 3.2)
+    # ==========================================================================
     gesture_to_intent: Callable[[GestureBasis], IntentVector] = field(
         default_factory=lambda: default_gesture_to_intent
     )
 
-    # Regime transition rules
+    # ==========================================================================
+    # VOICE MODEL POLICIES (per spec Sections 3.3-3.5)
+    # ==========================================================================
+
+    # Family policy: how intent maps to family weights
+    family_policy: FamilyPolicySpec = field(default_factory=FamilyPolicySpec)
+
+    # Tree policy: how to select and blend trees
+    tree_policy: TreePolicySpec = field(default_factory=TreePolicySpec)
+
+    # Event policy: how to generate events per lane
+    event_policy: EventPolicySpec = field(default_factory=EventPolicySpec)
+
+    # ==========================================================================
+    # REGIME GRAPH (per spec Section 7)
+    # ==========================================================================
+
+    # Regime specifications (per-regime settings)
+    regime_specs: Dict[Regime, RegimeSpec] = field(default_factory=dict)
+
+    # Regime graph (edges and arcs)
+    regime_graph: Optional[RegimeGraph] = None
+
+    # Legacy: simple regime transitions (used if regime_graph is None)
     attack_regime: Regime = Regime.R1_ATTACK_IGNITION
     sustain_regime: Regime = Regime.R2_STABLE_TONE
     release_regime: Regime = Regime.R0_IDLE
 
-    # Family weight modifiers (multipliers in Q15)
-    family_mods: List[int] = field(default_factory=lambda: [Q15_ONE] * NUM_FAMILIES)
-
-    # Tree preferences
-    preferred_tree: int = 0
-    tree_morph_rate: int = 512
-
-    # ADSR timings (in blocks)
+    # ==========================================================================
+    # ADSR ENVELOPE (per spec Section 5)
+    # ==========================================================================
     attack_blocks: int = 8
     decay_blocks: int = 32
     sustain_level_q15: int = Q15_HALF + Q15_HALF // 2  # 0.75
     release_blocks: int = 64
 
-    # Event modifiers
+    # ==========================================================================
+    # TAIL POLICY (per spec Section 8)
+    # ==========================================================================
+    normalize_curve: str = "pink"      # pink, white, brown, custom
+    fineclamp_cap_ratio: float = 0.5   # Max deviation ratio
+    slew_max_delta: int = 512          # Max sample-to-sample change
+
+    # ==========================================================================
+    # LEGACY COMPATIBILITY FIELDS
+    # ==========================================================================
+
+    # Family weight modifiers (legacy - use family_policy.W_q15 instead)
+    family_mods: List[int] = field(default_factory=lambda: [Q15_ONE] * NUM_FAMILIES)
+
+    # Tree preferences (legacy - use tree_policy instead)
+    preferred_tree: int = 0
+    tree_morph_rate: int = 512
+
+    # Event modifiers (legacy - use event_policy instead)
     event_probability: List[int] = field(default_factory=lambda: [Q15_HALF] * NUM_EVENTS)
+
+    def get_regime_spec(self, regime: Regime) -> RegimeSpec:
+        """Get spec for regime, or create default."""
+        if regime in self.regime_specs:
+            return self.regime_specs[regime]
+        return RegimeSpec(regime_id=regime)
 
 
 def make_glitch_violin_program() -> InstrumentProgram:
@@ -1244,12 +1815,44 @@ class VoiceState:
     # Block counter (monotonic, for deterministic timing)
     block_count: int = 0
 
+    # Deterministic RNG state (per spec Section 11)
+    # All randomness derives from this; update is xorshift32
+    rng_u32: int = 0x12345678
+
+    # ADSR envelope state (per spec Section 5)
+    env_phase: VoicePhase = VoicePhase.FREE
+    env_level_q15: int = 0
+    env_counter: int = 0
+
+    # Intent dynamics (derivative for smooth transitions)
+    dI_q15: List[int] = field(default_factory=lambda: [0] * NUM_INTENTS)
+
+    # Arc phase accumulators (for LFO/pattern arcs)
+    arc_phase_q16: List[int] = field(default_factory=lambda: [0] * MAX_ARCS)
+
+    # Note info
+    note_u8: int = 60  # MIDI note number
+    cents_i16: int = 0  # Fine tuning in cents
+
+    # Activity level (for voice stealing)
+    activity_q15: int = 0
+
+    # Send levels (for aux buses)
+    sendA_q15: int = 0
+    sendB_q15: int = 0
+
+    # Overlay state (during transitions)
+    overlay_active: bool = False
+    overlay_blocks_remaining: int = 0
+    overlay_spec: Optional[OverlaySpec] = None
+
     # Snapshot/replay support
     def snapshot(self) -> Dict:
         """
         Create a serializable snapshot of voice state.
 
         Returns dict that can be used with restore() for replay.
+        All fields needed for deterministic replay are included.
         """
         return {
             'voice_id': self.voice_id,
@@ -1288,6 +1891,26 @@ class VoiceState:
             'tower_level': int(self.tower_level),
             'program_id': self.program_id,
             'block_count': self.block_count,
+            # New fields for full spec compliance (Section 5, 11)
+            'rng_u32': self.rng_u32,
+            'env_phase': int(self.env_phase),
+            'env_level_q15': self.env_level_q15,
+            'env_counter': self.env_counter,
+            'dI_q15': list(self.dI_q15),
+            'arc_phase_q16': list(self.arc_phase_q16),
+            'note_u8': self.note_u8,
+            'cents_i16': self.cents_i16,
+            'activity_q15': self.activity_q15,
+            'sendA_q15': self.sendA_q15,
+            'sendB_q15': self.sendB_q15,
+            'overlay_active': self.overlay_active,
+            'overlay_blocks_remaining': self.overlay_blocks_remaining,
+            'overlay_spec': {
+                'duration_blocks': self.overlay_spec.duration_blocks,
+                'family_slew_mult_q15': self.overlay_spec.family_slew_mult_q15,
+                'tree_blend_override_q15': self.overlay_spec.tree_blend_override_q15,
+                'gain_mult_q15': self.overlay_spec.gain_mult_q15,
+            } if self.overlay_spec else None,
         }
 
     @classmethod
@@ -1296,6 +1919,7 @@ class VoiceState:
         Restore voice state from a snapshot.
 
         Enables deterministic replay from any saved state.
+        All fields needed for replay are restored.
         """
         state = cls()
         state.voice_id = snapshot['voice_id']
@@ -1343,6 +1967,32 @@ class VoiceState:
         state.tower_level = TowerLevel(snapshot['tower_level'])
         state.program_id = snapshot['program_id']
         state.block_count = snapshot['block_count']
+
+        # Restore new fields (with backwards compatibility defaults)
+        state.rng_u32 = snapshot.get('rng_u32', 0x12345678)
+        state.env_phase = VoicePhase(snapshot.get('env_phase', int(VoicePhase.FREE)))
+        state.env_level_q15 = snapshot.get('env_level_q15', 0)
+        state.env_counter = snapshot.get('env_counter', 0)
+        state.dI_q15 = list(snapshot.get('dI_q15', [0] * NUM_INTENTS))
+        state.arc_phase_q16 = list(snapshot.get('arc_phase_q16', [0] * MAX_ARCS))
+        state.note_u8 = snapshot.get('note_u8', 60)
+        state.cents_i16 = snapshot.get('cents_i16', 0)
+        state.activity_q15 = snapshot.get('activity_q15', 0)
+        state.sendA_q15 = snapshot.get('sendA_q15', 0)
+        state.sendB_q15 = snapshot.get('sendB_q15', 0)
+        state.overlay_active = snapshot.get('overlay_active', False)
+        state.overlay_blocks_remaining = snapshot.get('overlay_blocks_remaining', 0)
+
+        overlay_data = snapshot.get('overlay_spec')
+        if overlay_data:
+            state.overlay_spec = OverlaySpec(
+                duration_blocks=overlay_data['duration_blocks'],
+                family_slew_mult_q15=overlay_data['family_slew_mult_q15'],
+                tree_blend_override_q15=overlay_data['tree_blend_override_q15'],
+                gain_mult_q15=overlay_data['gain_mult_q15'],
+            )
+        else:
+            state.overlay_spec = None
 
         return state
 
@@ -1428,6 +2078,20 @@ class VoiceFrameABI:
     arc_active: bool = False
     arc_id: int = 0
     arc_progress_q15: int = 0    # 0 = start, Q15_ONE = complete
+
+    # Activity (for voice stealing priority)
+    activity_q15: int = 0        # Current voice activity level
+
+    # Aux send levels
+    sendA_q15: int = 0           # Aux bus A send level
+    sendB_q15: int = 0           # Aux bus B send level
+
+    # Note info
+    note_u8: int = 60            # MIDI note number
+    cents_i16: int = 0           # Fine tuning in cents
+
+    # Event payload (packed u64 for FPGA)
+    event_payload_u64: int = 0   # Packed event data
 
     # Legacy compatibility aliases
     @property
@@ -2063,418 +2727,6 @@ class VoiceEngine:
 
 
 # =============================================================================
-# ACCEPTANCE TESTS
-# =============================================================================
-
-def test_gesture_to_intent():
-    """Test: GestureBasis correctly maps to IntentVector."""
-    print("Test: gesture_to_intent ... ", end="")
-
-    # High pressure gesture
-    g = GestureBasis(gate=True, pressure_q15=Q15_ONE, speed_q15=Q15_HALF)
-    intent = default_gesture_to_intent(g)
-
-    assert intent.bow == Q15_ONE, f"Expected bow={Q15_ONE}, got {intent.bow}"
-    assert intent.tone > 0, "Tone should be positive with gate on"
-
-    # High chaos gesture
-    g2 = GestureBasis(gate=True, chaos_q15=Q15_ONE, pressure_q15=Q15_HALF)
-    intent2 = default_gesture_to_intent(g2)
-
-    assert intent2.glitch > 0, "Glitch should be positive with high chaos"
-    assert intent2.glue < Q15_ONE, "Glue should decrease with chaos"
-
-    print("PASS")
-
-
-def test_regime_transitions():
-    """Test: Regime FSM transitions correctly."""
-    print("Test: regime_transitions ... ", end="")
-
-    engine = VoiceEngine()
-    engine.allocate_voice(0, program_id=1001)
-    engine.note_on(0, velocity_q15=Q15_HALF)
-
-    # Should start in attack regime
-    frame = engine.step_voice(0)
-    assert frame.regime == Regime.R1_ATTACK_IGNITION, f"Expected R1, got {frame.regime}"
-
-    # Step through attack
-    for _ in range(10):
-        frame = engine.step_voice(0)
-
-    # Should transition to sustain regime
-    assert frame.regime in {Regime.R2_STABLE_TONE, Regime.R3_GRAIN_AIR}, \
-        f"Expected sustain regime, got {frame.regime}"
-
-    print("PASS")
-
-
-def test_family_weights():
-    """Test: Family weights computed correctly from intent."""
-    print("Test: family_weights ... ", end="")
-
-    intent = IntentVector()
-    intent.lanes[I_TONE] = Q15_ONE
-    intent.lanes[I_BOW] = Q15_HALF
-    intent.lanes[I_GLUE] = Q15_ONE
-
-    weights = compute_family_weights(intent, Regime.R2_STABLE_TONE)
-
-    # Color should be high (tone + bow)
-    assert weights[F_COLOR] > Q15_HALF, f"Expected high color, got {weights[F_COLOR]}"
-
-    # Glue should be high
-    assert weights[F_GLUE] > Q15_HALF, f"Expected high glue, got {weights[F_GLUE]}"
-
-    # Catastrophe should be zero (not in R5)
-    assert weights[F_CATASTROPHE] == 0, f"Expected zero catastrophe, got {weights[F_CATASTROPHE]}"
-
-    print("PASS")
-
-
-def test_tree_morph():
-    """Test: Tree morph transitions correctly."""
-    print("Test: tree_morph ... ", end="")
-
-    state = TreeMorphState(tree_a_id=0)
-
-    # Start morph to tree 2
-    state = update_tree_morph(state, 2)
-    assert state.is_morphing, "Should be morphing"
-    assert state.tree_b_id == 2, f"Expected tree_b=2, got {state.tree_b_id}"
-
-    # Step through morph
-    while state.is_morphing:
-        state = update_tree_morph(state, 2)
-
-    # Should complete with A promoted to 2
-    assert state.tree_a_id == 2, f"Expected tree_a=2, got {state.tree_a_id}"
-    assert state.blend_q15 == 0, f"Expected blend=0, got {state.blend_q15}"
-
-    print("PASS")
-
-
-def test_instrument_programs():
-    """Test: All four instrument programs load correctly."""
-    print("Test: instrument_programs ... ", end="")
-
-    for program_id in [1001, 1002, 1003, 1004]:
-        engine = VoiceEngine()
-        vid = engine.allocate_voice(program_id=program_id)
-        assert vid is not None, f"Failed to allocate voice for program {program_id}"
-
-        engine.note_on(vid, velocity_q15=Q15_HALF)
-        frame = engine.step_voice(vid)
-
-        assert frame is not None, f"No frame for program {program_id}"
-        assert frame.program_id == program_id, f"Wrong program_id: {frame.program_id}"
-        assert frame.is_active, f"Voice should be active for program {program_id}"
-
-    print("PASS")
-
-
-def test_voiceframe_abi():
-    """Test: VoiceFrameABI emitted correctly."""
-    print("Test: voiceframe_abi ... ", end="")
-
-    engine = VoiceEngine()
-    engine.allocate_voice(0, program_id=1001)
-
-    gesture = GestureBasis(
-        gate=True,
-        pressure_q15=Q15_HALF,
-        pan_q15=Q15_HALF // 2,  # Slight right
-        chaos_q15=Q15_HALF // 4,
-    )
-    engine.note_on(0, gesture=gesture)
-
-    frame = engine.step_voice(0)
-
-    # Check all ABI fields are set
-    assert frame.voice_id == 0
-    assert 0 <= frame.tree_a_id < NUM_TREES
-    assert 0 <= frame.tree_b_id < NUM_TREES
-    assert 0 <= frame.tree_blend_q15 <= Q15_ONE
-    assert frame.gain_q15 > 0, "Gain should be positive during attack"
-    assert len(frame.family_weights) == NUM_FAMILIES
-    assert frame.is_active
-
-    print("PASS")
-
-
-# =============================================================================
-# CMMM CONFORMANCE TESTS
-# =============================================================================
-
-def test_voicestate_snapshot_restore():
-    """Test: VoiceState can be snapshotted and restored for replay."""
-    print("Test: voicestate_snapshot_restore ... ", end="")
-
-    # Create initial state
-    state = VoiceState(voice_id=42)
-    state.phase = VoicePhase.SUSTAIN
-    state.phase_block = 100
-    state.regime = Regime.R3_GRAIN_AIR
-    state.regime_blocks = 50
-    state.gesture = GestureBasis(gate=True, pressure_q15=Q15_HALF, chaos_q15=1000)
-    state.intent.lanes[I_AIR] = 20000
-    state.arc = ArcState(active=True, arc_id=2, progress_blocks=5, total_blocks=16)
-    state.family_weights = [1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000]
-    state.tree_morph = TreeMorphState(tree_a_id=2, tree_b_id=4, blend_q15=10000, is_morphing=True)
-    state.gain_q15 = 25000
-    state.degradation = DegradationLevel.LIGHT
-    state.tower_level = TowerLevel.L2_SPARSE
-    state.program_id = 1002
-    state.block_count = 500
-
-    # Snapshot
-    snapshot = state.snapshot()
-
-    # Restore to new state
-    restored = VoiceState.restore(snapshot)
-
-    # Verify all fields match
-    assert restored.voice_id == state.voice_id
-    assert restored.phase == state.phase
-    assert restored.phase_block == state.phase_block
-    assert restored.regime == state.regime
-    assert restored.regime_blocks == state.regime_blocks
-    assert restored.gesture.gate == state.gesture.gate
-    assert restored.gesture.pressure_q15 == state.gesture.pressure_q15
-    assert restored.gesture.chaos_q15 == state.gesture.chaos_q15
-    assert restored.intent.lanes == state.intent.lanes
-    assert restored.arc.active == state.arc.active
-    assert restored.arc.arc_id == state.arc.arc_id
-    assert restored.arc.progress_blocks == state.arc.progress_blocks
-    assert restored.family_weights == state.family_weights
-    assert restored.tree_morph.tree_a_id == state.tree_morph.tree_a_id
-    assert restored.tree_morph.blend_q15 == state.tree_morph.blend_q15
-    assert restored.gain_q15 == state.gain_q15
-    assert restored.degradation == state.degradation
-    assert restored.tower_level == state.tower_level
-    assert restored.program_id == state.program_id
-    assert restored.block_count == state.block_count
-
-    print("PASS")
-
-
-def test_regime_graph_transitions():
-    """Test: RegimeGraph correctly checks EdgeSpec conditions."""
-    print("Test: regime_graph_transitions ... ", end="")
-
-    graph = build_default_regime_graph()
-
-    # Test: High glitch intent should trigger R2->R4 transition
-    intent = IntentVector()
-    intent.lanes[I_GLITCH] = int(Q15_ONE * 0.7)
-
-    target = graph.check_transition(Regime.R2_STABLE_TONE, intent, dwell_blocks=10)
-    assert target == Regime.R4_GLITCH_CHATTER, f"Expected R4, got {target}"
-
-    # Test: Short dwell time should prevent transition
-    target = graph.check_transition(Regime.R2_STABLE_TONE, intent, dwell_blocks=2)
-    assert target is None, f"Expected None (dwell too short), got {target}"
-
-    # Test: Catastrophe requires both high glitch AND high warp
-    # Note: R4 (glitch) has higher priority (5) than R5 (catastrophe, 3)
-    # So when both match, R4 is selected. This is expected behavior.
-    intent.lanes[I_GLITCH] = int(Q15_ONE * 0.9)
-    intent.lanes[I_WARP] = int(Q15_ONE * 0.7)
-    target = graph.check_transition(Regime.R2_STABLE_TONE, intent, dwell_blocks=20)
-    # R4 matches first due to priority, this is correct
-    assert target == Regime.R4_GLITCH_CHATTER, f"Expected R4 (higher priority), got {target}"
-
-    # To get to R5, we need to already be in R4 (glitch mode)
-    # From R4, catastrophe can trigger with very high glitch
-    intent.lanes[I_GLITCH] = int(Q15_ONE * 0.95)
-    target = graph.check_transition(Regime.R4_GLITCH_CHATTER, intent, dwell_blocks=20)
-    assert target == Regime.R5_CATASTROPHE, f"Expected R5 from R4, got {target}"
-
-    print("PASS")
-
-
-def test_arc_modulation():
-    """Test: ArcSpec modulators apply correctly during transitions."""
-    print("Test: arc_modulation ... ", end="")
-
-    engine = VoiceEngine()
-    engine.allocate_voice(0, program_id=1001)
-    engine.note_on(0, velocity_q15=Q15_HALF)
-
-    # First frame should have arc active (attack burst)
-    frame = engine.step_voice(0)
-    state = engine.voices[0]
-
-    # Attack arc should be active
-    assert state.arc.active, "Arc should be active during attack"
-    assert state.arc.arc_id == 1, f"Expected arc_id=1, got {state.arc.arc_id}"
-
-    # Frame should reflect arc state
-    assert frame.arc_active, "Frame should indicate arc active"
-    assert frame.arc_id == 1
-
-    # Step through arc duration
-    for _ in range(5):
-        frame = engine.step_voice(0)
-
-    # Arc should complete
-    state = engine.voices[0]
-    assert not state.arc.active, "Arc should complete after duration"
-
-    print("PASS")
-
-
-def test_regime_spec_policies():
-    """Test: RegimeSpec policies correctly influence family weights and events."""
-    print("Test: regime_spec_policies ... ", end="")
-
-    # Check R0_IDLE has all families disabled
-    spec_idle = REGIME_SPECS[Regime.R0_IDLE]
-    assert spec_idle.family_enable_mask == 0x00, "R0 should disable all families"
-    assert spec_idle.event_enable_mask == 0x00, "R0 should disable all events"
-
-    # Check R5_CATASTROPHE enables catastrophe family
-    spec_cat = REGIME_SPECS[Regime.R5_CATASTROPHE]
-    assert spec_cat.family_enable_mask & (1 << F_CATASTROPHE), "R5 should enable catastrophe"
-
-    # Check regime tower levels
-    assert spec_idle.tower_level == TowerLevel.L4_SCALAR, "R0 should use L4"
-    assert REGIME_SPECS[Regime.R2_STABLE_TONE].tower_level == TowerLevel.L0_FULL, "R2 should use L0"
-
-    print("PASS")
-
-
-def test_degradation_levels():
-    """Test: Degradation levels correctly disable operator families."""
-    print("Test: degradation_levels ... ", end="")
-
-    engine = VoiceEngine()
-    engine.allocate_voice(0, program_id=1001)
-    engine.note_on(0, velocity_q15=Q15_HALF)
-
-    # Step with no degradation
-    engine.set_degradation_level(DegradationLevel.NONE)
-    frame = engine.step_voice(0)
-    transport_none = frame.w_family_q15[F_TRANSPORT]
-
-    # Reset and step with HEAVY degradation
-    engine.voices[0].block_count = 0
-    engine.set_degradation_level(DegradationLevel.HEAVY)
-    frame = engine.step_voice(0)
-
-    # Transport should be disabled
-    assert frame.w_family_q15[F_TRANSPORT] == 0, "Heavy degradation should disable transport"
-    assert frame.w_family_q15[F_TOPOLOGY] == 0, "Heavy degradation should disable topology"
-
-    # Emergency should only keep glue
-    engine.set_degradation_level(DegradationLevel.EMERGENCY)
-    frame = engine.step_voice(0)
-
-    for i in range(NUM_FAMILIES):
-        if i != F_GLUE:
-            assert frame.w_family_q15[i] == 0, f"Emergency should disable family {i}"
-
-    print("PASS")
-
-
-def test_tower_level_assignment():
-    """Test: Tower levels are assigned based on regime."""
-    print("Test: tower_level_assignment ... ", end="")
-
-    engine = VoiceEngine()
-    engine.allocate_voice(0, program_id=1001)
-    engine.note_on(0, velocity_q15=Q15_HALF)
-
-    # Attack should use L1
-    frame = engine.step_voice(0)
-    assert frame.tower_level == TowerLevel.L1_COARSE, f"Attack should use L1, got {frame.tower_level}"
-
-    # Step to sustain (R2)
-    for _ in range(20):
-        frame = engine.step_voice(0)
-
-    # Stable tone should use L0
-    if frame.regime_id == int(Regime.R2_STABLE_TONE):
-        assert frame.tower_level == TowerLevel.L0_FULL, f"R2 should use L0, got {frame.tower_level}"
-
-    print("PASS")
-
-
-def test_voiceframe_serialization():
-    """Test: VoiceFrameABI can serialize to bytes."""
-    print("Test: voiceframe_serialization ... ", end="")
-
-    frame = VoiceFrameABI(
-        program_id=1001,
-        voice_id=5,
-        regime_id=2,
-        gain_q15=20000,
-        pan_q15=-5000,
-        w_family_q15=[1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000],
-        event_mask=0x05,
-        event_strengths=[100, 0, 200, 0, 0, 0, 0, 0],
-        tree_a_id=1,
-        tree_b_id=3,
-        tree_blend_q15=15000,
-        is_active=True,
-        arc_active=True,
-        arc_id=2,
-    )
-
-    # Should not raise
-    data = frame.to_bytes()
-    assert len(data) > 0, "Serialization should produce bytes"
-    assert isinstance(data, bytes), "Should return bytes"
-
-    print("PASS")
-
-
-def run_acceptance_tests():
-    """Run all Voice Engine acceptance tests."""
-    print("=" * 60)
-    print("VOICE ENGINE CMMM ACCEPTANCE TESTS")
-    print("=" * 60)
-
-    tests = [
-        # Original tests
-        test_gesture_to_intent,
-        test_regime_transitions,
-        test_family_weights,
-        test_tree_morph,
-        test_instrument_programs,
-        test_voiceframe_abi,
-        # CMMM conformance tests
-        test_voicestate_snapshot_restore,
-        test_regime_graph_transitions,
-        test_arc_modulation,
-        test_regime_spec_policies,
-        test_degradation_levels,
-        test_tower_level_assignment,
-        test_voiceframe_serialization,
-    ]
-
-    passed = 0
-    failed = 0
-
-    for test in tests:
-        try:
-            test()
-            passed += 1
-        except AssertionError as e:
-            print(f"FAIL: {e}")
-            failed += 1
-        except Exception as e:
-            print(f"ERROR: {e}")
-            failed += 1
-
-    print("-" * 60)
-    print(f"Results: {passed}/{len(tests)} passed")
-
-    return failed == 0
-
-
-# =============================================================================
 # DEMO
 # =============================================================================
 
@@ -2531,7 +2783,5 @@ def demo_voice_engine():
 
 
 if __name__ == "__main__":
-    # Run acceptance tests first
-    if run_acceptance_tests():
-        print("\n")
-        demo_voice_engine()
+    # Run demo (tests moved to pipeline_tests/test_voice_engine.py)
+    demo_voice_engine()
