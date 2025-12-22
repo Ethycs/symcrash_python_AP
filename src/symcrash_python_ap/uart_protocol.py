@@ -1142,6 +1142,20 @@ def resolve_pattern(payload: Payload64, pattern_table: Dict[int, PatternEntry] =
 
 
 # =============================================================================
+# VOICEFRAME PACKET V0b - imported from frames.py
+# =============================================================================
+
+# Re-export for backwards compatibility
+from frames import (
+    VoiceFramePacketV0b,
+    VoiceFlags,
+    VFP_MAGIC,
+    VFP_VERSION,
+    VFP_PACKET_LEN,
+)
+
+
+# =============================================================================
 # CONFORMANCE TEST
 # =============================================================================
 
