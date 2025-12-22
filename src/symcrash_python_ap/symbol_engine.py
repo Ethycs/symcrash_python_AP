@@ -494,12 +494,10 @@ class SymbolExecutor:
         """
         inp = ExecutorInput(voice_id=vf.voice_id)
 
-        # Tree control (Option A)
-        # VoiceFrame uses tree_a, tree_b (floats 0-1) for beta values
-        # We map to tree IDs based on beta thresholds
-        inp.tree_a_id = self._beta_to_tree_id(vf.tree_a)
-        inp.tree_b_id = self._beta_to_tree_id(vf.tree_b)
-        inp.blend_q15 = int(vf.tree_blend * Q15_ONE)
+        # Tree control (Option A) - use integer tree IDs directly
+        inp.tree_a_id = vf.tree_a_id
+        inp.tree_b_id = vf.tree_b_id
+        inp.blend_q15 = vf.tree_blend_q15
 
         # Activity/gain for skip decisions
         inp.activity_q15 = vf.density_env_q15
@@ -948,9 +946,9 @@ class SymbolEngine:
             vf_in = VoiceFrame(
                 voice_id=vid,
                 tree_id=self.voice_trees[vid],
-                tree_a=0.5,
-                tree_b=0.5,
-                tree_blend=0.0,
+                tree_a_id=2,  # Default to Texture tree
+                tree_b_id=2,
+                tree_blend_q15=0,
                 gain_q15=self.voice_gains[vid],
                 pan_q15=self.voice_pans[vid],
                 material_id=self.voice_materials[vid],
@@ -1002,9 +1000,9 @@ def test_determinism():
     # Create test VoiceFrame
     vf = VoiceFrame(
         voice_id=0,
-        tree_a=0.3,
-        tree_b=0.7,
-        tree_blend=0.5,
+        tree_a_id=1,  # Harmonic
+        tree_b_id=3,  # Impact
+        tree_blend_q15=16384,  # 50% blend
         gain_q15=0x4000,
         tilt_env_q15=0x6000,
         density_env_q15=0x5000,
@@ -1049,7 +1047,7 @@ def test_totality():
         # Edge: all zeros
         VoiceFrame(voice_id=1, gain_q15=0, tilt_env_q15=0),
         # Edge: max values
-        VoiceFrame(voice_id=2, gain_q15=Q15_ONE, tree_blend=1.0),
+        VoiceFrame(voice_id=2, gain_q15=Q15_ONE, tree_blend_q15=Q15_ONE),
         # Edge: invalid material
         VoiceFrame(voice_id=3, material_id=999),
     ]
@@ -1157,11 +1155,12 @@ def test_morph():
 
     all_valid = True
     for blend in blends:
+        blend_q15 = int(blend * Q15_ONE)
         vf = VoiceFrame(
             voice_id=0,
-            tree_a=0.3,
-            tree_b=0.8,
-            tree_blend=blend,
+            tree_a_id=1,  # Harmonic
+            tree_b_id=4,  # Drone
+            tree_blend_q15=blend_q15,
         )
 
         c = executor.step_voice(vf, program_id=0)

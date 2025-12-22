@@ -45,41 +45,33 @@ class WaveletEngine:
     def render_voice(self, vf: VoiceFrame) -> List[int]:
         """Render single VoiceFrame to audio block."""
         voice_id = vf.voice_id
-        tree_id = vf.tree_id
-        
-        # Check for tree transition
-        state = self.voice_tree_state.get(voice_id, {"tree_id": tree_id, "xfade": 0})
-        
-        if state["tree_id"] != tree_id and state["xfade"] == 0:
-            # Start transition
-            state["old_tree_id"] = state["tree_id"]
-            state["tree_id"] = tree_id
-            state["xfade"] = self.xfade_blocks
-        
-        self.voice_tree_state[voice_id] = state
-        
-        # Synthesize
-        if state.get("xfade", 0) > 0:
-            # Crossfading between trees
-            alpha = Q15_ONE - (state["xfade"] * Q15_ONE // self.xfade_blocks)
+
+        # Use Option A tree control: tree_a_id, tree_b_id, tree_blend_q15
+        # Fall back to legacy tree_id if tree_a_id is 0 and tree_id is set
+        tree_a_id = vf.tree_a_id if vf.tree_a_id > 0 else vf.tree_id
+        tree_b_id = vf.tree_b_id if vf.tree_b_id > 0 else tree_a_id
+        blend_q15 = vf.tree_blend_q15
+
+        # Synthesize with blending if needed
+        if blend_q15 > 0 and tree_a_id != tree_b_id:
+            # Voice Engine is morphing between trees
             x_q15 = self.trees.synthesize_crossfade(
-                state["old_tree_id"], tree_id, 
-                vf.coeff_q15, alpha
+                tree_a_id, tree_b_id,
+                vf.coeff_q15, blend_q15
             )
-            state["xfade"] -= 1
         else:
-            # Normal synthesis
-            x_q15 = self.trees.synthesize(tree_id, vf.coeff_q15)
-        
+            # Normal synthesis with primary tree
+            x_q15 = self.trees.synthesize(tree_a_id, vf.coeff_q15)
+
         # Apply voice gain
         x_q15 = [mul_q15_sat(s, vf.gain_q15) for s in x_q15]
-        
+
         # Ensure correct length
         if len(x_q15) < self.B:
             x_q15.extend([0] * (self.B - len(x_q15)))
         elif len(x_q15) > self.B:
             x_q15 = x_q15[:self.B]
-        
+
         return x_q15
     
     def apply_gain_pan(self, x: List[int], gain: int, pan: int) -> Tuple[List[int], List[int]]:
