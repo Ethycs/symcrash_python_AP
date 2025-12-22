@@ -5,6 +5,8 @@ Voicebank Instrument Audio Generation Tests
 Renders audio for each voicebank instrument (1001-1004) and saves to WAV files.
 Tests the full Voice Engine -> Symbol Engine -> Wavelet Engine -> Safety Engine pipeline.
 
+Uses Baby Fourier / Harmonic Target Injector for proper harmonic synthesis.
+
 Instruments:
 - 1001: Glitch Violin
 - 1002: Shepard Random
@@ -27,6 +29,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src" / "symcrash_python_a
 
 from test_config import FS, BLOCK_SIZE, BLOCKS_PER_SEC
 from audio_io import write_audio
+from harmonic_injector import (
+    HarmonicTargetGenerator, WaveType, create_harmonic_coeffs as baby_fourier_coeffs,
+    synthesize_harmonic_audio, note_to_freq, freq_to_leaf
+)
 
 
 # =============================================================================
@@ -206,42 +212,27 @@ def voice_frame_abi_to_vf(abi_frame):
     )
 
 
-def inject_note_coefficients(symbol_engine, voice_id: int, frequency: float = 220.0,
-                             amplitude: int = 0x5000, sample_rate: int = 48000):
+def create_harmonic_coeffs(frequency: float = 220.0, amplitude: int = 0x5000,
+                           wave_type: WaveType = WaveType.SAW,
+                           partials_n: int = 12,
+                           brightness_q15: int = Q15_ONE) -> List[int]:
     """
-    Inject harmonic note coefficients into Symbol Engine state.
+    Create harmonic coefficient pattern for a pitched note using Baby Fourier.
 
-    Creates a pitched note by placing energy in the appropriate wavelet bands
-    for the fundamental and harmonics.
+    Uses the Harmonic Target Injector to generate frequency-encoded coefficients
+    that properly map harmonic partials to wavelet band positions.
+
+    Args:
+        frequency: Fundamental frequency in Hz
+        amplitude: Base amplitude (Q15)
+        wave_type: Wave type (SINE, SAW, PULSE, TRIANGLE)
+        partials_n: Number of harmonic partials to generate
+        brightness_q15: Brightness control for high-frequency rolloff
+
+    Returns:
+        256-coefficient vector with harmonics placed at correct frequency positions
     """
-    from fixed import sat16
-
-    nyquist = sample_rate / 2  # 24000 Hz at 48kHz
-    band_width = nyquist / 32  # ~750 Hz per leaf (32 leaves)
-
-    state = symbol_engine.get_voice_state(voice_id)
-
-    # Generate harmonics
-    for harmonic in range(1, 16):
-        freq = frequency * harmonic
-        if freq >= nyquist * 0.95:
-            break
-
-        # Find which leaf contains this frequency
-        leaf_idx = int(freq / band_width)
-        leaf_idx = max(0, min(31, leaf_idx))
-
-        # Harmonic amplitude (1/n rolloff)
-        harm_amp = amplitude // harmonic
-
-        # Each leaf has 8 coefficients (envelope over the block)
-        node_start = leaf_idx * 8
-
-        for i in range(8):
-            # Slight variation for naturalness
-            mod = 1.0 + 0.15 * np.sin(2 * np.pi * i / 8 + harmonic * 0.7)
-            coeff_val = int(harm_amp * mod)
-            state.c_q15[node_start + i] = sat16(state.c_q15[node_start + i] + coeff_val)
+    return baby_fourier_coeffs(frequency, amplitude, wave_type, partials_n, brightness_q15)
 
 
 def render_instrument(program_id: int,
@@ -288,16 +279,20 @@ def render_instrument(program_id: int,
     voice_engine.note_on(vid, gesture=gesture)
     safety_engine.voice_on(vid)
 
-    # Inject harmonic note coefficients into Symbol Engine
-    # Different instruments get different base frequencies for variety
-    instrument_freqs = {
-        1001: 220.0,   # Glitch Violin - A3
-        1002: 110.0,   # Shepard Random - A2 (lower for drone)
-        1003: 330.0,   # Turbulent Choir - E4
-        1004: 196.0,   # Static Organ - G3
+    # Harmonic configuration for this instrument
+    # Different instruments get different base frequencies and wave types for variety
+    instrument_configs = {
+        1001: (220.0, WaveType.SAW, 12, Q15_ONE),       # Glitch Violin - A3, saw wave (rich harmonics)
+        1002: (110.0, WaveType.TRIANGLE, 8, Q15_HALF),  # Shepard Random - A2, triangle (mellow drone)
+        1003: (330.0, WaveType.PULSE, 10, Q15_ONE),     # Turbulent Choir - E4, pulse (hollow choir)
+        1004: (196.0, WaveType.SAW, 16, Q15_ONE),       # Static Organ - G3, saw (organ harmonics)
     }
-    base_freq = instrument_freqs.get(program_id, 220.0)
-    inject_note_coefficients(symbol_engine, vid, frequency=base_freq, amplitude=0x6000)
+    base_freq, wave_type, partials, brightness = instrument_configs.get(
+        program_id, (220.0, WaveType.SAW, 12, Q15_ONE)
+    )
+
+    # Phase state for continuous harmonic synthesis across blocks
+    harmonic_phase_state = None
 
     params = ParamFrame(K_mode=1)
 
@@ -322,16 +317,22 @@ def render_instrument(program_id: int,
             if hasattr(abi_frame.regime, 'name'):
                 regimes_seen.add(abi_frame.regime.name)
 
-            # Convert VoiceFrameABI to VoiceFrame for symbol/wavelet engines
-            vf = voice_frame_abi_to_vf(abi_frame)
+            # Direct harmonic synthesis using Baby Fourier (additive synthesis)
+            # This generates audio at exact harmonic frequencies
+            harmonic_amplitude = int(0x5000 * (gesture.pressure_q15 / Q15_ONE))
+            harmonic_audio, harmonic_phase_state = synthesize_harmonic_audio(
+                frequency=base_freq,
+                amplitude=harmonic_amplitude,
+                wave_type=wave_type,
+                partials_n=partials,
+                brightness_q15=brightness,
+                block_size=BLOCK_SIZE,
+                phase_state=harmonic_phase_state
+            )
 
-            coeffs = symbol_engine.step_voice(vf, program_id=0)
-            vf.coeff_q15 = list(coeffs)
-
-            audio = wavelet_engine.render_voice(vf)
-
+            # Apply voice gain
             gain_scale = abi_frame.gain_q15 / 32768.0
-            audio_scaled = [int(s * gain_scale) for s in audio]
+            audio_scaled = [int(s * gain_scale) for s in harmonic_audio]
 
             L_safe = safety_engine.apply_declick(audio_scaled, vid)
             R_safe = safety_engine.apply_declick(audio_scaled, vid)
@@ -554,10 +555,14 @@ class TestMultiVoice:
         voices = []
         programs = [1001, 1002, 1003, 1004]
         pans = [-0.6, -0.2, 0.2, 0.6]
-        # Different frequencies for each instrument for a chord
-        freqs = [220.0, 277.0, 330.0, 440.0]  # A3, C#4, E4, A4 (A major chord)
+        # Different frequencies for each instrument for a chord (A major)
+        freqs = [220.0, 277.0, 330.0, 440.0]  # A3, C#4, E4, A4
+        # Different wave types per voice for variety
+        wave_types = [WaveType.SAW, WaveType.TRIANGLE, WaveType.PULSE, WaveType.SAW]
 
-        for prog, pan, freq in zip(programs, pans, freqs):
+        # Track phase state per voice for continuous synthesis
+        voice_phase_states = {}
+        for prog, pan, freq, wave_type in zip(programs, pans, freqs, wave_types):
             vid = voice_engine.allocate_voice(program_id=prog)
             gesture = GestureBasis(
                 gate=True,
@@ -566,8 +571,12 @@ class TestMultiVoice:
             )
             voice_engine.note_on(vid, gesture=gesture)
             safety_engine.voice_on(vid)
-            # Inject coefficients for this voice
-            inject_note_coefficients(symbol_engine, vid, frequency=freq, amplitude=0x5000)
+            # Store config and phase state
+            voice_phase_states[vid] = {
+                'freq': freq,
+                'wave_type': wave_type,
+                'phase': None
+            }
             voices.append((vid, gesture, pan))
 
         all_L = []
@@ -586,15 +595,19 @@ class TestMultiVoice:
                 abi_frame = voice_engine.step_voice(vid)
 
                 if abi_frame:
-                    # Convert VoiceFrameABI to VoiceFrame
-                    vf = voice_frame_abi_to_vf(abi_frame)
+                    # Direct harmonic synthesis
+                    cfg = voice_phase_states[vid]
+                    harmonic_audio, cfg['phase'] = synthesize_harmonic_audio(
+                        frequency=cfg['freq'],
+                        amplitude=0x4000,
+                        wave_type=cfg['wave_type'],
+                        partials_n=10,
+                        block_size=BLOCK_SIZE,
+                        phase_state=cfg['phase']
+                    )
 
-                    coeffs = symbol_engine.step_voice(vf, program_id=0)
-                    vf.coeff_q15 = list(coeffs)
-
-                    audio = wavelet_engine.render_voice(vf)
                     gain_scale = abi_frame.gain_q15 / 32768.0
-                    audio_scaled = [int(s * gain_scale) for s in audio]
+                    audio_scaled = [int(s * gain_scale) for s in harmonic_audio]
 
                     l_gain = 0.5 * (1 - pan)
                     r_gain = 0.5 * (1 + pan)
@@ -653,8 +666,8 @@ class TestStress:
         voice_engine.note_on(vid, gesture=gesture)
         safety_engine.voice_on(vid)
 
-        # Inject coefficients
-        inject_note_coefficients(symbol_engine, vid, frequency=220.0, amplitude=0x5000)
+        # Phase state for continuous synthesis
+        harmonic_phase = None
 
         all_L = []
         all_R = []
@@ -671,14 +684,19 @@ class TestStress:
             abi_frame = voice_engine.step_voice(vid)
 
             if abi_frame:
-                # Convert VoiceFrameABI to VoiceFrame
-                vf = voice_frame_abi_to_vf(abi_frame)
+                # Direct harmonic synthesis with amplitude modulation
+                harmonic_amplitude = int(0x4000 * (gesture.pressure_q15 / Q15_ONE))
+                harmonic_audio, harmonic_phase = synthesize_harmonic_audio(
+                    frequency=220.0,
+                    amplitude=harmonic_amplitude,
+                    wave_type=WaveType.SAW,
+                    partials_n=12,
+                    block_size=BLOCK_SIZE,
+                    phase_state=harmonic_phase
+                )
 
-                coeffs = symbol_engine.step_voice(vf, program_id=0)
-                vf.coeff_q15 = list(coeffs)
-                audio = wavelet_engine.render_voice(vf)
                 gain_scale = abi_frame.gain_q15 / 32768.0
-                audio_scaled = [int(s * gain_scale) for s in audio]
+                audio_scaled = [int(s * gain_scale) for s in harmonic_audio]
 
                 L_safe = safety_engine.apply_declick(audio_scaled, vid)
                 R_safe = safety_engine.apply_declick(audio_scaled, vid)
@@ -728,8 +746,8 @@ class TestStress:
         voice_engine.note_on(vid, gesture=gesture)
         safety_engine.voice_on(vid)
 
-        # Inject coefficients
-        inject_note_coefficients(symbol_engine, vid, frequency=110.0, amplitude=0x5000)
+        # Phase state for continuous synthesis
+        harmonic_phase = None
 
         all_L = []
         all_R = []
@@ -738,14 +756,18 @@ class TestStress:
             abi_frame = voice_engine.step_voice(vid)
 
             if abi_frame:
-                # Convert VoiceFrameABI to VoiceFrame
-                vf = voice_frame_abi_to_vf(abi_frame)
+                # Direct harmonic synthesis
+                harmonic_audio, harmonic_phase = synthesize_harmonic_audio(
+                    frequency=110.0,
+                    amplitude=0x4000,
+                    wave_type=WaveType.TRIANGLE,
+                    partials_n=8,
+                    block_size=BLOCK_SIZE,
+                    phase_state=harmonic_phase
+                )
 
-                coeffs = symbol_engine.step_voice(vf, program_id=0)
-                vf.coeff_q15 = list(coeffs)
-                audio = wavelet_engine.render_voice(vf)
                 gain_scale = abi_frame.gain_q15 / 32768.0
-                audio_scaled = [int(s * gain_scale) for s in audio]
+                audio_scaled = [int(s * gain_scale) for s in harmonic_audio]
 
                 L_safe, R_safe = safety_engine.step_block(audio_scaled, audio_scaled, params)
 

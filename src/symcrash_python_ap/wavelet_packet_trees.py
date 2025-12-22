@@ -246,26 +246,39 @@ class PacketSynthesizer:
                 if self.rom.split_mask.get(d, {}).get(k, False):
                     self.combine_schedule.append((d, k))
     
-    def synthesize(self, coeff_nodes: List[List[int]], 
-                   complex_override: Optional[List[bool]] = None) -> List[int]:
+    def synthesize(self, coeff_nodes: List[List[int]],
+                   complex_override: Optional[List[bool]] = None,
+                   phase_state: Optional[List[float]] = None) -> List[int]:
         """
-        Wavelet packet synthesis using frequency-band modulation.
-        
-        Each leaf represents a frequency band. The coefficients encode
-        the amplitude in that band. We synthesize by generating carriers
-        at the appropriate sample-rate frequencies.
-        
+        Wavelet packet synthesis using frequency-encoded coefficient modulation.
+
+        Each leaf represents a frequency band. The 8 coefficients within each
+        node encode amplitudes at 8 different frequencies spread across the band.
+        The coefficient INDEX encodes WHERE within the band the frequency is,
+        enabling proper harmonic synthesis.
+
         For a 48kHz sample rate with 64-sample blocks:
         - Nyquist = 24kHz
-        - Leaf 0 (depth 5, k=0) covers 0-750 Hz
+        - Leaf 0 covers 0-750 Hz (8 sub-bands of ~93.75 Hz each)
         - Leaf 1 covers 750-1500 Hz
         - etc.
-        
-        The carrier frequency is the center of each leaf's band.
+
+        The Baby Fourier / Harmonic Target Injector places energy in specific
+        coefficient positions to encode actual harmonic frequencies, not just
+        band center frequencies.
+
+        Args:
+            coeff_nodes: 32 nodes of 8 coefficients each
+            complex_override: Optional complex leaf mask override
+            phase_state: Optional phase accumulator state (256 values) for
+                        continuous phase across blocks
+
+        Returns:
+            64-sample audio block
         """
         # Use override or default complex mask
         complex_mask = complex_override if complex_override else self.rom.complex_mask
-        
+
         # Step 1: Apply inverse complex atom transform where needed
         processed_nodes = []
         for leaf_idx in range(LEAF_COUNT):
@@ -273,60 +286,63 @@ class PacketSynthesizer:
             if complex_mask[leaf_idx]:
                 node = ComplexAtomTransform.inverse(node)
             processed_nodes.append(node)
-        
-        # Step 2: Synthesize each frequency band
-        # Key insight: we need to generate carriers at SAMPLE RATE frequencies
-        # not per-block frequencies
-        
+
+        # Step 2: Synthesize with frequency-encoded coefficients
         output = [0] * BLOCK_SIZE
-        
+
         # Sample rate and Nyquist (assuming 48kHz)
         sample_rate = 48000.0
         nyquist = sample_rate / 2
-        
-        for leaf_idx, (depth, k) in enumerate(self.rom.leaf_list):
+
+        # Use uniform leaf distribution for frequency mapping
+        # (matches harmonic_injector.py leaf mapping)
+        band_width = nyquist / LEAF_COUNT
+
+        for leaf_idx in range(LEAF_COUNT):
             node = processed_nodes[leaf_idx]
-            
+
             # Skip if node is silent
             node_energy = sum(abs(c) for c in node)
             if node_energy < 10:
                 continue
-            
-            # Compute center frequency in Hz
-            # At depth d, leaf k covers [k/2^d, (k+1)/2^d] of Nyquist
-            freq_low_norm = k / (2 ** depth)
-            freq_high_norm = (k + 1) / (2 ** depth)
-            freq_center_norm = (freq_low_norm + freq_high_norm) / 2
-            
-            # Center frequency in Hz
-            freq_hz = freq_center_norm * nyquist
-            
-            # Angular frequency for sample-rate synthesis
-            omega = 2 * np.pi * freq_hz / sample_rate
-            
-            # Compute amplitude and phase from node coefficients
-            # Use even/odd decomposition for amplitude/phase encoding
-            c_even = sum(node[i] for i in range(0, NODE_SIZE, 2))
-            c_odd = sum(node[i] for i in range(1, NODE_SIZE, 2))
-            
-            # RMS-like amplitude
-            rms_amplitude = int(np.sqrt(sum(c*c for c in node) / NODE_SIZE))
-            
-            # Phase from even/odd balance
-            phase_offset = np.arctan2(c_odd, c_even) if (c_even != 0 or c_odd != 0) else leaf_idx * np.pi / 8
-            
-            # Skip silent nodes
-            if rms_amplitude < 10:
-                continue
-            
-            for i in range(BLOCK_SIZE):
-                # Generate sample-rate carrier
-                carrier = np.sin(omega * i + phase_offset)
-                
-                # Modulated sample 
-                sample = int(rms_amplitude * carrier)
-                output[i] = sat16(output[i] + sample)
-        
+
+            # Leaf frequency range
+            freq_low_hz = leaf_idx * band_width
+            freq_high_hz = (leaf_idx + 1) * band_width
+            freq_span = freq_high_hz - freq_low_hz
+
+            # Generate each sub-frequency within the band
+            for coeff_idx in range(NODE_SIZE):
+                coeff_val = node[coeff_idx]
+                if abs(coeff_val) < 10:
+                    continue
+
+                # Coefficient index encodes position within band
+                # coeff 0 = low end of band, coeff 7 = high end
+                sub_pos = (coeff_idx + 0.5) / NODE_SIZE
+                sub_freq_hz = freq_low_hz + sub_pos * freq_span
+
+                # Skip DC and very low frequencies
+                if sub_freq_hz < 20:
+                    continue
+
+                # Angular frequency (radians per sample)
+                omega = 2 * np.pi * sub_freq_hz / sample_rate
+
+                # Get phase from state if available, otherwise use position-based phase
+                if phase_state is not None:
+                    phase_idx = leaf_idx * NODE_SIZE + coeff_idx
+                    phase = phase_state[phase_idx]
+                else:
+                    # Use coefficient position for initial phase spread
+                    phase = coeff_idx * np.pi / 4 + leaf_idx * np.pi / 16
+
+                # Generate samples for this sub-frequency
+                for i in range(BLOCK_SIZE):
+                    carrier = np.sin(omega * i + phase)
+                    sample = int(coeff_val * carrier)
+                    output[i] = sat16(output[i] + sample)
+
         return output
     
     def synthesize_full(self, coeff_nodes: List[List[int]],
