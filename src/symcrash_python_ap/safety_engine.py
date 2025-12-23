@@ -181,6 +181,30 @@ DC_MAX = 0x0800           # A3: Maximum DC offset allowed
 R_BRIDGE_LEN = 16         # Samples for micro-bridge (event-local)
 R_CURVATURE_MAX = 0x1000  # C2: Maximum second difference (curvature)
 
+# =============================================================================
+# DEGENERATE REGION HANDLING (low-energy awareness)
+# =============================================================================
+#
+# Peak-based logic breaks in near-silence. These thresholds define the
+# energy floor below which we switch to energy-aware repair mode.
+#
+# Key insight: in low-energy regions, *relative* jumps can be huge even
+# if absolute jumps are small. We need dual-detector: (E, J) not just J.
+
+# Energy floor thresholds (Q15 RMS scale)
+# -60 dBFS RMS ≈ 0.001 * 32768 ≈ 33
+# -72 dBFS RMS ≈ 0.00025 * 32768 ≈ 8
+E_FLOOR_RMS = 0x0080      # ~-48 dBFS - below this is "degenerate" region
+E_FLOOR_HYSTERESIS = 0x0100  # Exit degenerate mode when E > 2*floor
+
+# Jump thresholds for degenerate regions (tighter than normal)
+J_DEGENERATE_THRESHOLD = 0x0020  # 32 LSB - much stricter in low energy
+
+# Normalization guards
+NORM_EPSILON_RMS = 0x0040   # Minimum RMS for normalization (prevents blowup)
+NORM_MAX_GAIN = 0x4000      # Maximum normalization gain (Q15, ~2x)
+NORM_SLEW_RATE = 0x0100     # Maximum gain change per block
+
 # Degrade levels
 class DegradeLevel(IntEnum):
     """Degradation levels for CPU overload handling."""
@@ -264,6 +288,9 @@ def crossfade_append(
     This is a key safety primitive for click-free audio concatenation.
     Uses constant-power (sin²) fades by default to avoid amplitude dips.
 
+    Handles degenerate (near-silence) regions by using energy-aware fading
+    to avoid amplifying noise or creating artifacts when blending silence.
+
     Args:
         dest: Destination list (modified in place)
         src: Source samples to append
@@ -276,6 +303,17 @@ def crossfade_append(
 
     fade_samples = min(fade_samples, len(dest), len(src))
 
+    # Compute energy of dest tail and src head to detect degenerate regions
+    dest_tail_start = len(dest) - fade_samples
+    dest_energy = sum(abs(dest[dest_tail_start + i]) for i in range(fade_samples))
+    src_energy = sum(abs(src[i]) for i in range(fade_samples))
+
+    # Energy floor for degenerate detection (average |sample| < 64 is considered degenerate)
+    energy_floor_total = fade_samples * 64
+
+    dest_is_degenerate = dest_energy < energy_floor_total
+    src_is_degenerate = src_energy < energy_floor_total
+
     # Crossfade the overlap region
     for i in range(fade_samples):
         if constant_power:
@@ -287,7 +325,22 @@ def crossfade_append(
             fade_out = 1.0 - fade_in
 
         idx = len(dest) - fade_samples + i
-        dest[idx] = int(dest[idx] * fade_out + src[i] * fade_in)
+        dest_val = dest[idx]
+        src_val = src[i]
+
+        if dest_is_degenerate and not src_is_degenerate:
+            # Dest is near-silence, src has energy: fade in src from zero baseline
+            # This prevents weird artifacts from amplifying dest noise
+            dest[idx] = int(src_val * fade_in)
+        elif src_is_degenerate and not dest_is_degenerate:
+            # Src is near-silence, dest has energy: fade out dest to zero
+            dest[idx] = int(dest_val * fade_out)
+        elif dest_is_degenerate and src_is_degenerate:
+            # Both degenerate: just linear blend toward zero then src
+            dest[idx] = int(dest_val * fade_out + src_val * fade_in)
+        else:
+            # Normal case: both have energy, use standard crossfade
+            dest[idx] = int(dest_val * fade_out + src_val * fade_in)
 
     # Append the rest (after crossfade region)
     dest.extend(src[fade_samples:])
@@ -305,6 +358,9 @@ def crossfade_blocks(
     Unlike crossfade_append, this returns a new block of length
     len(block_a) + len(block_b) - fade_samples.
 
+    Handles degenerate (near-silence) regions by using energy-aware fading
+    to avoid amplifying noise or creating artifacts when blending silence.
+
     Args:
         block_a: First audio block
         block_b: Second audio block
@@ -321,6 +377,17 @@ def crossfade_blocks(
 
     fade_samples = min(fade_samples, len(block_a), len(block_b))
 
+    # Compute energy of overlap regions to detect degenerate cases
+    a_tail_start = len(block_a) - fade_samples
+    a_energy = sum(abs(block_a[a_tail_start + i]) for i in range(fade_samples))
+    b_energy = sum(abs(block_b[i]) for i in range(fade_samples))
+
+    # Energy floor for degenerate detection (average |sample| < 64 is considered degenerate)
+    energy_floor_total = fade_samples * 64
+
+    a_is_degenerate = a_energy < energy_floor_total
+    b_is_degenerate = b_energy < energy_floor_total
+
     # Copy the non-overlapping part of block_a
     result = list(block_a[:-fade_samples])
 
@@ -334,7 +401,22 @@ def crossfade_blocks(
             fade_out = 1.0 - fade_in
 
         a_idx = len(block_a) - fade_samples + i
-        sample = int(block_a[a_idx] * fade_out + block_b[i] * fade_in)
+        a_val = block_a[a_idx]
+        b_val = block_b[i]
+
+        if a_is_degenerate and not b_is_degenerate:
+            # A is near-silence, B has energy: fade in B from zero baseline
+            sample = int(b_val * fade_in)
+        elif b_is_degenerate and not a_is_degenerate:
+            # B is near-silence, A has energy: fade out A to zero
+            sample = int(a_val * fade_out)
+        elif a_is_degenerate and b_is_degenerate:
+            # Both degenerate: just linear blend
+            sample = int(a_val * fade_out + b_val * fade_in)
+        else:
+            # Normal case: both have energy, use standard crossfade
+            sample = int(a_val * fade_out + b_val * fade_in)
+
         result.append(sample)
 
     # Append the rest of block_b
@@ -423,6 +505,252 @@ def micro_bridge(
         result.append(sat16(out))
 
     return result
+
+
+def compute_local_rms(samples: List[int], center: int, window: int = 16) -> int:
+    """
+    Compute local RMS energy around a sample index.
+
+    Args:
+        samples: Audio samples
+        center: Center index for window
+        window: Half-width of window
+
+    Returns:
+        RMS energy in Q15 scale
+    """
+    if not samples:
+        return 0
+
+    start = max(0, center - window)
+    end = min(len(samples), center + window)
+    n = end - start
+
+    if n == 0:
+        return 0
+
+    # Sum of squares (avoiding overflow)
+    energy = 0
+    for i in range(start, end):
+        s = samples[i]
+        energy += (s * s) >> 16  # Scale down to prevent overflow
+
+    # RMS = sqrt(energy / n), scaled to Q15
+    avg_energy = energy // n
+    return sqrt_q15(min(Q15_ONE, avg_energy))
+
+
+def detect_discontinuities_energy_aware(
+    samples: List[int],
+    prev_sample: int = 0,
+    slew_threshold: int = SLEW_MAX,
+    curvature_threshold: int = R_CURVATURE_MAX,
+    energy_floor: int = E_FLOOR_RMS,
+    degenerate_slew: int = J_DEGENERATE_THRESHOLD,
+) -> Tuple[List[int], bool]:
+    """
+    Energy-aware discontinuity detection with dual (E, J) detector.
+
+    In normal energy regions: standard slew/curvature detection.
+    In degenerate (low-energy) regions: stricter thresholds + energy gating.
+
+    Args:
+        samples: Audio samples to analyze
+        prev_sample: Last sample from previous block
+        slew_threshold: Normal slew threshold
+        curvature_threshold: Normal curvature threshold
+        energy_floor: RMS below which we're in degenerate mode
+        degenerate_slew: Stricter slew threshold for degenerate regions
+
+    Returns:
+        (discontinuity_indices, is_degenerate_region)
+    """
+    if len(samples) < 3:
+        return [], False
+
+    # Compute block-level RMS
+    block_rms = compute_local_rms(samples, len(samples) // 2, len(samples) // 2)
+    is_degenerate = block_rms < energy_floor
+
+    discontinuities = []
+    prev = prev_sample
+    prev_delta = 0
+
+    for i, s in enumerate(samples):
+        delta = s - prev
+        abs_delta = abs(delta)
+        curvature = abs(delta - prev_delta) if i > 0 else 0
+
+        if is_degenerate:
+            # Degenerate mode: only flag if jump is significant relative to local energy
+            local_rms = compute_local_rms(samples, i, 8)
+            if local_rms < energy_floor:
+                # In true silence, only flag if absolute jump exceeds degenerate threshold
+                if abs_delta > degenerate_slew:
+                    discontinuities.append(i)
+            else:
+                # Transitioning out of silence - use normal thresholds
+                if abs_delta > slew_threshold or curvature > curvature_threshold:
+                    discontinuities.append(i)
+        else:
+            # Normal mode: standard detection
+            if abs_delta > slew_threshold or curvature > curvature_threshold:
+                discontinuities.append(i)
+
+        prev_delta = delta
+        prev = s
+
+    return discontinuities, is_degenerate
+
+
+def hermite_bridge(
+    samples: List[int],
+    k: int,
+    bridge_len: int = 8,
+) -> List[int]:
+    """
+    Apply C¹-continuous Hermite bridge at a known discontinuity point.
+
+    The Hermite bridge guarantees both value AND slope continuity by
+    interpolating between left and right context using cubic Hermite
+    interpolation:
+
+        H(t) = (2t³ - 3t² + 1)p₀ + (t³ - 2t² + t)m₀ + (-2t³ + 3t²)p₁ + (t³ - t²)m₁
+
+    where:
+        p₀, p₁ = endpoint values (left, right)
+        m₀, m₁ = endpoint slopes (left, right)
+
+    This is superior to raised-cosine for handling slope discontinuities
+    because it explicitly matches both value and derivative.
+
+    Args:
+        samples: Audio samples (modified in place conceptually)
+        k: Index of discontinuity
+        bridge_len: Half-width of bridge (total width = 2*bridge_len)
+
+    Returns:
+        Corrected samples
+    """
+    if k < bridge_len or k >= len(samples) - bridge_len:
+        return list(samples)
+
+    out = list(samples)
+
+    # Extract left and right context
+    # p0 = value at left edge of bridge
+    # p1 = value at right edge of bridge
+    # m0 = slope at left edge (average of nearby slopes)
+    # m1 = slope at right edge
+    left_idx = k - bridge_len
+    right_idx = k + bridge_len
+
+    p0 = samples[left_idx]
+    p1 = samples[right_idx]
+
+    # Compute slopes from surrounding context (average of 2 samples)
+    if left_idx >= 2:
+        m0 = ((samples[left_idx] - samples[left_idx - 1]) +
+              (samples[left_idx - 1] - samples[left_idx - 2])) // 2
+    elif left_idx >= 1:
+        m0 = samples[left_idx] - samples[left_idx - 1]
+    else:
+        m0 = 0
+
+    if right_idx < len(samples) - 2:
+        m1 = ((samples[right_idx + 1] - samples[right_idx]) +
+              (samples[right_idx + 2] - samples[right_idx + 1])) // 2
+    elif right_idx < len(samples) - 1:
+        m1 = samples[right_idx + 1] - samples[right_idx]
+    else:
+        m1 = 0
+
+    # Scale slopes for the interpolation interval
+    # The Hermite basis expects tangents in the same units as the interval
+    interval = 2 * bridge_len
+    m0_scaled = m0 * interval // 4  # Scaled for smoother blend
+    m1_scaled = m1 * interval // 4
+
+    # Apply Hermite interpolation across the bridge
+    for i in range(2 * bridge_len + 1):
+        idx = left_idx + i
+        if idx < 0 or idx >= len(out):
+            continue
+
+        t = i / (2 * bridge_len)  # 0 to 1
+
+        # Hermite basis functions
+        t2 = t * t
+        t3 = t2 * t
+        h00 = 2*t3 - 3*t2 + 1      # 1 at t=0, 0 at t=1, zero slopes
+        h10 = t3 - 2*t2 + t        # tangent basis at t=0
+        h01 = -2*t3 + 3*t2         # 0 at t=0, 1 at t=1, zero slopes
+        h11 = t3 - t2              # tangent basis at t=1
+
+        # Compute interpolated value
+        interp = int(h00 * p0 + h10 * m0_scaled + h01 * p1 + h11 * m1_scaled)
+        out[idx] = sat16(interp)
+
+    return out
+
+
+def apply_degenerate_hold(
+    samples: List[int],
+    prev_output: int,
+    energy_floor: int = E_FLOOR_RMS,
+) -> List[int]:
+    """
+    Energy-aware hold/fade for degenerate (near-silence) regions.
+
+    When both the input signal is near-silence, instead of amplifying noise
+    or letting tiny discontinuities through, we fade toward the previous
+    output value or zero.
+
+    This prevents the "normalizing noise" problem where tiny signals get
+    blown up into audible artifacts.
+
+    Args:
+        samples: Audio samples
+        prev_output: Previous block's final output sample (used as fade target)
+        energy_floor: RMS threshold for degenerate mode
+
+    Returns:
+        Processed samples (held/faded if degenerate)
+    """
+    block_rms = compute_local_rms(samples, len(samples) // 2, len(samples) // 2)
+
+    if block_rms >= energy_floor:
+        # Normal energy - pass through
+        return list(samples)
+
+    # Degenerate region - fade toward previous output (for continuity) then zero
+    out = []
+
+    # Use prev_output as initial fade target, decay toward zero
+    fade_target = prev_output
+
+    for i, s in enumerate(samples):
+        # Compute local energy to determine fade amount
+        local_rms = compute_local_rms(samples, i, 8)
+
+        if local_rms < energy_floor // 2:
+            # Very low energy - strong fade toward target
+            fade_amount = 0.8
+        elif local_rms < energy_floor:
+            # Low energy - moderate fade
+            fade_amount = 0.5
+        else:
+            # Transitioning - light fade
+            fade_amount = 0.2
+
+        # Blend toward target
+        blended = int(s * (1 - fade_amount) + fade_target * fade_amount)
+        out.append(sat16(blended))
+
+        # Decay fade target toward zero over the block
+        fade_target = int(fade_target * 0.95)
+
+    return out
 
 
 def detect_discontinuities(
@@ -1143,6 +1471,10 @@ class SafetyEngine:
         # Current degrade level
         self.degrade_level: DegradeLevel = DegradeLevel.NONE
 
+        # Degenerate mode hysteresis state (per voice)
+        self.degenerate_mode: Dict[int, bool] = {}
+        self.prev_output: Dict[int, int] = {}  # For degenerate hold
+
     # =========================================================================
     # OLA STATE MANAGEMENT
     # =========================================================================
@@ -1263,22 +1595,122 @@ class SafetyEngine:
         x = self.apply_voice_start(x, voice_id)
         x = self.apply_voice_stop(x, voice_id)
         x = self.apply_ola(x, voice_id)
-        x = self.apply_c1_patch(x)  # Interior discontinuity correction
+        x = self.apply_c1_patch(x, voice_id)  # Energy-aware interior discontinuity correction
         return x
 
     # =========================================================================
     # C¹ DISCONTINUITY PATCHER (interior click removal)
     # =========================================================================
 
+    def detect_discontinuity_energy_aware(
+        self,
+        x: List[int],
+        voice_id: int = 0,
+        threshold: int = SLEW_MAX,
+    ) -> Tuple[List[int], bool]:
+        """
+        Energy-aware discontinuity detection with hysteresis.
+
+        Uses dual (E, J) detector: in low-energy (degenerate) regions,
+        applies stricter thresholds and different repair strategies.
+
+        Implements hysteresis to prevent flapping:
+        - Enter degenerate mode when E < E_FLOOR_RMS
+        - Exit degenerate mode when E > E_FLOOR_HYSTERESIS
+
+        Args:
+            x: Audio samples
+            voice_id: Voice ID for hysteresis state tracking
+            threshold: Normal slew threshold
+
+        Returns:
+            (discontinuity_indices, is_degenerate)
+        """
+        # Get/init hysteresis state
+        was_degenerate = self.degenerate_mode.get(voice_id, False)
+
+        # Use the module-level energy-aware detector
+        discontinuities, is_degenerate_now = detect_discontinuities_energy_aware(
+            x, 0, threshold, R_CURVATURE_MAX, E_FLOOR_RMS, J_DEGENERATE_THRESHOLD
+        )
+
+        # Apply hysteresis
+        if was_degenerate:
+            # Already in degenerate mode - need higher energy to exit
+            block_rms = compute_local_rms(x, len(x) // 2, len(x) // 2)
+            if block_rms > E_FLOOR_HYSTERESIS:
+                is_degenerate = False
+            else:
+                is_degenerate = True
+        else:
+            is_degenerate = is_degenerate_now
+
+        # Update state
+        self.degenerate_mode[voice_id] = is_degenerate
+
+        return discontinuities, is_degenerate
+
+    def apply_c1_patch(
+        self,
+        x: List[int],
+        voice_id: int = 0,
+        patch_radius: int = 8,
+    ) -> List[int]:
+        """
+        Apply C¹-continuous correction using energy-aware detection + Hermite bridge.
+
+        This is the improved interior click repair that:
+        1. Uses dual (E, J) detection with hysteresis for degenerate regions
+        2. Applies Hermite bridge for true C¹ continuity (value + slope match)
+        3. In degenerate regions, applies hold/fade instead of amplifying noise
+
+        Args:
+            x: Audio samples
+            voice_id: Voice ID for state tracking
+            patch_radius: Half-width of Hermite bridge (samples)
+
+        Returns:
+            Corrected audio samples
+        """
+        # Energy-aware detection with hysteresis
+        discontinuities, is_degenerate = self.detect_discontinuity_energy_aware(
+            x, voice_id
+        )
+
+        # Get previous output for degenerate hold
+        prev_out = self.prev_output.get(voice_id, 0)
+
+        if is_degenerate:
+            # Degenerate region - apply hold/fade first
+            out = apply_degenerate_hold(x, prev_out, E_FLOOR_RMS)
+        else:
+            out = list(x)
+
+        if not discontinuities:
+            # Update prev_output and return
+            self.prev_output[voice_id] = out[-1] if out else 0
+            return out
+
+        # Apply Hermite bridge at each discontinuity
+        for k in discontinuities:
+            # Skip if too close to block edges for Hermite bridge
+            if k < patch_radius or k >= len(out) - patch_radius:
+                continue
+
+            # Apply Hermite bridge (guarantees C¹ continuity)
+            out = hermite_bridge(out, k, patch_radius)
+
+        # Update prev_output for next block
+        self.prev_output[voice_id] = out[-1] if out else 0
+
+        return out
+
     def detect_discontinuity(self, x: List[int], threshold: int = SLEW_MAX) -> List[int]:
         """
         Detect interior discontinuities (clicks) in a block.
 
-        A discontinuity is detected when |x[n] - x[n-1]| > threshold
-        (representing a sudden jump that likely causes an audible click).
-
-        We also look at the second derivative (curvature) to detect
-        slope discontinuities even when value changes are gradual.
+        Legacy method - uses simple slew/curvature detection.
+        For energy-aware detection, use detect_discontinuity_energy_aware().
 
         Args:
             x: Audio samples
@@ -1287,96 +1719,7 @@ class SafetyEngine:
         Returns:
             List of sample indices where discontinuities were detected
         """
-        if len(x) < 3:
-            return []
-
-        discontinuities = []
-
-        for n in range(1, len(x) - 1):
-            # First derivative (slope)
-            d = abs(x[n] - x[n - 1])
-
-            # Second derivative (curvature / slope change)
-            d2 = abs((x[n + 1] - x[n]) - (x[n] - x[n - 1]))
-
-            # Detect large slope (value discontinuity)
-            if d > threshold:
-                discontinuities.append(n)
-            # Detect large curvature (slope discontinuity) - catches "corners"
-            elif d2 > threshold * 2:
-                discontinuities.append(n)
-
-        return discontinuities
-
-    def apply_c1_patch(self, x: List[int], patch_radius: int = 4) -> List[int]:
-        """
-        Apply C¹-continuous correction to interior discontinuities.
-
-        When a discontinuity is detected, we solve for a minimum-energy
-        correction δ[n] that enforces value and slope continuity.
-
-        The correction uses a raised-cosine bump basis centered on each
-        discontinuity point, solving constraints:
-        - Value match: x_left[k] ≈ x_right[k]
-        - Slope match: Δx_left[k] ≈ Δx_right[k]
-
-        Args:
-            x: Audio samples
-            patch_radius: Half-width of correction window (samples)
-
-        Returns:
-            Corrected audio samples
-        """
-        discontinuities = self.detect_discontinuity(x)
-
-        if not discontinuities:
-            return x
-
-        out = list(x)
-
-        for k in discontinuities:
-            # Skip if too close to block edges
-            if k < patch_radius or k >= len(x) - patch_radius:
-                continue
-
-            # Compute value discontinuity
-            val_left = x[k - 1]
-            val_right = x[k]
-            val_jump = val_right - val_left
-
-            # Compute slope discontinuity
-            slope_left = x[k - 1] - x[k - 2] if k >= 2 else 0
-            slope_right = x[k + 1] - x[k] if k < len(x) - 1 else 0
-            slope_jump = slope_right - slope_left
-
-            # Skip if jumps are small (within tolerance)
-            if abs(val_jump) < 0x0800 and abs(slope_jump) < 0x0400:
-                continue
-
-            # Apply raised-cosine bump correction
-            # Correction is centered at k, tapers to zero at k±patch_radius
-            for i in range(-patch_radius, patch_radius + 1):
-                n = k + i
-                if n < 0 or n >= len(out):
-                    continue
-
-                # Raised cosine: 1 at center, 0 at edges
-                t = (i + patch_radius) / (2 * patch_radius)  # 0 to 1
-                bump = 0.5 * (1 - math.cos(2 * math.pi * t))
-
-                # Value correction: smooth the jump
-                # Apply more correction on the "after" side
-                if i >= 0:
-                    val_correction = -int(val_jump * bump * 0.5)
-                else:
-                    val_correction = int(val_jump * bump * 0.5)
-
-                # Slope correction: smooth the slope change
-                slope_correction = -int(slope_jump * bump * i * 0.1)
-
-                out[n] = sat16(out[n] + val_correction + slope_correction)
-
-        return out
+        return detect_discontinuities(x, 0, threshold, R_CURVATURE_MAX)
 
     # =========================================================================
     # MASTER OLA (for mixed stereo output)

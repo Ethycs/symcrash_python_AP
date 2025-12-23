@@ -361,6 +361,9 @@ class WaveletEngine:
         # Higher = faster tracking, Lower = smoother but laggier
         self.coeff_slew_rate = 0x2000  # ~25% per block
 
+        # Mix gain state (for smooth voice count transitions)
+        self.mix_gain_q15 = Q15_ONE  # Start at unity gain
+
     def get_regularity(self, voice_id: int) -> RegularityOperator:
         """Get or create RegularityOperator for a voice."""
         if voice_id not in self.regularity:
@@ -613,27 +616,53 @@ class WaveletEngine:
         return L, R
     
     def mix_block(self, voice_blocks: List[Tuple[VoiceFrame, List[int]]]) -> Tuple[List[int], List[int]]:
-        """Mix multiple voice blocks to stereo output."""
+        """
+        Mix multiple voice blocks to stereo output.
+
+        Uses slewed mix gain to prevent discontinuities when voice count changes.
+        The gain is computed as Q15 * (1 / sqrt(n_voices)) and smoothly ramped
+        within the block from the previous gain to the new gain.
+        """
         # Accumulate in int32
         accL = [0] * self.B
         accR = [0] * self.B
-        
+
         for vf, x in voice_blocks:
             # Note: gain already applied in render_voice, only apply pan here
             L, R = self.apply_pan(x, vf.pan_q15)
-            
+
             for i in range(self.B):
                 accL[i] += L[i]
                 accR[i] += R[i]
-        
-        # Scale and saturate
-        # Divide by number of voices to prevent clipping
+
+        # Compute target mix gain: 1/sqrt(n_voices) to maintain constant power
+        # This is smoother than shift-based division
         n_voices = max(1, len(voice_blocks))
-        shift = int(np.log2(n_voices)) if n_voices > 1 else 0
-        
-        outL = [sat16(accL[i] >> shift) for i in range(self.B)]
-        outR = [sat16(accR[i] >> shift) for i in range(self.B)]
-        
+        if n_voices == 1:
+            target_gain = Q15_ONE
+        else:
+            # 1/sqrt(n) in Q15: 32767 / sqrt(n)
+            target_gain = int(Q15_ONE / (n_voices ** 0.5))
+
+        # Slew the mix gain to prevent clicks when voice count changes
+        prev_gain = self.mix_gain_q15
+        gain_delta = target_gain - prev_gain
+
+        # Apply ramped gain across the block
+        outL = []
+        outR = []
+        for i in range(self.B):
+            # Linear ramp from prev_gain to target_gain
+            t = i / (self.B - 1) if self.B > 1 else 1.0
+            current_gain = prev_gain + int(gain_delta * t)
+
+            # Apply gain and saturate
+            outL.append(sat16((accL[i] * current_gain) >> 15))
+            outR.append(sat16((accR[i] * current_gain) >> 15))
+
+        # Update state for next block
+        self.mix_gain_q15 = target_gain
+
         return outL, outR
     
     def apply_pan(self, x: List[int], pan: int) -> Tuple[List[int], List[int]]:

@@ -730,9 +730,10 @@ class WPOState:
     # Per-sample interpolation to avoid stair-stepping
     glide_time_blocks: int = 0      # Total glide time in blocks
     target_phase_inc: int = 0       # Target phase increment for glide
+    start_phase_inc: int = 0        # Starting phase increment (for lerp)
     glide_samples_remaining: int = 0  # Samples left in glide (not blocks!)
     glide_samples_total: int = 0    # Total samples in glide (for envelope)
-    glide_inc_delta: int = 0        # Per-sample increment delta (fixed-point)
+    glide_inc_delta: int = 0        # Per-sample increment delta (fixed-point, Q16)
     glide_gain_q15: int = Q15_ONE   # Amplitude envelope during glide
 
     # Traction (for bridge regime stability)
@@ -740,6 +741,49 @@ class WPOState:
 
     # BLEP control - only needed for waveforms with discontinuities (saw, square)
     needs_blep: bool = True
+
+    # Seam continuity state
+    # Seam hints indicate known discontinuity points (note changes, parameter jumps)
+    # where we need C¹-continuous bridging (value + slope match)
+    seam_hints: List[int] = field(default_factory=list)  # Sample indices within next block
+    seam_bridge_len: int = 4  # Samples for Hermite bridge (half-width) - TIGHT
+
+    # History buffer for slope computation at seam points
+    history_buffer: List[int] = field(default_factory=list)
+    history_max_len: int = 4  # Keep last 4 samples for slope computation
+
+    # Pending seam state (for block-crossing seams)
+    pending_seam: bool = False  # Seam at block boundary
+    pending_seam_old_samples: List[int] = field(default_factory=list)  # Tail of previous block
+
+    def add_seam_hint(self, sample_index: int) -> None:
+        """
+        Add a seam hint at a specific sample index within the next block.
+
+        A seam is a known discontinuity point where we need C¹-continuous
+        bridging. Use this when you know a parameter change will occur.
+
+        Args:
+            sample_index: Sample index within the next render_block() call
+                         (0 = first sample, BLOCK_SIZE-1 = last sample)
+        """
+        if sample_index not in self.seam_hints:
+            self.seam_hints.append(sample_index)
+
+    def add_seam_at_block_boundary(self) -> None:
+        """
+        Signal that a seam occurs at the next block boundary.
+
+        Use this before calling render_block() when you're about to change
+        parameters (note, waveform, etc.) that would cause a discontinuity.
+        """
+        self.pending_seam = True
+
+    def clear_seam_hints(self) -> None:
+        """Clear all seam hints (called automatically after render_block)."""
+        self.seam_hints.clear()
+        self.pending_seam = False
+        self.pending_seam_old_samples.clear()
 
     def configure(
         self,
@@ -831,15 +875,18 @@ class WPOState:
             self.glide_samples_remaining = 0
             self.glide_samples_total = 0
             self.glide_inc_delta = 0
+            self.start_phase_inc = self.target_phase_inc
             self.glide_gain_q15 = Q15_ONE
         else:
-            # Compute per-sample delta for smooth interpolation
+            # Capture start position for accurate lerp
+            self.start_phase_inc = self.phase.phase_inc
             total_samples = glide_blocks * BLOCK_SIZE
-            delta = self.target_phase_inc - self.phase.phase_inc
-            # Use fixed-point for sub-integer precision
-            self.glide_inc_delta = delta // total_samples
             self.glide_samples_remaining = total_samples
             self.glide_samples_total = total_samples
+            # Compute delta in Q16 for sub-integer precision
+            delta = self.target_phase_inc - self.start_phase_inc
+            # Q16 fixed-point delta: (delta << 16) / total_samples
+            self.glide_inc_delta = (delta << 16) // total_samples
             self.glide_gain_q15 = Q15_ONE  # Will be updated per-sample
 
     def start_bridge(self, blocks: int = BRIDGE_BLOCKS) -> None:
@@ -878,26 +925,33 @@ class WPOState:
     def _update_glide_sample(self) -> None:
         """Update phase increment and amplitude envelope for glide (per-sample)."""
         if self.glide_samples_remaining > 0:
-            # Per-sample linear interpolation toward target
-            self.phase.phase_inc += self.glide_inc_delta
             self.glide_samples_remaining -= 1
 
-            # Compute amplitude envelope: "smile" curve that dips in the middle
-            # This masks any discontinuity during the pitch transition
-            # t goes from 1.0 -> 0.0 as we progress through the glide
+            # Compute exact lerp position to avoid accumulated error
+            # progress goes from 0.0 (start) to 1.0 (end)
             if self.glide_samples_total > 0:
-                t = self.glide_samples_remaining / self.glide_samples_total
+                samples_elapsed = self.glide_samples_total - self.glide_samples_remaining
+                # Use Q16 fixed-point lerp for precision
+                # lerp = start + (target - start) * progress
+                # = start + delta * (samples_elapsed / total_samples)
+                # = start + (delta * samples_elapsed) / total_samples
+                delta = self.target_phase_inc - self.start_phase_inc
+                interpolated = self.start_phase_inc + (delta * samples_elapsed) // self.glide_samples_total
+                self.phase.phase_inc = interpolated
+
+                # Compute amplitude envelope: "smile" curve that dips in the middle
+                # This masks any discontinuity during the pitch transition
+                # t goes from 0.0 -> 1.0 as we progress through the glide
+                t = samples_elapsed / self.glide_samples_total
                 # Parabolic dip: 1 - depth * 4 * t * (1-t)
                 # At t=0.5 (middle), dip is maximum
                 # depth = 0.15 (15% dip at center)
                 depth_q15 = 4915  # Q15 0.15
-                dip = (depth_q15 * 4 * int(t * 256) * int((1 - t) * 256)) >> 16
+                dip = int(depth_q15 * 4 * t * (1 - t))
                 self.glide_gain_q15 = Q15_ONE - dip
-            else:
-                self.glide_gain_q15 = Q15_ONE
 
             if self.glide_samples_remaining == 0:
-                # Snap to exact target at end to avoid drift
+                # Snap to exact target at end to avoid any rounding drift
                 self.phase.phase_inc = self.target_phase_inc
                 self.glide_inc_delta = 0
                 self.glide_gain_q15 = Q15_ONE
@@ -1042,7 +1096,10 @@ class WPOState:
         prng: Optional[VoicePRNG] = None,
     ) -> List[int]:
         """
-        Render a full block of samples.
+        Render a full block of samples with C¹-continuous seam bridging.
+
+        If seam hints are present, applies Hermite interpolation at those
+        points to ensure both value and slope continuity.
 
         Args:
             block_size: Number of samples
@@ -1059,7 +1116,320 @@ class WPOState:
         if prng:
             self.drift.update(prng)
 
-        return [self.render_sample(prng) for _ in range(block_size)]
+        # Render raw samples
+        samples = [self.render_sample(prng) for _ in range(block_size)]
+
+        # Apply C¹-continuous bridging at seam points
+        if self.seam_hints or self.pending_seam:
+            samples = self._apply_seam_bridges(samples)
+
+        # Update history buffer for slope computation at future seams
+        self._update_history(samples)
+
+        # Clear seam hints after processing
+        self.clear_seam_hints()
+
+        return samples
+
+    def _update_history(self, samples: List[int]) -> None:
+        """Update history buffer with tail samples for slope computation."""
+        # Keep last N samples for slope estimation at block boundaries
+        tail = samples[-self.history_max_len:] if len(samples) >= self.history_max_len else samples
+        self.history_buffer = list(tail)
+
+    def _apply_seam_bridges(self, samples: List[int]) -> List[int]:
+        """
+        Apply C¹-continuous Hermite bridges at all seam points.
+
+        The Hermite bridge guarantees both value AND slope continuity:
+            H(t) = (2t³ - 3t² + 1)p₀ + (t³ - 2t² + t)m₀ + (-2t³ + 3t²)p₁ + (t³ - t²)m₁
+
+        where p₀, p₁ are endpoint values and m₀, m₁ are endpoint slopes.
+        """
+        out = list(samples)
+
+        # Handle block boundary seam first
+        if self.pending_seam and self.pending_seam_old_samples:
+            out = self._apply_boundary_seam_bridge(out)
+
+        # Handle interior seam hints
+        for seam_idx in sorted(self.seam_hints):
+            if self.seam_bridge_len <= seam_idx < len(out) - self.seam_bridge_len:
+                out = self._apply_hermite_bridge(out, seam_idx)
+
+        return out
+
+    def _apply_boundary_seam_bridge(self, samples: List[int]) -> List[int]:
+        """
+        Apply C¹-continuous bridge at block boundary.
+
+        This handles the case where we have limited old samples (from history buffer)
+        and need to smoothly connect to the new waveform. Uses pure Hermite spline
+        to guarantee both value and slope continuity at the endpoints.
+        """
+        out = list(samples)
+        old = self.pending_seam_old_samples
+
+        if len(old) < 2 or len(samples) < 4:
+            return out
+
+        # Use smaller bridge width since we have limited old samples
+        M = min(len(old), 4, len(samples))
+
+        # Compute slopes at boundaries
+        old_slope = old[-1] - old[-2] if len(old) >= 2 else 0
+        new_slope = samples[1] - samples[0] if len(samples) >= 2 else 0
+
+        # Endpoint values for Hermite
+        p0 = old[-1]      # Last old sample (we match this exactly at t=0)
+        p1 = samples[M]   # First sample AFTER bridge (we match this exactly at t=1)
+        m0 = old_slope    # Slope coming out of old waveform
+        m1 = new_slope    # Slope going into new waveform
+
+        # Scale tangents by bridge width for proper Hermite
+        m0_scaled = m0 * M
+        m1_scaled = m1 * M
+
+        for i in range(M):
+            # t goes from 0 to 1 over the bridge region
+            # At t=0: output = p0 with slope m0
+            # At t=1: output = p1 with slope m1
+            t = (i + 1) / (M + 1)  # Offset so we don't overwrite sample 0 with p0
+
+            # Cubic Hermite basis functions
+            t2 = t * t
+            t3 = t2 * t
+            h00 = 2*t3 - 3*t2 + 1      # value at p0
+            h10 = t3 - 2*t2 + t         # tangent at p0
+            h01 = -2*t3 + 3*t2          # value at p1
+            h11 = t3 - t2               # tangent at p1
+
+            # Hermite interpolation
+            blended = int(h00 * p0 + h10 * m0_scaled + h01 * p1 + h11 * m1_scaled)
+
+            # Saturate
+            if blended > Q15_ONE:
+                blended = Q15_ONE
+            elif blended < -Q15_SCALE:
+                blended = -Q15_SCALE
+
+            out[i] = blended
+
+        return out
+
+    def _apply_hermite_bridge(self, samples: List[int], seam_idx: int) -> List[int]:
+        """
+        Apply smoothstep crossfade at an interior seam point.
+
+        For pitch changes in additive synthesis, the waveform shape changes
+        discontinuously even with phase continuity. This crossfade blends
+        the pre-change and post-change waveforms smoothly.
+
+        Args:
+            samples: Audio samples (contains both pre- and post-change data)
+            seam_idx: Index of the seam point where parameters changed
+
+        Returns:
+            Samples with crossfade applied around seam_idx
+        """
+        out = list(samples)
+        fade_half = 4  # 4 samples each side = 8 sample total crossfade
+
+        # Boundary checks
+        if seam_idx < fade_half or seam_idx >= len(samples) - fade_half:
+            return out
+
+        # Get slopes on each side of the seam
+        # Left side (pre-change): samples[seam_idx - fade_half] to samples[seam_idx - 1]
+        left_slope = samples[seam_idx - 1] - samples[seam_idx - 2] if seam_idx >= 2 else 0
+
+        # Right side (post-change): samples[seam_idx] to samples[seam_idx + fade_half]
+        right_slope = samples[seam_idx + 1] - samples[seam_idx] if seam_idx + 1 < len(samples) else 0
+
+        # Apply smoothstep crossfade across the seam region
+        for i in range(-fade_half, fade_half + 1):
+            idx = seam_idx + i
+            if idx < 0 or idx >= len(out):
+                continue
+
+            # Smoothstep blend: 0 at left edge, 1 at right edge
+            t = (i + fade_half) / (2 * fade_half)
+            blend = 3 * t * t - 2 * t * t * t
+
+            if i < 0:
+                # Before seam: extrapolate pre-change trajectory
+                # Original sample is from pre-change, keep it but start blending
+                pre_val = samples[idx]
+                # Project post-change waveform backwards
+                post_projected = samples[seam_idx] + right_slope * i
+                post_projected = max(-Q15_SCALE, min(Q15_ONE, post_projected))
+                out[idx] = int(pre_val * (1 - blend) + post_projected * blend)
+            else:
+                # After seam: blend from extrapolated pre-change to actual post-change
+                # Project pre-change waveform forward
+                pre_projected = samples[seam_idx - 1] + left_slope * (i + 1)
+                pre_projected = max(-Q15_SCALE, min(Q15_ONE, pre_projected))
+                post_val = samples[idx]
+                out[idx] = int(pre_projected * (1 - blend) + post_val * blend)
+
+            # Saturate
+            if out[idx] > Q15_ONE:
+                out[idx] = Q15_ONE
+            elif out[idx] < -Q15_SCALE:
+                out[idx] = -Q15_SCALE
+
+        return out
+
+    def prepare_for_parameter_change(self, samples_before_change: List[int] = None) -> None:
+        """
+        Prepare for a parameter change that would cause discontinuity.
+
+        Call this BEFORE changing parameters (note, waveform, etc.) and provide
+        the tail samples from the previous render. The next render_block() will
+        apply a Hermite bridge at the boundary.
+
+        Args:
+            samples_before_change: Last few samples before the change (optional,
+                                   uses history_buffer if not provided)
+        """
+        self.pending_seam = True
+        if samples_before_change:
+            self.pending_seam_old_samples = list(samples_before_change[-self.seam_bridge_len:])
+        elif self.history_buffer:
+            self.pending_seam_old_samples = list(self.history_buffer)
+
+    def render_with_seam_at(
+        self,
+        block_size: int,
+        seam_index: int,
+        new_note: int = None,
+        new_cents: int = 0,
+        prng: Optional[VoicePRNG] = None,
+    ) -> List[int]:
+        """
+        Render a block with a known seam point where parameters change.
+
+        Uses dual-render crossfade: renders the overlap region with BOTH
+        old and new parameters, then crossfades. This is the canonical
+        regularity operator for parameter changes.
+
+        Args:
+            block_size: Number of samples
+            seam_index: Sample index where parameter change occurs
+            new_note: New MIDI note (if changing pitch)
+            new_cents: New fine tuning
+            prng: Optional PRNG
+
+        Returns:
+            List of Q15 samples with smooth seam
+        """
+        # Update bridge/drift once per block
+        self._update_bridge()
+        if prng:
+            self.drift.update(prng)
+
+        # Seam width for crossfade (M samples)
+        M = 8
+
+        # Clamp seam_index to valid range with room for crossfade
+        seam_index = max(M, min(block_size - M, seam_index))
+
+        # === Phase 1: Render up to seam with old parameters ===
+        samples_before = [self.render_sample(prng) for _ in range(seam_index)]
+
+        # === Phase 2: Save state at seam point ===
+        # Save phase state so we can render overlap with both old and new params
+        saved_phase = self.phase.phase
+        saved_phase_inc = self.phase.phase_inc
+        saved_dc_state = self.dc_block_state
+        saved_last_output = self.last_output_q15
+
+        # === Phase 3: Render overlap region with OLD parameters ===
+        old_overlap = [self.render_sample(prng) for _ in range(M)]
+
+        # === Phase 4: Restore state and change parameters ===
+        self.phase.phase = saved_phase
+        self.dc_block_state = saved_dc_state
+        self.last_output_q15 = saved_last_output
+
+        if new_note is not None:
+            self.set_pitch(new_note, new_cents)
+
+        # === Phase 5: Render overlap region with NEW parameters ===
+        new_overlap = [self.render_sample(prng) for _ in range(M)]
+
+        # === Phase 6: Hermite crossfade with C¹ continuity ===
+        # For smooth seams we need BOTH value AND slope to match.
+        # Use cubic Hermite interpolation between the two waveforms.
+        #
+        # At t=0: output = old[0], slope = old_slope
+        # At t=1: output = new[M-1], slope = new_slope
+        # In between: Hermite spline smoothly interpolates both.
+
+        # Compute slopes at boundaries
+        old_slope = old_overlap[1] - old_overlap[0] if M > 1 else 0
+        new_slope = new_overlap[-1] - new_overlap[-2] if M > 1 else 0
+
+        # Endpoint values
+        p0 = old_overlap[0]  # Start value (from old)
+        p1 = new_overlap[-1]  # End value (from new)
+        m0 = old_slope * M  # Start tangent (scaled by interval)
+        m1 = new_slope * M  # End tangent (scaled by interval)
+
+        crossfaded = []
+        for i in range(M):
+            t = i / (M - 1) if M > 1 else 1.0
+
+            # Cubic Hermite basis functions
+            h00 = 2*t*t*t - 3*t*t + 1      # value at p0
+            h10 = t*t*t - 2*t*t + t         # tangent at p0
+            h01 = -2*t*t*t + 3*t*t          # value at p1
+            h11 = t*t*t - t*t               # tangent at p1
+
+            # Hermite interpolation
+            hermite_val = h00 * p0 + h10 * m0 + h01 * p1 + h11 * m1
+
+            # Blend Hermite curve with actual waveforms for texture
+            # At edges, use pure waveform; in middle, use Hermite
+            # This preserves waveform character while ensuring smooth endpoints
+            edge_blend = 4 * t * (1 - t)  # Peaks at 0.5, zero at edges
+
+            # Mix: at t=0 use old, at t=1 use new, in middle blend with Hermite
+            if t < 0.5:
+                # First half: blend old toward Hermite
+                wave_val = old_overlap[i]
+                blend_t = t * 2  # 0->1 over first half
+            else:
+                # Second half: blend Hermite toward new
+                wave_val = new_overlap[i]
+                blend_t = (t - 0.5) * 2  # 0->1 over second half
+
+            # Smoothstep blend factor
+            smooth_t = blend_t * blend_t * (3 - 2 * blend_t)
+
+            if t < 0.5:
+                blended = int(wave_val * (1 - smooth_t) + hermite_val * smooth_t)
+            else:
+                blended = int(hermite_val * (1 - smooth_t) + wave_val * smooth_t)
+
+            # Saturate
+            if blended > Q15_ONE:
+                blended = Q15_ONE
+            elif blended < -Q15_SCALE:
+                blended = -Q15_SCALE
+            crossfaded.append(blended)
+
+        # === Phase 7: Render remainder with new parameters ===
+        remaining = block_size - seam_index - M
+        samples_after = [self.render_sample(prng) for _ in range(remaining)]
+
+        # === Phase 8: Concatenate ===
+        samples = samples_before + crossfaded + samples_after
+
+        # Update history
+        self._update_history(samples)
+
+        return samples
 
     def _simple_texture(self, phase: int, prng: Optional[VoicePRNG]) -> int:
         """

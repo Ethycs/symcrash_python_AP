@@ -818,6 +818,125 @@ class TestMIDIRange:
         print(f"\n  Chromatic scale C3-C5 (legato + Safety Tail): {len(out_L)} samples")
         print(f"    Saved: {filepath}")
 
+    def test_chromatic_scale_seam_hints(self):
+        """
+        Render a chromatic scale using dual-render crossfade for C¹-continuous bridging.
+
+        This uses render_with_seam_at() which is the canonical method for smooth
+        pitch transitions. It renders the overlap region with BOTH old and new
+        parameters from the same state, then Hermite-crossfades them.
+
+        This produces the cleanest transitions because both waveforms are rendered
+        from the exact same phase state, eliminating phase mismatch artifacts.
+        """
+        osc = WPOState(voice_id=0)
+        osc.configure(note=48, waveform="saw")  # Start at C3
+
+        blocks_per_note = int(0.25 * BLOCKS_PER_SEC)  # 250ms per note
+        all_samples = []
+
+        # First note: just render normally
+        for _ in range(blocks_per_note):
+            block = osc.render_block(BLOCK_SIZE)
+            all_samples.extend(block)
+
+        # Remaining notes: use render_with_seam_at for smooth transitions
+        for note in range(49, 73):  # C#3 to C5
+            # First block of new note: dual-render crossfade at block start
+            block = osc.render_with_seam_at(
+                block_size=BLOCK_SIZE,
+                seam_index=8,  # Seam near start (after M=8 margin)
+                new_note=note,
+            )
+            all_samples.extend(block)
+
+            # Sustain blocks: normal rendering
+            for _ in range(blocks_per_note - 1):
+                block = osc.render_block(BLOCK_SIZE)
+                all_samples.extend(block)
+
+        L, R = samples_to_stereo(all_samples)
+        filepath = save_audio(L, R, "chromatic_scale_c3_c5_seam_hints")
+        print(f"\n  Chromatic scale C3-C5 (dual-render): {len(L)} samples")
+        print(f"    Saved: {filepath}")
+
+    def test_rapid_note_changes_seam_at(self):
+        """
+        Test rapid note changes within a single block using render_with_seam_at().
+
+        This tests the most demanding seam case: multiple pitch changes
+        happening mid-block with Hermite bridging at each seam point.
+        """
+        osc = WPOState(voice_id=0)
+        osc.configure(note=60, waveform="saw")  # Start at C4
+
+        # Render multiple blocks with mid-block note changes
+        all_samples = []
+
+        # Pattern: change note at sample 32 (middle of 64-sample block)
+        notes = [60, 62, 64, 65, 67, 69, 71, 72]  # C major scale
+
+        for note_idx, new_note in enumerate(notes[1:], 1):
+            # Render block with note change at middle
+            block = osc.render_with_seam_at(
+                block_size=BLOCK_SIZE,
+                seam_index=BLOCK_SIZE // 2,  # Change at middle
+                new_note=new_note,
+            )
+            all_samples.extend(block)
+
+            # Also render some sustain
+            for _ in range(int(0.1 * BLOCKS_PER_SEC)):  # 100ms sustain
+                block = osc.render_block(BLOCK_SIZE)
+                all_samples.extend(block)
+
+        L, R = samples_to_stereo(all_samples)
+        filepath = save_audio(L, R, "rapid_note_changes_seam_at")
+        print(f"\n  Rapid note changes (seam_at): {len(L)} samples")
+        print(f"    Saved: {filepath}")
+
+    def test_chromatic_scale_dual_render_prototype(self):
+        """
+        Chromatic scale using render_with_seam_at() for proper dual-render crossfade.
+
+        This is the prototype for the cleanest pitch transitions - uses the
+        dual-render technique where we render the overlap region with BOTH
+        old and new parameters from the same state, then Hermite-crossfade.
+
+        Unlike prepare_for_parameter_change() which only has limited history,
+        render_with_seam_at() does true dual-render at the seam point.
+        """
+        osc = WPOState(voice_id=0)
+        osc.configure(note=48, waveform="saw")  # Start at C3
+
+        blocks_per_note = int(0.25 * BLOCKS_PER_SEC)  # 250ms per note
+        all_samples = []
+
+        # First note: just render normally
+        for _ in range(blocks_per_note):
+            block = osc.render_block(BLOCK_SIZE)
+            all_samples.extend(block)
+
+        # Remaining notes: use render_with_seam_at for smooth transitions
+        for note in range(49, 73):  # C#3 to C5
+            # First block of new note: dual-render crossfade at block start
+            block = osc.render_with_seam_at(
+                block_size=BLOCK_SIZE,
+                seam_index=8,  # Seam near start (after M=8 margin)
+                new_note=note,
+            )
+            all_samples.extend(block)
+
+            # Sustain blocks: normal rendering
+            for _ in range(blocks_per_note - 1):
+                block = osc.render_block(BLOCK_SIZE)
+                all_samples.extend(block)
+
+        L, R = samples_to_stereo(all_samples)
+        filepath = save_audio(L, R, "chromatic_scale_c3_c5_dual_render_prototype")
+        print(f"\n  Chromatic scale C3-C5 (dual-render prototype): {len(L)} samples")
+        print(f"    Saved: {filepath}")
+
 
 # =============================================================================
 # MULTI-VOICE TESTS
