@@ -264,15 +264,19 @@ class RegularityOperator:
         Also applies microfade if armed (from voice_allocate).
 
         Call this at the end of render to ensure no clicks remain.
+
+        IMPORTANT: prev_sample is updated to the FINAL output sample (post-microfade)
+        to ensure continuity at block boundaries.
         """
-        # First apply slope projection
+        # Apply microfade FIRST if armed (before slope projection)
+        # This way slope projection sees the faded signal and can limit it properly
+        if self._microfade_counter > 0:
+            samples = self._apply_microfade(samples)
+
+        # Then apply slope projection
         result, self.prev_sample = slope_project(
             samples, self.prev_sample, self.max_slew
         )
-
-        # Apply microfade if armed
-        if self._microfade_counter > 0:
-            result = self._apply_microfade(result)
 
         return result
 
@@ -282,6 +286,9 @@ class RegularityOperator:
 
         The microfade is a smoothstep from 0 to 1 over microfade_len samples,
         applied to prevent clicks on voice allocation.
+
+        Fade starts from prev_sample (the last known output) and ramps
+        the new signal in smoothly.
         """
         if not samples:
             return samples
@@ -296,9 +303,11 @@ class RegularityOperator:
                 # Smoothstep for C¹ continuity
                 w = 3 * pos * pos - 2 * pos * pos * pos
 
-                # Apply fade
-                faded = int(s * w)
-                result.append(faded)
+                # Crossfade from prev_sample to new signal
+                # At pos=0: output = prev_sample
+                # At pos=1: output = s
+                faded = int(self.prev_sample * (1 - w) + s * w)
+                result.append(sat16(faded))
 
                 self._microfade_counter -= 1
             else:
@@ -336,14 +345,21 @@ class WaveletEngine:
         # Boundary/continuity state per voice
         self.boundary_state: Dict[int, Dict] = {}
 
-        # Tree transition state per voice
+        # Tree transition state per voice (for crossfade ramping)
         self.voice_tree_state: Dict[int, Dict] = {}
+
+        # Previous coefficients per voice (for coefficient smoothing)
+        self.prev_coeffs: Dict[int, List[int]] = {}
 
         # Crossfade duration (blocks)
         self.xfade_blocks = 32
 
         # Regularity Operator R per voice (handles musical transitions)
         self.regularity: Dict[int, RegularityOperator] = {}
+
+        # Coefficient smoothing rate (Q15 slew per block)
+        # Higher = faster tracking, Lower = smoother but laggier
+        self.coeff_slew_rate = 0x2000  # ~25% per block
 
     def get_regularity(self, voice_id: int) -> RegularityOperator:
         """Get or create RegularityOperator for a voice."""
@@ -397,6 +413,10 @@ class WaveletEngine:
         if voice_id in self.boundary_state:
             del self.boundary_state[voice_id]
 
+        # Clear previous coefficients (new voice starts fresh)
+        if voice_id in self.prev_coeffs:
+            del self.prev_coeffs[voice_id]
+
     def voice_on(self, voice_id: int) -> None:
         """
         Signal voice retrigger / gate rise.
@@ -446,6 +466,12 @@ class WaveletEngine:
         The Regularity Operator R handles musical transitions (coefficient
         changes, tree morphs) by applying slope projection. This is NOT the
         same as Safety Tail's block-boundary OLA.
+
+        Anti-click mechanisms applied:
+        1. Coefficient smoothing: slew-limit coefficient changes
+        2. Micro-bridge: C¹ blend when coefficients change significantly
+        3. Intra-block alpha ramp: smooth tree blend transitions
+        4. Slope projection: final safety net for any remaining spikes
         """
         voice_id = vf.voice_id
 
@@ -455,16 +481,58 @@ class WaveletEngine:
         tree_b_id = vf.tree_b_id if vf.tree_b_id > 0 else tree_a_id
         blend_q15 = vf.tree_blend_q15
 
-        # Synthesize with blending if needed
-        if blend_q15 > 0 and tree_a_id != tree_b_id:
-            # Voice Engine is morphing between trees
-            x_q15 = self.trees.synthesize_crossfade(
-                tree_a_id, tree_b_id,
-                vf.coeff_q15, blend_q15
+        # Get previous blend state for this voice (for intra-block ramping)
+        if voice_id not in self.voice_tree_state:
+            self.voice_tree_state[voice_id] = {
+                'prev_tree_a': tree_a_id,
+                'prev_tree_b': tree_b_id,
+                'prev_blend': 0,
+            }
+        state = self.voice_tree_state[voice_id]
+        prev_blend = state['prev_blend']
+
+        # === COEFFICIENT SMOOTHING ===
+        # Detect if coefficients changed significantly and need smoothing
+        coeffs_to_use = vf.coeff_q15
+        need_micro_bridge = False
+
+        if voice_id in self.prev_coeffs:
+            prev_coeffs = self.prev_coeffs[voice_id]
+            # Check if coefficients changed significantly
+            coeff_diff = self._compute_coeff_change(prev_coeffs, vf.coeff_q15)
+            if coeff_diff > 0x1000:  # Significant change threshold
+                need_micro_bridge = True
+                # Slew-limit coefficients toward new values
+                coeffs_to_use = self._slew_coefficients(prev_coeffs, vf.coeff_q15)
+
+        # Store current coefficients for next block
+        self.prev_coeffs[voice_id] = list(vf.coeff_q15)
+
+        # === SYNTHESIS ===
+        if need_micro_bridge and voice_id in self.prev_coeffs:
+            # Synthesize both old and new, then micro-bridge
+            R = self.get_regularity(voice_id)
+            x_old = self.trees.synthesize(tree_a_id, self.prev_coeffs.get(voice_id, coeffs_to_use))
+            x_new = self._synthesize_with_blend(
+                tree_a_id, tree_b_id, coeffs_to_use,
+                prev_blend, blend_q15
             )
+            # Apply micro-bridge at block start
+            x_q15 = R.apply_transition(x_old, x_new, 0)
+            # Pad to full block if needed
+            if len(x_q15) < self.B:
+                x_q15.extend(x_new[len(x_q15):])
         else:
-            # Normal synthesis with primary tree
-            x_q15 = self.trees.synthesize(tree_a_id, vf.coeff_q15)
+            # Normal synthesis path
+            x_q15 = self._synthesize_with_blend(
+                tree_a_id, tree_b_id, coeffs_to_use,
+                prev_blend, blend_q15
+            )
+
+        # Update state for next block
+        state['prev_tree_a'] = tree_a_id
+        state['prev_tree_b'] = tree_b_id
+        state['prev_blend'] = blend_q15
 
         # Apply voice gain
         x_q15 = [mul_q15_sat(s, vf.gain_q15) for s in x_q15]
@@ -482,7 +550,49 @@ class WaveletEngine:
             x_q15 = R.finalize(x_q15)
 
         return x_q15
-    
+
+    def _synthesize_ramped_crossfade(
+        self,
+        tree_a_id: int,
+        tree_b_id: int,
+        coeff_q15: List[int],
+        alpha_start: int,
+        alpha_end: int,
+    ) -> List[int]:
+        """
+        Synthesize crossfade with intra-block alpha ramping.
+
+        Ramps alpha linearly from alpha_start to alpha_end over the block.
+        This prevents clicks when blend factor changes between blocks.
+
+        Args:
+            tree_a_id: Primary tree ID
+            tree_b_id: Secondary tree ID
+            coeff_q15: Coefficients
+            alpha_start: Blend at start of block (0 = all tree_a)
+            alpha_end: Blend at end of block (Q15_ONE = all tree_b)
+
+        Returns:
+            Audio samples with smooth crossfade ramp
+        """
+        # Synthesize both trees
+        x_a = self.trees.synthesize(tree_a_id, coeff_q15)
+        x_b = self.trees.synthesize(tree_b_id, coeff_q15)
+
+        # Ramp alpha linearly across the block
+        result = []
+        for i in range(self.B):
+            # Linear interpolation of alpha across block
+            t = i / (self.B - 1) if self.B > 1 else 0
+            alpha = int(alpha_start + t * (alpha_end - alpha_start))
+            alpha_inv = Q15_ONE - alpha
+
+            # Blend samples
+            mixed = mul_q15_sat(x_a[i], alpha_inv) + mul_q15_sat(x_b[i], alpha)
+            result.append(sat16(mixed))
+
+        return result
+
     def apply_gain_pan(self, x: List[int], gain: int, pan: int) -> Tuple[List[int], List[int]]:
         """Apply gain and pan to mono signal, return stereo L/R."""
         # Pan law: constant power approximation
@@ -558,8 +668,126 @@ class WaveletEngine:
             
             left_gain = int(Q15_ONE * (1.0 - max(0, pan) / 32768))
             right_gain = int(Q15_ONE * (1.0 + min(0, pan) / 32768))
-            
+
             L = [mul_q15_sat(s, left_gain) for s in x]
             R = [mul_q15_sat(s, right_gain) for s in x]
-            
+
             return L, R
+
+    def _compute_coeff_change(self, prev_coeffs: List[int], new_coeffs: List[int]) -> int:
+        """
+        Compute magnitude of coefficient change between blocks.
+
+        Returns the maximum absolute difference across all coefficients.
+        This determines whether micro-bridge is needed.
+
+        Args:
+            prev_coeffs: Previous block's coefficients
+            new_coeffs: Current block's coefficients
+
+        Returns:
+            Maximum coefficient change (Q15 scale)
+        """
+        if len(prev_coeffs) != len(new_coeffs):
+            # Different lengths means major change
+            return Q15_ONE
+
+        max_diff = 0
+        for p, n in zip(prev_coeffs, new_coeffs):
+            diff = abs(n - p)
+            if diff > max_diff:
+                max_diff = diff
+
+        return max_diff
+
+    def _slew_coefficients(self, prev_coeffs: List[int], new_coeffs: List[int]) -> List[int]:
+        """
+        Slew-limit coefficients toward new values.
+
+        Prevents large coefficient jumps that cause clicks.
+        Each coefficient moves at most coeff_slew_rate per block.
+
+        Args:
+            prev_coeffs: Previous block's coefficients
+            new_coeffs: Target coefficients
+
+        Returns:
+            Slew-limited coefficients (may not reach target in one block)
+        """
+        result = []
+
+        for i, (prev, new) in enumerate(zip(prev_coeffs, new_coeffs)):
+            delta = new - prev
+            if delta > self.coeff_slew_rate:
+                # Positive change, limit to slew rate
+                result.append(prev + self.coeff_slew_rate)
+            elif delta < -self.coeff_slew_rate:
+                # Negative change, limit to slew rate
+                result.append(prev - self.coeff_slew_rate)
+            else:
+                # Within slew rate, use target directly
+                result.append(new)
+
+        # Handle length mismatch (new coeffs longer)
+        if len(new_coeffs) > len(prev_coeffs):
+            # New coefficients fade in from 0
+            for i in range(len(prev_coeffs), len(new_coeffs)):
+                target = new_coeffs[i]
+                if target > self.coeff_slew_rate:
+                    result.append(self.coeff_slew_rate)
+                elif target < -self.coeff_slew_rate:
+                    result.append(-self.coeff_slew_rate)
+                else:
+                    result.append(target)
+
+        return result
+
+    def _synthesize_with_blend(
+        self,
+        tree_a_id: int,
+        tree_b_id: int,
+        coeff_q15: List[int],
+        prev_blend: int,
+        blend_q15: int,
+    ) -> List[int]:
+        """
+        Synthesize audio with tree blending and intra-block ramping.
+
+        If blend changed from previous block, uses intra-block alpha ramp
+        to prevent discontinuities.
+
+        Args:
+            tree_a_id: Primary tree ID
+            tree_b_id: Secondary tree ID
+            coeff_q15: Coefficients to use
+            prev_blend: Previous block's blend value
+            blend_q15: Target blend value
+
+        Returns:
+            Synthesized audio samples
+        """
+        # Check if we need blending at all
+        if tree_a_id == tree_b_id or blend_q15 == 0:
+            # Single tree, no blend needed
+            return self.trees.synthesize(tree_a_id, coeff_q15)
+
+        # Check if blend changed - if so, use ramped crossfade
+        if prev_blend != blend_q15:
+            # Blend changed, ramp within block to prevent click
+            return self._synthesize_ramped_crossfade(
+                tree_a_id, tree_b_id, coeff_q15,
+                prev_blend, blend_q15
+            )
+        else:
+            # Blend stable, use constant blend
+            x_a = self.trees.synthesize(tree_a_id, coeff_q15)
+            x_b = self.trees.synthesize(tree_b_id, coeff_q15)
+
+            # Blend: out = a * (1 - blend) + b * blend
+            blend_inv = Q15_ONE - blend_q15
+            result = []
+            for a, b in zip(x_a, x_b):
+                mixed = mul_q15_sat(a, blend_inv) + mul_q15_sat(b, blend_q15)
+                result.append(sat16(mixed))
+
+            return result

@@ -16,6 +16,11 @@ Uses the symcrash_python_ap audio pipeline.
 
 import numpy as np
 from typing import List, Tuple, Dict
+from pathlib import Path
+import sys
+
+# Add src to path (same pattern as other audio tests)
+sys.path.insert(0, str(Path(__file__).parent.parent / "src" / "symcrash_python_ap"))
 
 from test_config import (
     FS, BLOCK_SIZE, TOTAL_BLOCKS, BLOCKS_PER_SEC,
@@ -33,16 +38,15 @@ from test_atoms import (
     get_blended_matrix,
 )
 
-# Import from the symcrash_python_ap package
-from symcrash_python_ap.pipeline import Pipeline
-from symcrash_python_ap.symbol_engine import SymbolEngine
-from symcrash_python_ap.wavelet_engine import WaveletEngine
-from symcrash_python_ap.material_engine import MaterialEngine
-from symcrash_python_ap.safety_engine import SafetyEngine
-from symcrash_python_ap.frames import ParamFrame, VoiceFrame
-from symcrash_python_ap.fixed import sat16, mul_q15_sat
-from symcrash_python_ap.wavelet_packet_trees import PacketTreeSet, COEFF_LEN
-from symcrash_python_ap.audio_io import write_audio
+# Import from the symcrash_python_ap package (now via sys.path)
+from symbol_engine import SymbolEngine
+from wavelet_engine import WaveletEngine
+from material_engine import MaterialEngine
+from safety_engine import SafetyEngine
+from frames import ParamFrame, VoiceFrame
+from fixed import sat16, mul_q15_sat
+from wavelet_packet_trees import PacketTreeSet, COEFF_LEN
+from audio_io import write_audio
 
 
 # =============================================================================
@@ -74,6 +78,9 @@ class TortureTestPipeline:
 
         # Voice phase states for richer synthesis
         self.voice_phases: Dict[int, Dict[int, float]] = {i: {} for i in range(N_VOICES)}
+
+        # Track which voices have been allocated (for anti-click)
+        self.allocated_voices: set = set()
 
         # Audio buffer
         self.output_L: List[int] = []
@@ -177,6 +184,12 @@ class TortureTestPipeline:
                 for i, v in enumerate(transformed):
                     coeffs[node_start + i] = v
 
+        # Allocate voice in wavelet engine if not already (for anti-click microfade)
+        if voice_id not in self.allocated_voices:
+            self.wavelet.voice_allocate(voice_id)
+            self.safety.voice_on(voice_id)
+            self.allocated_voices.add(voice_id)
+
         # Inject into symbol engine
         self.symbol.inject_note(voice_id, coeffs)
         self.symbol.voice_trees[voice_id] = tree_id
@@ -195,10 +208,12 @@ class TortureTestPipeline:
         # Symbol engine step
         vframes = self.symbol.step_block(self.params)
 
-        # Wavelet synthesis for each voice
+        # Wavelet synthesis for each voice with per-voice declick
         voice_blocks = []
         for vf in vframes:
             audio = self.wavelet.render_voice(vf)
+            # Apply per-voice declick (fade-in/fade-out on voice start/stop)
+            audio = self.safety.apply_declick(audio, vf.voice_id)
             voice_blocks.append((vf, audio))
 
         # Mix to stereo

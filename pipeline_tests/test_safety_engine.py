@@ -631,3 +631,123 @@ class TestSlewLimiter:
             max_slew = max(max_slew, slew)
             prev = s
         assert max_slew <= SLEW_MAX, f"Max slew {max_slew} should be <= {SLEW_MAX}"
+
+
+class TestC1DiscontinuityPatcher:
+    """
+    Tests for C¹-continuous discontinuity detection and patching.
+
+    The C¹ patcher handles interior clicks that OLA can't reach:
+    - Coefficient-change induced clicks (sample ~32 in crossfade)
+    - Tree morph discontinuities
+    - Operator boundary artifacts
+    """
+
+    def test_detect_discontinuity_finds_click(self):
+        """Discontinuity detector finds interior clicks."""
+        from safety_engine import SafetyEngine, SLEW_MAX
+
+        engine = SafetyEngine(block_size=64)
+
+        # Create signal with interior discontinuity at sample 32
+        x = [0] * 64
+        for i in range(32):
+            x[i] = 1000  # Quiet signal
+        for i in range(32, 64):
+            x[i] = 20000  # Big jump at sample 32
+
+        discontinuities = engine.detect_discontinuity(x)
+
+        assert 32 in discontinuities, f"Should detect discontinuity at sample 32, found: {discontinuities}"
+
+    def test_detect_discontinuity_ignores_smooth(self):
+        """Discontinuity detector ignores smooth signals."""
+        from safety_engine import SafetyEngine
+
+        engine = SafetyEngine(block_size=64)
+
+        # Smooth ramp signal
+        x = [i * 100 for i in range(64)]
+
+        discontinuities = engine.detect_discontinuity(x)
+
+        assert len(discontinuities) == 0, f"Smooth signal should have no discontinuities, found: {discontinuities}"
+
+    def test_c1_patch_smooths_click(self):
+        """C¹ patcher reduces discontinuity magnitude."""
+        from safety_engine import SafetyEngine
+
+        engine = SafetyEngine(block_size=64)
+
+        # Create signal with big discontinuity
+        x = [1000] * 32 + [20000] * 32
+        original_jump = abs(x[32] - x[31])
+
+        patched = engine.apply_c1_patch(x)
+
+        # Check that the jump is reduced
+        patched_jump = abs(patched[32] - patched[31])
+        assert patched_jump < original_jump, f"Patched jump {patched_jump} should be less than original {original_jump}"
+
+    def test_c1_patch_preserves_smooth(self):
+        """C¹ patcher doesn't modify smooth signals."""
+        from safety_engine import SafetyEngine
+
+        engine = SafetyEngine(block_size=64)
+
+        # Smooth sine-ish signal
+        import math
+        x = [int(10000 * math.sin(2 * math.pi * i / 64)) for i in range(64)]
+
+        patched = engine.apply_c1_patch(x)
+
+        # Should be unchanged (no discontinuities detected)
+        assert patched == x, "Smooth signal should not be modified"
+
+    def test_c1_patch_in_declick_chain(self):
+        """C¹ patcher is applied in full declick chain."""
+        from safety_engine import SafetyEngine
+
+        engine = SafetyEngine(block_size=64)
+
+        # Activate voice
+        engine.voice_on(0)
+
+        # Process a block with discontinuity
+        x = [0] * 16 + [1000] * 16 + [20000] * 16 + [1000] * 16
+
+        declicked = engine.apply_declick(x, voice_id=0)
+
+        # Check that discontinuity at sample 32 is reduced
+        original_jump = abs(x[32] - x[31])
+        declicked_jump = abs(declicked[32] - declicked[31])
+
+        # The jump should be reduced (fade-in might also affect early samples)
+        # Focus on the interior discontinuity
+        assert declicked_jump < original_jump * 0.8, \
+            f"Declick chain should reduce interior discontinuity: {declicked_jump} vs {original_jump}"
+
+    def test_c1_patch_handles_multiple_discontinuities(self):
+        """C¹ patcher handles multiple discontinuities."""
+        from safety_engine import SafetyEngine
+
+        engine = SafetyEngine(block_size=64)
+
+        # Create signal with discontinuities at samples 16 and 48
+        x = [1000] * 16 + [20000] * 16 + [1000] * 16 + [20000] * 16
+        jump1 = abs(x[16] - x[15])
+        jump2 = abs(x[32] - x[31])
+        jump3 = abs(x[48] - x[47])
+
+        patched = engine.apply_c1_patch(x)
+
+        patched_jump1 = abs(patched[16] - patched[15])
+        patched_jump2 = abs(patched[32] - patched[31])
+        patched_jump3 = abs(patched[48] - patched[47])
+
+        # At least one discontinuity should be detected and patched
+        total_original = jump1 + jump2 + jump3
+        total_patched = patched_jump1 + patched_jump2 + patched_jump3
+
+        assert total_patched < total_original, \
+            f"Total discontinuities should be reduced: {total_patched} vs {total_original}"

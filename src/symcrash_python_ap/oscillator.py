@@ -499,28 +499,50 @@ class HarmonicScaffold:
         Fast sine approximation from phase.
 
         Uses parabolic approximation for FPGA-friendliness.
+        This is a Bhaskara I style approximation that produces smooth curves
+        instead of triangle wave corners.
+
+        The parabola 4x(1-x) maps [0,1] -> [0,1] with smooth peaks.
+        We apply this per half-cycle for C1-continuous sine approximation.
         """
-        # Normalize to [0, 4) representing quadrants
-        normalized = (phase >> (PHASE_BITS - 18)) & 0x3FFFF
-        quadrant = normalized >> 16
-        x = normalized & 0xFFFF
+        # Normalize to [0, 2) representing half-cycles
+        # Use 17 bits: bit 16 = half-cycle, bits 0-15 = position in half
+        normalized = (phase >> (PHASE_BITS - 17)) & 0x1FFFF
+        half_cycle = (normalized >> 16) & 1
+        x = normalized & 0xFFFF  # 0 to 65535 within half-cycle
 
-        # Parabolic approximation
-        if quadrant == 0:
-            # 0 to π/2: rising
-            y = x
-        elif quadrant == 1:
-            # π/2 to π: falling from peak
-            y = 0xFFFF - x
-        elif quadrant == 2:
-            # π to 3π/2: negative rising
-            y = -x
+        # Parabolic approximation: 4x(1-x) scaled for Q15
+        # x is 0..65535, we need x_norm = x/65535 in [0,1]
+        # parabola = 4 * x_norm * (1 - x_norm)
+        # = 4 * (x/65535) * (1 - x/65535)
+        # = 4 * x * (65535 - x) / 65535^2
+        #
+        # To avoid overflow, compute in steps:
+        # (x >> 8) * ((65535 - x) >> 8) gives us (x * (65535-x)) >> 16
+        # Then multiply by 4 and scale for Q15
+
+        x_hi = x >> 8  # 0..255
+        inv_x_hi = (0xFFFF - x) >> 8  # 0..255
+
+        # parabola in range 0..16256 (when x = 32768)
+        parabola = x_hi * inv_x_hi
+
+        # Scale to Q15 peak (32767)
+        # max parabola value is 127*128 = 16256 at x=32768
+        # We want this to map to Q15_ONE (32767)
+        # Scale factor: 32767 / 16256 ≈ 2.016
+        # Use (parabola * 2 + parabola >> 4) ≈ parabola * 2.0625
+        y = (parabola << 1) + (parabola >> 4)
+
+        # Clamp to Q15 (handles rounding edge cases)
+        if y > Q15_ONE:
+            y = Q15_ONE
+
+        # Apply sign based on half-cycle
+        if half_cycle:
+            return -y
         else:
-            # 3π/2 to 2π: negative falling
-            y = -(0xFFFF - x)
-
-        # Scale to Q15
-        return (y * Q15_ONE) >> 16
+            return y
 
 
 @dataclass
@@ -716,6 +738,9 @@ class WPOState:
     # Traction (for bridge regime stability)
     traction_q15: int = BRIDGE_TRACTION_NOM
 
+    # BLEP control - only needed for waveforms with discontinuities (saw, square)
+    needs_blep: bool = True
+
     def configure(
         self,
         note: int,
@@ -755,6 +780,11 @@ class WPOState:
         self.eta_q15 = eta_q15
 
         # Configure scaffold based on waveform
+        # Note: Scaffold uses additive synthesis (sum of sine harmonics), which is
+        # inherently bandlimited. BLEP is only needed for naive/direct waveforms.
+        # Since we use harmonic synthesis, we disable BLEP by default.
+        self.needs_blep = False  # Harmonic synthesis is already bandlimited
+
         if waveform == "saw":
             self.scaffold.set_saw_harmonics()
         elif waveform == "square":
@@ -973,16 +1003,18 @@ class WPOState:
         # Blend two streams
         output = blend_two_stream(scaffold_sample, texture_sample, self.eta_q15)
 
-        # Add BLEP correction for edges (skip first cycle to avoid click)
-        if wrapped:
-            if self.first_cycle:
-                self.first_cycle = False
-            else:
-                # Inject BLEP at cycle boundary (for saw-like waveforms)
-                edge_amp = Q15_ONE >> 1  # Half amplitude edge
-                self.blep.inject_edge(edge_amp, frac_offset)
+        # Add BLEP correction for edges (only for saw/square waveforms)
+        # Triangle/sine are continuous and don't need BLEP
+        if self.needs_blep:
+            if wrapped:
+                if self.first_cycle:
+                    self.first_cycle = False
+                else:
+                    # Inject BLEP at cycle boundary
+                    edge_amp = Q15_ONE >> 1  # Half amplitude edge
+                    self.blep.inject_edge(edge_amp, frac_offset)
 
-        output += self.blep.read_and_advance()
+            output += self.blep.read_and_advance()
 
         # Apply glide amplitude envelope (masks transition artifacts)
         if self.glide_gain_q15 < Q15_ONE:

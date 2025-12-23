@@ -8,21 +8,17 @@ Symbol Engine -> Wavelet Engine -> Material Engine -> Safety Engine -> Output
 Supports WAV export for listening tests.
 """
 
-import sys
-sys.path.insert(0, '/home/claude')
-sys.path.insert(0, '/home/claude/synth_pipeline')
-
 from typing import List, Tuple, Optional
 import struct
 import wave
 import numpy as np
 
-from fixed import Q15_ONE, Q15_HALF, sat16, mul_q15_sat
-from frames import ParamFrame, VoiceFrame
-from symbol_engine import SymbolEngine
-from wavelet_engine import WaveletEngine
-from material_engine import MaterialEngine
-from safety_engine import SafetyEngine
+from .fixed import Q15_ONE, Q15_HALF, sat16, mul_q15_sat
+from .frames import ParamFrame, VoiceFrame
+from .symbol_engine import SymbolEngine
+from .wavelet_engine import WaveletEngine
+from .material_engine import MaterialEngine
+from .safety_engine import SafetyEngine
 
 
 class AudioSink:

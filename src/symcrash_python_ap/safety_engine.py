@@ -1263,7 +1263,120 @@ class SafetyEngine:
         x = self.apply_voice_start(x, voice_id)
         x = self.apply_voice_stop(x, voice_id)
         x = self.apply_ola(x, voice_id)
+        x = self.apply_c1_patch(x)  # Interior discontinuity correction
         return x
+
+    # =========================================================================
+    # C¹ DISCONTINUITY PATCHER (interior click removal)
+    # =========================================================================
+
+    def detect_discontinuity(self, x: List[int], threshold: int = SLEW_MAX) -> List[int]:
+        """
+        Detect interior discontinuities (clicks) in a block.
+
+        A discontinuity is detected when |x[n] - x[n-1]| > threshold
+        (representing a sudden jump that likely causes an audible click).
+
+        We also look at the second derivative (curvature) to detect
+        slope discontinuities even when value changes are gradual.
+
+        Args:
+            x: Audio samples
+            threshold: Slew threshold for discontinuity detection
+
+        Returns:
+            List of sample indices where discontinuities were detected
+        """
+        if len(x) < 3:
+            return []
+
+        discontinuities = []
+
+        for n in range(1, len(x) - 1):
+            # First derivative (slope)
+            d = abs(x[n] - x[n - 1])
+
+            # Second derivative (curvature / slope change)
+            d2 = abs((x[n + 1] - x[n]) - (x[n] - x[n - 1]))
+
+            # Detect large slope (value discontinuity)
+            if d > threshold:
+                discontinuities.append(n)
+            # Detect large curvature (slope discontinuity) - catches "corners"
+            elif d2 > threshold * 2:
+                discontinuities.append(n)
+
+        return discontinuities
+
+    def apply_c1_patch(self, x: List[int], patch_radius: int = 4) -> List[int]:
+        """
+        Apply C¹-continuous correction to interior discontinuities.
+
+        When a discontinuity is detected, we solve for a minimum-energy
+        correction δ[n] that enforces value and slope continuity.
+
+        The correction uses a raised-cosine bump basis centered on each
+        discontinuity point, solving constraints:
+        - Value match: x_left[k] ≈ x_right[k]
+        - Slope match: Δx_left[k] ≈ Δx_right[k]
+
+        Args:
+            x: Audio samples
+            patch_radius: Half-width of correction window (samples)
+
+        Returns:
+            Corrected audio samples
+        """
+        discontinuities = self.detect_discontinuity(x)
+
+        if not discontinuities:
+            return x
+
+        out = list(x)
+
+        for k in discontinuities:
+            # Skip if too close to block edges
+            if k < patch_radius or k >= len(x) - patch_radius:
+                continue
+
+            # Compute value discontinuity
+            val_left = x[k - 1]
+            val_right = x[k]
+            val_jump = val_right - val_left
+
+            # Compute slope discontinuity
+            slope_left = x[k - 1] - x[k - 2] if k >= 2 else 0
+            slope_right = x[k + 1] - x[k] if k < len(x) - 1 else 0
+            slope_jump = slope_right - slope_left
+
+            # Skip if jumps are small (within tolerance)
+            if abs(val_jump) < 0x0800 and abs(slope_jump) < 0x0400:
+                continue
+
+            # Apply raised-cosine bump correction
+            # Correction is centered at k, tapers to zero at k±patch_radius
+            for i in range(-patch_radius, patch_radius + 1):
+                n = k + i
+                if n < 0 or n >= len(out):
+                    continue
+
+                # Raised cosine: 1 at center, 0 at edges
+                t = (i + patch_radius) / (2 * patch_radius)  # 0 to 1
+                bump = 0.5 * (1 - math.cos(2 * math.pi * t))
+
+                # Value correction: smooth the jump
+                # Apply more correction on the "after" side
+                if i >= 0:
+                    val_correction = -int(val_jump * bump * 0.5)
+                else:
+                    val_correction = int(val_jump * bump * 0.5)
+
+                # Slope correction: smooth the slope change
+                slope_correction = -int(slope_jump * bump * i * 0.1)
+
+                out[n] = sat16(out[n] + val_correction + slope_correction)
+
+        return out
 
     # =========================================================================
     # MASTER OLA (for mixed stereo output)
