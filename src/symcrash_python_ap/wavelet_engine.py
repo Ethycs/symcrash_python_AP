@@ -4,9 +4,18 @@ Wavelet Engine
 
 Renders VoiceFrames to audio via inverse wavelet packet synthesis.
 Uses CDF 5/3 lifting with 5 tree types.
+
+ARCHITECTURAL NOTE:
+All coefficient changes are slewed or micro-interpolated HERE, not in Safety.
+Safety handles block-boundary OLA only; musical transitions are Wavelet Engine's job.
+
+The Regularity Operator R provides:
+- Event-local micro-bridge: C¹ cosine ramp at coefficient change points
+- Slew limiting on audio output for any residual discontinuities
 """
 
 from typing import List, Dict, Tuple, Optional
+import math
 import numpy as np
 
 from fixed import (
@@ -15,6 +24,214 @@ from fixed import (
 )
 from frames import VoiceFrame
 from wavelet_packet_trees import PacketTreeSet, BLOCK_SIZE, LEAF_COUNT, NODE_SIZE
+
+
+# =============================================================================
+# REGULARITY OPERATOR R (WSE-STD-070)
+# =============================================================================
+#
+# The Regularity Operator projects audio onto a bounded-variation set.
+# Clicks are impulses; impulses are unbounded derivatives.
+#
+# R consists of two components:
+# 1. Event-local micro-bridge: C¹ cosine ramp at known change points
+# 2. Slope projection fallback: symmetric slew limiter for any remaining spikes
+#
+# This lives in Wavelet Engine because it handles MUSICAL transitions
+# (note changes, coefficient morphs, tree blends), NOT block boundaries.
+
+# Constants
+R_BRIDGE_LEN = 16         # Samples for micro-bridge (event-local)
+R_SLEW_MAX = 0x2000       # Maximum sample-to-sample change for audio
+R_CURVATURE_MAX = 0x1000  # Maximum second difference (curvature)
+
+
+def _build_cosine_bridge_lut(n: int) -> List[int]:
+    """
+    Build C¹ cosine bridge LUT for micro-bridge.
+
+    The bridge function w(t) satisfies:
+    - w(0) = 0, w(1) = 1 (amplitude continuity)
+    - w'(0) = 0, w'(1) = 0 (derivative continuity at endpoints)
+
+    Uses smoothstep: w(t) = 3t² - 2t³
+    """
+    lut = []
+    for i in range(n + 1):
+        t = i / n
+        # Smoothstep: 3t² - 2t³ (C¹ continuous)
+        w = 3 * t * t - 2 * t * t * t
+        lut.append(int(round(w * Q15_ONE)))
+    return lut
+
+
+# Precomputed micro-bridge LUT
+_BRIDGE_LUT = _build_cosine_bridge_lut(R_BRIDGE_LEN)
+
+
+def micro_bridge(
+    old_samples: List[int],
+    new_samples: List[int],
+    bridge_len: int = R_BRIDGE_LEN,
+) -> List[int]:
+    """
+    Apply C¹-continuous micro-bridge between old and new generator states.
+
+    This is the event-local regularity fix: when something changes at a known
+    sample index, we blend old->new using a smoothstep that matches both value
+    and derivative at the endpoints.
+
+    Args:
+        old_samples: Samples from the "old" state (at least bridge_len)
+        new_samples: Samples from the "new" state (at least bridge_len)
+        bridge_len: Number of samples for the transition
+
+    Returns:
+        Blended samples (length = bridge_len)
+    """
+    if len(old_samples) < bridge_len or len(new_samples) < bridge_len:
+        # Not enough context, fall back to simple blend
+        bridge_len = min(len(old_samples), len(new_samples), bridge_len)
+        if bridge_len == 0:
+            return []
+
+    result = []
+    for i in range(bridge_len):
+        # w goes from 0 to Q15_ONE over bridge_len
+        if bridge_len == R_BRIDGE_LEN:
+            w = _BRIDGE_LUT[i]
+        else:
+            t = i / (bridge_len - 1) if bridge_len > 1 else 1.0
+            w = int((3 * t * t - 2 * t * t * t) * Q15_ONE)
+
+        inv_w = Q15_ONE - w
+
+        # Blend: out = old * (1-w) + new * w
+        out = (old_samples[i] * inv_w + new_samples[i] * w) >> 15
+        result.append(sat16(out))
+
+    return result
+
+
+def slope_project(
+    samples: List[int],
+    prev_sample: int = 0,
+    max_slew: int = R_SLEW_MAX,
+) -> Tuple[List[int], int]:
+    """
+    Project audio onto bounded-slope set (slew limiter).
+
+    GUARANTEE: Output always satisfies |x[n] - x[n-1]| <= max_slew.
+
+    Args:
+        samples: Audio samples
+        prev_sample: Last sample from previous block
+        max_slew: Maximum |x[n] - x[n-1]|
+
+    Returns:
+        (limited_samples, last_sample)
+    """
+    if not samples:
+        return [], prev_sample
+
+    out = []
+    prev = prev_sample
+    for s in samples:
+        delta = s - prev
+        if delta > max_slew:
+            limited = prev + max_slew
+        elif delta < -max_slew:
+            limited = prev - max_slew
+        else:
+            limited = s
+        out.append(limited)
+        prev = limited
+
+    return out, out[-1] if out else prev_sample
+
+
+class RegularityOperator:
+    """
+    Universal Regularity Operator R for the Wavelet Engine.
+
+    Enforces bounded variation (no impulses) through:
+    1. Event-local micro-bridge at known change points (coefficient morphs)
+    2. Slope projection fallback for unknown/residual discontinuities
+
+    Usage in render path:
+        R = RegularityOperator()
+
+        # When coefficients change (note, tree, morph):
+        audio = R.apply_transition(old_audio, new_audio, change_idx)
+
+        # Always apply slope projection as final safety:
+        audio = R.finalize(audio)
+    """
+
+    def __init__(
+        self,
+        bridge_len: int = R_BRIDGE_LEN,
+        max_slew: int = R_SLEW_MAX,
+    ):
+        self.bridge_len = bridge_len
+        self.max_slew = max_slew
+        self.prev_sample = 0
+
+    def apply_transition(
+        self,
+        old_samples: List[int],
+        new_samples: List[int],
+        blend_start: int = 0,
+    ) -> List[int]:
+        """
+        Apply micro-bridge at a coefficient transition point.
+
+        Args:
+            old_samples: Audio from previous coefficient state
+            new_samples: Audio from new coefficient state
+            blend_start: Sample index where transition begins
+
+        Returns:
+            Blended audio with C¹-continuous transition
+        """
+        if not old_samples or not new_samples:
+            return new_samples if new_samples else old_samples
+
+        # Build output: old before transition, bridge, new after
+        result = list(old_samples[:blend_start])
+
+        # Get context for bridge
+        old_context = old_samples[blend_start:blend_start + self.bridge_len]
+        new_context = new_samples[blend_start:blend_start + self.bridge_len]
+
+        if old_context and new_context:
+            bridge = micro_bridge(old_context, new_context, self.bridge_len)
+            result.extend(bridge)
+
+            # Continue with new samples after bridge
+            after_bridge = blend_start + self.bridge_len
+            if after_bridge < len(new_samples):
+                result.extend(new_samples[after_bridge:])
+        else:
+            # Not enough context, just use new samples
+            result.extend(new_samples[blend_start:])
+
+        return result
+
+    def finalize(self, samples: List[int]) -> List[int]:
+        """
+        Final slope projection to guarantee bounded slew.
+
+        Call this at the end of render to ensure no clicks remain.
+        """
+        result, self.prev_sample = slope_project(
+            samples, self.prev_sample, self.max_slew
+        )
+        return result
+
+    def reset(self):
+        """Reset internal state (call on voice start)."""
+        self.prev_sample = 0
 
 
 class WaveletEngine:
@@ -32,18 +249,52 @@ class WaveletEngine:
     def __init__(self, block_size: int = 64):
         self.B = block_size
         self.trees = PacketTreeSet()
-        
+
         # Boundary/continuity state per voice
         self.boundary_state: Dict[int, Dict] = {}
-        
+
         # Tree transition state per voice
         self.voice_tree_state: Dict[int, Dict] = {}
-        
+
         # Crossfade duration (blocks)
         self.xfade_blocks = 32
+
+        # Regularity Operator R per voice (handles musical transitions)
+        self.regularity: Dict[int, RegularityOperator] = {}
+
+    def get_regularity(self, voice_id: int) -> RegularityOperator:
+        """Get or create RegularityOperator for a voice."""
+        if voice_id not in self.regularity:
+            self.regularity[voice_id] = RegularityOperator()
+        return self.regularity[voice_id]
+
+    def voice_on(self, voice_id: int):
+        """
+        Signal voice start.
+
+        Per WSE-STD-070: voice_on MUST NOT reset internal state to zero.
+        RegularityOperator maintains prev_sample continuity.
+        """
+        # Ensure RegularityOperator exists (but do NOT reset)
+        self.get_regularity(voice_id)
+
+    def voice_off(self, voice_id: int):
+        """Signal voice stop."""
+        # Could clear state here if needed
+        pass
     
-    def render_voice(self, vf: VoiceFrame) -> List[int]:
-        """Render single VoiceFrame to audio block."""
+    def render_voice(self, vf: VoiceFrame, apply_regularity: bool = True) -> List[int]:
+        """
+        Render single VoiceFrame to audio block.
+
+        Args:
+            vf: VoiceFrame with coefficients, tree selection, gain
+            apply_regularity: Apply Regularity Operator R for click-free output
+
+        The Regularity Operator R handles musical transitions (coefficient
+        changes, tree morphs) by applying slope projection. This is NOT the
+        same as Safety Tail's block-boundary OLA.
+        """
         voice_id = vf.voice_id
 
         # Use Option A tree control: tree_a_id, tree_b_id, tree_blend_q15
@@ -71,6 +322,12 @@ class WaveletEngine:
             x_q15.extend([0] * (self.B - len(x_q15)))
         elif len(x_q15) > self.B:
             x_q15 = x_q15[:self.B]
+
+        # Apply Regularity Operator R (handles musical transitions)
+        # This ensures bounded slew rate across coefficient changes
+        if apply_regularity:
+            R = self.get_regularity(voice_id)
+            x_q15 = R.finalize(x_q15)
 
         return x_q15
     

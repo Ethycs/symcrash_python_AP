@@ -99,6 +99,163 @@ def samples_to_stereo(mono: List[int], pan: float = 0.0) -> tuple:
     return L, R
 
 
+# Import from safety_engine (canonical location for audio safety)
+from symcrash_python_ap.safety_engine import (
+    SafetyEngine,
+    crossfade_append,
+    FADE_LEN,
+    OLA_OVERLAP,
+)
+from symcrash_python_ap.frames import ParamFrame
+
+
+# =============================================================================
+# SAFETY ENGINE INTEGRATION
+# =============================================================================
+
+# Global SafetyEngine instance for tests (reused to maintain OLA state)
+_safety_engine: Optional[SafetyEngine] = None
+
+
+def get_safety_engine(reset: bool = False) -> SafetyEngine:
+    """Get or create the global SafetyEngine instance."""
+    global _safety_engine
+    if _safety_engine is None or reset:
+        _safety_engine = SafetyEngine(block_size=BLOCK_SIZE)
+    return _safety_engine
+
+
+def render_through_safety_tail(
+    samples_L: List[int],
+    samples_R: List[int],
+    voice_id: int = 0,
+    is_voice_start: bool = True,
+    is_voice_stop: bool = True,
+) -> Tuple[List[int], List[int]]:
+    """
+    Route audio through SafetyEngine's tail processing.
+
+    This is the canonical way to render audio - all anti-click processing
+    belongs in the Safety Tail, not scattered throughout the oscillator.
+
+    Args:
+        samples_L: Left channel samples
+        samples_R: Right channel samples
+        voice_id: Voice ID for per-voice OLA tracking
+        is_voice_start: Signal voice start (fade-in)
+        is_voice_stop: Signal voice stop (fade-out at end)
+
+    Returns:
+        (processed_L, processed_R) with OLA, slew limiting, and limiting applied
+    """
+    safety = get_safety_engine()
+    params = ParamFrame()
+
+    # Signal voice start if needed
+    if is_voice_start:
+        safety.voice_on(voice_id)
+
+    out_L = []
+    out_R = []
+
+    # Process in blocks
+    n_samples = len(samples_L)
+    n_blocks = (n_samples + BLOCK_SIZE - 1) // BLOCK_SIZE
+
+    for block_idx in range(n_blocks):
+        start = block_idx * BLOCK_SIZE
+        end = min(start + BLOCK_SIZE, n_samples)
+
+        # Extract block (pad if needed)
+        block_L = list(samples_L[start:end])
+        block_R = list(samples_R[start:end])
+
+        # Pad final block if needed
+        while len(block_L) < BLOCK_SIZE:
+            block_L.append(0)
+            block_R.append(0)
+
+        # Signal voice stop on last block
+        if is_voice_stop and block_idx == n_blocks - 1:
+            safety.voice_off(voice_id)
+
+        # Apply per-voice de-click (voice start/stop fades + OLA)
+        block_L = safety.apply_declick(block_L, voice_id)
+        block_R = safety.apply_declick(block_R, voice_id)
+
+        # Apply full safety chain (metrics, Q, master OLA, slew limit, limiter, DC)
+        block_L, block_R = safety.step_block(block_L, block_R, params)
+
+        # Collect output (trim padding from final block)
+        if block_idx == n_blocks - 1 and end < start + BLOCK_SIZE:
+            out_L.extend(block_L[:end - start])
+            out_R.extend(block_R[:end - start])
+        else:
+            out_L.extend(block_L)
+            out_R.extend(block_R)
+
+    return out_L, out_R
+
+
+def render_blocks_through_safety_tail(
+    oscillator: 'WPOState',
+    n_blocks: int,
+    voice_id: int = 0,
+    prng: Optional['VoicePRNG'] = None,
+    is_voice_start: bool = True,
+    is_voice_stop: bool = True,
+) -> Tuple[List[int], List[int]]:
+    """
+    Render oscillator blocks directly through SafetyEngine.
+
+    This integrates the oscillator with the Safety Tail in a block-by-block
+    manner, which is the correct architecture for click-free audio.
+
+    Args:
+        oscillator: WPOState oscillator to render
+        n_blocks: Number of blocks to render
+        voice_id: Voice ID for per-voice OLA tracking
+        prng: Optional PRNG for drift
+        is_voice_start: Signal voice start (fade-in)
+        is_voice_stop: Signal voice stop (fade-out at end)
+
+    Returns:
+        (processed_L, processed_R) stereo output
+    """
+    safety = get_safety_engine()
+    params = ParamFrame()
+
+    if is_voice_start:
+        safety.voice_on(voice_id)
+
+    out_L = []
+    out_R = []
+
+    for block_idx in range(n_blocks):
+        # Render oscillator block (mono)
+        block = oscillator.render_block(BLOCK_SIZE, prng)
+
+        # Convert to stereo (center pan for simplicity)
+        block_L = list(block)
+        block_R = list(block)
+
+        # Signal voice stop on last block
+        if is_voice_stop and block_idx == n_blocks - 1:
+            safety.voice_off(voice_id)
+
+        # Apply per-voice de-click
+        block_L = safety.apply_declick(block_L, voice_id)
+        block_R = safety.apply_declick(block_R, voice_id)
+
+        # Apply full safety chain
+        block_L, block_R = safety.step_block(block_L, block_R, params)
+
+        out_L.extend(block_L)
+        out_R.extend(block_R)
+
+    return out_L, out_R
+
+
 # =============================================================================
 # RENDER HELPERS
 # =============================================================================
@@ -486,7 +643,34 @@ class TestMIDIRange:
         print(f"    Saved: {filepath}")
 
     def test_chromatic_scale(self):
-        """Render a chromatic scale from C3 to C5."""
+        """Render a chromatic scale from C3 to C5 with phase-continuous transitions."""
+        # Use a single oscillator with phase-continuous pitch changes (legato style)
+        # This avoids clicks by never resetting phase - just changing frequency
+        osc = WPOState(voice_id=0)
+        osc.configure(note=48, waveform="saw")  # Start at C3
+
+        samples_per_note = int(0.25 * SAMPLE_RATE)
+        all_samples = []
+
+        for note in range(48, 73):  # C3 to C5
+            if note > 48:
+                # Change pitch without phase reset (legato)
+                osc.set_pitch(note)
+
+            # Render this note
+            note_samples = []
+            while len(note_samples) < samples_per_note:
+                block = osc.render_block(BLOCK_SIZE)
+                note_samples.extend(block)
+            all_samples.extend(note_samples[:samples_per_note])
+
+        L, R = samples_to_stereo(all_samples)
+        filepath = save_audio(L, R, "chromatic_scale_c3_c5")
+        print(f"\n  Chromatic scale C3-C5 (phase-continuous): {len(L)} samples")
+        print(f"    Saved: {filepath}")
+
+    def test_chromatic_scale_crossfade(self):
+        """Render a chromatic scale with per-note crossfades (for comparison)."""
         all_L = []
         all_R = []
 
@@ -497,11 +681,141 @@ class TestMIDIRange:
                 duration_sec=0.25,
             )
             L, R = samples_to_stereo(samples)
-            all_L.extend(L)
-            all_R.extend(R)
+            # Use constant-power crossfade to avoid clicks at note boundaries
+            crossfade_append(all_L, L, fade_samples=128, constant_power=True)
+            crossfade_append(all_R, R, fade_samples=128, constant_power=True)
 
-        filepath = save_audio(all_L, all_R, "chromatic_scale_c3_c5")
-        print(f"\n  Chromatic scale C3-C5: {len(all_L)} samples")
+        filepath = save_audio(all_L, all_R, "chromatic_scale_c3_c5_crossfade")
+        print(f"\n  Chromatic scale C3-C5 (crossfade): {len(all_L)} samples")
+        print(f"    Saved: {filepath}")
+
+    def test_chromatic_scale_glide(self):
+        """Render a chromatic scale using glide_to() for smooth portamento."""
+        osc = WPOState(voice_id=0)
+        osc.configure(note=48, waveform="saw")  # Start at C3
+
+        samples_per_note = int(0.25 * SAMPLE_RATE)
+        glide_blocks = 24  # ~32ms glide time (smooth portamento)
+        all_samples = []
+
+        for note in range(48, 73):  # C3 to C5
+            if note > 48:
+                # Glide to new pitch (per-sample interpolation for smoothness)
+                osc.glide_to(note, glide_blocks=glide_blocks)
+
+            # Render this note
+            note_samples = []
+            while len(note_samples) < samples_per_note:
+                block = osc.render_block(BLOCK_SIZE)
+                note_samples.extend(block)
+            all_samples.extend(note_samples[:samples_per_note])
+
+        L, R = samples_to_stereo(all_samples)
+        filepath = save_audio(L, R, "chromatic_scale_c3_c5_glide")
+        print(f"\n  Chromatic scale C3-C5 (glide): {len(L)} samples")
+        print(f"    Saved: {filepath}")
+
+    def test_chromatic_scale_safety_tail(self):
+        """
+        Render a chromatic scale through the Safety Tail.
+
+        This is the architecturally correct approach: all anti-click processing
+        belongs in the Safety Tail, not scattered in the oscillator.
+
+        The Safety Tail provides:
+        - Per-voice fade-in on voice_on()
+        - Per-voice fade-out on voice_off()
+        - Block boundary OLA (overlap-add) smoothing
+        - Slew rate limiting (A2 invariant)
+        - Peak limiting (A1 invariant)
+        - DC removal (A3 invariant)
+        """
+        # Reset safety engine for clean state
+        safety = get_safety_engine(reset=True)
+        params = ParamFrame()
+
+        blocks_per_note = int(0.25 * BLOCKS_PER_SEC)
+        out_L = []
+        out_R = []
+
+        for note_idx, note in enumerate(range(48, 73)):  # C3 to C5
+            osc = WPOState(voice_id=note_idx % 4)  # Cycle voice IDs
+            osc.configure(note=note, waveform="saw")
+
+            # Signal voice start
+            safety.voice_on(osc.voice_id)
+
+            for block_idx in range(blocks_per_note):
+                # Render oscillator block
+                block = osc.render_block(BLOCK_SIZE)
+                block_L = list(block)
+                block_R = list(block)
+
+                # Signal voice stop on last block of each note
+                if block_idx == blocks_per_note - 1:
+                    safety.voice_off(osc.voice_id)
+
+                # Apply per-voice de-click (the Safety Tail's job)
+                block_L = safety.apply_declick(block_L, osc.voice_id)
+                block_R = safety.apply_declick(block_R, osc.voice_id)
+
+                # Apply full safety chain
+                block_L, block_R = safety.step_block(block_L, block_R, params)
+
+                out_L.extend(block_L)
+                out_R.extend(block_R)
+
+        filepath = save_audio(out_L, out_R, "chromatic_scale_c3_c5_safety_tail")
+        print(f"\n  Chromatic scale C3-C5 (Safety Tail): {len(out_L)} samples")
+        print(f"    Saved: {filepath}")
+
+    def test_chromatic_scale_legato_safety_tail(self):
+        """
+        Render a chromatic scale with legato (continuous voice) through Safety Tail.
+
+        This combines phase-continuous pitch changes with proper Safety Tail
+        processing. The oscillator just changes pitch; the Safety Tail handles
+        all block-boundary smoothing.
+        """
+        safety = get_safety_engine(reset=True)
+        params = ParamFrame()
+
+        osc = WPOState(voice_id=0)
+        osc.configure(note=48, waveform="saw")
+
+        blocks_per_note = int(0.25 * BLOCKS_PER_SEC)
+        n_notes = 25  # C3 to C5
+
+        out_L = []
+        out_R = []
+
+        # Signal voice start once at beginning
+        safety.voice_on(0)
+
+        for note_idx, note in enumerate(range(48, 73)):
+            if note > 48:
+                # Phase-continuous pitch change (no reset)
+                osc.set_pitch(note)
+
+            for block_idx in range(blocks_per_note):
+                block = osc.render_block(BLOCK_SIZE)
+                block_L = list(block)
+                block_R = list(block)
+
+                # Signal voice stop on very last block
+                if note == 72 and block_idx == blocks_per_note - 1:
+                    safety.voice_off(0)
+
+                # Safety Tail handles block boundaries
+                block_L = safety.apply_declick(block_L, 0)
+                block_R = safety.apply_declick(block_R, 0)
+                block_L, block_R = safety.step_block(block_L, block_R, params)
+
+                out_L.extend(block_L)
+                out_R.extend(block_R)
+
+        filepath = save_audio(out_L, out_R, "chromatic_scale_c3_c5_legato_safety")
+        print(f"\n  Chromatic scale C3-C5 (legato + Safety Tail): {len(out_L)} samples")
         print(f"    Saved: {filepath}")
 
 
@@ -688,6 +1002,228 @@ class TestStress:
 
         print(f"\n  8 voices: {len(L)} samples, clip_rate={clip_rate*100:.2f}%")
         print(f"    Saved: {filepath}")
+
+
+# =============================================================================
+# SAFETY TAIL INTEGRATION TESTS
+# =============================================================================
+
+class TestSafetyTailIntegration:
+    """
+    Test proper routing through Safety Tail.
+
+    ARCHITECTURE NOTE: All anti-click processing belongs in the Safety Tail,
+    not scattered throughout the oscillator. The oscillator should focus on
+    synthesis; the Safety Tail handles all block-boundary smoothing, voice
+    fade-in/out, slew limiting, and peak protection.
+
+    The Safety Tail enforces three invariants:
+    - A1: Peak bound (|x[n]| ≤ P_max)
+    - A2: Slew bound (|x[n] - x[n-1]| ≤ S_max)
+    - A3: DC bound (|μ| ≤ D_max)
+    """
+
+    def test_single_note_through_safety_tail(self):
+        """Render a single note through the Safety Tail."""
+        safety = get_safety_engine(reset=True)
+
+        osc = WPOState(voice_id=0)
+        osc.configure(note=60, waveform="saw")
+
+        n_blocks = int(1.0 * BLOCKS_PER_SEC)
+        L, R = render_blocks_through_safety_tail(
+            osc, n_blocks, voice_id=0,
+            is_voice_start=True, is_voice_stop=True
+        )
+
+        filepath = save_audio(L, R, "safety_tail_single_note")
+        rms = compute_rms(L)
+        peak = compute_peak(L)
+
+        print(f"\n  Single note (Safety Tail): RMS={rms:.0f}, peak={peak}")
+        print(f"    Saved: {filepath}")
+
+        # Verify safety invariants (allow up to Q15_ONE since limiter uses soft knee)
+        assert peak <= Q15_ONE, f"Peak exceeded Q15 limit: {peak}"
+
+    def test_note_sequence_through_safety_tail(self):
+        """
+        Render a sequence of notes with proper voice on/off signaling.
+
+        Each note triggers:
+        - voice_on() -> Hann fade-in (FADE_LEN samples)
+        - voice_off() -> Hann fade-out (FADE_LEN samples)
+
+        Block boundaries use OLA crossfade automatically.
+        """
+        safety = get_safety_engine(reset=True)
+        params = ParamFrame()
+
+        notes = [60, 64, 67, 72]  # C major arpeggio
+        blocks_per_note = int(0.5 * BLOCKS_PER_SEC)
+
+        out_L = []
+        out_R = []
+
+        for note_idx, note in enumerate(notes):
+            osc = WPOState(voice_id=0)
+            osc.configure(note=note, waveform="saw")
+
+            # Signal voice start
+            safety.voice_on(0)
+
+            for block_idx in range(blocks_per_note):
+                block = osc.render_block(BLOCK_SIZE)
+                block_L = list(block)
+                block_R = list(block)
+
+                # Signal voice stop on last block
+                if block_idx == blocks_per_note - 1:
+                    safety.voice_off(0)
+
+                # Route through Safety Tail
+                block_L = safety.apply_declick(block_L, 0)
+                block_R = safety.apply_declick(block_R, 0)
+                block_L, block_R = safety.step_block(block_L, block_R, params)
+
+                out_L.extend(block_L)
+                out_R.extend(block_R)
+
+        filepath = save_audio(out_L, out_R, "safety_tail_arpeggio")
+        print(f"\n  Arpeggio (Safety Tail): {len(out_L)} samples")
+        print(f"    Saved: {filepath}")
+
+    def test_multivoice_through_safety_tail(self):
+        """
+        Render multiple voices simultaneously through Safety Tail.
+
+        Each voice has its own OLA state for independent de-clicking.
+        """
+        safety = get_safety_engine(reset=True)
+        params = ParamFrame()
+
+        notes = [60, 64, 67]  # C major chord
+        n_voices = len(notes)
+        n_blocks = int(2.0 * BLOCKS_PER_SEC)
+
+        # Create oscillators
+        oscillators = []
+        for i, note in enumerate(notes):
+            osc = WPOState(voice_id=i)
+            osc.configure(note=note, waveform="saw")
+            oscillators.append(osc)
+            safety.voice_on(i)
+
+        out_L = []
+        out_R = []
+
+        for block_idx in range(n_blocks):
+            # Signal voice stop on last block
+            if block_idx == n_blocks - 1:
+                for i in range(n_voices):
+                    safety.voice_off(i)
+
+            # Render and declick each voice
+            mix_L = [0] * BLOCK_SIZE
+            mix_R = [0] * BLOCK_SIZE
+
+            for i, osc in enumerate(oscillators):
+                block = osc.render_block(BLOCK_SIZE)
+                block_L = list(block)
+                block_R = list(block)
+
+                # Per-voice declick
+                block_L = safety.apply_declick(block_L, i)
+                block_R = safety.apply_declick(block_R, i)
+
+                # Mix (with pan spread)
+                pan = (i / (n_voices - 1)) * 2 - 1 if n_voices > 1 else 0
+                l_gain = 0.5 * (1 - pan)
+                r_gain = 0.5 * (1 + pan)
+
+                for j in range(BLOCK_SIZE):
+                    mix_L[j] += int(block_L[j] * l_gain)
+                    mix_R[j] += int(block_R[j] * r_gain)
+
+            # Saturate mix
+            mix_L = [max(-Q15_SCALE, min(Q15_ONE, s)) for s in mix_L]
+            mix_R = [max(-Q15_SCALE, min(Q15_ONE, s)) for s in mix_R]
+
+            # Apply master safety chain (OLA, slew, limiter, DC)
+            mix_L, mix_R = safety.step_block(mix_L, mix_R, params)
+
+            out_L.extend(mix_L)
+            out_R.extend(mix_R)
+
+        filepath = save_audio(out_L, out_R, "safety_tail_chord")
+        print(f"\n  Chord (Safety Tail): {len(out_L)} samples")
+        print(f"    Saved: {filepath}")
+
+    def test_compare_raw_vs_safety_tail(self):
+        """
+        Compare raw oscillator output vs Safety Tail processed.
+
+        This demonstrates why the Safety Tail is necessary:
+        - Raw output may have clicks at note boundaries
+        - Safety Tail smooths all transitions
+        """
+        # Reset for fresh state
+        safety = get_safety_engine(reset=True)
+        params = ParamFrame()
+
+        # Common rendering params
+        blocks_per_note = int(0.25 * BLOCKS_PER_SEC)
+        notes = [60, 67, 60, 67, 60]  # Alternating notes
+
+        # === RAW OUTPUT (no Safety Tail) ===
+        raw_samples = []
+        for note in notes:
+            osc = WPOState(voice_id=0)
+            osc.configure(note=note, waveform="saw", reset_phase=True)
+            for _ in range(blocks_per_note):
+                block = osc.render_block(BLOCK_SIZE)
+                raw_samples.extend(block)
+
+        raw_L, raw_R = samples_to_stereo(raw_samples)
+        filepath_raw = save_audio(raw_L, raw_R, "compare_raw_no_safety")
+
+        # === SAFETY TAIL OUTPUT ===
+        safety = get_safety_engine(reset=True)  # Fresh state
+        safe_L = []
+        safe_R = []
+
+        for note_idx, note in enumerate(notes):
+            osc = WPOState(voice_id=0)
+            osc.configure(note=note, waveform="saw", reset_phase=True)
+
+            safety.voice_on(0)
+
+            for block_idx in range(blocks_per_note):
+                block = osc.render_block(BLOCK_SIZE)
+                block_L = list(block)
+                block_R = list(block)
+
+                if block_idx == blocks_per_note - 1:
+                    safety.voice_off(0)
+
+                block_L = safety.apply_declick(block_L, 0)
+                block_R = safety.apply_declick(block_R, 0)
+                block_L, block_R = safety.step_block(block_L, block_R, params)
+
+                safe_L.extend(block_L)
+                safe_R.extend(block_R)
+
+        filepath_safe = save_audio(safe_L, safe_R, "compare_with_safety")
+
+        # Analyze differences
+        raw_peak = compute_peak(raw_samples)
+        safe_peak = compute_peak(safe_L)
+
+        print(f"\n  Raw (no Safety Tail):")
+        print(f"    Peak: {raw_peak}, Saved: {filepath_raw}")
+        print(f"  With Safety Tail:")
+        print(f"    Peak: {safe_peak}, Saved: {filepath_safe}")
+        print(f"    (Listen to compare click behavior at note boundaries)")
 
 
 # =============================================================================

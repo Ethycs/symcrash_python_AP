@@ -80,6 +80,35 @@ class TreeArchetype(IntEnum):
     TRANSIENT = 4
 
 
+class TransitionKind(IntEnum):
+    """
+    Voice transition types for click-free note changes.
+
+    - RETRIGGER: New articulation with controlled transient. Allows onset
+                 operators, no phase continuity required. Use for staccato,
+                 chord hits, new bow strokes.
+
+    - GLIDE: Continuous pitch/target motion. Forbids onset operators,
+             requires phase continuity and bounded parameter deltas.
+             Use for portamento, MPE pitch slides, legato.
+
+    - BRIDGE: Short transition regime (2-8 blocks) for structural changes.
+              Temporarily increases traction, folds to body, applies change,
+              then re-grows detail. Use for tree_id changes, permutation
+              swaps, regime shifts.
+    """
+    RETRIGGER = 0  # New articulation (allow transient)
+    GLIDE = 1      # Continuous motion (phase-continuous)
+    BRIDGE = 2     # Structural change (fold→switch→regrow)
+
+
+# Bridge regime defaults (WSE-STD-0xx)
+BRIDGE_BLOCKS = 4           # Default bridge duration (~5.3ms @ 48k/64)
+BRIDGE_TRACTION_HI = 26214  # Q15 0.8 - high traction during bridge
+BRIDGE_TRACTION_NOM = 9830  # Q15 0.3 - nominal traction
+GLIDE_THRESHOLD_CENTS = 30  # Below this, use param slew not bridge
+
+
 @dataclass
 class TreeArchetypeConfig:
     """Configuration for a tree archetype."""
@@ -367,9 +396,41 @@ class HarmonicScaffold:
 
     Generates a stable harmonic series that provides pitch integrity.
     This is the "baby Fourier" / additive component.
+
+    Includes automatic gain normalization so all waveforms have equal peak amplitude.
     """
     num_harmonics: int = 8
     harmonic_amps_q15: List[int] = field(default_factory=lambda: [Q15_ONE] + [0] * 7)
+    norm_gain_q15: int = Q15_ONE  # Normalization gain (Q15)
+
+    def _compute_normalization(self) -> None:
+        """
+        Compute normalization gain so peak output reaches Q15_ONE.
+
+        Uses empirical peak measurement over one cycle for accurate normalization.
+        """
+        if not any(self.harmonic_amps_q15):
+            self.norm_gain_q15 = Q15_ONE
+            return
+
+        # Measure actual peak over one cycle (256 samples is enough)
+        max_val = 0
+        for i in range(256):
+            phase = (i * PHASE_ONE) // 256
+            output = 0
+            for n, amp in enumerate(self.harmonic_amps_q15, start=1):
+                if amp == 0:
+                    continue
+                h_phase = (phase * n) & PHASE_MASK
+                sine = self._fast_sine(h_phase)
+                output += (sine * amp) >> 15
+            max_val = max(max_val, abs(output))
+
+        if max_val > 0:
+            # Scale so max_val maps to Q15_ONE
+            self.norm_gain_q15 = min(Q15_ONE, (Q15_ONE * Q15_ONE) // max_val)
+        else:
+            self.norm_gain_q15 = Q15_ONE
 
     def set_saw_harmonics(self, num: int = 8) -> None:
         """Set amplitudes for saw wave (1/n falloff)."""
@@ -378,6 +439,7 @@ class HarmonicScaffold:
         for n in range(1, num + 1):
             amp = Q15_ONE // n
             self.harmonic_amps_q15.append(amp)
+        self._compute_normalization()
 
     def set_square_harmonics(self, num: int = 8) -> None:
         """Set amplitudes for square wave (odd harmonics only, 1/n falloff)."""
@@ -389,6 +451,7 @@ class HarmonicScaffold:
             else:
                 amp = 0
             self.harmonic_amps_q15.append(amp)
+        self._compute_normalization()
 
     def set_triangle_harmonics(self, num: int = 8) -> None:
         """Set amplitudes for triangle wave (odd harmonics, 1/n² falloff)."""
@@ -400,12 +463,14 @@ class HarmonicScaffold:
             else:
                 amp = 0
             self.harmonic_amps_q15.append(amp)
+        self._compute_normalization()
 
     def render_sample(self, phase: int) -> int:
         """
         Render one sample of the harmonic scaffold.
 
         Uses phase to compute each harmonic's contribution.
+        Output is normalized for consistent peak amplitude across waveforms.
         """
         output = 0
         for n, amp in enumerate(self.harmonic_amps_q15, start=1):
@@ -417,7 +482,10 @@ class HarmonicScaffold:
             sine = self._fast_sine(h_phase)
             output += (sine * amp) >> 15
 
-        # Saturate
+        # Apply normalization gain
+        output = (output * self.norm_gain_q15) >> 15
+
+        # Saturate (should rarely hit after normalization)
         if output > Q15_ONE:
             output = Q15_ONE
         elif output < -Q15_SCALE:
@@ -629,6 +697,24 @@ class WPOState:
     # Output state
     last_output_q15: int = 0
     dc_block_state: int = 0
+    first_cycle: bool = True  # Skip BLEP on first cycle to avoid click
+
+    # Transition state (for click-free note changes)
+    transition_kind: TransitionKind = TransitionKind.RETRIGGER
+    bridge_blocks_remaining: int = 0  # Blocks left in bridge regime
+    bridge_phase: int = 0  # 0=fold, 1=switch, 2=regrow
+
+    # Glide state (for smooth pitch transitions)
+    # Per-sample interpolation to avoid stair-stepping
+    glide_time_blocks: int = 0      # Total glide time in blocks
+    target_phase_inc: int = 0       # Target phase increment for glide
+    glide_samples_remaining: int = 0  # Samples left in glide (not blocks!)
+    glide_samples_total: int = 0    # Total samples in glide (for envelope)
+    glide_inc_delta: int = 0        # Per-sample increment delta (fixed-point)
+    glide_gain_q15: int = Q15_ONE   # Amplitude envelope during glide
+
+    # Traction (for bridge regime stability)
+    traction_q15: int = BRIDGE_TRACTION_NOM
 
     def configure(
         self,
@@ -637,6 +723,7 @@ class WPOState:
         archetype: TreeArchetype = TreeArchetype.HARMONIC,
         eta_q15: int = Q15_HALF,
         waveform: str = "saw",
+        reset_phase: bool = True,
     ) -> None:
         """
         Configure oscillator for playback.
@@ -647,9 +734,18 @@ class WPOState:
             archetype: Tree archetype
             eta_q15: Two-stream blend (0 = scaffold, 32767 = texture)
             waveform: Scaffold waveform ("saw", "square", "triangle", "sine")
+            reset_phase: If True, reset phase to 0 (note-on). If False, keep
+                         phase continuous (legato/pitch change).
         """
         # Set frequency
         self.phase.set_midi_note(note, cents)
+
+        # Phase reset behavior:
+        # - reset_phase=True: New note, reset to 0 and skip first BLEP
+        # - reset_phase=False: Legato/pitch change, keep phase continuous
+        if reset_phase:
+            self.phase.reset()
+            self.first_cycle = True  # Skip first BLEP to avoid click
 
         # Set archetype
         self.archetype_a = archetype
@@ -670,6 +766,142 @@ class WPOState:
 
         # Apply archetype modifications to scaffold harmonics
         self._apply_archetype_to_scaffold(archetype)
+
+        # Recompute normalization after archetype modifications
+        self.scaffold._compute_normalization()
+
+    def set_pitch(self, note: int, cents: int = 0) -> None:
+        """
+        Change pitch without resetting phase (phase-continuous).
+
+        Use this for legato, portamento, or pitch bends.
+        Instant change - for glide, use glide_to().
+        """
+        self.phase.set_midi_note(note, cents)
+
+    def glide_to(self, note: int, cents: int = 0, glide_blocks: int = 8) -> None:
+        """
+        Glide to a new pitch over N blocks (phase-continuous).
+
+        Uses per-sample linear interpolation for smooth portamento.
+        Includes amplitude envelope to mask any discontinuities.
+
+        Args:
+            note: Target MIDI note
+            cents: Target fine tuning
+            glide_blocks: Number of blocks for the glide (0 = instant)
+        """
+        self.transition_kind = TransitionKind.GLIDE
+        self.target_phase_inc = midi_to_phase_inc(note, cents)
+        self.glide_time_blocks = glide_blocks
+
+        if glide_blocks <= 0:
+            # Instant change
+            self.phase.phase_inc = self.target_phase_inc
+            self.glide_samples_remaining = 0
+            self.glide_samples_total = 0
+            self.glide_inc_delta = 0
+            self.glide_gain_q15 = Q15_ONE
+        else:
+            # Compute per-sample delta for smooth interpolation
+            total_samples = glide_blocks * BLOCK_SIZE
+            delta = self.target_phase_inc - self.phase.phase_inc
+            # Use fixed-point for sub-integer precision
+            self.glide_inc_delta = delta // total_samples
+            self.glide_samples_remaining = total_samples
+            self.glide_samples_total = total_samples
+            self.glide_gain_q15 = Q15_ONE  # Will be updated per-sample
+
+    def start_bridge(self, blocks: int = BRIDGE_BLOCKS) -> None:
+        """
+        Start a bridge regime for structural transitions.
+
+        Use before changing tree_id, permutation, or regime.
+        The bridge temporarily stabilizes state during the change.
+
+        Phases:
+        - Phase 0 (fold): Increase traction, diffuse up
+        - Phase 1 (switch): Apply structural change
+        - Phase 2 (regrow): Reduce traction, re-enable detail
+        """
+        self.transition_kind = TransitionKind.BRIDGE
+        self.bridge_blocks_remaining = blocks
+        self.bridge_phase = 0
+        self.traction_q15 = BRIDGE_TRACTION_HI
+
+    def retrigger(self, note: int, cents: int = 0) -> None:
+        """
+        Retrigger with a new note (allows transient, resets phase).
+
+        Use for staccato, new articulations, chord hits.
+        """
+        self.transition_kind = TransitionKind.RETRIGGER
+        self.phase.set_midi_note(note, cents)
+        self.phase.reset()
+        self.first_cycle = True
+        self.bridge_blocks_remaining = 0
+        self.glide_samples_remaining = 0
+        self.glide_samples_total = 0
+        self.glide_inc_delta = 0
+        self.glide_gain_q15 = Q15_ONE
+
+    def _update_glide_sample(self) -> None:
+        """Update phase increment and amplitude envelope for glide (per-sample)."""
+        if self.glide_samples_remaining > 0:
+            # Per-sample linear interpolation toward target
+            self.phase.phase_inc += self.glide_inc_delta
+            self.glide_samples_remaining -= 1
+
+            # Compute amplitude envelope: "smile" curve that dips in the middle
+            # This masks any discontinuity during the pitch transition
+            # t goes from 1.0 -> 0.0 as we progress through the glide
+            if self.glide_samples_total > 0:
+                t = self.glide_samples_remaining / self.glide_samples_total
+                # Parabolic dip: 1 - depth * 4 * t * (1-t)
+                # At t=0.5 (middle), dip is maximum
+                # depth = 0.15 (15% dip at center)
+                depth_q15 = 4915  # Q15 0.15
+                dip = (depth_q15 * 4 * int(t * 256) * int((1 - t) * 256)) >> 16
+                self.glide_gain_q15 = Q15_ONE - dip
+            else:
+                self.glide_gain_q15 = Q15_ONE
+
+            if self.glide_samples_remaining == 0:
+                # Snap to exact target at end to avoid drift
+                self.phase.phase_inc = self.target_phase_inc
+                self.glide_inc_delta = 0
+                self.glide_gain_q15 = Q15_ONE
+
+    def _update_bridge(self) -> None:
+        """Update bridge regime state (called once per block)."""
+        if self.bridge_blocks_remaining > 0:
+            blocks_per_phase = max(1, BRIDGE_BLOCKS // 3)
+
+            if self.bridge_phase == 0:
+                # Phase 0: Fold to body - high traction
+                self.traction_q15 = BRIDGE_TRACTION_HI
+                if self.bridge_blocks_remaining <= BRIDGE_BLOCKS - blocks_per_phase:
+                    self.bridge_phase = 1
+
+            elif self.bridge_phase == 1:
+                # Phase 1: Switch point - structural changes applied externally
+                if self.bridge_blocks_remaining <= BRIDGE_BLOCKS - 2 * blocks_per_phase:
+                    self.bridge_phase = 2
+
+            elif self.bridge_phase == 2:
+                # Phase 2: Regrow detail - reduce traction gradually
+                progress = (BRIDGE_BLOCKS - self.bridge_blocks_remaining) / BRIDGE_BLOCKS
+                self.traction_q15 = int(
+                    BRIDGE_TRACTION_HI * (1 - progress) +
+                    BRIDGE_TRACTION_NOM * progress
+                )
+
+            self.bridge_blocks_remaining -= 1
+
+            if self.bridge_blocks_remaining == 0:
+                # Bridge complete
+                self.traction_q15 = BRIDGE_TRACTION_NOM
+                self.transition_kind = TransitionKind.RETRIGGER
 
     def _apply_archetype_to_scaffold(self, archetype: TreeArchetype) -> None:
         """
@@ -722,6 +954,9 @@ class WPOState:
         Returns:
             Q15 sample
         """
+        # Update glide per-sample (before phase advance for smoothness)
+        self._update_glide_sample()
+
         # Advance phase
         phase, wrapped, frac_offset = self.phase.advance()
 
@@ -738,13 +973,20 @@ class WPOState:
         # Blend two streams
         output = blend_two_stream(scaffold_sample, texture_sample, self.eta_q15)
 
-        # Add BLEP correction for edges
+        # Add BLEP correction for edges (skip first cycle to avoid click)
         if wrapped:
-            # Inject BLEP at cycle boundary (for saw-like waveforms)
-            edge_amp = Q15_ONE >> 1  # Half amplitude edge
-            self.blep.inject_edge(edge_amp, frac_offset)
+            if self.first_cycle:
+                self.first_cycle = False
+            else:
+                # Inject BLEP at cycle boundary (for saw-like waveforms)
+                edge_amp = Q15_ONE >> 1  # Half amplitude edge
+                self.blep.inject_edge(edge_amp, frac_offset)
 
         output += self.blep.read_and_advance()
+
+        # Apply glide amplitude envelope (masks transition artifacts)
+        if self.glide_gain_q15 < Q15_ONE:
+            output = (output * self.glide_gain_q15) >> 15
 
         # Apply drift
         output = self.drift.apply_amp_drift(output)
@@ -777,6 +1019,10 @@ class WPOState:
         Returns:
             List of Q15 samples
         """
+        # Update bridge transition state once per block
+        # Note: glide is updated per-sample in render_sample() for smoothness
+        self._update_bridge()
+
         # Update drift once per block
         if prng:
             self.drift.update(prng)
@@ -893,6 +1139,12 @@ __all__ = [
     'TreeArchetypeConfig',
     'TREE_ARCHETYPES',
     'get_archetype_config',
+    # Transitions
+    'TransitionKind',
+    'BRIDGE_BLOCKS',
+    'BRIDGE_TRACTION_HI',
+    'BRIDGE_TRACTION_NOM',
+    'GLIDE_THRESHOLD_CENTS',
     # BLEP
     'BLEP_KERNEL',
     'BLEP_TABLE',

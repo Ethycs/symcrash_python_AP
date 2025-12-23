@@ -14,7 +14,13 @@ scheduled operator work and before audio leaves the pipeline.
 
 Two goals:
 1. Prevent blow-up / runaway / invalid state in coefficient-space and audio-space
-2. Make block boundaries inaudible by default (clicks must be intentional)
+2. Make BLOCK BOUNDARIES inaudible by default (clicks must be intentional)
+
+IMPORTANT ARCHITECTURAL INVARIANT:
+- Safety Tail handles BLOCK BOUNDARY artifacts ONLY
+- Safety NEVER handles musical transitions (note changes, pitch glides, coefficient morphs)
+- All coefficient changes are slewed or micro-interpolated by the Wavelet Engine
+- Clicks from musical transitions = bug in Wavelet/Symbol Engine, NOT Safety's job
 
 The Tail is split across engines:
 - Symbol Tail (coefficient-space): projection, clamping, legality enforcement
@@ -171,6 +177,10 @@ PEAK_MAX = 0x7F00         # A1: Peak bound (~0.996 of full scale)
 SLEW_MAX = 0x2000         # A2: Maximum sample-to-sample change
 DC_MAX = 0x0800           # A3: Maximum DC offset allowed
 
+# Regularity operator constants
+R_BRIDGE_LEN = 16         # Samples for micro-bridge (event-local)
+R_CURVATURE_MAX = 0x1000  # C2: Maximum second difference (curvature)
+
 # Degrade levels
 class DegradeLevel(IntEnum):
     """Degradation levels for CPU overload handling."""
@@ -221,6 +231,466 @@ def hann_fade_in(n: int, fade_len: int = FADE_LEN) -> int:
 def hann_fade_out(n: int, fade_len: int = FADE_LEN) -> int:
     """Returns Q1.15 gain for sample n of fade-out (0..fade_len)."""
     return hann_fade_in(fade_len - n, fade_len)
+
+
+# =============================================================================
+# CONSTANT-POWER CROSSFADE
+# =============================================================================
+
+def constant_power_fade(t: float) -> Tuple[float, float]:
+    """
+    Compute constant-power (sin²) crossfade gains.
+
+    Args:
+        t: Normalized position [0.0, 1.0] through the crossfade
+
+    Returns:
+        (fade_out, fade_in) gains that sum to 1.0 in power
+    """
+    fade_in = math.sin(math.pi / 2 * t) ** 2
+    fade_out = math.cos(math.pi / 2 * t) ** 2
+    return fade_out, fade_in
+
+
+def crossfade_append(
+    dest: List[int],
+    src: List[int],
+    fade_samples: int = 128,
+    constant_power: bool = True,
+) -> None:
+    """
+    Append src to dest with a crossfade to avoid clicks at boundaries.
+
+    This is a key safety primitive for click-free audio concatenation.
+    Uses constant-power (sin²) fades by default to avoid amplitude dips.
+
+    Args:
+        dest: Destination list (modified in place)
+        src: Source samples to append
+        fade_samples: Number of samples for crossfade region
+        constant_power: Use sin² constant-power fade (True) or linear (False)
+    """
+    if not dest or not src or fade_samples <= 0:
+        dest.extend(src)
+        return
+
+    fade_samples = min(fade_samples, len(dest), len(src))
+
+    # Crossfade the overlap region
+    for i in range(fade_samples):
+        if constant_power:
+            t = i / (fade_samples - 1) if fade_samples > 1 else 1.0
+            fade_out, fade_in = constant_power_fade(t)
+        else:
+            # Linear fade
+            fade_in = i / fade_samples
+            fade_out = 1.0 - fade_in
+
+        idx = len(dest) - fade_samples + i
+        dest[idx] = int(dest[idx] * fade_out + src[i] * fade_in)
+
+    # Append the rest (after crossfade region)
+    dest.extend(src[fade_samples:])
+
+
+def crossfade_blocks(
+    block_a: List[int],
+    block_b: List[int],
+    fade_samples: int = 64,
+    constant_power: bool = True,
+) -> List[int]:
+    """
+    Crossfade between two audio blocks, returning the blended result.
+
+    Unlike crossfade_append, this returns a new block of length
+    len(block_a) + len(block_b) - fade_samples.
+
+    Args:
+        block_a: First audio block
+        block_b: Second audio block
+        fade_samples: Number of samples for crossfade overlap
+        constant_power: Use sin² constant-power fade (True) or linear (False)
+
+    Returns:
+        New list with crossfaded audio
+    """
+    if not block_a:
+        return list(block_b)
+    if not block_b:
+        return list(block_a)
+
+    fade_samples = min(fade_samples, len(block_a), len(block_b))
+
+    # Copy the non-overlapping part of block_a
+    result = list(block_a[:-fade_samples])
+
+    # Crossfade region
+    for i in range(fade_samples):
+        if constant_power:
+            t = i / (fade_samples - 1) if fade_samples > 1 else 1.0
+            fade_out, fade_in = constant_power_fade(t)
+        else:
+            fade_in = i / fade_samples
+            fade_out = 1.0 - fade_in
+
+        a_idx = len(block_a) - fade_samples + i
+        sample = int(block_a[a_idx] * fade_out + block_b[i] * fade_in)
+        result.append(sample)
+
+    # Append the rest of block_b
+    result.extend(block_b[fade_samples:])
+
+    return result
+
+
+# =============================================================================
+# REGULARITY OPERATOR R (WSE-STD-070)
+# =============================================================================
+#
+# The Regularity Operator projects audio onto a bounded-variation set.
+# Clicks are impulses; impulses are unbounded derivatives.
+#
+# R consists of two components:
+# 1. Event-local micro-bridge: C¹ cosine ramp at known change points
+# 2. Slope projection fallback: symmetric slew limiter for any remaining spikes
+#
+# R is universal: it doesn't care what caused the change (pitch, tree, op-chain,
+# injection). It only enforces that the output has bounded first and second
+# differences.
+
+def _build_cosine_bridge_lut(n: int) -> List[int]:
+    """
+    Build C¹ cosine bridge LUT for micro-bridge.
+
+    The bridge function w(t) satisfies:
+    - w(0) = 0, w(1) = 1 (amplitude continuity)
+    - w'(0) = 0, w'(1) = 0 (derivative continuity at endpoints)
+
+    Uses smoothstep: w(t) = 3t² - 2t³
+    """
+    lut = []
+    for i in range(n + 1):
+        t = i / n
+        # Smoothstep: 3t² - 2t³ (C¹ continuous)
+        w = 3 * t * t - 2 * t * t * t
+        lut.append(int(round(w * Q15_ONE)))
+    return lut
+
+
+# Precomputed micro-bridge LUT
+_BRIDGE_LUT = _build_cosine_bridge_lut(R_BRIDGE_LEN)
+
+
+def micro_bridge(
+    old_samples: List[int],
+    new_samples: List[int],
+    bridge_len: int = R_BRIDGE_LEN,
+) -> List[int]:
+    """
+    Apply C¹-continuous micro-bridge between old and new generator states.
+
+    This is the event-local regularity fix: when something changes at a known
+    sample index, we blend old→new using a smoothstep that matches both value
+    and derivative at the endpoints.
+
+    Args:
+        old_samples: Samples from the "old" state (at least bridge_len)
+        new_samples: Samples from the "new" state (at least bridge_len)
+        bridge_len: Number of samples for the transition
+
+    Returns:
+        Blended samples (length = bridge_len)
+    """
+    if len(old_samples) < bridge_len or len(new_samples) < bridge_len:
+        # Not enough context, fall back to simple blend
+        bridge_len = min(len(old_samples), len(new_samples), bridge_len)
+        if bridge_len == 0:
+            return []
+
+    result = []
+    for i in range(bridge_len):
+        # w goes from 0 to Q15_ONE over bridge_len
+        if bridge_len == R_BRIDGE_LEN:
+            w = _BRIDGE_LUT[i]
+        else:
+            t = i / (bridge_len - 1) if bridge_len > 1 else 1.0
+            w = int((3 * t * t - 2 * t * t * t) * Q15_ONE)
+
+        inv_w = Q15_ONE - w
+
+        # Blend: out = old * (1-w) + new * w
+        out = (old_samples[i] * inv_w + new_samples[i] * w) >> 15
+        result.append(sat16(out))
+
+    return result
+
+
+def detect_discontinuities(
+    samples: List[int],
+    prev_sample: int = 0,
+    slew_threshold: int = SLEW_MAX,
+    curvature_threshold: int = R_CURVATURE_MAX,
+) -> List[int]:
+    """
+    Detect sample indices where discontinuities occur.
+
+    Discontinuities are detected by:
+    1. First difference (slew) exceeding threshold
+    2. Second difference (curvature) exceeding threshold
+
+    Args:
+        samples: Audio samples to analyze
+        prev_sample: Last sample from previous block
+        slew_threshold: Maximum allowed |x[n] - x[n-1]|
+        curvature_threshold: Maximum allowed |(x[n]-x[n-1]) - (x[n-1]-x[n-2])|
+
+    Returns:
+        List of sample indices where discontinuities were detected
+    """
+    if len(samples) < 2:
+        return []
+
+    discontinuities = []
+    prev = prev_sample
+    prev_delta = 0
+
+    for i, s in enumerate(samples):
+        delta = s - prev
+        curvature = abs(delta - prev_delta) if i > 0 else 0
+
+        # Check both slew and curvature
+        if abs(delta) > slew_threshold or curvature > curvature_threshold:
+            discontinuities.append(i)
+
+        prev_delta = delta
+        prev = s
+
+    return discontinuities
+
+
+def slope_project(
+    samples: List[int],
+    prev_sample: int = 0,
+    max_slew: int = SLEW_MAX,
+    bidirectional: bool = True,
+) -> Tuple[List[int], int]:
+    """
+    Project audio onto bounded-slope set (symmetric slew limiter).
+
+    This is the fallback regularity operator: even if we don't know where
+    the change happened, we clamp all sample-to-sample differences.
+
+    GUARANTEE: Output always satisfies |x[n] - x[n-1]| <= max_slew.
+
+    For symmetric (unbiased) limiting, we do a forward pass then optionally
+    a backward pass to reduce directional bias, followed by a final
+    enforcement pass.
+
+    Args:
+        samples: Audio samples
+        prev_sample: Last sample from previous block
+        max_slew: Maximum |x[n] - x[n-1]|
+        bidirectional: Apply backward pass for symmetry
+
+    Returns:
+        (limited_samples, last_sample)
+    """
+    if not samples:
+        return [], prev_sample
+
+    # Forward pass - strict slew limiting
+    out = []
+    prev = prev_sample
+    for s in samples:
+        delta = s - prev
+        if delta > max_slew:
+            limited = prev + max_slew
+        elif delta < -max_slew:
+            limited = prev - max_slew
+        else:
+            limited = s
+        out.append(limited)
+        prev = limited
+
+    if not bidirectional or len(out) < 2:
+        return out, out[-1] if out else prev_sample
+
+    # Backward pass (reduces bias from forward-only limiting)
+    # Work backward to pull samples toward target while respecting slew
+    backward = list(out)
+    prev = backward[-1]
+    for i in range(len(backward) - 2, -1, -1):
+        target = samples[i]
+        current = backward[i]
+        next_val = backward[i + 1]
+
+        # Can we move current toward target without breaking slew to next?
+        delta_to_next = next_val - current
+        if abs(delta_to_next) < max_slew:
+            # We have headroom - try to move toward target
+            headroom = max_slew - abs(delta_to_next)
+            delta_to_target = target - current
+
+            # Move by at most headroom, and at most half the distance to target
+            move = min(headroom, abs(delta_to_target) // 2)
+            if delta_to_target > 0:
+                backward[i] = current + move
+            elif delta_to_target < 0:
+                backward[i] = current - move
+
+    # Final enforcement pass - GUARANTEE slew bound
+    # This handles any edge cases from backward pass
+    out = []
+    prev = prev_sample
+    for s in backward:
+        delta = s - prev
+        if delta > max_slew:
+            limited = prev + max_slew
+        elif delta < -max_slew:
+            limited = prev - max_slew
+        else:
+            limited = s
+        out.append(limited)
+        prev = limited
+
+    return out, out[-1] if out else prev_sample
+
+
+class RegularityOperator:
+    """
+    Universal Regularity Operator R.
+
+    Enforces bounded variation (no impulses) through:
+    1. Event-local micro-bridge at known change points
+    2. Slope projection fallback for unknown/residual discontinuities
+
+    Usage:
+        R = RegularityOperator()
+
+        # When you know where a change happened (e.g., note change at sample 32):
+        audio = R.apply_bridge(audio, change_idx=32)
+
+        # Or let it auto-detect discontinuities:
+        audio = R.regularize(audio, prev_sample)
+
+        # Always apply slope projection as final safety net:
+        audio, last = R.slope_project(audio, prev_sample)
+    """
+
+    def __init__(
+        self,
+        bridge_len: int = R_BRIDGE_LEN,
+        max_slew: int = SLEW_MAX,
+        max_curvature: int = R_CURVATURE_MAX,
+    ):
+        self.bridge_len = bridge_len
+        self.max_slew = max_slew
+        self.max_curvature = max_curvature
+        self.prev_sample = 0
+
+    def apply_bridge_at(
+        self,
+        samples: List[int],
+        change_idx: int,
+        old_samples: List[int] = None,
+    ) -> List[int]:
+        """
+        Apply micro-bridge at a known change point.
+
+        If old_samples is provided, blends old→new at change_idx.
+        Otherwise, applies local smoothing around the discontinuity.
+
+        Args:
+            samples: Current audio samples (modified in place conceptually)
+            change_idx: Sample index where change occurred
+            old_samples: Optional previous state samples
+
+        Returns:
+            Regularized samples
+        """
+        if change_idx < 0 or change_idx >= len(samples):
+            return list(samples)
+
+        out = list(samples)
+        half_bridge = self.bridge_len // 2
+
+        if old_samples is not None and len(old_samples) >= half_bridge:
+            # Blend old → new using micro-bridge
+            start = max(0, change_idx - half_bridge)
+            end = min(len(samples), change_idx + half_bridge)
+
+            for i in range(start, end):
+                rel_pos = i - (change_idx - half_bridge)
+                if rel_pos < 0 or rel_pos >= self.bridge_len:
+                    continue
+
+                t = rel_pos / (self.bridge_len - 1) if self.bridge_len > 1 else 1.0
+                w = 3 * t * t - 2 * t * t * t  # smoothstep
+
+                old_idx = i - change_idx + len(old_samples) - 1
+                if 0 <= old_idx < len(old_samples):
+                    old_val = old_samples[old_idx]
+                    new_val = samples[i]
+                    out[i] = int(old_val * (1 - w) + new_val * w)
+        else:
+            # No old samples - apply local smoothing
+            # Use a short weighted average around the discontinuity
+            start = max(0, change_idx - half_bridge)
+            end = min(len(samples), change_idx + half_bridge)
+
+            if end - start >= 3:
+                # Simple 3-tap smoothing centered on change point
+                for i in range(max(1, start), min(len(out) - 1, end)):
+                    out[i] = (samples[i - 1] + samples[i] * 2 + samples[i + 1]) // 4
+
+        return out
+
+    def regularize(
+        self,
+        samples: List[int],
+        prev_sample: int = None,
+        change_indices: List[int] = None,
+    ) -> List[int]:
+        """
+        Full regularization: micro-bridges + slope projection.
+
+        Args:
+            samples: Audio samples
+            prev_sample: Last sample from previous block (or use internal state)
+            change_indices: Optional list of known change points
+
+        Returns:
+            Regularized samples
+        """
+        if prev_sample is None:
+            prev_sample = self.prev_sample
+
+        out = list(samples)
+
+        # 1. Apply micro-bridges at known change points
+        if change_indices:
+            for idx in change_indices:
+                out = self.apply_bridge_at(out, idx)
+
+        # 2. Detect remaining discontinuities
+        remaining = detect_discontinuities(
+            out, prev_sample, self.max_slew, self.max_curvature
+        )
+
+        # 3. Apply micro-bridges at detected discontinuities
+        for idx in remaining:
+            out = self.apply_bridge_at(out, idx)
+
+        # 4. Final slope projection (always, as safety net)
+        out, self.prev_sample = slope_project(
+            out, prev_sample, self.max_slew, bidirectional=True
+        )
+
+        return out
+
+    def reset(self):
+        """Reset internal state."""
+        self.prev_sample = 0
 
 
 # =============================================================================
@@ -1076,13 +1546,23 @@ class SafetyEngine:
 
         Chain: Metrics -> RG -> Q -> Master OLA -> Slew Limit -> Limiter -> DC removal
 
+        IMPORTANT: Safety Tail handles BLOCK BOUNDARY artifacts only.
+        Musical transitions (note changes, coefficient morphing) are handled
+        by the Wavelet Engine's coefficient slewing, NOT here.
+
         For per-voice de-click, call apply_declick() on each voice block
         BEFORE mixing to stereo.
 
         Enforces invariants:
         - A1: Peak bound (via limiter)
-        - A2: Slew bound (via slew limiter)
+        - A2: Slew bound (via slew limiter at block boundaries)
         - A3: DC bound (via DC removal)
+
+        Args:
+            L, R: Audio samples (stereo)
+            params: ParamFrame with K_mode etc.
+            apply_master_ola: Apply master OLA for block boundary smoothing
+            apply_slew_limit: Apply final slew limiting
         """
         # 1) Measure metrics
         m = self.measure_metrics(L, R)
@@ -1097,7 +1577,7 @@ class SafetyEngine:
         if apply_master_ola:
             Lq, Rq = self.apply_master_ola(Lq, Rq)
 
-        # 5) Apply slew limit (A2 invariant)
+        # 5) Apply slew limit (A2 invariant - final safety net after all processing)
         if apply_slew_limit:
             Lq, Rq, self.prev_sample_L, self.prev_sample_R = self.apply_slew_limit(
                 Lq, Rq, self.prev_sample_L, self.prev_sample_R
