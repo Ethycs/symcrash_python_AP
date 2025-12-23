@@ -163,11 +163,27 @@ class VoiceFlags(IntEnum):
 @dataclass
 class VoiceFramePacketV0b:
     """
-    VoiceFrame Packet v0b - exact 136-byte wire format.
+    VoiceFrame Packet v0b - exact 136-byte format.
+
+    IMPORTANT: This is an INTERNAL/DEBUG format, NOT for real-time wire use.
+
+    At 750 Hz block rate with 12 voices:
+      136 bytes × 12 voices × 750 Hz = 1,224,000 bytes/s
+      UART at 921600 bps = ~92,000 bytes/s capacity
+      → Physically impossible for real-time transmission.
+
+    For real-time wire transmission, use CTRL-DELTA packets (ctrl_delta.py):
+      - Sparse parameter updates using MaskedUpdate + FieldMask
+      - Typically < 30 bytes per update
+      - Only changed parameters transmitted
+
+    This format is used for:
+      - Debug/diagnostic dumps
+      - Logging and replay
+      - Internal Python simulation
+      - Test fixtures
 
     Per docs/Core System/04 - Wire Contract v0b, VoiceFrame Packet v0b.md
-
-    This is the canonical packet format for UART/wire transmission.
     All fields are big-endian per spec Section 2.
 
     Layout:

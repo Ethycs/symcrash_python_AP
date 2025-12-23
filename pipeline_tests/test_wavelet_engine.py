@@ -53,7 +53,7 @@ class TestW1NoMusicalSemantics:
         assert any(a != 0 for a in audio), "Output is all zeros"
 
     def test_same_coeffs_same_output(self, wavelet_engine, q15_half):
-        """Same coefficients produce same output."""
+        """Same coefficients produce same output (pure synthesis, no regularity state)."""
         from frames import VoiceFrame
 
         coeffs = [1000] * 256
@@ -65,8 +65,11 @@ class TestW1NoMusicalSemantics:
             coeff_q15=coeffs,
         )
 
-        audio1 = wavelet_engine.render_voice(vf)
-        audio2 = wavelet_engine.render_voice(vf)
+        # Disable regularity to test pure wavelet synthesis determinism
+        # RegularityOperator maintains state between calls (prev_sample, slew)
+        # which is intentional for click-free audio but breaks this test
+        audio1 = wavelet_engine.render_voice(vf, apply_regularity=False)
+        audio2 = wavelet_engine.render_voice(vf, apply_regularity=False)
 
         assert audio1 == audio2, "Same input produced different output"
 
@@ -310,3 +313,157 @@ class TestW4TimeMultiplexingSafety:
             assert len(audio) == 64
             energy = sum(a * a for a in audio)
             assert energy > 0, f"Voice {vid} produced silence"
+
+
+class TestW5VoiceLifecycle:
+    """
+    W5. Voice Lifecycle (WSE-STD-070)
+
+    Requirement:
+    - voice_allocate arms microfade, clears tree state
+    - voice_on does NOT reset state (retrigger only)
+    - voice_free keeps prev_sample for next allocate
+
+    Test:
+    - Microfade applied on allocation prevents clicks
+    - Retrigger preserves continuity
+    - Reallocation uses retained last sample
+
+    Gotchas:
+    - Resetting on voice_on causes clicks
+    - Not preserving prev_sample on free causes clicks on realloc
+    """
+
+    def test_voice_allocate_arms_microfade(self, wavelet_engine, q15_half):
+        """voice_allocate arms microfade for click prevention."""
+        from frames import VoiceFrame
+
+        voice_id = 0
+
+        # Allocate voice (arms microfade)
+        wavelet_engine.voice_allocate(voice_id, last_sample=0)
+
+        R = wavelet_engine.get_regularity(voice_id)
+        assert R.is_fading(), "Microfade should be armed after allocate"
+        assert R._microfade_counter == 32, "Microfade should be 32 samples"
+
+    def test_voice_on_does_not_reset(self, wavelet_engine, q15_half):
+        """voice_on (retrigger) does NOT reset state."""
+        from frames import VoiceFrame
+
+        voice_id = 0
+
+        # First render to establish state
+        coeffs = [1000] * 256
+        vf = VoiceFrame(voice_id=voice_id, tree_id=0, gain_q15=q15_half, coeff_q15=coeffs)
+        wavelet_engine.render_voice(vf)
+
+        R = wavelet_engine.get_regularity(voice_id)
+        prev_sample_before = R.prev_sample
+
+        # voice_on should NOT reset
+        wavelet_engine.voice_on(voice_id)
+
+        assert R.prev_sample == prev_sample_before, "voice_on should NOT reset prev_sample"
+        assert not R.is_fading(), "voice_on should NOT arm microfade"
+
+    def test_voice_free_preserves_last_sample(self, wavelet_engine, q15_half):
+        """voice_free keeps prev_sample for next allocate."""
+        from frames import VoiceFrame
+
+        voice_id = 0
+
+        # Render to establish state
+        coeffs = [5000] * 256
+        vf = VoiceFrame(voice_id=voice_id, tree_id=0, gain_q15=q15_half, coeff_q15=coeffs)
+        wavelet_engine.render_voice(vf)
+
+        R = wavelet_engine.get_regularity(voice_id)
+        prev_sample_before = R.prev_sample
+
+        # Free voice
+        wavelet_engine.voice_free(voice_id)
+
+        # prev_sample should be preserved
+        assert R.prev_sample == prev_sample_before, "voice_free should preserve prev_sample"
+
+    def test_reallocation_uses_preserved_sample(self, wavelet_engine, q15_half):
+        """Reallocation uses preserved last sample for smooth transition."""
+        from frames import VoiceFrame
+
+        voice_id = 0
+
+        # Render to establish non-zero state
+        coeffs = [10000] * 256
+        vf = VoiceFrame(voice_id=voice_id, tree_id=0, gain_q15=q15_half, coeff_q15=coeffs)
+        wavelet_engine.render_voice(vf)
+
+        R = wavelet_engine.get_regularity(voice_id)
+        prev_sample_before = R.prev_sample
+
+        # Free and reallocate (new owner)
+        wavelet_engine.voice_free(voice_id)
+        wavelet_engine.voice_allocate(voice_id)  # No explicit last_sample, uses preserved
+
+        # Microfade should be armed
+        assert R.is_fading(), "Microfade should be armed after reallocate"
+        # prev_sample should still be the preserved value
+        assert R.prev_sample == prev_sample_before, "allocate() should use preserved prev_sample"
+
+    def test_microfade_produces_smooth_onset(self, wavelet_engine, q15_half):
+        """Microfade produces smooth fade-in from 0."""
+        from frames import VoiceFrame
+
+        voice_id = 0
+
+        # Allocate voice from silence
+        wavelet_engine.voice_allocate(voice_id, last_sample=0)
+
+        # Render loud content
+        coeffs = [20000] * 256
+        vf = VoiceFrame(voice_id=voice_id, tree_id=0, gain_q15=q15_half, coeff_q15=coeffs)
+        audio = wavelet_engine.render_voice(vf)
+
+        # First sample should be near 0 (faded in from 0)
+        assert abs(audio[0]) < 1000, f"First sample should be near 0, got {audio[0]}"
+
+        # Samples should gradually increase
+        # Check that sample 16 is larger than sample 4
+        assert abs(audio[16]) > abs(audio[4]), "Audio should fade in gradually"
+
+    def test_allocate_clears_tree_state(self, wavelet_engine, q15_half):
+        """voice_allocate clears tree transition state."""
+        from frames import VoiceFrame
+
+        voice_id = 0
+
+        # Set up some tree state
+        wavelet_engine.voice_tree_state[voice_id] = {"tree_a": 0, "tree_b": 2, "blend": 0.5}
+        wavelet_engine.boundary_state[voice_id] = {"some": "state"}
+
+        # Allocate (new owner)
+        wavelet_engine.voice_allocate(voice_id, last_sample=0)
+
+        # Tree state should be cleared
+        assert voice_id not in wavelet_engine.voice_tree_state, "Tree state should be cleared"
+        assert voice_id not in wavelet_engine.boundary_state, "Boundary state should be cleared"
+
+    def test_voice_off_is_alias_for_voice_free(self, wavelet_engine, q15_half):
+        """voice_off (legacy) behaves like voice_free."""
+        from frames import VoiceFrame
+
+        voice_id = 0
+
+        # Render to establish state
+        coeffs = [5000] * 256
+        vf = VoiceFrame(voice_id=voice_id, tree_id=0, gain_q15=q15_half, coeff_q15=coeffs)
+        wavelet_engine.render_voice(vf)
+
+        R = wavelet_engine.get_regularity(voice_id)
+        prev_sample_before = R.prev_sample
+
+        # voice_off (legacy)
+        wavelet_engine.voice_off(voice_id)
+
+        # Should preserve state like voice_free
+        assert R.prev_sample == prev_sample_before, "voice_off should preserve prev_sample"

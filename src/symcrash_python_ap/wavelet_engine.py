@@ -45,6 +45,9 @@ R_BRIDGE_LEN = 16         # Samples for micro-bridge (event-local)
 R_SLEW_MAX = 0x2000       # Maximum sample-to-sample change for audio
 R_CURVATURE_MAX = 0x1000  # Maximum second difference (curvature)
 
+# Microfade constants (per WSE-STD-070 Section 4)
+MICROFADE_LEN = 32        # Samples for allocation microfade (fade-in from 0)
+
 
 def _build_cosine_bridge_lut(n: int) -> List[int]:
     """
@@ -157,25 +160,61 @@ class RegularityOperator:
     Enforces bounded variation (no impulses) through:
     1. Event-local micro-bridge at known change points (coefficient morphs)
     2. Slope projection fallback for unknown/residual discontinuities
+    3. Microfade on voice allocation (per WSE-STD-070 Section 4)
+
+    Voice Lifecycle (WSE-STD-070):
+    - voice_allocate(): New owner of voice slot. Arms microfade, sets prev_sample.
+    - voice_on(): Retrigger/gate rise. NEVER resets state.
+    - voice_free(): Voice becomes inactive. Keeps last sample state.
 
     Usage in render path:
         R = RegularityOperator()
+
+        # On new voice allocation:
+        R.allocate(last_known_sample)  # Arms microfade
 
         # When coefficients change (note, tree, morph):
         audio = R.apply_transition(old_audio, new_audio, change_idx)
 
         # Always apply slope projection as final safety:
-        audio = R.finalize(audio)
+        audio = R.finalize(audio)  # Also applies microfade if armed
     """
 
     def __init__(
         self,
         bridge_len: int = R_BRIDGE_LEN,
         max_slew: int = R_SLEW_MAX,
+        microfade_len: int = MICROFADE_LEN,
     ):
         self.bridge_len = bridge_len
         self.max_slew = max_slew
+        self.microfade_len = microfade_len
         self.prev_sample = 0
+
+        # Microfade state: armed on voice_allocate, decremented each sample
+        self._microfade_counter = 0
+
+    def allocate(self, last_sample: int = 0) -> None:
+        """
+        Signal new voice allocation (new logical owner of this voice slot).
+
+        Per WSE-STD-070 Section 4:
+        - Sets prev_sample to last known output (or 0)
+        - Arms microfade to prevent clicks from stale/unknown state
+
+        Call this on voice_allocate, NOT on voice_on (retrigger).
+
+        Args:
+            last_sample: Last known output sample from this voice slot,
+                         or 0 if unknown. The microfade ensures smooth
+                         transition regardless.
+        """
+        self.prev_sample = last_sample
+        self._microfade_counter = self.microfade_len
+
+    def is_fading(self) -> bool:
+        """Check if microfade is currently active."""
+        return self._microfade_counter > 0
 
     def apply_transition(
         self,
@@ -222,16 +261,60 @@ class RegularityOperator:
         """
         Final slope projection to guarantee bounded slew.
 
+        Also applies microfade if armed (from voice_allocate).
+
         Call this at the end of render to ensure no clicks remain.
         """
+        # First apply slope projection
         result, self.prev_sample = slope_project(
             samples, self.prev_sample, self.max_slew
         )
+
+        # Apply microfade if armed
+        if self._microfade_counter > 0:
+            result = self._apply_microfade(result)
+
+        return result
+
+    def _apply_microfade(self, samples: List[int]) -> List[int]:
+        """
+        Apply microfade ramp to samples.
+
+        The microfade is a smoothstep from 0 to 1 over microfade_len samples,
+        applied to prevent clicks on voice allocation.
+        """
+        if not samples:
+            return samples
+
+        result = []
+        for s in samples:
+            if self._microfade_counter > 0:
+                # Compute fade position: starts at 0, ends at 1
+                # remaining = microfade_counter, so position = (len - remaining) / len
+                pos = (self.microfade_len - self._microfade_counter) / self.microfade_len
+
+                # Smoothstep for C¹ continuity
+                w = 3 * pos * pos - 2 * pos * pos * pos
+
+                # Apply fade
+                faded = int(s * w)
+                result.append(faded)
+
+                self._microfade_counter -= 1
+            else:
+                result.append(s)
+
         return result
 
     def reset(self):
-        """Reset internal state (call on voice start)."""
+        """
+        Reset internal state.
+
+        WARNING: This should ONLY be called on voice_allocate, never on voice_on.
+        Use allocate() instead for proper microfade handling.
+        """
         self.prev_sample = 0
+        self._microfade_counter = 0
 
 
 class WaveletEngine:
@@ -268,20 +351,89 @@ class WaveletEngine:
             self.regularity[voice_id] = RegularityOperator()
         return self.regularity[voice_id]
 
-    def voice_on(self, voice_id: int):
+    def get_last_sample(self, voice_id: int) -> int:
         """
-        Signal voice start.
+        Get last known output sample for a voice.
 
-        Per WSE-STD-070: voice_on MUST NOT reset internal state to zero.
-        RegularityOperator maintains prev_sample continuity.
+        Used by scheduler to pass to voice_allocate when reassigning a voice slot.
         """
-        # Ensure RegularityOperator exists (but do NOT reset)
+        if voice_id in self.regularity:
+            return self.regularity[voice_id].prev_sample
+        return 0
+
+    def voice_allocate(self, voice_id: int, last_sample: Optional[int] = None) -> None:
+        """
+        Allocate voice slot to new logical owner.
+
+        Per WSE-STD-070 Section 4 (Voice Lifecycle):
+        - Called when a voice slot is assigned to a NEW note/sound
+        - Sets prev_sample to last known output
+        - Arms 32-sample microfade (smoothstep 0→1)
+        - Clears any tree transition state
+
+        This is DIFFERENT from voice_on, which is a retrigger/gate-rise and
+        MUST NOT reset state.
+
+        Args:
+            voice_id: Voice slot index
+            last_sample: Last output sample from this slot, or None to query.
+                        Pass explicit 0 only if voice was silent.
+        """
+        # Get or create RegularityOperator
+        R = self.get_regularity(voice_id)
+
+        # Determine last sample if not provided
+        if last_sample is None:
+            last_sample = R.prev_sample
+
+        # Arm microfade via RegularityOperator.allocate()
+        R.allocate(last_sample)
+
+        # Clear tree transition state for fresh start
+        if voice_id in self.voice_tree_state:
+            del self.voice_tree_state[voice_id]
+
+        # Clear boundary state
+        if voice_id in self.boundary_state:
+            del self.boundary_state[voice_id]
+
+    def voice_on(self, voice_id: int) -> None:
+        """
+        Signal voice retrigger / gate rise.
+
+        Per WSE-STD-070: voice_on is a RETRIGGER, not a new allocation.
+        - MUST NOT reset prev_sample or arm microfade
+        - MUST NOT clear tree/boundary state
+        - Only ensures RegularityOperator exists
+
+        Use voice_allocate() when a voice slot gets a new owner.
+        Use voice_on() for retriggering the same sound.
+        """
+        # Ensure RegularityOperator exists (but do NOT reset anything)
         self.get_regularity(voice_id)
 
-    def voice_off(self, voice_id: int):
-        """Signal voice stop."""
-        # Could clear state here if needed
+    def voice_free(self, voice_id: int) -> None:
+        """
+        Mark voice as inactive / available for reallocation.
+
+        Per WSE-STD-070:
+        - Voice slot becomes available for scheduler
+        - Keeps prev_sample state (next allocate will use it for microfade)
+        - Does NOT clear RegularityOperator
+
+        The next voice_allocate() will arm microfade from the retained prev_sample.
+        """
+        # Intentionally minimal: we keep R.prev_sample for next allocate
+        # Could add a flag or notify scheduler here if needed
         pass
+
+    def voice_off(self, voice_id: int) -> None:
+        """
+        Signal voice gate fall (legacy compatibility).
+
+        For backward compatibility with existing code. Equivalent to voice_free().
+        """
+        self.voice_free(voice_id)
     
     def render_voice(self, vf: VoiceFrame, apply_regularity: bool = True) -> List[int]:
         """

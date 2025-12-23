@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import List, Tuple, Optional, Set
 from enum import IntEnum
 
-from .frames import VoiceFramePacketV0b, VoiceFlags
+from frames import VoiceFramePacketV0b, VoiceFlags
 
 
 # =============================================================================
