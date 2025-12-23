@@ -21,11 +21,19 @@ from src.symcrash_python_ap.parameter_registry import (
     ParamType,
     UpdateMode,
     Persistence,
+    FieldMask,
+    WireFieldMask,
     # Classes
     ParameterDef,
     ParameterState,
     ParameterRegistry,
     ParameterBank,
+    MaskedUpdate,
+    # Mapping tables
+    FIELD_TO_PARAMS,
+    PARAM_TO_FIELD,
+    CANONICAL_TO_WIRE,
+    WIRE_TO_CANONICAL,
     # Fixed-point functions
     q15_mul,
     q15_add,
@@ -34,6 +42,10 @@ from src.symcrash_python_ap.parameter_registry import (
     q15_to_float,
     q8_from_float,
     q8_to_float,
+    # Routing/conversion functions
+    route_by_domain,
+    to_wire_field_mask,
+    from_wire_field_mask,
     # Defaults
     CANONICAL_DEFAULTS,
     # Global registry
@@ -489,3 +501,356 @@ class TestGlobalRegistry:
         """Global registry should have canonical params."""
         registry = get_registry()
         assert registry.get_by_name("gain_q15") is not None
+
+
+# =============================================================================
+# FIELDMASK TESTS
+# =============================================================================
+
+class TestFieldMask:
+    """Test FieldMask enum and mappings."""
+
+    def test_fieldmask_voice_domain_bits(self):
+        """Voice domain fields should be in bits 0-15."""
+        voice_fields = [
+            FieldMask.GAIN_Q15, FieldMask.ACTIVITY_Q15, FieldMask.PAN_Q15,
+            FieldMask.SEND_A_Q15, FieldMask.SEND_B_Q15, FieldMask.NOTE_U8,
+            FieldMask.CENTS_I16, FieldMask.REGIME_ID, FieldMask.DEGRADATION,
+            FieldMask.TREE_A_ID, FieldMask.TREE_B_ID, FieldMask.TREE_BLEND_Q15,
+            FieldMask.FAMILY_WEIGHTS, FieldMask.EVENT_MASK, FieldMask.EVENT_STRENGTHS,
+        ]
+        for field in voice_fields:
+            assert 0 <= field <= 15, f"{field.name} should be in voice domain bits"
+
+    def test_fieldmask_symbol_domain_bits(self):
+        """Symbol domain fields should be in bits 16-23."""
+        symbol_fields = [
+            FieldMask.K_MODE, FieldMask.DRIVE_Q15, FieldMask.TONE_Q15,
+            FieldMask.BIAS_Q15, FieldMask.PRESSURE_Q15,
+        ]
+        for field in symbol_fields:
+            assert 16 <= field <= 23, f"{field.name} should be in symbol domain bits"
+
+    def test_fieldmask_safety_domain_bits(self):
+        """Safety domain fields should be in bits 24-31."""
+        safety_fields = [
+            FieldMask.ENERGY_CAP_Q15, FieldMask.GEAR_STRENGTH_Q15, FieldMask.TRACTION_Q15,
+        ]
+        for field in safety_fields:
+            assert 24 <= field <= 31, f"{field.name} should be in safety domain bits"
+
+    def test_field_to_params_completeness(self):
+        """All FieldMask values should have FIELD_TO_PARAMS mapping."""
+        for field in FieldMask:
+            assert field in FIELD_TO_PARAMS, f"{field.name} missing from FIELD_TO_PARAMS"
+
+    def test_param_to_field_reverse_mapping(self):
+        """PARAM_TO_FIELD should be inverse of FIELD_TO_PARAMS."""
+        for field_bit, param_ids in FIELD_TO_PARAMS.items():
+            if isinstance(param_ids, list):
+                for pid in param_ids:
+                    assert PARAM_TO_FIELD[pid] == int(field_bit)
+            else:
+                assert PARAM_TO_FIELD[param_ids] == int(field_bit)
+
+
+# =============================================================================
+# MASKED UPDATE TESTS
+# =============================================================================
+
+class TestMaskedUpdate:
+    """Test MaskedUpdate dataclass."""
+
+    def test_empty_update(self):
+        """Empty update should have no fields."""
+        update = MaskedUpdate()
+        assert update.is_empty()
+        assert update.field_mask == 0
+        assert len(update.fields()) == 0
+
+    def test_set_single_field(self):
+        """Setting a field should update mask and values."""
+        update = MaskedUpdate()
+        update.set(FieldMask.GAIN_Q15, 0x6000)
+
+        assert update.has(FieldMask.GAIN_Q15)
+        assert not update.has(FieldMask.PAN_Q15)
+        assert update.get(FieldMask.GAIN_Q15) == 0x6000
+        assert update.get(FieldMask.PAN_Q15) is None
+
+    def test_set_multiple_fields(self):
+        """Setting multiple fields should work correctly."""
+        update = MaskedUpdate()
+        update.set(FieldMask.GAIN_Q15, 0x6000)
+        update.set(FieldMask.PAN_Q15, 0x4000)
+        update.set(FieldMask.K_MODE, 2)
+
+        fields = update.fields()
+        assert len(fields) == 3
+        assert FieldMask.GAIN_Q15 in fields
+        assert FieldMask.PAN_Q15 in fields
+        assert FieldMask.K_MODE in fields
+
+    def test_clear_field(self):
+        """Clearing a field should remove it from update."""
+        update = MaskedUpdate()
+        update.set(FieldMask.GAIN_Q15, 0x6000)
+        update.set(FieldMask.PAN_Q15, 0x4000)
+
+        update.clear(FieldMask.GAIN_Q15)
+
+        assert not update.has(FieldMask.GAIN_Q15)
+        assert update.has(FieldMask.PAN_Q15)
+
+    def test_group_field_values(self):
+        """Group fields should accept list values."""
+        update = MaskedUpdate()
+        weights = [0x1000, 0x2000, 0x3000, 0x4000, 0x5000, 0x6000, 0x7000, 0x7FFF]
+        update.set(FieldMask.FAMILY_WEIGHTS, weights)
+
+        assert update.has(FieldMask.FAMILY_WEIGHTS)
+        assert update.get(FieldMask.FAMILY_WEIGHTS) == weights
+
+
+# =============================================================================
+# APPLY MASKED TESTS
+# =============================================================================
+
+class TestApplyMasked:
+    """Test ParameterBank.apply_masked()."""
+
+    def test_apply_single_field_abs(self):
+        """Applying single field with ABS mode should set value."""
+        registry = get_registry()
+        bank = ParameterBank(registry)
+
+        update = MaskedUpdate(mode=UpdateMode.ABS)
+        update.set(FieldMask.GAIN_Q15, 0x6000)
+
+        applied = bank.apply_masked(update)
+
+        assert 0x0001 in applied  # gain_q15 param_id
+        assert applied[0x0001] == 0x6000
+        assert bank.get(0x0001) == 0x6000
+
+    def test_apply_multiple_fields(self):
+        """Applying multiple fields should set all values."""
+        registry = get_registry()
+        bank = ParameterBank(registry)
+
+        update = MaskedUpdate(mode=UpdateMode.ABS)
+        update.set(FieldMask.GAIN_Q15, 0x5000)
+        update.set(FieldMask.REGIME_ID, 3)
+        update.set(FieldMask.K_MODE, 2)
+
+        applied = bank.apply_masked(update)
+
+        assert bank.get(0x0001) == 0x5000  # gain_q15
+        assert bank.get(0x0020) == 3       # regime_id
+        assert bank.get(0x0100) == 2       # K_mode
+
+    def test_apply_group_field(self):
+        """Applying group field should set all members."""
+        registry = get_registry()
+        bank = ParameterBank(registry)
+
+        weights = [0x1000, 0x2000, 0x3000, 0x4000, 0x5000, 0x6000, 0x7000, 0x7FFF]
+        update = MaskedUpdate(mode=UpdateMode.ABS)
+        update.set(FieldMask.FAMILY_WEIGHTS, weights)
+
+        applied = bank.apply_masked(update)
+
+        # Check all 8 family weights were set
+        for i, expected in enumerate(weights):
+            param_id = 0x0040 + i
+            assert param_id in applied
+            assert bank.get(param_id) == expected
+
+    def test_apply_delta_mode(self):
+        """Applying with DELTA mode should add to current values."""
+        registry = get_registry()
+        bank = ParameterBank(registry)
+
+        # Set initial value
+        bank.apply_abs(0x0001, 0x4000)  # gain_q15 = 0x4000
+
+        # Apply delta
+        update = MaskedUpdate(mode=UpdateMode.DELTA)
+        update.set(FieldMask.GAIN_Q15, 0x1000)  # +0x1000
+
+        applied = bank.apply_masked(update)
+
+        assert bank.get(0x0001) == 0x5000  # 0x4000 + 0x1000
+
+
+# =============================================================================
+# DIFF TESTS
+# =============================================================================
+
+class TestDiff:
+    """Test ParameterBank.diff()."""
+
+    def test_diff_identical_banks(self):
+        """Diffing identical banks should produce empty update."""
+        registry = get_registry()
+        bank1 = ParameterBank(registry)
+        bank2 = ParameterBank(registry)
+
+        diff = bank1.diff(bank2)
+
+        assert diff.is_empty()
+
+    def test_diff_single_change(self):
+        """Diffing with single change should include that field."""
+        registry = get_registry()
+        bank1 = ParameterBank(registry)
+        bank2 = ParameterBank(registry)
+
+        bank1.apply_abs(0x0001, 0x6000)  # Change gain_q15
+
+        diff = bank1.diff(bank2)
+
+        assert diff.has(FieldMask.GAIN_Q15)
+        assert diff.get(FieldMask.GAIN_Q15) == 0x6000
+
+    def test_diff_multiple_changes(self):
+        """Diffing with multiple changes should include all."""
+        registry = get_registry()
+        bank1 = ParameterBank(registry)
+        bank2 = ParameterBank(registry)
+
+        bank1.apply_abs(0x0001, 0x6000)  # gain_q15
+        bank1.apply_abs(0x0020, 5)       # regime_id
+
+        diff = bank1.diff(bank2)
+
+        assert diff.has(FieldMask.GAIN_Q15)
+        assert diff.has(FieldMask.REGIME_ID)
+
+
+# =============================================================================
+# TO MASKED UPDATE TESTS
+# =============================================================================
+
+class TestToMaskedUpdate:
+    """Test ParameterBank.to_masked_update()."""
+
+    def test_export_all_fields(self):
+        """Exporting all fields should include all initialized params."""
+        registry = get_registry()
+        bank = ParameterBank(registry)
+
+        update = bank.to_masked_update()
+
+        # Should have at least gain, which is initialized by default
+        assert update.has(FieldMask.GAIN_Q15)
+
+    def test_export_specific_fields(self):
+        """Exporting specific fields should only include those."""
+        registry = get_registry()
+        bank = ParameterBank(registry)
+
+        update = bank.to_masked_update(fields=[FieldMask.GAIN_Q15, FieldMask.REGIME_ID])
+
+        assert update.has(FieldMask.GAIN_Q15)
+        assert update.has(FieldMask.REGIME_ID)
+        # Should not have other fields
+        assert not update.has(FieldMask.K_MODE) or FieldMask.K_MODE in [FieldMask.GAIN_Q15, FieldMask.REGIME_ID]
+
+
+# =============================================================================
+# ROUTE BY DOMAIN TESTS
+# =============================================================================
+
+class TestRouteByDomain:
+    """Test route_by_domain() function."""
+
+    def test_route_single_domain(self):
+        """Routing voice-only update should produce single domain."""
+        registry = get_registry()
+        update = MaskedUpdate()
+        update.set(FieldMask.GAIN_Q15, 0x6000)
+        update.set(FieldMask.PAN_Q15, 0x0000)
+
+        routed = route_by_domain(update, registry)
+
+        assert ParamDomain.VOICE in routed
+        assert ParamDomain.SYMBOL not in routed
+        assert ParamDomain.SAFETY not in routed
+
+    def test_route_multiple_domains(self):
+        """Routing multi-domain update should split correctly."""
+        registry = get_registry()
+        update = MaskedUpdate()
+        update.set(FieldMask.GAIN_Q15, 0x6000)      # Voice
+        update.set(FieldMask.K_MODE, 2)              # Symbol
+        update.set(FieldMask.TRACTION_Q15, 0x4000)  # Safety
+
+        routed = route_by_domain(update, registry)
+
+        assert ParamDomain.VOICE in routed
+        assert ParamDomain.SYMBOL in routed
+        assert ParamDomain.SAFETY in routed
+
+        # Check each domain has correct fields
+        assert routed[ParamDomain.VOICE].has(FieldMask.GAIN_Q15)
+        assert routed[ParamDomain.SYMBOL].has(FieldMask.K_MODE)
+        assert routed[ParamDomain.SAFETY].has(FieldMask.TRACTION_Q15)
+
+
+# =============================================================================
+# WIRE PROTOCOL CONVERSION TESTS
+# =============================================================================
+
+class TestWireProtocolConversion:
+    """Test wire protocol field mask conversion."""
+
+    def test_to_wire_single_field(self):
+        """Converting single canonical field to wire."""
+        canonical = 1 << FieldMask.GAIN_Q15
+        wire = to_wire_field_mask(canonical)
+
+        assert wire == (1 << WireFieldMask.GAIN_Q15)
+
+    def test_to_wire_multiple_fields(self):
+        """Converting multiple canonical fields to wire."""
+        canonical = (1 << FieldMask.GAIN_Q15) | (1 << FieldMask.REGIME_ID)
+        wire = to_wire_field_mask(canonical)
+
+        expected = (1 << WireFieldMask.GAIN_Q15) | (1 << WireFieldMask.REGIME_ID)
+        assert wire == expected
+
+    def test_to_wire_unmapped_fields_dropped(self):
+        """Fields without wire mapping should be dropped."""
+        # ACTIVITY_Q15 has no wire mapping
+        canonical = (1 << FieldMask.ACTIVITY_Q15) | (1 << FieldMask.GAIN_Q15)
+        wire = to_wire_field_mask(canonical)
+
+        # Only GAIN_Q15 should be in wire mask
+        assert wire == (1 << WireFieldMask.GAIN_Q15)
+
+    def test_from_wire_single_field(self):
+        """Converting single wire field to canonical."""
+        wire = 1 << WireFieldMask.GAIN_Q15
+        canonical = from_wire_field_mask(wire)
+
+        assert canonical == (1 << FieldMask.GAIN_Q15)
+
+    def test_from_wire_unmapped_fields_dropped(self):
+        """Wire-only fields (BACKBONE, PAYLOAD) should be dropped."""
+        wire = (1 << WireFieldMask.BACKBONE) | (1 << WireFieldMask.GAIN_Q15)
+        canonical = from_wire_field_mask(wire)
+
+        # Only GAIN_Q15 should be in canonical mask
+        assert canonical == (1 << FieldMask.GAIN_Q15)
+
+    def test_roundtrip_conversion(self):
+        """Converting to wire and back should preserve mappable fields."""
+        original = (1 << FieldMask.GAIN_Q15) | (1 << FieldMask.REGIME_ID) | (1 << FieldMask.K_MODE)
+
+        # K_MODE has no wire mapping, so it will be lost
+        wire = to_wire_field_mask(original)
+        recovered = from_wire_field_mask(wire)
+
+        expected = (1 << FieldMask.GAIN_Q15) | (1 << FieldMask.REGIME_ID)
+        assert recovered == expected
