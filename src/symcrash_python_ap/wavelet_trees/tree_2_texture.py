@@ -3,46 +3,40 @@ Tree 2 - Texture Microscope
 ===========================
 
 High-band resolution for texture/detail voices, noise-band, shatter.
+64 leaves for D=6 master tree.
 """
 
-from . import TreeROM, PacketNode, MAX_DEPTH, enumerate_leaves
+from . import TreeROM, PacketNode, MAX_DEPTH, LEAF_COUNT, enumerate_leaves
 
 
 def build_tree_2_texture() -> TreeROM:
     """
     Tree 2 - Texture Microscope (high-band resolution)
-    For texture/detail voices, noise-band, shatter.
+    For D=6 master tree, all 64 leaves at depth 6.
+    The "texture" character is now handled by tuning gains, not tree structure.
     """
     rom = TreeROM(tree_id=2, name="texture")
 
-    # Initialize
+    # Initialize split mask - split all nodes to depth 6
     for d in range(MAX_DEPTH):
-        rom.split_mask[d] = {k: False for k in range(2 ** d)}
-
-    # Step 1: Split to depth 4 everywhere
-    for d in range(4):
+        rom.split_mask[d] = {}
         for k in range(2 ** d):
-            rom.split_mask[d][k] = True
+            rom.split_mask[d][k] = (d < MAX_DEPTH)
 
-    # Step 2: Lower 4 depth-4 nodes are leaves, upper 12 split to depth 5
-    for k in range(16):
-        if k >= 4:
-            rom.split_mask[4][k] = True
+    # Enumerate leaves (all at depth 6)
+    leaves = []
+    for k in range(LEAF_COUNT):
+        leaves.append(PacketNode(depth=MAX_DEPTH, index=k, is_leaf=True))
 
-    # Step 3: Split 4 highest-freq depth-5 leaves to depth 6
-    # After step 2, depth-5 nodes exist for k=8..31 (from parents k=4..15)
-    # Highest freq: k=28,29,30,31 at d=5
-    for k5 in [28, 29, 30, 31]:
-        rom.split_mask[5][k5] = True
-
-    leaves = enumerate_leaves(rom.split_mask)
+    # Sort by frequency
     leaves.sort()
 
+    # Store
     rom.leaf_list = [(n.depth, n.index) for n in leaves]
     rom.leaf_depth = [n.depth for n in leaves]
     rom.leaf_k = [n.index for n in leaves]
 
-    # Complex mask: N_top = 20 (aggressive)
-    rom.complex_mask = [i >= 12 for i in range(32)]
+    # Complex mask: top 3/4 (aggressive for texture)
+    rom.complex_mask = [i >= (LEAF_COUNT // 4) for i in range(LEAF_COUNT)]
 
     return rom

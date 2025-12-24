@@ -129,25 +129,25 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 import math
 
-from fixed import (
+from .fixed import (
     sat16, mul_q15_sat, shift_round, slew_q15, slew_q15_asym,
     sqrt_q15, soft_clip_q15,
     Q15_ONE, Q15_SHIFT, Q15_HALF
 )
-from frames import ParamFrame, Metrics
+from .frames import ParamFrame, Metrics
 
 
 # =============================================================================
 # SYMBOL TAIL CONSTANTS (coefficient-space)
 # =============================================================================
 
-LEAF_COUNT = 32           # L = 32 leaves per tree
-COEFF_PER_LEAF = 8        # 8 coefficients per leaf
+LEAF_COUNT = 64           # L = 64 leaves per tree (D=6 master tree)
+COEFF_PER_LEAF = 4        # 4 coefficients per leaf (256 / 64 = 4)
 COEFF_LEN = 256           # Total coefficient vector length
 
 # Fine band set (highest frequency leaves, prone to ultrafine blowup)
-FINE_BAND_SET = {28, 29, 30, 31}  # Default: last 4 leaves
-COARSE_BAND_SET = set(range(0, 28))  # Everything else
+FINE_BAND_SET = {60, 61, 62, 63}  # Default: last 4 leaves (updated for 64 leaves)
+COARSE_BAND_SET = set(range(0, 60))  # Everything else
 
 # Energy caps (Q30 for squared values before normalization)
 E_LEAF_MAX = 0x40000000       # Per-leaf energy cap (Q30)

@@ -16,13 +16,13 @@ Frozen spec: 1 leaf ⇄ 1 coefficient node (8 coeffs)
 from typing import List, Dict, Tuple, Optional
 import numpy as np
 
-from fixed import (
+from .fixed import (
     sat16, mul_q15_sat, shift_round, shift_round_sat16,
     Q15_ONE, Q15_SHIFT, Q15_HALF
 )
 
 # Import tree definitions and shared types from wavelet_trees package
-from wavelet_trees import (
+from .wavelet_trees import (
     BLOCK_SIZE, MAX_DEPTH, LEAF_COUNT, COEFF_LEN, NODE_SIZE, NODE_COUNT,
     PacketNode, TreeROM, enumerate_leaves,
     build_tree_0_balanced,
@@ -318,7 +318,7 @@ class PacketSynthesizer:
                     continue
 
                 # Coefficient index encodes position within band
-                # coeff 0 = low end of band, coeff 7 = high end
+                # coeff 0 = low end of band, coeff NODE_SIZE-1 = high end
                 sub_pos = (coeff_idx + 0.5) / NODE_SIZE
                 sub_freq_hz = freq_low_hz + sub_pos * freq_span
 
@@ -335,7 +335,8 @@ class PacketSynthesizer:
                     phase = phase_state[phase_idx]
                 else:
                     # Use coefficient position for initial phase spread
-                    phase = coeff_idx * np.pi / 4 + leaf_idx * np.pi / 16
+                    # Spread coeffs evenly across 2*pi and leaves across pi
+                    phase = coeff_idx * (2 * np.pi / NODE_SIZE) + leaf_idx * (np.pi / LEAF_COUNT)
 
                 # Generate samples for this sub-frequency
                 for i in range(BLOCK_SIZE):
@@ -447,10 +448,10 @@ class PacketTreeSet:
     def unpack_coeffs(self, tree_id: int, coeff_q15: List[int]) -> List[List[int]]:
         """
         Unpack coefficient vector into nodes ordered by tree's leaf list.
-        
-        coeff_q15[256] -> 32 nodes of 8 coefficients each
+
+        coeff_q15[256] -> 64 nodes of 4 coefficients each
         """
-        # coeff_q15 is already 256 coefficients = 32 nodes of 8
+        # coeff_q15 is 256 coefficients = 64 nodes of 4 (with NODE_SIZE=4)
         # leaf_list[ℓ] maps to node ℓ directly (per spec)
         nodes = []
         for leaf_idx in range(LEAF_COUNT):

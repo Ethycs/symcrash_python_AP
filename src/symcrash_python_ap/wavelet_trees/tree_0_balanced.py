@@ -2,17 +2,18 @@
 Tree 0 - Balanced Default
 =========================
 
-Uniform resolution with all leaves at depth 5.
+Uniform resolution with all leaves at depth 6.
 Simple, predictable frequency distribution.
+64 leaves for D=6 master tree.
 """
 
-from . import TreeROM, PacketNode, MAX_DEPTH, enumerate_leaves
+from . import TreeROM, PacketNode, MAX_DEPTH, LEAF_COUNT, enumerate_leaves
 
 
 def build_tree_0_balanced() -> TreeROM:
     """
     Tree 0 - Balanced Default (uniform resolution)
-    All leaves at depth 5. Simple, predictable.
+    All leaves at depth 6. Simple, predictable.
     """
     rom = TreeROM(tree_id=0, name="balanced")
 
@@ -20,13 +21,13 @@ def build_tree_0_balanced() -> TreeROM:
     for d in range(MAX_DEPTH):
         rom.split_mask[d] = {}
         for k in range(2 ** d):
-            # Split all nodes at d < 5
-            rom.split_mask[d][k] = (d < 5)
+            # Split all nodes at d < 6 (MAX_DEPTH)
+            rom.split_mask[d][k] = (d < MAX_DEPTH)
 
-    # Enumerate leaves (all at depth 5)
+    # Enumerate leaves (all at depth 6)
     leaves = []
-    for k in range(32):
-        leaves.append(PacketNode(depth=5, index=k, is_leaf=True))
+    for k in range(LEAF_COUNT):
+        leaves.append(PacketNode(depth=MAX_DEPTH, index=k, is_leaf=True))
 
     # Sort by frequency
     leaves.sort()
@@ -36,7 +37,7 @@ def build_tree_0_balanced() -> TreeROM:
     rom.leaf_depth = [n.depth for n in leaves]
     rom.leaf_k = [n.index for n in leaves]
 
-    # Complex mask: top half (N_top = 16)
-    rom.complex_mask = [i >= 16 for i in range(32)]
+    # Complex mask: top half (N_top = 32)
+    rom.complex_mask = [i >= (LEAF_COUNT // 2) for i in range(LEAF_COUNT)]
 
     return rom

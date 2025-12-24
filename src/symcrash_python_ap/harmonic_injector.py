@@ -23,8 +23,8 @@ import numpy as np
 from fixed import sat16, mul_q15_sat, Q15_ONE, Q15_SHIFT
 
 # Constants
-LEAF_COUNT = 32
-NODE_SIZE = 8
+LEAF_COUNT = 64           # D=6 master tree: 64 leaves
+NODE_SIZE = 4             # 256 / 64 = 4 coefficients per leaf
 COEFF_LEN = 256
 SAMPLE_RATE = 48000
 NYQUIST = SAMPLE_RATE // 2

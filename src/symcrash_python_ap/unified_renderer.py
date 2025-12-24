@@ -963,7 +963,7 @@ class CarrierLiftPipeline:
         self.carrier.gate_on(voice_id)
 
         # Allocate wavelet voice
-        self.wavelet_backend.backend.voice_allocate(voice_id)
+        self.wavelet_backend.engine.voice_allocate(voice_id)
         self.wavelet_backend._allocated_voices.add(voice_id)
 
         # Safety

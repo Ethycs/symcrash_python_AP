@@ -15,10 +15,10 @@ from typing import List, Dict, Tuple
 
 BLOCK_SIZE = 64          # B = 64 samples
 MAX_DEPTH = 6            # J = 6
-LEAF_COUNT = 32          # L = 32 leaves per tree
+LEAF_COUNT = 64          # L = 64 leaves per tree (D=6 master tree)
 COEFF_LEN = 256          # Total coefficient vector length
-NODE_SIZE = 8            # Coefficients per node
-NODE_COUNT = 32          # COEFF_LEN / NODE_SIZE
+NODE_SIZE = 4            # Coefficients per node (256 / 64 = 4)
+NODE_COUNT = 64          # COEFF_LEN / NODE_SIZE
 
 
 # =============================================================================

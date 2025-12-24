@@ -28,14 +28,14 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 import numpy as np
 
-from fixed import (
+from .fixed import (
     sat16, mul_q15_sat, shift_round_sat16, slew_q15,
     Q15_ONE, Q15_SHIFT, mac_q15
 )
-from frames import ParamFrame, VoiceFrame
+from .frames import ParamFrame, VoiceFrame
 
 # Import operator library
-from operator_library import (
+from .operator_library import (
     build_operator_library, COEFF_LEN, BAND_SLICES, NUM_BANDS,
     OpType, Operator, from_q15, to_q15
 )

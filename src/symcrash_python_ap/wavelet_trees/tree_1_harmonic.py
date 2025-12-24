@@ -4,54 +4,40 @@ Tree 1 - Harmonic Anchor
 
 Wider lows, detailed highs.
 Cleaner pitch reading, less over-resolved lows.
+64 leaves for D=6 master tree.
 """
 
-from . import TreeROM, PacketNode, MAX_DEPTH, enumerate_leaves
+from . import TreeROM, PacketNode, MAX_DEPTH, LEAF_COUNT, enumerate_leaves
 
 
 def build_tree_1_harmonic() -> TreeROM:
     """
     Tree 1 - Harmonic Anchor (wider lows, detailed highs)
-    Cleaner pitch reading, less over-resolved lows.
+    For D=6 master tree, all 64 leaves at depth 6.
+    The "harmonic" character is now handled by tuning gains, not tree structure.
     """
     rom = TreeROM(tree_id=1, name="harmonic")
 
-    # Initialize all as not-split
+    # Initialize split mask - split all nodes to depth 6
     for d in range(MAX_DEPTH):
-        rom.split_mask[d] = {k: False for k in range(2 ** d)}
-
-    # Step 1: Split to depth 3 everywhere
-    for d in range(3):
+        rom.split_mask[d] = {}
         for k in range(2 ** d):
-            rom.split_mask[d][k] = True
+            rom.split_mask[d][k] = (d < MAX_DEPTH)
 
-    # Step 2: Low 2 regions (k=0,1 at d=3) split to depth 4 only
-    for k in [0, 1]:
-        rom.split_mask[3][k] = True
-        # Children at d=4 are leaves (don't split)
+    # Enumerate leaves (all at depth 6)
+    leaves = []
+    for k in range(LEAF_COUNT):
+        leaves.append(PacketNode(depth=MAX_DEPTH, index=k, is_leaf=True))
 
-    # Step 3: Remaining 6 regions (k=2..7 at d=3) split to depth 5
-    for k in range(2, 8):
-        rom.split_mask[3][k] = True
-        # Their children at d=4
-        for k4 in range(k * 2, k * 2 + 2):
-            rom.split_mask[4][k4] = True
-            # Children at d=5 are leaves by default
-
-    # Step 4: Split 4 highest-freq depth-5 leaves to depth 6
-    # Highest freq at d=5 are k=28,29,30,31
-    for k5 in [28, 29, 30, 31]:
-        rom.split_mask[5][k5] = True
-
-    # Enumerate leaves
-    leaves = enumerate_leaves(rom.split_mask)
+    # Sort by frequency
     leaves.sort()
 
+    # Store
     rom.leaf_list = [(n.depth, n.index) for n in leaves]
     rom.leaf_depth = [n.depth for n in leaves]
     rom.leaf_k = [n.index for n in leaves]
 
-    # Complex mask: N_top = 12
-    rom.complex_mask = [i >= 20 for i in range(32)]
+    # Complex mask: top half
+    rom.complex_mask = [i >= (LEAF_COUNT // 2) for i in range(LEAF_COUNT)]
 
     return rom

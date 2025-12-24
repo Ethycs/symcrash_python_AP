@@ -18,12 +18,12 @@ from typing import List, Dict, Tuple, Optional
 import math
 import numpy as np
 
-from fixed import (
+from .fixed import (
     sat16, mul_q15_sat, shift_round, slew_q15,
     Q15_ONE, Q15_SHIFT, Q15_HALF
 )
-from frames import VoiceFrame
-from wavelet_packet_trees import PacketTreeSet, BLOCK_SIZE, LEAF_COUNT, NODE_SIZE
+from .frames import VoiceFrame
+from .wavelet_packet_trees import PacketTreeSet, BLOCK_SIZE, LEAF_COUNT, NODE_SIZE
 
 
 # =============================================================================
@@ -387,9 +387,10 @@ class WaveletEngine:
         if voice_id not in self.voice_phase_state:
             # Initialize with position-based phase spread (same as synthesizer default)
             phase_state = []
-            for leaf_idx in range(32):  # LEAF_COUNT
-                for coeff_idx in range(8):  # NODE_SIZE
-                    phase = coeff_idx * math.pi / 4 + leaf_idx * math.pi / 16
+            for leaf_idx in range(LEAF_COUNT):
+                for coeff_idx in range(NODE_SIZE):
+                    # Spread coeffs evenly across 2*pi and leaves across pi
+                    phase = coeff_idx * (math.pi * 2 / NODE_SIZE) + leaf_idx * (math.pi / LEAF_COUNT)
                     phase_state.append(phase)
             self.voice_phase_state[voice_id] = phase_state
         return self.voice_phase_state[voice_id]
@@ -927,7 +928,8 @@ class IDWPTLift:
             phase_state = []
             for leaf_idx in range(LEAF_COUNT):
                 for coeff_idx in range(NODE_SIZE):
-                    phase = coeff_idx * math.pi / 4 + leaf_idx * math.pi / 16
+                    # Spread coeffs evenly across 2*pi and leaves across pi
+                    phase = coeff_idx * (math.pi * 2 / NODE_SIZE) + leaf_idx * (math.pi / LEAF_COUNT)
                     phase_state.append(phase)
             self.voice_phase_state[voice_id] = phase_state
 
@@ -1038,8 +1040,10 @@ class IDWPTLift:
         """
         Expand 64 leaf gains to 256 coefficients.
 
-        Each leaf expands to NODE_SIZE (8) coefficients with envelope shaping.
+        Each leaf expands to NODE_SIZE (4) coefficients with envelope shaping.
         This creates smooth spectral content that IDWPT can process.
+
+        With NODE_SIZE=4: 64 leaves × 4 coeffs = 256 total
 
         Args:
             leaf_gains_q15: 64 Q15 leaf gains
@@ -1049,8 +1053,8 @@ class IDWPTLift:
         """
         coeffs = []
 
-        # Ensure we have exactly 64 leaves (or less)
-        leaves = leaf_gains_q15[:64] if len(leaf_gains_q15) >= 64 else leaf_gains_q15
+        # Ensure we have exactly LEAF_COUNT leaves (or less)
+        leaves = leaf_gains_q15[:LEAF_COUNT] if len(leaf_gains_q15) >= LEAF_COUNT else leaf_gains_q15
 
         for leaf_idx, gain in enumerate(leaves):
             # Create NODE_SIZE coefficients per leaf
@@ -1064,7 +1068,7 @@ class IDWPTLift:
                 coeff = int(gain * envelope)
                 coeffs.append(sat16(coeff))
 
-        # Pad to 256 if needed (shouldn't happen with 64 leaves)
+        # Pad to 256 if needed (shouldn't happen with 64 leaves × 4 coeffs)
         while len(coeffs) < 256:
             coeffs.append(0)
 

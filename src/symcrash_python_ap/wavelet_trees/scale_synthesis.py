@@ -18,7 +18,7 @@ import numpy as np
 from typing import List, Dict
 from dataclasses import dataclass
 
-from fixed import sat16, mul_q15_sat, Q15_ONE
+from ..fixed import sat16, mul_q15_sat, Q15_ONE
 from . import LEAF_COUNT, NODE_SIZE, BLOCK_SIZE
 
 

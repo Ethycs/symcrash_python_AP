@@ -20,10 +20,10 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Tuple, Optional
 import zlib
 
-from fixed import MUL_Q15, Q15_ONE, ONE_Q15
+from .fixed import MUL_Q15, Q15_ONE, ONE_Q15
 
 # Import tree definitions
-from wavelet_trees import (
+from .wavelet_trees import (
     BLOCK_SIZE, MAX_DEPTH, LEAF_COUNT, COEFF_LEN, NODE_SIZE, NODE_COUNT,
     PacketNode, TreeROM, enumerate_leaves,
     build_tree_0_balanced,
