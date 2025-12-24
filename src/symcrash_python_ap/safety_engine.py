@@ -1590,12 +1590,37 @@ class SafetyEngine:
 
         return out
 
-    def apply_declick(self, x: List[int], voice_id: int) -> List[int]:
-        """Full de-click chain for a voice block."""
+    def apply_declick(self, x: List[int], voice_id: int, seam: bool = False,
+                      apply_c1_patch: bool = True) -> List[int]:
+        """
+        Full de-click chain for a voice block.
+
+        Args:
+            x: Audio samples
+            voice_id: Voice identifier
+            seam: If True, apply OLA crossfade at block boundary.
+                  Seam events include: voice start/stop, wet-valid transition,
+                  tree/tuning change. For phase-continuous carrier (beta=0),
+                  seam should always be False.
+            apply_c1_patch: If True, apply C1 discontinuity correction.
+                  Disable for phase-continuous carrier which has no interior
+                  discontinuities.
+
+        IMPORTANT: OLA is ONLY applied when seam=True. This prevents the
+        block-rate artifacts (750 Hz at 48kHz/64 samples) that occur when
+        Hann crossfade is applied to phase-continuous audio.
+        """
         x = self.apply_voice_start(x, voice_id)
         x = self.apply_voice_stop(x, voice_id)
-        x = self.apply_ola(x, voice_id)
-        x = self.apply_c1_patch(x, voice_id)  # Energy-aware interior discontinuity correction
+
+        # OLA only on explicit seam events, NOT every block
+        if seam:
+            x = self.apply_ola(x, voice_id)
+
+        # C1 patch for interior discontinuity correction (wavelet synthesis)
+        if apply_c1_patch:
+            x = self.apply_c1_patch(x, voice_id)
+
         return x
 
     # =========================================================================
@@ -1996,7 +2021,8 @@ class SafetyEngine:
     def step_block(self, L: List[int], R: List[int],
                    params: ParamFrame,
                    apply_master_ola: bool = True,
-                   apply_slew_limit: bool = True) -> Tuple[List[int], List[int]]:
+                   apply_slew_limit: bool = True,
+                   apply_dc_removal: bool = True) -> Tuple[List[int], List[int]]:
         """
         Full safety processing chain (Safety Tail).
 
@@ -2019,6 +2045,8 @@ class SafetyEngine:
             params: ParamFrame with K_mode etc.
             apply_master_ola: Apply master OLA for block boundary smoothing
             apply_slew_limit: Apply final slew limiting
+            apply_dc_removal: Apply DC offset removal. Disable for phase-continuous
+                              carrier signals that are zero-mean over full cycles.
         """
         # 1) Measure metrics
         m = self.measure_metrics(L, R)
@@ -2043,7 +2071,9 @@ class SafetyEngine:
         Lo, Ro = self.apply_limiter(Lq, Rq)
 
         # 7) Remove DC (A3 invariant)
-        Lo, Ro = self.remove_dc(Lo, Ro)
+        # Skip for phase-continuous signals (sine waves have zero-mean over full cycles)
+        if apply_dc_removal:
+            Lo, Ro = self.remove_dc(Lo, Ro)
 
         return Lo, Ro
 

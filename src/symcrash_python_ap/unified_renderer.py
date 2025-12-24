@@ -1134,7 +1134,15 @@ class CarrierLiftPipeline:
         x_wpt = self._apply_dc_blocker(voice_id, x_wpt)
 
         # === Step 5: Blend with latency-aware beta ramp ===
+        # Track if wet just became ready (seam event for OLA)
+        was_not_ready = blend.wet_ready_counter > 0
         wet_ready = blend.advance_block()
+
+        # Mark seam event when wet transitions from not-ready to ready
+        if was_not_ready and wet_ready and blend.beta_target_q15 > 0:
+            blend._just_became_ready = True
+        else:
+            blend._just_became_ready = False
 
         if not wet_ready:
             # During warmup (first 5 blocks), carrier only
@@ -1171,8 +1179,28 @@ class CarrierLiftPipeline:
         # Render voice
         samples = self.render_voice(frame)
 
+        # Determine if this is a seam event requiring OLA crossfade
+        # Seam events: voice start/stop, wet-valid transition, tree change
+        # For carrier-only (beta=0) or steady-state, seam=False
+        seam = False
+
+        # Check for wet-valid transition (wet path just became available)
+        if frame.voice_id in self.blend_states:
+            blend = self.blend_states[frame.voice_id]
+            # Seam when wet transitions from not-ready to ready AND beta > 0
+            if hasattr(blend, '_just_became_ready') and blend._just_became_ready:
+                seam = True
+                blend._just_became_ready = False
+
         # Apply SafetyEngine declick
-        samples = self.safety.apply_declick(samples, frame.voice_id)
+        # - OLA only on seam events
+        # - Disable C1 patch for carrier-only (beta=0) since carrier is phase-continuous
+        is_carrier_only = frame.beta_target_q15 == 0
+        samples = self.safety.apply_declick(
+            samples, frame.voice_id,
+            seam=seam,
+            apply_c1_patch=not is_carrier_only
+        )
 
         # Convert to stereo (using pan from frame)
         pan_q15 = frame.pan_q15
@@ -1184,7 +1212,14 @@ class CarrierLiftPipeline:
         R = [int(s * right_gain) for s in samples]
 
         # Apply SafetyEngine limiting
-        L, R = self.safety.step_block(L, R, self.params)
+        # - Disable master OLA: we use per-voice seam-only OLA
+        # - Disable DC removal: carrier is zero-mean over full cycles, per-block
+        #   DC measurement bounces and causes artifacts
+        L, R = self.safety.step_block(
+            L, R, self.params,
+            apply_master_ola=False,
+            apply_dc_removal=False
+        )
 
         return L, R
 
