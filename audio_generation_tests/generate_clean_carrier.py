@@ -49,16 +49,21 @@ def generate_steady_note(name: str, note: int, duration_sec: float = 3.0):
 
 
 def generate_chromatic_scale(name: str, start_note: int, end_note: int, note_duration_sec: float = 0.25):
-    """Generate chromatic scale with clean carrier."""
+    """Generate chromatic scale with clean carrier (legato style - no voice reset between notes)."""
     pipeline = CarrierLiftPipeline()
 
+    # Start voice once at beginning
+    pipeline.voice_on(0, note=start_note)
+
     # Pure sine
+    if 0 in pipeline.carrier.states:
+        pipeline.carrier.states[0].harmonic_amps_q15 = [Q15_ONE, 0, 0, 0, 0, 0, 0, 0]
+
     L_out, R_out = [], []
 
     for note in range(start_note, end_note + 1):
-        pipeline.voice_on(0, note=note)
-        if 0 in pipeline.carrier.states:
-            pipeline.carrier.states[0].harmonic_amps_q15 = [Q15_ONE, 0, 0, 0, 0, 0, 0, 0]
+        # Change pitch without resetting phase (legato) - 5ms glide for smooth transition
+        pipeline.carrier.set_pitch(0, note, slew_time_ms=5.0)
 
         for _ in range(int(note_duration_sec * BLOCKS_PER_SEC)):
             frame = VoiceFrame(
@@ -72,7 +77,7 @@ def generate_chromatic_scale(name: str, start_note: int, end_note: int, note_dur
             L_out.extend(L)
             R_out.extend(R)
 
-        pipeline.voice_off(0)
+    pipeline.voice_off(0)
 
     metadata = audio_io.write_audio(name, L_out, R_out, subdirectory="clean_carrier")
     print(f"  {name}: {metadata.filepath}")

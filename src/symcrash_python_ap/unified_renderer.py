@@ -1010,8 +1010,11 @@ class CarrierLiftPipeline:
         Uses a cascaded (second-order) high-pass filter for steeper rolloff:
         Two first-order stages: y[n] = x[n] - x[n-1] + alpha * y[n-1]
 
-        with alpha ~= 0.987 for a cutoff around 100Hz @ 48kHz.
+        with alpha ~= 0.997 for a cutoff around 20Hz @ 48kHz.
         Cascaded = 12dB/octave rolloff below cutoff.
+
+        Lower cutoff (20Hz vs 100Hz) to avoid affecting bass fundamentals.
+        C3 = 130.8 Hz, A1 = 55 Hz - need headroom below these.
 
         Args:
             voice_id: Voice identifier (for per-voice state)
@@ -1020,10 +1023,10 @@ class CarrierLiftPipeline:
         Returns:
             DC-blocked samples
         """
-        # DC blocker coefficient for ~100Hz cutoff @ 48kHz
-        # alpha = exp(-2*pi*fc/fs) ≈ 0.987 for fc=100Hz, fs=48kHz
-        # In Q15: 0.987 * 32767 = 32341
-        ALPHA_Q15 = 32341
+        # DC blocker coefficient for ~20Hz cutoff @ 48kHz
+        # alpha = exp(-2*pi*fc/fs) ≈ 0.9974 for fc=20Hz, fs=48kHz
+        # In Q15: 0.9974 * 32767 = 32682
+        ALPHA_Q15 = 32682
 
         # Get or initialize state (two cascaded stages)
         if not hasattr(self, '_dc_block_state'):
