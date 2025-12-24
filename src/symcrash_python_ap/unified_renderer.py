@@ -962,9 +962,18 @@ class CarrierLiftPipeline:
         self.carrier.configure_voice(voice_id, note, cents)
         self.carrier.gate_on(voice_id)
 
-        # Allocate wavelet voice
+        # Allocate wavelet voice AND reset wet state to prevent drones
         self.wavelet_backend.engine.voice_allocate(voice_id)
+        self.wavelet_backend.engine.reset_wet_state(voice_id)
         self.wavelet_backend._allocated_voices.add(voice_id)
+
+        # Initialize DC blocker state for this voice (two cascaded stages)
+        if not hasattr(self, '_dc_block_state'):
+            self._dc_block_state = {}
+        self._dc_block_state[voice_id] = {
+            'x1_prev': 0, 'y1_prev': 0,  # Stage 1
+            'x2_prev': 0, 'y2_prev': 0,  # Stage 2
+        }
 
         # Safety
         self.safety.voice_on(voice_id)
@@ -993,6 +1002,67 @@ class CarrierLiftPipeline:
             morph_time_sec: Transition time (1-5 seconds typical)
         """
         self.tuning.set_target_by_name(tuning_name, morph_time_sec)
+
+    def _apply_dc_blocker(self, voice_id: int, samples: List[int]) -> List[int]:
+        """
+        Apply DC blocker to wet path to remove low-frequency drone.
+
+        Uses a cascaded (second-order) high-pass filter for steeper rolloff:
+        Two first-order stages: y[n] = x[n] - x[n-1] + alpha * y[n-1]
+
+        with alpha ~= 0.987 for a cutoff around 100Hz @ 48kHz.
+        Cascaded = 12dB/octave rolloff below cutoff.
+
+        Args:
+            voice_id: Voice identifier (for per-voice state)
+            samples: Input samples
+
+        Returns:
+            DC-blocked samples
+        """
+        # DC blocker coefficient for ~100Hz cutoff @ 48kHz
+        # alpha = exp(-2*pi*fc/fs) ≈ 0.987 for fc=100Hz, fs=48kHz
+        # In Q15: 0.987 * 32767 = 32341
+        ALPHA_Q15 = 32341
+
+        # Get or initialize state (two cascaded stages)
+        if not hasattr(self, '_dc_block_state'):
+            self._dc_block_state = {}
+        if voice_id not in self._dc_block_state:
+            self._dc_block_state[voice_id] = {
+                'x1_prev': 0, 'y1_prev': 0,  # Stage 1
+                'x2_prev': 0, 'y2_prev': 0,  # Stage 2
+            }
+
+        state = self._dc_block_state[voice_id]
+        x1_prev = state['x1_prev']
+        y1_prev = state['y1_prev']
+        x2_prev = state['x2_prev']
+        y2_prev = state['y2_prev']
+
+        result = []
+        for x in samples:
+            # Stage 1: y1[n] = x[n] - x[n-1] + alpha * y1[n-1]
+            y1 = x - x1_prev + ((ALPHA_Q15 * y1_prev) >> 15)
+            y1 = max(-32768, min(32767, y1))
+            x1_prev = x
+            y1_prev = y1
+
+            # Stage 2: y2[n] = y1[n] - y1[n-1] + alpha * y2[n-1]
+            y2 = y1 - x2_prev + ((ALPHA_Q15 * y2_prev) >> 15)
+            y2 = max(-32768, min(32767, y2))
+            x2_prev = y1
+            y2_prev = y2
+
+            result.append(y2)
+
+        # Save state
+        state['x1_prev'] = x1_prev
+        state['y1_prev'] = y1_prev
+        state['x2_prev'] = x2_prev
+        state['y2_prev'] = y2_prev
+
+        return result
 
     def render_voice(self, frame: 'VoiceFrame') -> List[int]:
         """
@@ -1058,6 +1128,10 @@ class CarrierLiftPipeline:
 
         self.wavelet_backend.apply_params(wavelet_frame)
         x_wpt = self.wavelet_backend.render_block(wavelet_frame, self.block_size)
+
+        # === Step 4b: Apply DC blocker to wet path ===
+        # Prevents low-frequency drone from IDWPT DC leakage
+        x_wpt = self._apply_dc_blocker(voice_id, x_wpt)
 
         # === Step 5: Blend with latency-aware beta ramp ===
         wet_ready = blend.advance_block()

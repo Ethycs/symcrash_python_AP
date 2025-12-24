@@ -490,7 +490,44 @@ class WaveletEngine:
         For backward compatibility with existing code. Equivalent to voice_free().
         """
         self.voice_free(voice_id)
-    
+
+    def reset_wet_state(self, voice_id: int) -> None:
+        """
+        Reset all wet/IDWPT state for a voice.
+
+        Call this on voice start/stop and on explicit "force silence" to ensure
+        no stale state causes drones or DC leakage.
+
+        Clears:
+        - prev_coeffs (no coefficient memory)
+        - phase_state (fresh phase accumulator)
+        - boundary_state (no boundary memory)
+        - voice_tree_state (fresh tree blend state)
+        - RegularityOperator history (no slope memory)
+
+        This is the nuclear option for ensuring the wet path starts clean.
+        """
+        # Clear previous coefficients
+        if voice_id in self.prev_coeffs:
+            del self.prev_coeffs[voice_id]
+
+        # Reset phase state
+        self.reset_phase_state(voice_id)
+
+        # Clear boundary state
+        if voice_id in self.boundary_state:
+            del self.boundary_state[voice_id]
+
+        # Clear tree transition state
+        if voice_id in self.voice_tree_state:
+            del self.voice_tree_state[voice_id]
+
+        # Reset RegularityOperator (clear slope history)
+        if voice_id in self.regularity:
+            R = self.regularity[voice_id]
+            R.prev_sample = 0
+            R._microfade_counter = 0
+
     def render_voice(self, vf: VoiceFrame, apply_regularity: bool = True) -> List[int]:
         """
         Render single VoiceFrame to audio block.
@@ -499,15 +536,19 @@ class WaveletEngine:
             vf: VoiceFrame with coefficients, tree selection, gain
             apply_regularity: Apply Regularity Operator R for click-free output
 
-        The Regularity Operator R handles musical transitions (coefficient
-        changes, tree morphs) by applying slope projection. This is NOT the
-        same as Safety Tail's block-boundary OLA.
+        ARCHITECTURE NOTE (v2 Carrier+Lift):
+        With the carrier owning pitch/phase, the IDWPT is now a "lift" (effect),
+        NOT an oscillator. We disable coefficient slewing and micro-bridge as
+        they were oscillator-stability hacks that now cause drones/stale state.
 
-        Anti-click mechanisms applied:
-        1. Coefficient smoothing: slew-limit coefficient changes
-        2. Micro-bridge: C¹ blend when coefficients change significantly
-        3. Intra-block alpha ramp: smooth tree blend transitions
-        4. Slope projection: final safety net for any remaining spikes
+        Anti-click mechanisms (retained for effect stability):
+        1. Intra-block alpha ramp: smooth tree blend transitions (still useful)
+        2. Slope projection: final safety net for any remaining spikes
+        3. DC blocking: handled in CarrierLiftPipeline
+
+        DISABLED (were oscillator hacks, now harmful):
+        - Coefficient slewing: kept wet alive when it should die
+        - Micro-bridge: had ordering bugs and smeared transients
         """
         voice_id = vf.voice_id
 
@@ -527,48 +568,24 @@ class WaveletEngine:
         state = self.voice_tree_state[voice_id]
         prev_blend = state['prev_blend']
 
-        # === COEFFICIENT SMOOTHING ===
-        # Detect if coefficients changed significantly and need smoothing
+        # === COEFFICIENT HANDLING (v2: NO slewing, direct use) ===
+        # With carrier leading pitch, we use coefficients directly.
+        # Slewing was an oscillator-stability hack that causes drones.
         coeffs_to_use = vf.coeff_q15
-        need_micro_bridge = False
-        old_coeffs = None  # Capture BEFORE overwriting
 
-        if voice_id in self.prev_coeffs:
-            old_coeffs = self.prev_coeffs[voice_id]  # Capture old coefficients FIRST
-            # Check if coefficients changed significantly
-            coeff_diff = self._compute_coeff_change(old_coeffs, vf.coeff_q15)
-            if coeff_diff > 0x1000:  # Significant change threshold
-                need_micro_bridge = True
-                # Slew-limit coefficients toward new values
-                coeffs_to_use = self._slew_coefficients(old_coeffs, vf.coeff_q15)
-
-        # Store current coefficients for next block (AFTER capturing old)
+        # Store current coefficients for tracking (but NOT for slewing)
         self.prev_coeffs[voice_id] = list(vf.coeff_q15)
 
-        # Get phase state for this voice (critical for pitch continuity)
+        # Get phase state for this voice
         phase_state = self.get_phase_state(voice_id)
 
-        # === SYNTHESIS ===
-        if need_micro_bridge and old_coeffs is not None:
-            # Synthesize both old and new, then micro-bridge
-            R = self.get_regularity(voice_id)
-            # For old coeffs, use a copy of phase state (don't advance it)
-            x_old = self.trees.synthesize(tree_a_id, old_coeffs, phase_state=None)
-            x_new = self._synthesize_with_blend(
-                voice_id, tree_a_id, tree_b_id, coeffs_to_use,
-                prev_blend, blend_q15, phase_state
-            )
-            # Apply micro-bridge at block start
-            x_q15 = R.apply_transition(x_old, x_new, 0)
-            # Pad to full block if needed
-            if len(x_q15) < self.B:
-                x_q15.extend(x_new[len(x_q15):])
-        else:
-            # Normal synthesis path
-            x_q15 = self._synthesize_with_blend(
-                voice_id, tree_a_id, tree_b_id, coeffs_to_use,
-                prev_blend, blend_q15, phase_state
-            )
+        # === SYNTHESIS (v2: NO micro-bridge, direct synthesis) ===
+        # Micro-bridge was for oscillator phase continuity.
+        # With carrier+lift, we just synthesize directly.
+        x_q15 = self._synthesize_with_blend(
+            voice_id, tree_a_id, tree_b_id, coeffs_to_use,
+            prev_blend, blend_q15, phase_state
+        )
 
         # Update state for next block
         state['prev_tree_a'] = tree_a_id
