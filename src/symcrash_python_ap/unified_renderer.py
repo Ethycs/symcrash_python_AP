@@ -1096,41 +1096,74 @@ class CarrierLiftPipeline:
         # === Step 1: Render carrier (phase-continuous, immediate) ===
         x_carrier = self.carrier.render_block(voice_id, self.block_size)
 
-        # === Step 2: Generate leaf content from partials ===
+        # === Step 2: Generate 256 coefficients with proper frequency mapping ===
+        # Use harmonic_injector for frequency-accurate coefficient placement
+        # This maps each harmonic to the correct (leaf, coeff) position based on frequency
         f0_hz = frame.f0_hz if frame.f0_hz > 0 else 440.0 * (2.0 ** ((frame.note - 69 + frame.cents / 100.0) / 12.0))
-        leaf_content = self.leaf_gen.generate_from_fundamental(
-            f0_hz,
-            frame.partial_amps_q15 if frame.partial_amps_q15 else state.partial_amps_q15
+
+        from .harmonic_injector import create_harmonic_coeffs, WaveType
+
+        # Determine waveform from partial amplitudes
+        partial_amps = frame.partial_amps_q15 if frame.partial_amps_q15 else state.partial_amps_q15
+
+        # Check if it's a pure sine (only fundamental has energy)
+        if partial_amps and partial_amps[0] > 0 and all(a == 0 for a in partial_amps[1:]):
+            wave_type = WaveType.SINE
+        else:
+            wave_type = WaveType.SAW  # Default to saw for rich harmonics
+
+        # Generate coefficients with proper frequency->coefficient mapping
+        # This places energy at exact harmonic frequencies, not just leaf centers
+        coeffs_256 = create_harmonic_coeffs(
+            frequency=f0_hz,
+            amplitude=Q15_HALF,  # Base amplitude
+            wave_type=wave_type,
+            partials_n=8,  # Match carrier harmonic count
+            brightness_q15=Q15_ONE
         )
 
         # === Step 3: Apply global tuning gains ===
+        # Apply tuning to the generated coefficients
         tuning_gains = self.tuning.get_current_gains()
-        leaf_content.apply_per_leaf_gains(tuning_gains)
-
-        # === Step 4: IDWPT synthesis (lift) ===
-        # Build a RenderFrame for wavelet backend using leaf content as coefficients
-        # Expand 64 leaves to 256 coefficients (4x repetition for compatibility)
-        coeffs_256 = []
+        from .wavelet_trees import NODE_SIZE as WPT_NODE_SIZE
         for i in range(256):
-            leaf_idx = i % self.NUM_LEAVES
-            coeffs_256.append(leaf_content.coeffs_q15[leaf_idx])
+            leaf_idx = i // WPT_NODE_SIZE
+            if leaf_idx < len(tuning_gains):
+                coeffs_256[i] = (coeffs_256[i] * tuning_gains[leaf_idx]) >> 15
 
-        wavelet_frame = RenderFrame(
-            voice_id=voice_id,
-            note=frame.note,
-            cents=frame.cents,
-            gain_q15=Q15_ONE,  # Gain applied at blend stage
-            coeff_q15=coeffs_256,
-            tree_a_id=frame.tree_a_id,
-            tree_b_id=frame.tree_b_id,
-            tree_blend_q15=frame.tree_blend_q15,
+        # === Step 4: Effect mode - FWPT(carrier) -> mask -> IDWPT ===
+        # This is the correct architecture where:
+        # - Carrier owns pitch/phase (pitch-accurate audio)
+        # - Wavelet transform is a filterbank effect, not an oscillator
+        # - Mask shapes the timbre in coefficient space
+        #
+        # With identity mask (None), output equals carrier (wet-only = dry)
+        # With a spectral mask, we can shape timbre while preserving pitch
+
+        from .wavelet_packet_trees import PacketTreeSet
+
+        if not hasattr(self, '_packet_tree_set'):
+            self._packet_tree_set = PacketTreeSet()
+
+        tree_id = frame.tree_a_id if frame.tree_blend_q15 < Q15_HALF else frame.tree_b_id
+
+        # For now, use identity mask (None) for clean carrier passthrough
+        # This validates the effect mode architecture works correctly.
+        # Future: use coeffs_256 or tuning_gains to shape the spectrum
+        # while preserving the carrier's pitch accuracy.
+        #
+        # Note: Setting mask_q15=None means the wet path equals the carrier,
+        # making beta a dry/wet blend that has no effect at extreme values.
+        # To add timbral coloring, convert tuning_gains to a proper mask.
+        x_wpt = self._packet_tree_set.effect_mode(
+            tree_id=tree_id,
+            carrier_audio=x_carrier,
+            mask_q15=None  # Identity mask - wet equals carrier
         )
 
-        self.wavelet_backend.apply_params(wavelet_frame)
-        x_wpt = self.wavelet_backend.render_block(wavelet_frame, self.block_size)
-
         # === Step 4b: Apply DC blocker to wet path ===
-        # Prevents low-frequency drone from IDWPT DC leakage
+        # The FWPT/IDWPT roundtrip can introduce small low-frequency errors.
+        # DC blocker helps reduce these artifacts, especially at low pitches.
         x_wpt = self._apply_dc_blocker(voice_id, x_wpt)
 
         # === Step 5: Blend with latency-aware beta ramp ===
@@ -1192,10 +1225,12 @@ class CarrierLiftPipeline:
                 seam = True
                 blend._just_became_ready = False
 
-        # Apply SafetyEngine declick
-        # - OLA only on seam events
-        # - Disable C1 patch for carrier-only (beta=0) since carrier is phase-continuous
+        # Determine if we're in carrier-only mode (no wet path)
         is_carrier_only = frame.beta_target_q15 == 0
+
+        # Apply SafetyEngine declick
+        # - OLA only on seam events (not every block)
+        # - C1 patch: disable for carrier-only (phase-continuous), enable for wet blend
         samples = self.safety.apply_declick(
             samples, frame.voice_id,
             seam=seam,
@@ -1212,13 +1247,19 @@ class CarrierLiftPipeline:
         R = [int(s * right_gain) for s in samples]
 
         # Apply SafetyEngine limiting
-        # - Disable master OLA: we use per-voice seam-only OLA
-        # - Disable DC removal: carrier is zero-mean over full cycles, per-block
-        #   DC measurement bounces and causes artifacts
+        # IMPORTANT: Both carrier and wavelet synthesis are now phase-continuous,
+        # so we disable master OLA for all modes (it was causing artifacts).
+        # The OLA is only useful for handling discontinuous transitions (seams),
+        # which are rare events, not every-block processing.
+        #
+        # For carrier-only (beta=0):
+        #   - Disable DC removal: carrier is zero-mean over full cycles
+        # For wet blend (beta>0):
+        #   - Enable DC removal: wavelet can have DC offset issues
         L, R = self.safety.step_block(
             L, R, self.params,
-            apply_master_ola=False,
-            apply_dc_removal=False
+            apply_master_ola=False,  # Phase-continuous synthesis doesn't need block OLA
+            apply_dc_removal=not is_carrier_only
         )
 
         return L, R

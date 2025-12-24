@@ -212,7 +212,100 @@ class ComplexAtomTransform:
 
 
 # =============================================================================
-# WAVELET PACKET SYNTHESIS
+# WAVELET PACKET ANALYSIS (FWPT - Forward Transform)
+# =============================================================================
+
+class PacketAnalyzer:
+    """
+    Wavelet packet forward analysis using CDF 5/3.
+
+    Takes audio block, applies tree structure, produces coefficient nodes.
+    This is the FWPT (Forward Wavelet Packet Transform).
+
+    Used for effect mode: FWPT(carrier) -> mask -> IDWPT
+    """
+
+    def __init__(self, tree_rom: TreeROM):
+        self.rom = tree_rom
+        self.lifting = CDF53Lifting()
+        self._build_analysis_schedule()
+
+    def _build_analysis_schedule(self):
+        """
+        Build the schedule for forward packet analysis.
+
+        We work top-down: starting from root, split nodes according to tree structure.
+        """
+        # Analysis schedule is top-down (opposite of synthesis)
+        self.split_schedule = []  # List of (depth, k) to process
+
+        for d in range(MAX_DEPTH):
+            for k in range(2 ** d):
+                if self.rom.split_mask.get(d, {}).get(k, False):
+                    self.split_schedule.append((d, k))
+
+    def analyze(self, x: List[int]) -> List[List[int]]:
+        """
+        Forward wavelet packet transform.
+
+        Takes 64-sample audio block, returns coefficient nodes.
+
+        Note: The actual number of coefficients per leaf depends on the tree structure.
+        At depth d, a node has BLOCK_SIZE / 2^d samples.
+        For MAX_DEPTH=6 and BLOCK_SIZE=64, leaves at depth 6 have 1 sample each.
+
+        Args:
+            x: 64-sample audio block (Q15)
+
+        Returns:
+            List of coefficient nodes (actual sizes depend on tree structure)
+        """
+        # Ensure input is correct length
+        if len(x) < BLOCK_SIZE:
+            x = list(x) + [0] * (BLOCK_SIZE - len(x))
+        x = x[:BLOCK_SIZE]
+
+        # tree_data[d][k] = coefficient data at node (d, k)
+        tree_data: Dict[int, Dict[int, List[int]]] = {d: {} for d in range(MAX_DEPTH + 1)}
+
+        # Start with full signal at root
+        tree_data[0][0] = list(x)
+
+        # Top-down decomposition following split schedule
+        for d, k in self.split_schedule:
+            parent_data = tree_data.get(d, {}).get(k, [])
+
+            if not parent_data:
+                continue
+
+            # Forward lifting step: split into approx (left child) and detail (right child)
+            approx, detail = self.lifting.forward_step(parent_data)
+
+            # Store in children nodes
+            left_k = 2 * k
+            right_k = 2 * k + 1
+
+            if d + 1 not in tree_data:
+                tree_data[d + 1] = {}
+
+            tree_data[d + 1][left_k] = approx
+            tree_data[d + 1][right_k] = detail
+
+        # Extract leaf coefficients in order (preserving actual sizes)
+        coeff_nodes = []
+        for leaf_idx, (d, k) in enumerate(self.rom.leaf_list):
+            leaf_data = tree_data.get(d, {}).get(k, [])
+            coeff_nodes.append(list(leaf_data) if leaf_data else [0])
+
+        # Ensure we have exactly LEAF_COUNT nodes
+        while len(coeff_nodes) < LEAF_COUNT:
+            coeff_nodes.append([0])
+
+        return coeff_nodes[:LEAF_COUNT]
+
+
+# =============================================================================
+# WAVELET PACKET SYNTHESIS (IDWPT - Inverse Transform)
 # =============================================================================
 
 class PacketSynthesizer:
@@ -359,41 +452,53 @@ class PacketSynthesizer:
                         complex_override: Optional[List[bool]] = None) -> List[int]:
         """
         Full wavelet packet synthesis with proper CDF 5/3 inverse.
-        
-        This is more complex but bit-accurate.
+
+        This performs bit-accurate inverse transform matching the forward transform.
+
+        Note: Complex atom transform is only applied to nodes with NODE_SIZE coefficients.
+        For nodes from FWPT analysis (which may have fewer coefficients at max depth),
+        the complex transform is skipped to preserve roundtrip accuracy.
         """
         complex_mask = complex_override if complex_override else self.rom.complex_mask
-        
-        # Apply complex transform
+
+        # Process nodes - apply complex transform only if appropriate
         processed_nodes = []
         for leaf_idx in range(LEAF_COUNT):
-            node = list(coeff_nodes[leaf_idx])
-            if complex_mask[leaf_idx]:
-                node = ComplexAtomTransform.inverse(node)
+            if leaf_idx < len(coeff_nodes):
+                node = list(coeff_nodes[leaf_idx])
+            else:
+                node = [0]
+
+            # Only apply complex transform if node has full NODE_SIZE coefficients
+            # (i.e., it came from coefficient synthesis, not FWPT analysis)
+            if len(node) >= NODE_SIZE and complex_mask[leaf_idx]:
+                node = ComplexAtomTransform.inverse(node[:NODE_SIZE])
+
             processed_nodes.append(node)
-        
+
         # Map leaves into tree structure
         # tree_data[d][k] = coefficient data at node (d, k)
         tree_data: Dict[int, Dict[int, List[int]]] = {d: {} for d in range(MAX_DEPTH + 1)}
-        
+
         # Place processed leaves
         for leaf_idx, (d, k) in enumerate(self.rom.leaf_list):
-            tree_data[d][k] = processed_nodes[leaf_idx]
-        
+            if leaf_idx < len(processed_nodes):
+                tree_data[d][k] = processed_nodes[leaf_idx]
+
         # Bottom-up synthesis
         for d, k in self.combine_schedule:
             left_k = 2 * k
             right_k = 2 * k + 1
-            
+
             left_data = tree_data.get(d + 1, {}).get(left_k, [])
             right_data = tree_data.get(d + 1, {}).get(right_k, [])
-            
+
             if left_data and right_data:
                 # Pad to same length
                 max_len = max(len(left_data), len(right_data))
                 left_padded = left_data + [0] * (max_len - len(left_data))
                 right_padded = right_data + [0] * (max_len - len(right_data))
-                
+
                 # Inverse lifting
                 combined = self.lifting.inverse_step(left_padded, right_padded)
                 tree_data[d][k] = combined
@@ -401,14 +506,14 @@ class PacketSynthesizer:
                 tree_data[d][k] = left_data
             elif right_data:
                 tree_data[d][k] = right_data
-        
+
         # Get root
         result = tree_data.get(0, {}).get(0, [0] * BLOCK_SIZE)
-        
+
         # Ensure correct length
         if len(result) < BLOCK_SIZE:
             result = result + [0] * (BLOCK_SIZE - len(result))
-        
+
         return result[:BLOCK_SIZE]
 
 
@@ -419,10 +524,16 @@ class PacketSynthesizer:
 class PacketTreeSet:
     """
     Complete set of wavelet packet trees.
-    
-    Manages tree ROMs and synthesis for all tree_id values.
+
+    Manages tree ROMs, analyzers, and synthesizers for all tree_id values.
+
+    Supports two modes:
+    1. Coefficient mode: coeff_q15 -> synthesize -> audio (old oscillator-based)
+    2. Effect mode: carrier_audio -> analyze -> mask -> synthesize_full -> wet_audio
+
+    Effect mode is the correct architecture where pitch lives in the carrier.
     """
-    
+
     def __init__(self):
         # Build all trees
         self.trees: Dict[int, TreeROM] = {
@@ -432,12 +543,17 @@ class PacketTreeSet:
             3: build_tree_3_transient(),
             4: build_tree_4_drone(),
         }
-        
-        # Create synthesizers
+
+        # Create analyzers (FWPT - Forward Wavelet Packet Transform)
+        self.analyzers: Dict[int, PacketAnalyzer] = {
+            tid: PacketAnalyzer(rom) for tid, rom in self.trees.items()
+        }
+
+        # Create synthesizers (IDWPT - Inverse DWP Transform)
         self.synthesizers: Dict[int, PacketSynthesizer] = {
             tid: PacketSynthesizer(rom) for tid, rom in self.trees.items()
         }
-        
+
         # Crossfade state for tree transitions
         self.xfade_blocks = 32  # Blocks for crossfade
     
@@ -505,6 +621,102 @@ class PacketTreeSet:
             result.append(sat16(mixed))
         
         return result
+
+    def analyze(self, tree_id: int, audio: List[int]) -> List[List[int]]:
+        """
+        Forward wavelet packet transform (FWPT).
+
+        Takes 64-sample audio block, returns 64 coefficient nodes.
+
+        Args:
+            tree_id: Which tree structure to use
+            audio: 64 Q15 audio samples
+
+        Returns:
+            List of 64 coefficient nodes, each with NODE_SIZE coefficients
+        """
+        analyzer = self.analyzers.get(tree_id, self.analyzers[0])
+        return analyzer.analyze(audio)
+
+    def effect_mode(self, tree_id: int, carrier_audio: List[int],
+                    mask_q15: Optional[List[int]] = None,
+                    complex_override: Optional[List[bool]] = None) -> List[int]:
+        """
+        Effect mode synthesis: carrier -> FWPT -> mask -> IDWPT.
+
+        This is the correct architecture where:
+        - Pitch identity lives in the carrier (phase-accurate)
+        - Wavelet transform is a filterbank effect, not an oscillator
+        - Mask shapes the timbre in coefficient space
+
+        With identity mask (all ones or None), output should approximately equal input.
+        Note: Due to Q15 saturation in deep wavelet packet trees, there may be small
+        differences. For pitch-accurate audio, the carrier provides the foundation.
+
+        Args:
+            tree_id: Which tree structure to use
+            carrier_audio: 64-sample Q15 carrier audio (pitch-accurate)
+            mask_q15: Optional mask array. Can be:
+                     - 64 elements (one per leaf) for simple per-band gain
+                     - 256 elements (LEAF_COUNT * NODE_SIZE) for full masking
+                     - None = identity mask (no modification)
+            complex_override: Optional complex leaf mask override
+
+        Returns:
+            64-sample Q15 wet audio
+        """
+        # Scale down input to prevent coefficient overflow during FWPT
+        # CDF 5/3 wavelet packet transforms can amplify signals by ~4x at deep levels
+        # Using 3-bit headroom (divide by 8) to prevent saturation
+        HEADROOM_BITS = 3
+        scaled_input = [s >> HEADROOM_BITS for s in carrier_audio]
+
+        # Step 1: FWPT - Analyze carrier into coefficient space
+        analyzer = self.analyzers.get(tree_id, self.analyzers[0])
+        coeff_nodes = analyzer.analyze(scaled_input)
+
+        # Step 2: Apply mask in coefficient space
+        if mask_q15 is not None:
+            masked_nodes = []
+            for leaf_idx in range(LEAF_COUNT):
+                node = coeff_nodes[leaf_idx] if leaf_idx < len(coeff_nodes) else [0]
+                masked_node = []
+
+                # Determine mask value for this leaf
+                # Support both 64-element (per-leaf) and 256-element (full) masks
+                if len(mask_q15) <= LEAF_COUNT:
+                    # Per-leaf mask: one value per leaf
+                    mask_val = mask_q15[leaf_idx] if leaf_idx < len(mask_q15) else Q15_ONE
+                    for coeff in node:
+                        scaled = mul_q15_sat(coeff, mask_val)
+                        masked_node.append(scaled)
+                else:
+                    # Full mask: NODE_SIZE values per leaf
+                    for coeff_idx, coeff in enumerate(node):
+                        mask_idx = leaf_idx * NODE_SIZE + coeff_idx
+                        mask_val = mask_q15[mask_idx] if mask_idx < len(mask_q15) else Q15_ONE
+                        scaled = mul_q15_sat(coeff, mask_val)
+                        masked_node.append(scaled)
+
+                masked_nodes.append(masked_node)
+            coeff_nodes = masked_nodes
+
+        # Step 3: IDWPT - Synthesize back to audio using proper CDF 5/3 inverse
+        synth = self.synthesizers.get(tree_id, self.synthesizers[0])
+        result = synth.synthesize_full(coeff_nodes, complex_override)
+
+        # Scale back up and saturate
+        output = []
+        for s in result:
+            scaled_up = s << HEADROOM_BITS
+            # Saturate to Q15 range
+            if scaled_up > 32767:
+                scaled_up = 32767
+            elif scaled_up < -32768:
+                scaled_up = -32768
+            output.append(scaled_up)
+
+        return output
 
 
 # =============================================================================

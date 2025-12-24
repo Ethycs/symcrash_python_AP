@@ -527,7 +527,8 @@ def create_harmonic_coeffs(frequency: float = 220.0,
                            amplitude: int = 0x5000,
                            wave_type: WaveType = WaveType.SAW,
                            partials_n: int = 12,
-                           brightness_q15: int = Q15_ONE) -> List[int]:
+                           brightness_q15: int = Q15_ONE,
+                           spread_to_neighbors: bool = False) -> List[int]:
     """
     Create harmonic coefficient pattern for a given frequency and wave type.
 
@@ -540,6 +541,9 @@ def create_harmonic_coeffs(frequency: float = 220.0,
         wave_type: Wave type enum
         partials_n: Number of partials to generate
         brightness_q15: Brightness control (affects high partial rolloff)
+        spread_to_neighbors: If True, spread energy to adjacent coefficients
+            for richer/fatter sound. If False (default), place energy only at
+            the exact coefficient for cleaner frequency targeting.
 
     Returns:
         256-coefficient vector with harmonic energy placed in appropriate leaves
@@ -579,21 +583,22 @@ def create_harmonic_coeffs(frequency: float = 220.0,
 
         node_start = leaf_idx * NODE_SIZE
 
-        # Place energy with spread for richer synthesis
+        # Place energy at target coefficient
         coeffs[node_start + coeff_idx] = sat16(
             coeffs[node_start + coeff_idx] + amp_k
         )
 
-        # Spread to neighbors
-        spread_amp = amp_k // 4
-        if coeff_idx > 0:
-            coeffs[node_start + coeff_idx - 1] = sat16(
-                coeffs[node_start + coeff_idx - 1] + spread_amp
-            )
-        if coeff_idx < NODE_SIZE - 1:
-            coeffs[node_start + coeff_idx + 1] = sat16(
-                coeffs[node_start + coeff_idx + 1] + spread_amp
-            )
+        # Optionally spread to neighbors for richer sound
+        if spread_to_neighbors:
+            spread_amp = amp_k // 4
+            if coeff_idx > 0:
+                coeffs[node_start + coeff_idx - 1] = sat16(
+                    coeffs[node_start + coeff_idx - 1] + spread_amp
+                )
+            if coeff_idx < NODE_SIZE - 1:
+                coeffs[node_start + coeff_idx + 1] = sat16(
+                    coeffs[node_start + coeff_idx + 1] + spread_amp
+                )
 
     return coeffs
 
