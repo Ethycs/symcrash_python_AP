@@ -330,8 +330,8 @@ class PacketSynthesizer:
                 omega = 2 * np.pi * sub_freq_hz / sample_rate
 
                 # Get phase from state if available, otherwise use position-based phase
+                phase_idx = leaf_idx * NODE_SIZE + coeff_idx
                 if phase_state is not None:
-                    phase_idx = leaf_idx * NODE_SIZE + coeff_idx
                     phase = phase_state[phase_idx]
                 else:
                     # Use coefficient position for initial phase spread
@@ -342,6 +342,15 @@ class PacketSynthesizer:
                     carrier = np.sin(omega * i + phase)
                     sample = int(coeff_val * carrier)
                     output[i] = sat16(output[i] + sample)
+
+                # Update phase state for next block (advance by block length)
+                # This is critical for phase continuity across blocks!
+                if phase_state is not None:
+                    # Advance phase by omega * BLOCK_SIZE
+                    new_phase = phase + omega * BLOCK_SIZE
+                    # Wrap to [-pi, pi] to prevent float drift
+                    new_phase = np.fmod(new_phase + np.pi, 2 * np.pi) - np.pi
+                    phase_state[phase_idx] = new_phase
 
         return output
     
@@ -456,13 +465,25 @@ class PacketTreeSet:
         return nodes
     
     def synthesize(self, tree_id: int, coeff_q15: List[int],
-                   complex_override: Optional[List[bool]] = None) -> List[int]:
+                   complex_override: Optional[List[bool]] = None,
+                   phase_state: Optional[List[float]] = None) -> List[int]:
         """
         Full synthesis: coefficients -> audio block.
+
+        Args:
+            tree_id: Which tree structure to use
+            coeff_q15: 256 Q15 coefficients
+            complex_override: Optional complex leaf mask
+            phase_state: Optional 256-element phase accumulator array.
+                        If provided, phases are updated in-place for continuity
+                        across blocks. Critical for pitched audio.
+
+        Returns:
+            64 Q15 audio samples
         """
         nodes = self.unpack_coeffs(tree_id, coeff_q15)
         synth = self.synthesizers.get(tree_id, self.synthesizers[0])
-        return synth.synthesize(nodes, complex_override)
+        return synth.synthesize(nodes, complex_override, phase_state)
     
     def synthesize_crossfade(self, old_tree_id: int, new_tree_id: int,
                              coeff_q15: List[int], alpha_q15: int) -> List[int]:

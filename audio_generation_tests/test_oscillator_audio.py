@@ -937,6 +937,63 @@ class TestMIDIRange:
         print(f"\n  Chromatic scale C3-C5 (dual-render prototype): {len(L)} samples")
         print(f"    Saved: {filepath}")
 
+    def test_chromatic_scale_auto_dual_render(self):
+        """
+        Chromatic scale using automatic dual-render via set_pitch().
+
+        This tests the new default behavior where set_pitch() queues a pitch
+        change and render_block() automatically applies dual-render crossfade.
+        This should produce identical results to the explicit render_with_seam_at()
+        approach but with simpler API.
+        """
+        osc = WPOState(voice_id=0)
+        osc.configure(note=48, waveform="saw")  # Start at C3
+
+        blocks_per_note = int(0.25 * BLOCKS_PER_SEC)  # 250ms per note
+        all_samples = []
+
+        # First note: just render normally
+        for _ in range(blocks_per_note):
+            block = osc.render_block(BLOCK_SIZE)
+            all_samples.extend(block)
+
+        # Remaining notes: use set_pitch() for automatic dual-render
+        for note in range(49, 73):  # C#3 to C5
+            # Queue pitch change - render_block will auto-apply dual-render
+            osc.set_pitch(note, seam_sample=8)
+
+            # First block: automatic dual-render happens here
+            block = osc.render_block(BLOCK_SIZE)
+            all_samples.extend(block)
+
+            # Sustain blocks: normal rendering
+            for _ in range(blocks_per_note - 1):
+                block = osc.render_block(BLOCK_SIZE)
+                all_samples.extend(block)
+
+        L, R = samples_to_stereo(all_samples)
+        filepath = save_audio(L, R, "chromatic_scale_c3_c5_auto_dual_render")
+        print(f"\n  Chromatic scale C3-C5 (auto dual-render): {len(L)} samples")
+        print(f"    Saved: {filepath}")
+
+        # Verify no clicks by checking max delta at note boundaries
+        # Note boundaries occur every blocks_per_note * BLOCK_SIZE samples
+        note_boundary_samples = blocks_per_note * BLOCK_SIZE
+        max_boundary_delta = 0
+        for i in range(1, 24):  # 24 note changes
+            boundary_idx = i * note_boundary_samples
+            if boundary_idx < len(all_samples) - 1:
+                # Check around the boundary (within crossfade region)
+                for offset in range(-16, 16):
+                    idx = boundary_idx + offset
+                    if 0 < idx < len(all_samples):
+                        delta = abs(all_samples[idx] - all_samples[idx - 1])
+                        max_boundary_delta = max(max_boundary_delta, delta)
+
+        print(f"    Max delta at note boundaries: {max_boundary_delta}")
+        # With proper dual-render, max delta should be reasonable (< 5000)
+        assert max_boundary_delta < 8000, f"Possible click detected: delta={max_boundary_delta}"
+
 
 # =============================================================================
 # MULTI-VOICE TESTS

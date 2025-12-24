@@ -90,6 +90,49 @@ def freq_to_leaf(freq_hz: float) -> int:
     return LEAF_COUNT - 1
 
 
+def freq_to_leaf_and_coeff(freq_hz: float) -> Tuple[int, int]:
+    """
+    Map frequency to (leaf_index, coeff_index) for precise frequency encoding.
+
+    Each leaf covers a frequency band, and the 8 coefficients within encode
+    position within that band:
+    - coeff 0 = low end of band
+    - coeff 7 = high end of band
+
+    This allows sub-band frequency resolution, which is critical for
+    proper pitch reproduction in synthesis.
+
+    Returns:
+        (leaf_idx, coeff_idx) where coeff_idx is 0-7
+    """
+    if freq_hz < 0:
+        return 0, 0
+    if freq_hz >= NYQUIST:
+        return LEAF_COUNT - 1, NODE_SIZE - 1
+
+    # Find leaf
+    leaf_idx = freq_to_leaf(freq_hz)
+
+    # Compute position within leaf's frequency band
+    band_low = LEAF_EDGES_HZ[leaf_idx]
+    band_high = LEAF_EDGES_HZ[leaf_idx + 1]
+    band_width = band_high - band_low
+
+    if band_width <= 0:
+        return leaf_idx, 0
+
+    # Normalize position in band: 0 = low edge, 1 = high edge
+    pos_in_band = (freq_hz - band_low) / band_width
+    pos_in_band = max(0.0, min(1.0, pos_in_band))
+
+    # Map to coefficient index (0-7)
+    # Use floor to get stable mapping
+    coeff_idx = int(pos_in_band * NODE_SIZE)
+    coeff_idx = max(0, min(NODE_SIZE - 1, coeff_idx))
+
+    return leaf_idx, coeff_idx
+
+
 # =============================================================================
 # NOTE TO FREQUENCY CONVERSION
 # =============================================================================
@@ -271,6 +314,12 @@ class HarmonicTargetGenerator:
         """
         Generate harmonic target for a voice.
 
+        Uses freq_to_leaf_and_coeff for precise frequency encoding within
+        each leaf's 8-coefficient structure. This is critical for proper
+        pitch reproduction: the coefficient index encodes the position
+        within the frequency band, allowing the synthesizer to reconstruct
+        the correct frequency.
+
         Args:
             voice_id: Voice identifier
             include_dense: If True, also generate full 256-coeff dense target
@@ -283,13 +332,14 @@ class HarmonicTargetGenerator:
         # Get fundamental frequency
         f0 = note_to_freq(state.note_u8, state.cents_i16)
 
-        # Build sparse target
+        # Build sparse target with precise frequency mapping
         leaf_indices = []
         leaf_amplitudes = []
         coeff_indices = []
 
-        # Accumulate per-leaf (multiple partials may hit same leaf)
-        leaf_energy: Dict[int, int] = {}
+        # Track per-(leaf, coeff) energy for proper accumulation
+        # Key: (leaf_idx, coeff_idx), Value: accumulated amplitude
+        coeff_energy: Dict[Tuple[int, int], int] = {}
 
         for k in range(1, state.partials_n + 1):
             # Partial frequency
@@ -307,20 +357,21 @@ class HarmonicTargetGenerator:
             if amp_k < 10:
                 continue
 
-            # Map to leaf
-            leaf_idx = freq_to_leaf(f_k)
+            # Map to (leaf, coeff) for precise frequency encoding
+            leaf_idx, coeff_idx = freq_to_leaf_and_coeff(f_k)
 
-            # Accumulate energy in leaf
-            if leaf_idx in leaf_energy:
-                leaf_energy[leaf_idx] = sat16(leaf_energy[leaf_idx] + amp_k)
+            # Accumulate energy at this specific (leaf, coeff)
+            key = (leaf_idx, coeff_idx)
+            if key in coeff_energy:
+                coeff_energy[key] = sat16(coeff_energy[key] + amp_k)
             else:
-                leaf_energy[leaf_idx] = amp_k
+                coeff_energy[key] = amp_k
 
         # Convert to sorted lists
-        for leaf_idx in sorted(leaf_energy.keys()):
+        for (leaf_idx, coeff_idx) in sorted(coeff_energy.keys()):
             leaf_indices.append(leaf_idx)
-            leaf_amplitudes.append(leaf_energy[leaf_idx])
-            coeff_indices.append(0)  # v0: always target coeff 0 in each leaf
+            leaf_amplitudes.append(coeff_energy[(leaf_idx, coeff_idx)])
+            coeff_indices.append(coeff_idx)
 
         target = HarmonicTarget(
             leaf_indices=leaf_indices,

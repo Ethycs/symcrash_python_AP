@@ -756,6 +756,12 @@ class WPOState:
     pending_seam: bool = False  # Seam at block boundary
     pending_seam_old_samples: List[int] = field(default_factory=list)  # Tail of previous block
 
+    # Pending pitch change (for automatic dual-render)
+    pending_pitch_change: bool = False
+    pending_new_note: Optional[int] = None
+    pending_new_cents: int = 0
+    pending_seam_sample: int = 0  # Sample index for the pitch change (default = start of block)
+
     def add_seam_hint(self, sample_index: int) -> None:
         """
         Add a seam hint at a specific sample index within the next block.
@@ -844,12 +850,31 @@ class WPOState:
         # Recompute normalization after archetype modifications
         self.scaffold._compute_normalization()
 
-    def set_pitch(self, note: int, cents: int = 0) -> None:
+    def set_pitch(self, note: int, cents: int = 0, seam_sample: int = 0) -> None:
         """
         Change pitch without resetting phase (phase-continuous).
 
-        Use this for legato, portamento, or pitch bends.
-        Instant change - for glide, use glide_to().
+        Uses dual-render crossfade by default for click-free transitions.
+        The pitch change is queued and applied during the next render_block()
+        with automatic crossfade at the seam point.
+
+        Args:
+            note: MIDI note number
+            cents: Fine tuning in cents
+            seam_sample: Sample index within the block where the change occurs
+                        (default 0 = start of block)
+        """
+        self.pending_pitch_change = True
+        self.pending_new_note = note
+        self.pending_new_cents = cents
+        self.pending_seam_sample = seam_sample
+
+    def set_pitch_immediate(self, note: int, cents: int = 0) -> None:
+        """
+        Change pitch immediately without dual-render crossfade.
+
+        Use this only when you know a click won't occur (e.g., voice is silent)
+        or when you're manually handling the crossfade yourself.
         """
         self.phase.set_midi_note(note, cents)
 
@@ -1096,10 +1121,11 @@ class WPOState:
         prng: Optional[VoicePRNG] = None,
     ) -> List[int]:
         """
-        Render a full block of samples with C¹-continuous seam bridging.
+        Render a full block of samples with automatic dual-render for pitch changes.
 
-        If seam hints are present, applies Hermite interpolation at those
-        points to ensure both value and slope continuity.
+        If a pitch change is pending (via set_pitch()), automatically uses
+        dual-render crossfade for click-free transitions. Otherwise renders
+        normally with C¹-continuous seam bridging for any seam hints.
 
         Args:
             block_size: Number of samples
@@ -1108,6 +1134,23 @@ class WPOState:
         Returns:
             List of Q15 samples
         """
+        # Check for pending pitch change - use dual-render automatically
+        if self.pending_pitch_change and self.pending_new_note is not None:
+            samples = self.render_with_seam_at(
+                block_size=block_size,
+                seam_index=self.pending_seam_sample,
+                new_note=self.pending_new_note,
+                new_cents=self.pending_new_cents,
+                prng=prng,
+            )
+            # Clear the pending pitch change
+            self.pending_pitch_change = False
+            self.pending_new_note = None
+            self.pending_new_cents = 0
+            self.pending_seam_sample = 0
+            return samples
+
+        # Normal render path (no pitch change pending)
         # Update bridge transition state once per block
         # Note: glide is updated per-sample in render_sample() for smoothness
         self._update_bridge()

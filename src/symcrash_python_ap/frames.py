@@ -41,6 +41,12 @@ class VoiceFrame:
     - Wavelet Engine handles HOW to blend coefficients (numerical)
 
     Tree IDs: 0=Balanced, 1=Harmonic, 2=Texture, 3=Impact, 4=Drone
+
+    Carrier/Lift Architecture (v2):
+    - f0_hz: Fundamental frequency for carrier oscillator
+    - beta_target_q15: Dry/wet blend target (0=carrier, 32767=wavelet)
+    - partial_amps_q15: Harmonic amplitudes for leaf generation
+    - allow_transient: If True, snappy changes are allowed (e.g., note attack)
     """
     tag: int = 0xA0
     voice_id: int = 0
@@ -67,6 +73,35 @@ class VoiceFrame:
     is_starting: bool = False    # True on first block after note-on
     is_stopping: bool = False    # True when transitioning to FREE
     is_active: bool = True       # False when voice is done
+
+    # =========================================================================
+    # Carrier/Lift Architecture Fields (v2)
+    # =========================================================================
+
+    # Fundamental frequency for carrier oscillator (Hz)
+    # The carrier provides phase-continuous pitch; IDWPT shapes timbre
+    f0_hz: float = 440.0
+
+    # Carrier/Lift blend target (beta)
+    # 0 = pure carrier (dry), 32767 = pure wavelet (wet)
+    # Default ~75% wet for rich wavelet texture with carrier stability
+    beta_target_q15: int = 24576
+
+    # Harmonic amplitudes for leaf generation (Q15)
+    # Index 0 = fundamental, index 1 = 2nd harmonic, etc.
+    # These are distributed across leaves via Gaussian soft assignment
+    partial_amps_q15: List[int] = field(
+        default_factory=lambda: [32767, 16384, 8192, 4096, 2048, 1024, 512, 256]
+    )
+
+    # Transient window flag
+    # If True, snappy parameter changes are allowed (note attack, percussive hit)
+    # If False, all changes must be smoothed/slewed
+    allow_transient: bool = False
+
+    # MIDI note info (for carrier frequency derivation if f0_hz not set)
+    note: int = 60               # MIDI note number
+    cents: int = 0               # Fine tuning in cents
 
     # Legacy compatibility: convert float betas to IDs
     @property

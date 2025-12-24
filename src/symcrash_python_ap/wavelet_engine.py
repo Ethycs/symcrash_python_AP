@@ -357,6 +357,10 @@ class WaveletEngine:
         # Regularity Operator R per voice (handles musical transitions)
         self.regularity: Dict[int, RegularityOperator] = {}
 
+        # Phase state per voice for continuous synthesis (256 floats per voice)
+        # Maps voice_id -> List[float] of phase accumulators for each coefficient
+        self.voice_phase_state: Dict[int, List[float]] = {}
+
         # Coefficient smoothing rate (Q15 slew per block)
         # Higher = faster tracking, Lower = smoother but laggier
         self.coeff_slew_rate = 0x2000  # ~25% per block
@@ -369,6 +373,31 @@ class WaveletEngine:
         if voice_id not in self.regularity:
             self.regularity[voice_id] = RegularityOperator()
         return self.regularity[voice_id]
+
+    def get_phase_state(self, voice_id: int) -> List[float]:
+        """
+        Get or create phase state array for a voice.
+
+        Phase state is critical for pitched audio synthesis - it ensures
+        continuity of sinusoidal components across block boundaries.
+
+        Returns:
+            256-element array of phase accumulators (one per coefficient)
+        """
+        if voice_id not in self.voice_phase_state:
+            # Initialize with position-based phase spread (same as synthesizer default)
+            phase_state = []
+            for leaf_idx in range(32):  # LEAF_COUNT
+                for coeff_idx in range(8):  # NODE_SIZE
+                    phase = coeff_idx * math.pi / 4 + leaf_idx * math.pi / 16
+                    phase_state.append(phase)
+            self.voice_phase_state[voice_id] = phase_state
+        return self.voice_phase_state[voice_id]
+
+    def reset_phase_state(self, voice_id: int) -> None:
+        """Reset phase state for a voice (on new note allocation)."""
+        if voice_id in self.voice_phase_state:
+            del self.voice_phase_state[voice_id]
 
     def get_last_sample(self, voice_id: int) -> int:
         """
@@ -419,6 +448,9 @@ class WaveletEngine:
         # Clear previous coefficients (new voice starts fresh)
         if voice_id in self.prev_coeffs:
             del self.prev_coeffs[voice_id]
+
+        # Reset phase state for new note (ensures clean start)
+        self.reset_phase_state(voice_id)
 
     def voice_on(self, voice_id: int) -> None:
         """
@@ -498,27 +530,32 @@ class WaveletEngine:
         # Detect if coefficients changed significantly and need smoothing
         coeffs_to_use = vf.coeff_q15
         need_micro_bridge = False
+        old_coeffs = None  # Capture BEFORE overwriting
 
         if voice_id in self.prev_coeffs:
-            prev_coeffs = self.prev_coeffs[voice_id]
+            old_coeffs = self.prev_coeffs[voice_id]  # Capture old coefficients FIRST
             # Check if coefficients changed significantly
-            coeff_diff = self._compute_coeff_change(prev_coeffs, vf.coeff_q15)
+            coeff_diff = self._compute_coeff_change(old_coeffs, vf.coeff_q15)
             if coeff_diff > 0x1000:  # Significant change threshold
                 need_micro_bridge = True
                 # Slew-limit coefficients toward new values
-                coeffs_to_use = self._slew_coefficients(prev_coeffs, vf.coeff_q15)
+                coeffs_to_use = self._slew_coefficients(old_coeffs, vf.coeff_q15)
 
-        # Store current coefficients for next block
+        # Store current coefficients for next block (AFTER capturing old)
         self.prev_coeffs[voice_id] = list(vf.coeff_q15)
 
+        # Get phase state for this voice (critical for pitch continuity)
+        phase_state = self.get_phase_state(voice_id)
+
         # === SYNTHESIS ===
-        if need_micro_bridge and voice_id in self.prev_coeffs:
+        if need_micro_bridge and old_coeffs is not None:
             # Synthesize both old and new, then micro-bridge
             R = self.get_regularity(voice_id)
-            x_old = self.trees.synthesize(tree_a_id, self.prev_coeffs.get(voice_id, coeffs_to_use))
+            # For old coeffs, use a copy of phase state (don't advance it)
+            x_old = self.trees.synthesize(tree_a_id, old_coeffs, phase_state=None)
             x_new = self._synthesize_with_blend(
-                tree_a_id, tree_b_id, coeffs_to_use,
-                prev_blend, blend_q15
+                voice_id, tree_a_id, tree_b_id, coeffs_to_use,
+                prev_blend, blend_q15, phase_state
             )
             # Apply micro-bridge at block start
             x_q15 = R.apply_transition(x_old, x_new, 0)
@@ -528,8 +565,8 @@ class WaveletEngine:
         else:
             # Normal synthesis path
             x_q15 = self._synthesize_with_blend(
-                tree_a_id, tree_b_id, coeffs_to_use,
-                prev_blend, blend_q15
+                voice_id, tree_a_id, tree_b_id, coeffs_to_use,
+                prev_blend, blend_q15, phase_state
             )
 
         # Update state for next block
@@ -561,6 +598,7 @@ class WaveletEngine:
         coeff_q15: List[int],
         alpha_start: int,
         alpha_end: int,
+        phase_state: Optional[List[float]] = None,
     ) -> List[int]:
         """
         Synthesize crossfade with intra-block alpha ramping.
@@ -574,13 +612,14 @@ class WaveletEngine:
             coeff_q15: Coefficients
             alpha_start: Blend at start of block (0 = all tree_a)
             alpha_end: Blend at end of block (Q15_ONE = all tree_b)
+            phase_state: Phase accumulator array for continuous synthesis
 
         Returns:
             Audio samples with smooth crossfade ramp
         """
-        # Synthesize both trees
-        x_a = self.trees.synthesize(tree_a_id, coeff_q15)
-        x_b = self.trees.synthesize(tree_b_id, coeff_q15)
+        # Synthesize both trees (phase_state applied to primary tree)
+        x_a = self.trees.synthesize(tree_a_id, coeff_q15, phase_state=phase_state)
+        x_b = self.trees.synthesize(tree_b_id, coeff_q15, phase_state=None)
 
         # Ramp alpha linearly across the block
         result = []
@@ -773,11 +812,13 @@ class WaveletEngine:
 
     def _synthesize_with_blend(
         self,
+        voice_id: int,
         tree_a_id: int,
         tree_b_id: int,
         coeff_q15: List[int],
         prev_blend: int,
         blend_q15: int,
+        phase_state: Optional[List[float]] = None,
     ) -> List[int]:
         """
         Synthesize audio with tree blending and intra-block ramping.
@@ -786,11 +827,13 @@ class WaveletEngine:
         to prevent discontinuities.
 
         Args:
+            voice_id: Voice identifier (for phase state lookup)
             tree_a_id: Primary tree ID
             tree_b_id: Secondary tree ID
             coeff_q15: Coefficients to use
             prev_blend: Previous block's blend value
             blend_q15: Target blend value
+            phase_state: Phase accumulator array for continuous synthesis
 
         Returns:
             Synthesized audio samples
@@ -798,19 +841,20 @@ class WaveletEngine:
         # Check if we need blending at all
         if tree_a_id == tree_b_id or blend_q15 == 0:
             # Single tree, no blend needed
-            return self.trees.synthesize(tree_a_id, coeff_q15)
+            return self.trees.synthesize(tree_a_id, coeff_q15, phase_state=phase_state)
 
         # Check if blend changed - if so, use ramped crossfade
         if prev_blend != blend_q15:
             # Blend changed, ramp within block to prevent click
             return self._synthesize_ramped_crossfade(
                 tree_a_id, tree_b_id, coeff_q15,
-                prev_blend, blend_q15
+                prev_blend, blend_q15, phase_state
             )
         else:
             # Blend stable, use constant blend
-            x_a = self.trees.synthesize(tree_a_id, coeff_q15)
-            x_b = self.trees.synthesize(tree_b_id, coeff_q15)
+            # Note: phase_state is only passed to tree_a (primary)
+            x_a = self.trees.synthesize(tree_a_id, coeff_q15, phase_state=phase_state)
+            x_b = self.trees.synthesize(tree_b_id, coeff_q15, phase_state=None)
 
             # Blend: out = a * (1 - blend) + b * blend
             blend_inv = Q15_ONE - blend_q15
@@ -820,3 +864,231 @@ class WaveletEngine:
                 result.append(sat16(mixed))
 
             return result
+
+
+# =============================================================================
+# IDWPT LIFT MODE (Carrier + Lift Architecture v2)
+# =============================================================================
+
+class IDWPTLift:
+    """
+    IDWPT as a "Lift" for the Carrier + Lift Architecture.
+
+    In this mode, the IDWPT doesn't determine pitch - that's the carrier's job.
+    Instead, it acts as a timbral shaping effect that "lifts" the spectral
+    content defined by 64-leaf gains.
+
+    Key differences from standard WaveletEngine:
+    - Input: 64 leaf gains (not 256 coefficients)
+    - No pitch responsibility (carrier handles that)
+    - Optimized for audio-domain blending with carrier
+    - 5-block latency modeled explicitly
+
+    Usage:
+        lift = IDWPTLift()
+        lift.voice_allocate(voice_id)
+
+        # Each block:
+        x_wpt = lift.render_leaves(voice_id, leaf_gains_q15)
+        # Then blend with carrier using equal-power crossfade
+    """
+
+    def __init__(self, block_size: int = BLOCK_SIZE):
+        self.B = block_size
+        self.trees = PacketTreeSet()
+
+        # Per-voice state
+        self.voice_state: Dict[int, Dict] = {}
+
+        # Phase state per voice (256 floats for continuous synthesis)
+        self.voice_phase_state: Dict[int, List[float]] = {}
+
+        # Regularity operators per voice
+        self.regularity: Dict[int, RegularityOperator] = {}
+
+        # Latency tracking (5 blocks for D=6)
+        self.LATENCY_BLOCKS = 5
+
+        # Previous leaf gains per voice (for smoothing)
+        self.prev_leaves: Dict[int, List[int]] = {}
+
+        # Slew rate for leaf changes
+        self.leaf_slew_rate = 0x2000  # ~25% per block
+
+    def voice_allocate(self, voice_id: int) -> None:
+        """Allocate voice slot for lift synthesis."""
+        self.voice_state[voice_id] = {
+            'blocks_rendered': 0,
+            'tree_id': 1,  # Default to harmonic tree
+        }
+
+        # Initialize phase state
+        if voice_id not in self.voice_phase_state:
+            phase_state = []
+            for leaf_idx in range(LEAF_COUNT):
+                for coeff_idx in range(NODE_SIZE):
+                    phase = coeff_idx * math.pi / 4 + leaf_idx * math.pi / 16
+                    phase_state.append(phase)
+            self.voice_phase_state[voice_id] = phase_state
+
+        # Initialize regularity operator
+        if voice_id not in self.regularity:
+            self.regularity[voice_id] = RegularityOperator()
+            self.regularity[voice_id].allocate(0)
+
+    def voice_free(self, voice_id: int) -> None:
+        """Free voice slot."""
+        self.voice_state.pop(voice_id, None)
+        # Keep phase state and regularity for potential reuse
+
+    def set_tree(self, voice_id: int, tree_id: int) -> None:
+        """Set tree (tuning) for a voice. Should be slow-morphed externally."""
+        if voice_id in self.voice_state:
+            self.voice_state[voice_id]['tree_id'] = tree_id
+
+    def render_leaves(
+        self,
+        voice_id: int,
+        leaf_gains_q15: List[int],
+        tree_id: Optional[int] = None,
+    ) -> List[int]:
+        """
+        Render audio from 64 leaf gains.
+
+        This is the core lift operation: takes spectral content defined by
+        leaf gains and synthesizes audio via IDWPT.
+
+        Args:
+            voice_id: Voice identifier
+            leaf_gains_q15: 64 Q15 gains, one per master leaf
+            tree_id: Optional tree override (uses voice's tree if None)
+
+        Returns:
+            64 Q15 audio samples
+        """
+        # Ensure voice is allocated
+        if voice_id not in self.voice_state:
+            self.voice_allocate(voice_id)
+
+        state = self.voice_state[voice_id]
+        state['blocks_rendered'] += 1
+
+        # Get tree to use
+        tid = tree_id if tree_id is not None else state['tree_id']
+
+        # === LEAF SMOOTHING ===
+        # Slew-limit leaf changes to prevent clicks
+        if voice_id in self.prev_leaves:
+            leaf_gains_q15 = self._slew_leaves(
+                self.prev_leaves[voice_id], leaf_gains_q15
+            )
+        self.prev_leaves[voice_id] = list(leaf_gains_q15)
+
+        # === EXPAND 64 LEAVES TO 256 COEFFICIENTS ===
+        # Each leaf expands to NODE_SIZE (8) coefficients
+        # For now, use simple repetition with envelope shaping
+        coeffs_256 = self._expand_leaves_to_coeffs(leaf_gains_q15)
+
+        # Get phase state for this voice
+        phase_state = self.voice_phase_state.get(voice_id)
+
+        # === IDWPT SYNTHESIS ===
+        x_q15 = self.trees.synthesize(tid, coeffs_256, phase_state=phase_state)
+
+        # === APPLY REGULARITY ===
+        R = self.regularity.get(voice_id)
+        if R:
+            x_q15 = R.finalize(x_q15)
+
+        # Ensure correct length
+        if len(x_q15) < self.B:
+            x_q15.extend([0] * (self.B - len(x_q15)))
+        elif len(x_q15) > self.B:
+            x_q15 = x_q15[:self.B]
+
+        return x_q15
+
+    def _slew_leaves(
+        self,
+        prev_leaves: List[int],
+        new_leaves: List[int],
+    ) -> List[int]:
+        """
+        Slew-limit leaf changes to prevent clicks.
+
+        Args:
+            prev_leaves: Previous leaf gains
+            new_leaves: Target leaf gains
+
+        Returns:
+            Slew-limited leaf gains
+        """
+        result = []
+        for prev, new in zip(prev_leaves, new_leaves):
+            delta = new - prev
+            if delta > self.leaf_slew_rate:
+                result.append(prev + self.leaf_slew_rate)
+            elif delta < -self.leaf_slew_rate:
+                result.append(prev - self.leaf_slew_rate)
+            else:
+                result.append(new)
+        return result
+
+    def _expand_leaves_to_coeffs(self, leaf_gains_q15: List[int]) -> List[int]:
+        """
+        Expand 64 leaf gains to 256 coefficients.
+
+        Each leaf expands to NODE_SIZE (8) coefficients with envelope shaping.
+        This creates smooth spectral content that IDWPT can process.
+
+        Args:
+            leaf_gains_q15: 64 Q15 leaf gains
+
+        Returns:
+            256 Q15 coefficients
+        """
+        coeffs = []
+
+        # Ensure we have exactly 64 leaves (or less)
+        leaves = leaf_gains_q15[:64] if len(leaf_gains_q15) >= 64 else leaf_gains_q15
+
+        for leaf_idx, gain in enumerate(leaves):
+            # Create NODE_SIZE coefficients per leaf
+            for coeff_idx in range(NODE_SIZE):
+                # Apply envelope within leaf (Hann-like for smooth edges)
+                # This prevents harsh transitions between leaves
+                t = (coeff_idx + 0.5) / NODE_SIZE
+                envelope = math.sin(t * math.pi)  # 0 at edges, 1 at center
+
+                # Scale gain by envelope
+                coeff = int(gain * envelope)
+                coeffs.append(sat16(coeff))
+
+        # Pad to 256 if needed (shouldn't happen with 64 leaves)
+        while len(coeffs) < 256:
+            coeffs.append(0)
+
+        return coeffs[:256]
+
+    def is_wet_ready(self, voice_id: int) -> bool:
+        """
+        Check if wet signal is ready (past latency period).
+
+        The IDWPT has ~5 blocks of latency. During this period,
+        the carrier should be used alone with beta=0.
+
+        Args:
+            voice_id: Voice identifier
+
+        Returns:
+            True if at least LATENCY_BLOCKS have been rendered
+        """
+        if voice_id not in self.voice_state:
+            return False
+        return self.voice_state[voice_id]['blocks_rendered'] >= self.LATENCY_BLOCKS
+
+    def get_blocks_rendered(self, voice_id: int) -> int:
+        """Get number of blocks rendered for a voice."""
+        if voice_id not in self.voice_state:
+            return 0
+        return self.voice_state[voice_id]['blocks_rendered']
