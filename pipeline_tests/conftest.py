@@ -41,26 +41,26 @@ def q15_half():
 @pytest.fixture
 def voice_engine():
     """Fresh Voice Engine instance."""
-    from voice_engine import VoiceEngine
+    from symcrash_python_ap.voice import VoiceEngine
     return VoiceEngine(max_voices=12)
 
 
 @pytest.fixture
 def symbol_executor():
     """Fresh Symbol Executor instance."""
-    from symbol_engine import SymbolExecutor
+    from symcrash_python_ap.symbol import SymbolExecutor
     return SymbolExecutor(n_voices=12)
 
 
 @pytest.fixture
 def safety_engine():
     """Fresh Safety Engine instance."""
-    from safety_engine import SafetyEngine
+    from symcrash_python_ap.safety import SafetyEngine
     return SafetyEngine(block_size=64)
 
 
 @pytest.fixture
 def wavelet_engine():
     """Fresh Wavelet Engine instance."""
-    from wavelet_engine import WaveletEngine
+    from symcrash_python_ap.wavelet import WaveletEngine
     return WaveletEngine(block_size=64)

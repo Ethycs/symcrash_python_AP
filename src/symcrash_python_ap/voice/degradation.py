@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Set, Tuple, Dict
 from enum import Enum, IntEnum
 
-from .frames import VoiceFramePacketV0b, VoiceFlags
+from ..frames import VoiceFramePacketV0b, VoiceFlags
 
 
 # =============================================================================

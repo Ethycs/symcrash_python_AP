@@ -33,8 +33,8 @@ class TestS1StatelessnessMusicalTime:
 
     def test_same_input_converges(self, q15_one, q15_half):
         """Same input repeatedly produces stable output."""
-        from symbol_engine import SymbolExecutor
-        from frames import VoiceFrame
+        from symcrash_python_ap.symbol import SymbolExecutor
+        from symcrash_python_ap import VoiceFrame
 
         executor = SymbolExecutor(n_voices=4)
 
@@ -60,8 +60,8 @@ class TestS1StatelessnessMusicalTime:
 
     def test_no_internal_counters(self, q15_half):
         """Symbol Engine has no time-varying internal counters."""
-        from symbol_engine import SymbolExecutor
-        from frames import VoiceFrame
+        from symcrash_python_ap.symbol import SymbolExecutor
+        from symcrash_python_ap import VoiceFrame
 
         # Create two fresh executors
         exec1 = SymbolExecutor(n_voices=4)
@@ -89,8 +89,8 @@ class TestS1StatelessnessMusicalTime:
 
     def test_block_count_not_used(self, q15_half):
         """Block count is not accessible or used."""
-        from symbol_engine import SymbolExecutor
-        from frames import VoiceFrame
+        from symcrash_python_ap.symbol import SymbolExecutor
+        from symcrash_python_ap import VoiceFrame
 
         executor = SymbolExecutor(n_voices=4)
 
@@ -122,8 +122,8 @@ class TestS2OperatorLegalityEnforcement:
 
     def test_output_bounded(self, q15_one):
         """Output coefficients stay within bounds."""
-        from symbol_engine import SymbolExecutor
-        from frames import VoiceFrame
+        from symcrash_python_ap.symbol import SymbolExecutor
+        from symcrash_python_ap import VoiceFrame
 
         executor = SymbolExecutor(n_voices=4)
 
@@ -143,8 +143,8 @@ class TestS2OperatorLegalityEnforcement:
 
     def test_energy_conservation(self, q15_half):
         """Total energy doesn't grow unbounded."""
-        from symbol_engine import SymbolExecutor, COEFF_LEN
-        from frames import VoiceFrame
+        from symcrash_python_ap.symbol import SymbolExecutor, COEFF_LEN
+        from symcrash_python_ap import VoiceFrame
 
         executor = SymbolExecutor(n_voices=4)
 
@@ -174,8 +174,8 @@ class TestS2OperatorLegalityEnforcement:
 
     def test_worst_case_chain(self, q15_one):
         """Worst-case operator chains don't cause overflow."""
-        from symbol_engine import SymbolExecutor
-        from frames import VoiceFrame
+        from symcrash_python_ap.symbol import SymbolExecutor
+        from symcrash_python_ap import VoiceFrame
 
         executor = SymbolExecutor(n_voices=4)
 
@@ -212,8 +212,8 @@ class TestS3CoefficientStateStability:
 
     def test_long_run_stability(self, q15_half):
         """Coefficients don't diverge over long runs."""
-        from symbol_engine import SymbolExecutor
-        from frames import VoiceFrame
+        from symcrash_python_ap.symbol import SymbolExecutor
+        from symcrash_python_ap import VoiceFrame
 
         executor = SymbolExecutor(n_voices=4)
 
@@ -239,8 +239,8 @@ class TestS3CoefficientStateStability:
 
     def test_no_dc_accumulation(self, q15_half):
         """DC offset doesn't accumulate."""
-        from symbol_engine import SymbolExecutor
-        from frames import VoiceFrame
+        from symcrash_python_ap.symbol import SymbolExecutor
+        from symcrash_python_ap import VoiceFrame
 
         executor = SymbolExecutor(n_voices=4)
 
@@ -263,8 +263,8 @@ class TestS3CoefficientStateStability:
 
     def test_injection_counteracted(self, q15_half, q15_one):
         """Injected energy is counteracted by normalization."""
-        from symbol_engine import SymbolExecutor
-        from frames import VoiceFrame
+        from symcrash_python_ap.symbol import SymbolExecutor
+        from symcrash_python_ap import VoiceFrame
 
         executor = SymbolExecutor(n_voices=4)
 
@@ -306,8 +306,8 @@ class TestS4EventLaneIsolation:
 
     def test_impulse_targets_correct_band(self, q15_half):
         """Impulse events target correct frequency band."""
-        from symbol_engine import SymbolExecutor, BAND_SLICES
-        from frames import VoiceFrame
+        from symcrash_python_ap.symbol import SymbolExecutor, BAND_SLICES
+        from symcrash_python_ap import VoiceFrame
 
         executor = SymbolExecutor(n_voices=4)
 
@@ -328,8 +328,8 @@ class TestS4EventLaneIsolation:
 
     def test_noise_isolated_to_band(self, q15_half):
         """Noise injection is isolated to target band."""
-        from symbol_engine import SymbolExecutor, BAND_SLICES
-        from frames import VoiceFrame
+        from symcrash_python_ap.symbol import SymbolExecutor, BAND_SLICES
+        from symcrash_python_ap import VoiceFrame
 
         executor = SymbolExecutor(n_voices=4)
 
@@ -366,8 +366,8 @@ class TestS5EmergencySimplifyCorrectness:
 
     def test_emergency_produces_output(self, q15_one):
         """Emergency degradation still produces output."""
-        from symbol_engine import SymbolExecutor
-        from frames import VoiceFrame
+        from symcrash_python_ap.symbol import SymbolExecutor
+        from symcrash_python_ap import VoiceFrame
 
         executor = SymbolExecutor(n_voices=4)
 
@@ -389,8 +389,8 @@ class TestS5EmergencySimplifyCorrectness:
 
     def test_emergency_no_overflow(self, q15_one):
         """Emergency mode doesn't cause overflow."""
-        from symbol_engine import SymbolExecutor
-        from frames import VoiceFrame
+        from symcrash_python_ap.symbol import SymbolExecutor
+        from symcrash_python_ap import VoiceFrame
 
         executor = SymbolExecutor(n_voices=4)
 
@@ -408,8 +408,8 @@ class TestS5EmergencySimplifyCorrectness:
 
     def test_emergency_repeated_stable(self, q15_half):
         """Repeated emergency calls remain stable."""
-        from symbol_engine import SymbolExecutor
-        from frames import VoiceFrame
+        from symcrash_python_ap.symbol import SymbolExecutor
+        from symcrash_python_ap import VoiceFrame
 
         executor = SymbolExecutor(n_voices=4)
 
@@ -446,8 +446,8 @@ class TestSymbolExecutorAcceptance:
 
     def test_determinism(self, q15_one):
         """Test 1: Repeated runs produce identical results."""
-        from symcrash_python_ap.symbol_engine import SymbolExecutor, COEFF_LEN
-        from symcrash_python_ap.frames import VoiceFrame
+        from symcrash_python_ap.symbol import SymbolExecutor, COEFF_LEN
+        from symcrash_python_ap import VoiceFrame
 
         executor = SymbolExecutor(n_voices=4)
 
@@ -488,8 +488,8 @@ class TestSymbolExecutorAcceptance:
 
     def test_totality(self, q15_one):
         """Test 2: No input produces undefined behavior."""
-        from symcrash_python_ap.symbol_engine import SymbolExecutor, COEFF_LEN
-        from symcrash_python_ap.frames import VoiceFrame
+        from symcrash_python_ap.symbol import SymbolExecutor, COEFF_LEN
+        from symcrash_python_ap import VoiceFrame
 
         executor = SymbolExecutor(n_voices=4)
 
@@ -510,8 +510,8 @@ class TestSymbolExecutorAcceptance:
 
     def test_boundedness(self, q15_one):
         """Test 3: Coefficients remain bounded after processing."""
-        from symcrash_python_ap.symbol_engine import SymbolExecutor, COEFF_LEN
-        from symcrash_python_ap.frames import VoiceFrame
+        from symcrash_python_ap.symbol import SymbolExecutor, COEFF_LEN
+        from symcrash_python_ap import VoiceFrame
 
         executor = SymbolExecutor(n_voices=4)
 
@@ -535,7 +535,7 @@ class TestSymbolExecutorAcceptance:
 
     def test_degradation_levels(self, q15_one):
         """Test 4: Degradation levels drop correct families."""
-        from symcrash_python_ap.symbol_engine import (
+        from symcrash_python_ap.symbol import (
             SymbolExecutor, ExecutorInput, NUM_FAMILIES,
             DEGRADE_NONE, DEGRADE_LIGHT, DEGRADE_HEAVY, DEGRADE_EMERGENCY,
             F_COLOR, F_TRANSPORT, F_LOCAL, F_TOPOLOGY, F_GLUE,
@@ -573,8 +573,8 @@ class TestSymbolExecutorAcceptance:
 
     def test_morph_correctness(self, q15_one):
         """Test 5: Tree morph sequences don't corrupt state."""
-        from symcrash_python_ap.symbol_engine import SymbolExecutor, COEFF_LEN
-        from symcrash_python_ap.frames import VoiceFrame
+        from symcrash_python_ap.symbol import SymbolExecutor, COEFF_LEN
+        from symcrash_python_ap import VoiceFrame
 
         executor = SymbolExecutor(n_voices=4)
 

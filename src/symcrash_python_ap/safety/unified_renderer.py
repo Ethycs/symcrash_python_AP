@@ -608,8 +608,8 @@ class WaveletBackend:
     """
 
     def __init__(self, block_size: int = BLOCK_SIZE):
-        from .wavelet_engine import WaveletEngine
-        from .frames import VoiceFrame
+        from ..wavelet.wavelet_engine import WaveletEngine
+        from ..frames import VoiceFrame
 
         self.WaveletEngine = WaveletEngine
         self.VoiceFrame = VoiceFrame
@@ -710,7 +710,7 @@ class StandardWaveletPipeline:
 
     def __init__(self, block_size: int = BLOCK_SIZE):
         from .safety_engine import SafetyEngine
-        from .frames import ParamFrame
+        from ..frames import ParamFrame
 
         self.backend = WaveletBackend(block_size=block_size)
         self.renderer = UnifiedRenderer(self.backend, block_size=block_size)
@@ -799,7 +799,7 @@ class StandardHarmonicPipeline:
 
     def __init__(self, block_size: int = BLOCK_SIZE):
         from .safety_engine import SafetyEngine
-        from .frames import ParamFrame
+        from ..frames import ParamFrame
 
         self.backend = HarmonicScaffoldBackend()
         self.renderer = UnifiedRenderer(self.backend, block_size=block_size)
@@ -906,13 +906,13 @@ class CarrierLiftPipeline:
 
     def __init__(self, block_size: int = BLOCK_SIZE):
         from .safety_engine import SafetyEngine
-        from .frames import ParamFrame, VoiceFrame
-        from .carrier import CarrierOscillator
-        from .carrier_lift import (
+        from ..frames import ParamFrame, VoiceFrame
+        from ..wavelet.carrier import CarrierOscillator
+        from ..wavelet.carrier_lift import (
             CarrierLiftVoiceState, NUM_LEAVES
         )
-        from .leaf_generator import LeafGenerator
-        from .tuning import TuningMorpher, TUNING_HARMONIC
+        from ..wavelet.leaf_generator import LeafGenerator
+        from ..tuning import TuningMorpher, TUNING_HARMONIC
         from .anti_click import AntiClickOperator, AntiClickConfig, AntiClickState
 
         # Store imports for use

@@ -23,7 +23,7 @@ import threading
 import queue
 import time
 
-from fixed import Q15_ONE
+from ..fixed import Q15_ONE
 
 
 # =============================================================================

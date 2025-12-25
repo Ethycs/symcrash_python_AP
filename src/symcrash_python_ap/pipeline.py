@@ -15,10 +15,10 @@ import numpy as np
 
 from .fixed import Q15_ONE, Q15_HALF, sat16, mul_q15_sat
 from .frames import ParamFrame, VoiceFrame
-from .symbol_engine import SymbolEngine
-from .wavelet_engine import WaveletEngine
-from .material_engine import MaterialEngine
-from .safety_engine import SafetyEngine
+from .symbol import SymbolEngine
+from .wavelet import WaveletEngine
+from .material import MaterialEngine
+from .safety import SafetyEngine
 
 
 class AudioSink:

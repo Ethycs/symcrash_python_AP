@@ -31,7 +31,7 @@ class TestW1NoMusicalSemantics:
 
     def test_random_coeffs_produce_output(self, wavelet_engine, q15_half):
         """Random coefficients produce deterministic audio."""
-        from frames import VoiceFrame
+        from symcrash_python_ap.frames import VoiceFrame
 
         np.random.seed(42)
 
@@ -54,7 +54,7 @@ class TestW1NoMusicalSemantics:
 
     def test_same_coeffs_same_output(self, wavelet_engine, q15_half):
         """Same coefficients produce same output (pure synthesis, no regularity state)."""
-        from frames import VoiceFrame
+        from symcrash_python_ap.frames import VoiceFrame
 
         coeffs = [1000] * 256
 
@@ -75,7 +75,7 @@ class TestW1NoMusicalSemantics:
 
     def test_no_note_awareness(self, wavelet_engine, q15_half):
         """Wavelet engine has no concept of notes."""
-        from frames import VoiceFrame
+        from symcrash_python_ap.frames import VoiceFrame
 
         # VoiceFrame doesn't contain note information for wavelet
         vf = VoiceFrame(
@@ -106,7 +106,7 @@ class TestW2PerfectReconstruction:
 
     def test_synthesis_bounded(self, wavelet_engine, q15_half):
         """Synthesis produces bounded output."""
-        from frames import VoiceFrame
+        from symcrash_python_ap.frames import VoiceFrame
 
         # Test with various coefficient patterns
         test_patterns = [
@@ -131,7 +131,7 @@ class TestW2PerfectReconstruction:
 
     def test_tree_synthesis_consistent(self, wavelet_engine, q15_half):
         """All tree types produce consistent output."""
-        from frames import VoiceFrame
+        from symcrash_python_ap.frames import VoiceFrame
 
         coeffs = [1000] * 256
 
@@ -175,7 +175,7 @@ class TestW3TreeInterpolationHygiene:
 
     def test_tree_crossfade_smooth(self, wavelet_engine, q15_half, q15_one):
         """Tree crossfade produces smooth transition."""
-        from frames import VoiceFrame
+        from symcrash_python_ap.frames import VoiceFrame
 
         coeffs = [1000] * 256
 
@@ -208,7 +208,7 @@ class TestW3TreeInterpolationHygiene:
     def test_blend_produces_intermediate(self, wavelet_engine, q15_half):
         """Blended trees produce intermediate output."""
         # This test checks the crossfade mechanism
-        from frames import VoiceFrame
+        from symcrash_python_ap.frames import VoiceFrame
 
         coeffs = [1000] * 256
 
@@ -241,7 +241,7 @@ class TestW4TimeMultiplexingSafety:
 
     def test_voices_dont_bleed(self, wavelet_engine, q15_half):
         """Different voices don't bleed into each other."""
-        from frames import VoiceFrame
+        from symcrash_python_ap.frames import VoiceFrame
 
         # Voice 0: high frequency content
         coeffs0 = [0] * 256
@@ -271,7 +271,7 @@ class TestW4TimeMultiplexingSafety:
 
     def test_sequential_voices_independent(self, wavelet_engine, q15_half):
         """Sequential voice rendering is independent."""
-        from frames import VoiceFrame
+        from symcrash_python_ap.frames import VoiceFrame
 
         # Render voice 0 with complex content
         coeffs0 = [1000 * ((i * 7) % 10 - 5) for i in range(256)]
@@ -284,7 +284,7 @@ class TestW4TimeMultiplexingSafety:
         audio1_after = wavelet_engine.render_voice(vf1)
 
         # Render voice 1 fresh (in new engine)
-        from wavelet_engine import WaveletEngine
+        from symcrash_python_ap.wavelet import WaveletEngine
         fresh_engine = WaveletEngine(block_size=64)
         audio1_fresh = fresh_engine.render_voice(vf1)
 
@@ -293,7 +293,7 @@ class TestW4TimeMultiplexingSafety:
 
     def test_high_voice_count(self, wavelet_engine, q15_half):
         """Many voices can render without interference."""
-        from frames import VoiceFrame
+        from symcrash_python_ap.frames import VoiceFrame
 
         outputs = []
         for vid in range(12):
@@ -336,7 +336,7 @@ class TestW5VoiceLifecycle:
 
     def test_voice_allocate_arms_microfade(self, wavelet_engine, q15_half):
         """voice_allocate arms microfade for click prevention."""
-        from frames import VoiceFrame
+        from symcrash_python_ap.frames import VoiceFrame
 
         voice_id = 0
 
@@ -349,7 +349,7 @@ class TestW5VoiceLifecycle:
 
     def test_voice_on_does_not_reset(self, wavelet_engine, q15_half):
         """voice_on (retrigger) does NOT reset state."""
-        from frames import VoiceFrame
+        from symcrash_python_ap.frames import VoiceFrame
 
         voice_id = 0
 
@@ -369,7 +369,7 @@ class TestW5VoiceLifecycle:
 
     def test_voice_free_preserves_last_sample(self, wavelet_engine, q15_half):
         """voice_free keeps prev_sample for next allocate."""
-        from frames import VoiceFrame
+        from symcrash_python_ap.frames import VoiceFrame
 
         voice_id = 0
 
@@ -389,7 +389,7 @@ class TestW5VoiceLifecycle:
 
     def test_reallocation_uses_preserved_sample(self, wavelet_engine, q15_half):
         """Reallocation uses preserved last sample for smooth transition."""
-        from frames import VoiceFrame
+        from symcrash_python_ap.frames import VoiceFrame
 
         voice_id = 0
 
@@ -412,7 +412,7 @@ class TestW5VoiceLifecycle:
 
     def test_microfade_produces_smooth_onset(self, wavelet_engine, q15_half):
         """Microfade produces smooth fade-in from 0."""
-        from frames import VoiceFrame
+        from symcrash_python_ap.frames import VoiceFrame
 
         voice_id = 0
 
@@ -433,7 +433,7 @@ class TestW5VoiceLifecycle:
 
     def test_allocate_clears_tree_state(self, wavelet_engine, q15_half):
         """voice_allocate clears tree transition state."""
-        from frames import VoiceFrame
+        from symcrash_python_ap.frames import VoiceFrame
 
         voice_id = 0
 
@@ -450,7 +450,7 @@ class TestW5VoiceLifecycle:
 
     def test_voice_off_is_alias_for_voice_free(self, wavelet_engine, q15_half):
         """voice_off (legacy) behaves like voice_free."""
-        from frames import VoiceFrame
+        from symcrash_python_ap.frames import VoiceFrame
 
         voice_id = 0
 

@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 import numpy as np
 
-from fixed import sat16, mul_q15_sat, Q15_ONE, Q15_SHIFT
+from ..fixed import sat16, mul_q15_sat, Q15_ONE, Q15_SHIFT
 
 # Constants
 LEAF_COUNT = 64           # D=6 master tree: 64 leaves

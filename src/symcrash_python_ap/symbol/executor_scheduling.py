@@ -33,11 +33,11 @@ from typing import List, Dict, Optional, Tuple, Callable
 from enum import IntEnum
 import numpy as np
 
-from fixed import sat16, mul_q15_sat, slew_q15, Q15_ONE, Q15_HALF
-from operator_library import COEFF_LEN, BAND_SLICES, NUM_BANDS
+from ..fixed import sat16, mul_q15_sat, slew_q15, Q15_ONE, Q15_HALF
+from ..operator_library import COEFF_LEN, BAND_SLICES, NUM_BANDS
 
 # Import from uart_protocol for VoiceFrame ABI
-from uart_protocol import (
+from ..comm.uart_protocol import (
     VoiceFrameV0, BackboneEntry, Payload64, PayloadMode,
     EventLane, NUM_EVENT_LANES, resolve_pattern
 )

@@ -31,7 +31,7 @@ class TestF1NeverSilenceInstrument:
 
     def test_overload_not_muted(self, safety_engine, q15_one):
         """Extreme overload doesn't cause complete mute."""
-        from frames import ParamFrame
+        from symcrash_python_ap.frames import ParamFrame
 
         # Create extremely hot signal
         L = [q15_one] * 64
@@ -48,7 +48,7 @@ class TestF1NeverSilenceInstrument:
 
     def test_repeated_overload_recovers(self, safety_engine, q15_one, q15_half):
         """System recovers after repeated overloads."""
-        from frames import ParamFrame
+        from symcrash_python_ap.frames import ParamFrame
 
         params = ParamFrame(K_mode=2)
 
@@ -69,7 +69,7 @@ class TestF1NeverSilenceInstrument:
 
     def test_limiter_gain_never_zero(self, safety_engine, q15_one):
         """Limiter gain doesn't drop to zero."""
-        from frames import ParamFrame
+        from symcrash_python_ap.frames import ParamFrame
 
         params = ParamFrame(K_mode=3)
 
@@ -84,7 +84,7 @@ class TestF1NeverSilenceInstrument:
 
     def test_zero_input_passthrough(self, safety_engine):
         """Zero input produces near-zero output (no phantom sounds)."""
-        from frames import ParamFrame
+        from symcrash_python_ap.frames import ParamFrame
 
         params = ParamFrame(K_mode=0)
 
@@ -115,7 +115,7 @@ class TestF2ClickSpikeSuppression:
 
     def test_voice_start_smoothed(self, safety_engine, q15_half):
         """Voice start is smoothed (fade-in)."""
-        from frames import ParamFrame
+        from symcrash_python_ap.frames import ParamFrame
 
         params = ParamFrame(K_mode=1)
 
@@ -133,7 +133,7 @@ class TestF2ClickSpikeSuppression:
 
     def test_voice_stop_smoothed(self, safety_engine, q15_half):
         """Voice stop is smoothed (fade-out)."""
-        from frames import ParamFrame
+        from symcrash_python_ap.frames import ParamFrame
 
         # First, activate voice
         safety_engine.voice_on(0)
@@ -156,7 +156,7 @@ class TestF2ClickSpikeSuppression:
 
     def test_step_change_limited(self, safety_engine, q15_one):
         """Step changes are limited by slew."""
-        from frames import ParamFrame
+        from symcrash_python_ap.frames import ParamFrame
 
         params = ParamFrame(K_mode=1)
 
@@ -213,7 +213,7 @@ class TestF3AliasPolicyCorrectness:
 
     def test_k_modes_produce_different_output(self, safety_engine, q15_half):
         """Different K modes produce different output character."""
-        from frames import ParamFrame
+        from symcrash_python_ap.frames import ParamFrame
 
         # Create bright signal (high frequency content)
         L = [q15_half if i % 2 == 0 else -q15_half for i in range(64)]
@@ -222,7 +222,7 @@ class TestF3AliasPolicyCorrectness:
         outputs = []
         for k_mode in range(4):
             # Fresh engine for each mode
-            from safety_engine import SafetyEngine
+            from symcrash_python_ap.safety import SafetyEngine
             engine = SafetyEngine(block_size=64)
 
             params = ParamFrame(K_mode=k_mode)
@@ -245,7 +245,7 @@ class TestF3AliasPolicyCorrectness:
 
     def test_k_mode_transition_smooth(self, safety_engine, q15_half):
         """K mode transitions don't cause clicks."""
-        from frames import ParamFrame
+        from symcrash_python_ap.frames import ParamFrame
 
         L = [q15_half // 2] * 64
         R = list(L)
@@ -269,14 +269,14 @@ class TestF3AliasPolicyCorrectness:
 
     def test_hf_budget_respected(self, safety_engine, q15_half):
         """HF energy budget is respected per K mode."""
-        from frames import ParamFrame
+        from symcrash_python_ap.frames import ParamFrame
 
         # Very bright signal
         L = [q15_half if i % 2 == 0 else -q15_half for i in range(64)]
         R = list(L)
 
         for k_mode in range(4):
-            from safety_engine import SafetyEngine
+            from symcrash_python_ap.safety import SafetyEngine
             engine = SafetyEngine(block_size=64)
 
             params = ParamFrame(K_mode=k_mode)
@@ -552,7 +552,7 @@ class TestDegradeLevels:
 
     def test_safety_engine_has_degrade_level(self):
         """SafetyEngine tracks current degrade level."""
-        from safety_engine import SafetyEngine, DegradeLevel
+        from symcrash_python_ap.safety import SafetyEngine, DegradeLevel
 
         engine = SafetyEngine(block_size=64)
 
@@ -567,7 +567,7 @@ class TestSlewLimiter:
 
     def test_slew_limit_enforced(self):
         """Slew limiter enforces A2 invariant."""
-        from safety_engine import SafetyEngine, SLEW_MAX
+        from symcrash_python_ap.safety import SafetyEngine, SLEW_MAX
 
         engine = SafetyEngine(block_size=64)
 
@@ -589,7 +589,7 @@ class TestSlewLimiter:
 
     def test_slew_limit_preserves_slow_signals(self):
         """Slew limiter preserves signals within limit."""
-        from safety_engine import SafetyEngine, SLEW_MAX
+        from symcrash_python_ap.safety import SafetyEngine, SLEW_MAX
 
         engine = SafetyEngine(block_size=64)
 
@@ -604,8 +604,8 @@ class TestSlewLimiter:
 
     def test_step_block_applies_slew(self):
         """step_block applies slew limiting when enabled."""
-        from safety_engine import SafetyEngine, SLEW_MAX
-        from frames import ParamFrame
+        from symcrash_python_ap.safety import SafetyEngine, SLEW_MAX
+        from symcrash_python_ap.frames import ParamFrame
 
         engine = SafetyEngine(block_size=64)
         params = ParamFrame(K_mode=1)
@@ -645,7 +645,7 @@ class TestC1DiscontinuityPatcher:
 
     def test_detect_discontinuity_finds_click(self):
         """Discontinuity detector finds interior clicks."""
-        from safety_engine import SafetyEngine, SLEW_MAX
+        from symcrash_python_ap.safety import SafetyEngine, SLEW_MAX
 
         engine = SafetyEngine(block_size=64)
 
@@ -662,7 +662,7 @@ class TestC1DiscontinuityPatcher:
 
     def test_detect_discontinuity_ignores_smooth(self):
         """Discontinuity detector ignores smooth signals."""
-        from safety_engine import SafetyEngine
+        from symcrash_python_ap.safety import SafetyEngine
 
         engine = SafetyEngine(block_size=64)
 
@@ -675,7 +675,7 @@ class TestC1DiscontinuityPatcher:
 
     def test_c1_patch_smooths_click(self):
         """C¹ patcher reduces discontinuity magnitude."""
-        from safety_engine import SafetyEngine
+        from symcrash_python_ap.safety import SafetyEngine
 
         engine = SafetyEngine(block_size=64)
 
@@ -691,7 +691,7 @@ class TestC1DiscontinuityPatcher:
 
     def test_c1_patch_preserves_smooth(self):
         """C¹ patcher doesn't modify smooth signals."""
-        from safety_engine import SafetyEngine
+        from symcrash_python_ap.safety import SafetyEngine
 
         engine = SafetyEngine(block_size=64)
 
@@ -706,7 +706,7 @@ class TestC1DiscontinuityPatcher:
 
     def test_c1_patch_in_declick_chain(self):
         """C¹ patcher is applied in full declick chain."""
-        from safety_engine import SafetyEngine
+        from symcrash_python_ap.safety import SafetyEngine
 
         engine = SafetyEngine(block_size=64)
 
@@ -729,7 +729,7 @@ class TestC1DiscontinuityPatcher:
 
     def test_c1_patch_handles_multiple_discontinuities(self):
         """C¹ patcher handles multiple discontinuities."""
-        from safety_engine import SafetyEngine
+        from symcrash_python_ap.safety import SafetyEngine
 
         engine = SafetyEngine(block_size=64)
 

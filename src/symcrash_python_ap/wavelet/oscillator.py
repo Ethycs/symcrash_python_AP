@@ -25,7 +25,7 @@ from typing import List, Optional, Tuple, Dict
 from enum import Enum, IntEnum
 import math
 
-from .prng import PCG32, VoicePRNG
+from ..prng import PCG32, VoicePRNG
 
 
 # =============================================================================

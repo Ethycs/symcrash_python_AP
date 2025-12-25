@@ -13,12 +13,12 @@ Applies selected "material" programs to audio:
 from typing import List, Tuple
 from dataclasses import dataclass
 
-from fixed import (
+from ..fixed import (
     sat16, mul_q15_sat, shift_round, slew_q15, slew_q15_asym,
     tanh_q15, soft_clip_q15,
     Q15_ONE, Q15_SHIFT, Q15_HALF, mac_q15
 )
-from frames import ParamFrame, MaterialParams
+from ..frames import ParamFrame, MaterialParams
 
 
 @dataclass

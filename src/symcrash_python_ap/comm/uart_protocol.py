@@ -22,7 +22,7 @@ import threading
 import queue
 import time
 
-from fixed import sat16, mul_q15_sat, Q15_ONE, Q15_HALF
+from ..fixed import sat16, mul_q15_sat, Q15_ONE, Q15_HALF
 
 
 # =============================================================================
@@ -1146,7 +1146,7 @@ def resolve_pattern(payload: Payload64, pattern_table: Dict[int, PatternEntry] =
 # =============================================================================
 
 # Re-export for backwards compatibility
-from frames import (
+from ..frames import (
     VoiceFramePacketV0b,
     VoiceFlags,
     VFP_MAGIC,

@@ -16,13 +16,13 @@ Frozen spec: 1 leaf ⇄ 1 coefficient node (8 coeffs)
 from typing import List, Dict, Tuple, Optional
 import numpy as np
 
-from .fixed import (
+from ..fixed import (
     sat16, mul_q15_sat, shift_round, shift_round_sat16,
     Q15_ONE, Q15_SHIFT, Q15_HALF
 )
 
 # Import tree definitions and shared types from wavelet_trees package
-from .wavelet_trees import (
+from ..wavelet_trees import (
     BLOCK_SIZE, MAX_DEPTH, LEAF_COUNT, COEFF_LEN, NODE_SIZE, NODE_COUNT,
     PacketNode, TreeROM, enumerate_leaves,
     build_tree_0_balanced,

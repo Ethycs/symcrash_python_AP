@@ -30,7 +30,7 @@ import struct
 from typing import Optional, List, Dict
 from dataclasses import dataclass
 
-from uart_protocol import (
+from .uart_protocol import (
     UARTListener, UARTPacket, MockUART,
     VoiceFrameV0, VoiceFrameDelta, BackboneEntry, Payload64,
     MsgType, EventLane, PayloadMode, TargetKind,
@@ -38,7 +38,7 @@ from uart_protocol import (
     crc32c, SYNC_WORD, NUM_EVENT_LANES,
     run_conformance_test
 )
-from fixed import Q15_ONE, Q15_HALF
+from ..fixed import Q15_ONE, Q15_HALF
 
 
 # =============================================================================

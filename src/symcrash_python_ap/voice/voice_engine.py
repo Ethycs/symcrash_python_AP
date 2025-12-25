@@ -44,7 +44,7 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 import numpy as np
 
-from fixed import (
+from ..fixed import (
     sat16, mul_q15_sat, slew_q15,
     Q15_ONE, Q15_HALF, Q15_SHIFT
 )

@@ -17,7 +17,7 @@ from typing import List, Tuple, Optional, Dict
 from enum import Enum
 import numpy as np
 
-from fixed import sat16, shift_round
+from ..fixed import sat16, shift_round
 
 
 # =============================================================================

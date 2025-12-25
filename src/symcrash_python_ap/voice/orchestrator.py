@@ -26,14 +26,14 @@ from dataclasses import dataclass, field
 from typing import List, Tuple, Optional, Dict, Set
 from enum import IntEnum
 
-from frames import VoiceFrame, VoiceFramePacketV0b, VoiceFlags, ParamFrame
-from scheduler import (
+from ..frames import VoiceFrame, VoiceFramePacketV0b, VoiceFlags, ParamFrame
+from .scheduler import (
     BlockScheduler, ScheduleResult, VoiceScheduleInfo, EmissionGroup,
     HealthTelemetry, BLOCK_SIZE
 )
-from wavelet_engine import WaveletEngine
-from symbol_engine import SymbolEngine
-from fixed import Q15_ONE, sat16, mul_q15_sat
+from ..wavelet import WaveletEngine
+from ..symbol import SymbolEngine
+from ..fixed import Q15_ONE, sat16, mul_q15_sat
 
 
 # =============================================================================

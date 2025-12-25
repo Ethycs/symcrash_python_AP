@@ -29,7 +29,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from enum import IntEnum
 import struct
 
-from parameter_registry import (
+from ..parameter_registry import (
     FieldMask, MaskedUpdate, UpdateMode,
     FIELD_TO_PARAMS, get_registry
 )

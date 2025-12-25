@@ -18,11 +18,11 @@ from typing import List, Dict, Tuple, Optional
 import math
 import numpy as np
 
-from .fixed import (
+from ..fixed import (
     sat16, mul_q15_sat, shift_round, slew_q15,
     Q15_ONE, Q15_SHIFT, Q15_HALF
 )
-from .frames import VoiceFrame
+from ..frames import VoiceFrame
 from .wavelet_packet_trees import PacketTreeSet, BLOCK_SIZE, LEAF_COUNT, NODE_SIZE
 
 

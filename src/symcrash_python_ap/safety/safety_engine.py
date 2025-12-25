@@ -129,12 +129,12 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 import math
 
-from .fixed import (
+from ..fixed import (
     sat16, mul_q15_sat, shift_round, slew_q15, slew_q15_asym,
     sqrt_q15, soft_clip_q15,
     Q15_ONE, Q15_SHIFT, Q15_HALF
 )
-from .frames import ParamFrame, Metrics
+from ..frames import ParamFrame, Metrics
 
 
 # =============================================================================
