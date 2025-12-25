@@ -6,10 +6,10 @@ import wave
 audio_dir = Path(__file__).parent.parent / 'audio_out' / 'clean_carrier'
 
 files_to_check = [
-    'chromatic_C4_C6-20251224-114303.wav',  # NEW - with legato fix
-    'chromatic_C3_C5-20251224-114255.wav',  # NEW - with legato fix
-    'chromatic_C4_C6-20251224-095250.wav',  # OLD - with clicks
-    'chromatic_C3_C5-20251224-095234.wav',  # OLD - with clicks
+    'chromatic_C4_C6-20251224-175604.wav',  # NEW - with fixed AntiClick (no OLA for dry)
+    'chromatic_C3_C5-20251224-175601.wav',  # NEW - with fixed AntiClick (no OLA for dry)
+    'chromatic_C4_C6-20251224-114303.wav',  # OLD - with legato fix
+    'chromatic_C3_C5-20251224-114255.wav',  # OLD - with legato fix
 ]
 
 for filename in files_to_check:

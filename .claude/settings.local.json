@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(pixi run pytest:*)"
+      "Bash(pixi run pytest:*)",
+      "Bash(pixi run python:*)"
     ]
   }
 }

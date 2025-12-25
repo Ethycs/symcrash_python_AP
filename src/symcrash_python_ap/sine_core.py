@@ -492,5 +492,4 @@ __all__ = [
 ]
 
 
-if __name__ == "__main__":
-    self_test()
+# Tests moved to pipeline_tests/test_sine_core_conformance.py

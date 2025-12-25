@@ -888,6 +888,11 @@ class CarrierLiftPipeline:
     3. Trees = slow global tunings (1-5s morph), not per-voice swaps
     4. All discrete changes -> continuous morph (slew/crossfade everything)
 
+    Anti-click handling is consolidated in AntiClickOperator which:
+    - Aligns latency (5-block FIFO for wet/carrier sync)
+    - Mixes carrier/wet with equal-power crossfade
+    - Applies optional OLA seam smoothing
+
     Usage:
         pipeline = CarrierLiftPipeline()
         pipeline.voice_on(0, note=60)
@@ -902,20 +907,18 @@ class CarrierLiftPipeline:
     def __init__(self, block_size: int = BLOCK_SIZE):
         from .safety_engine import SafetyEngine
         from .frames import ParamFrame, VoiceFrame
-        from .carrier import CarrierOscillator, equal_power_blend_q15
+        from .carrier import CarrierOscillator
         from .carrier_lift import (
-            BlendState, CarrierLiftVoiceState,
-            IDWPT_LATENCY_BLOCKS, DEFAULT_BETA_TARGET_Q15, NUM_LEAVES
+            CarrierLiftVoiceState, NUM_LEAVES
         )
         from .leaf_generator import LeafGenerator
         from .tuning import TuningMorpher, TUNING_HARMONIC
+        from .anti_click import AntiClickOperator, AntiClickConfig, AntiClickState
 
         # Store imports for use
         self.VoiceFrame = VoiceFrame
-        self.BlendState = BlendState
-        self.equal_power_blend = equal_power_blend_q15
-        self.IDWPT_LATENCY_BLOCKS = IDWPT_LATENCY_BLOCKS
         self.NUM_LEAVES = NUM_LEAVES
+        self.AntiClickState = AntiClickState
 
         # Core components
         self.carrier = CarrierOscillator()
@@ -928,9 +931,19 @@ class CarrierLiftPipeline:
         # Wavelet backend for IDWPT lift
         self.wavelet_backend = WaveletBackend(block_size=block_size)
 
+        # AntiClick operator (single source of truth for click prevention)
+        self.anticlick = AntiClickOperator(AntiClickConfig(
+            block_size=block_size,
+            sample_rate=48000,
+            wet_latency_blocks=5,
+            bloom_time_s=0.05,
+            ola_K=16,
+            equal_power=True
+        ))
+
         # Per-voice state
         self.voice_states: Dict[int, CarrierLiftVoiceState] = {}
-        self.blend_states: Dict[int, BlendState] = {}
+        self.ac_states: Dict[int, AntiClickState] = {}  # AntiClick state per voice
 
         # Initialize with harmonic tuning
         self.tuning.set_tuning_immediate(TUNING_HARMONIC)
@@ -946,16 +959,16 @@ class CarrierLiftPipeline:
             cents: Fine tuning in cents
             velocity_q15: Note velocity (Q15)
         """
-        from .carrier_lift import CarrierLiftVoiceState, BlendState
+        from .carrier_lift import CarrierLiftVoiceState
 
         # Create voice state
         state = CarrierLiftVoiceState(voice_id=voice_id)
         state.note_on(note, cents, velocity_q15)
         self.voice_states[voice_id] = state
 
-        # Create blend state (starts carrier-only, wet blooms in)
-        self.blend_states[voice_id] = BlendState(voice_id=voice_id)
-        self.blend_states[voice_id].reset_for_note_on()
+        # Initialize AntiClick state (replaces BlendState + DC blocker)
+        self.ac_states[voice_id] = self.anticlick.init_state()
+        self.anticlick.note_on(self.ac_states[voice_id])
 
         # Configure carrier
         f0_hz = 440.0 * (2.0 ** ((note - 69 + cents / 100.0) / 12.0))
@@ -966,14 +979,6 @@ class CarrierLiftPipeline:
         self.wavelet_backend.engine.voice_allocate(voice_id)
         self.wavelet_backend.engine.reset_wet_state(voice_id)
         self.wavelet_backend._allocated_voices.add(voice_id)
-
-        # Initialize DC blocker state for this voice (two cascaded stages)
-        if not hasattr(self, '_dc_block_state'):
-            self._dc_block_state = {}
-        self._dc_block_state[voice_id] = {
-            'x1_prev': 0, 'y1_prev': 0,  # Stage 1
-            'x2_prev': 0, 'y2_prev': 0,  # Stage 2
-        }
 
         # Safety
         self.safety.voice_on(voice_id)
@@ -987,7 +992,7 @@ class CarrierLiftPipeline:
     def voice_deallocate(self, voice_id: int) -> None:
         """Fully deallocate a voice slot."""
         self.voice_states.pop(voice_id, None)
-        self.blend_states.pop(voice_id, None)
+        self.ac_states.pop(voice_id, None)
         self.carrier.remove_state(voice_id)
         self.safety.voice_off(voice_id)
 
@@ -1003,70 +1008,6 @@ class CarrierLiftPipeline:
         """
         self.tuning.set_target_by_name(tuning_name, morph_time_sec)
 
-    def _apply_dc_blocker(self, voice_id: int, samples: List[int]) -> List[int]:
-        """
-        Apply DC blocker to wet path to remove low-frequency drone.
-
-        Uses a cascaded (second-order) high-pass filter for steeper rolloff:
-        Two first-order stages: y[n] = x[n] - x[n-1] + alpha * y[n-1]
-
-        with alpha ~= 0.997 for a cutoff around 20Hz @ 48kHz.
-        Cascaded = 12dB/octave rolloff below cutoff.
-
-        Lower cutoff (20Hz vs 100Hz) to avoid affecting bass fundamentals.
-        C3 = 130.8 Hz, A1 = 55 Hz - need headroom below these.
-
-        Args:
-            voice_id: Voice identifier (for per-voice state)
-            samples: Input samples
-
-        Returns:
-            DC-blocked samples
-        """
-        # DC blocker coefficient for ~20Hz cutoff @ 48kHz
-        # alpha = exp(-2*pi*fc/fs) ≈ 0.9974 for fc=20Hz, fs=48kHz
-        # In Q15: 0.9974 * 32767 = 32682
-        ALPHA_Q15 = 32682
-
-        # Get or initialize state (two cascaded stages)
-        if not hasattr(self, '_dc_block_state'):
-            self._dc_block_state = {}
-        if voice_id not in self._dc_block_state:
-            self._dc_block_state[voice_id] = {
-                'x1_prev': 0, 'y1_prev': 0,  # Stage 1
-                'x2_prev': 0, 'y2_prev': 0,  # Stage 2
-            }
-
-        state = self._dc_block_state[voice_id]
-        x1_prev = state['x1_prev']
-        y1_prev = state['y1_prev']
-        x2_prev = state['x2_prev']
-        y2_prev = state['y2_prev']
-
-        result = []
-        for x in samples:
-            # Stage 1: y1[n] = x[n] - x[n-1] + alpha * y1[n-1]
-            y1 = x - x1_prev + ((ALPHA_Q15 * y1_prev) >> 15)
-            y1 = max(-32768, min(32767, y1))
-            x1_prev = x
-            y1_prev = y1
-
-            # Stage 2: y2[n] = y1[n] - y1[n-1] + alpha * y2[n-1]
-            y2 = y1 - x2_prev + ((ALPHA_Q15 * y2_prev) >> 15)
-            y2 = max(-32768, min(32767, y2))
-            x2_prev = y1
-            y2_prev = y2
-
-            result.append(y2)
-
-        # Save state
-        state['x1_prev'] = x1_prev
-        state['y1_prev'] = y1_prev
-        state['x2_prev'] = x2_prev
-        state['y2_prev'] = y2_prev
-
-        return result
-
     def render_voice(self, frame: 'VoiceFrame') -> List[int]:
         """
         Render one block for a voice using Carrier + Lift architecture.
@@ -1077,6 +1018,7 @@ class CarrierLiftPipeline:
         Returns:
             List of Q15 audio samples
         """
+        import numpy as np
         voice_id = frame.voice_id
 
         # Ensure voice is allocated
@@ -1084,113 +1026,83 @@ class CarrierLiftPipeline:
             self.voice_on(voice_id, frame.note, frame.cents)
 
         state = self.voice_states[voice_id]
-        blend = self.blend_states[voice_id]
+        ac_state = self.ac_states[voice_id]
 
         # Update pitch if changed
         if frame.f0_hz != state.carrier.target_phase_inc:
-            # Note: proper frequency comparison would need conversion
-            # For now, update carrier from VoiceFrame
             self.carrier.set_pitch(voice_id, frame.note, frame.cents)
 
-        # Update blend target if changed
-        if frame.beta_target_q15 != blend.beta_target_q15:
-            blend.set_beta_target(frame.beta_target_q15)
+        # Set wet target from frame (AntiClick handles ramping)
+        beta_target = frame.beta_target_q15 / 32767.0
+        self.anticlick.set_wet_target(ac_state, beta_target)
 
         # === Step 1: Render carrier (phase-continuous, immediate) ===
         x_carrier = self.carrier.render_block(voice_id, self.block_size)
 
-        # === Step 2: Generate 256 coefficients with proper frequency mapping ===
-        # Use harmonic_injector for frequency-accurate coefficient placement
-        # This maps each harmonic to the correct (leaf, coeff) position based on frequency
-        f0_hz = frame.f0_hz if frame.f0_hz > 0 else 440.0 * (2.0 ** ((frame.note - 69 + frame.cents / 100.0) / 12.0))
+        # === Step 2: Generate wet path (FWPT -> mask -> IDWPT) ===
+        # Only render wet if beta target > 0
+        x_wet = None
+        if frame.beta_target_q15 > 0:
+            # Get frequency for coefficient generation
+            f0_hz = frame.f0_hz if frame.f0_hz > 0 else 440.0 * (2.0 ** ((frame.note - 69 + frame.cents / 100.0) / 12.0))
 
-        from .harmonic_injector import create_harmonic_coeffs, WaveType
+            from .harmonic_injector import create_harmonic_coeffs, WaveType
 
-        # Determine waveform from partial amplitudes
-        partial_amps = frame.partial_amps_q15 if frame.partial_amps_q15 else state.partial_amps_q15
+            # Determine waveform from partial amplitudes
+            partial_amps = frame.partial_amps_q15 if frame.partial_amps_q15 else state.partial_amps_q15
 
-        # Check if it's a pure sine (only fundamental has energy)
-        if partial_amps and partial_amps[0] > 0 and all(a == 0 for a in partial_amps[1:]):
-            wave_type = WaveType.SINE
-        else:
-            wave_type = WaveType.SAW  # Default to saw for rich harmonics
+            if partial_amps and partial_amps[0] > 0 and all(a == 0 for a in partial_amps[1:]):
+                wave_type = WaveType.SINE
+            else:
+                wave_type = WaveType.SAW
 
-        # Generate coefficients with proper frequency->coefficient mapping
-        # This places energy at exact harmonic frequencies, not just leaf centers
-        coeffs_256 = create_harmonic_coeffs(
-            frequency=f0_hz,
-            amplitude=Q15_HALF,  # Base amplitude
-            wave_type=wave_type,
-            partials_n=8,  # Match carrier harmonic count
-            brightness_q15=Q15_ONE
-        )
+            coeffs_256 = create_harmonic_coeffs(
+                frequency=f0_hz,
+                amplitude=Q15_HALF,
+                wave_type=wave_type,
+                partials_n=8,
+                brightness_q15=Q15_ONE
+            )
 
-        # === Step 3: Apply global tuning gains ===
-        # Apply tuning to the generated coefficients
-        tuning_gains = self.tuning.get_current_gains()
-        from .wavelet_trees import NODE_SIZE as WPT_NODE_SIZE
-        for i in range(256):
-            leaf_idx = i // WPT_NODE_SIZE
-            if leaf_idx < len(tuning_gains):
-                coeffs_256[i] = (coeffs_256[i] * tuning_gains[leaf_idx]) >> 15
+            # Apply global tuning gains
+            tuning_gains = self.tuning.get_current_gains()
+            from .wavelet_trees import NODE_SIZE as WPT_NODE_SIZE
+            for i in range(256):
+                leaf_idx = i // WPT_NODE_SIZE
+                if leaf_idx < len(tuning_gains):
+                    coeffs_256[i] = (coeffs_256[i] * tuning_gains[leaf_idx]) >> 15
 
-        # === Step 4: Effect mode - FWPT(carrier) -> mask -> IDWPT ===
-        # This is the correct architecture where:
-        # - Carrier owns pitch/phase (pitch-accurate audio)
-        # - Wavelet transform is a filterbank effect, not an oscillator
-        # - Mask shapes the timbre in coefficient space
-        #
-        # With identity mask (None), output equals carrier (wet-only = dry)
-        # With a spectral mask, we can shape timbre while preserving pitch
+            # Effect mode: FWPT(carrier) -> mask -> IDWPT
+            from .wavelet_packet_trees import PacketTreeSet
+            if not hasattr(self, '_packet_tree_set'):
+                self._packet_tree_set = PacketTreeSet()
 
-        from .wavelet_packet_trees import PacketTreeSet
+            tree_id = frame.tree_a_id if frame.tree_blend_q15 < Q15_HALF else frame.tree_b_id
 
-        if not hasattr(self, '_packet_tree_set'):
-            self._packet_tree_set = PacketTreeSet()
+            x_wet = self._packet_tree_set.effect_mode(
+                tree_id=tree_id,
+                carrier_audio=x_carrier,
+                mask_q15=None  # Identity mask for now
+            )
 
-        tree_id = frame.tree_a_id if frame.tree_blend_q15 < Q15_HALF else frame.tree_b_id
+        # === Step 3: AntiClick operator does ALL mixing + click prevention ===
+        # Convert to numpy arrays for AntiClick
+        carrier_np = np.array(x_carrier, dtype=np.float32) / 32768.0
+        wet_np = None
+        if x_wet is not None:
+            wet_np = np.array(x_wet, dtype=np.float32) / 32768.0
 
-        # For now, use identity mask (None) for clean carrier passthrough
-        # This validates the effect mode architecture works correctly.
-        # Future: use coeffs_256 or tuning_gains to shape the spectrum
-        # while preserving the carrier's pitch accuracy.
-        #
-        # Note: Setting mask_q15=None means the wet path equals the carrier,
-        # making beta a dry/wet blend that has no effect at extreme values.
-        # To add timbral coloring, convert tuning_gains to a proper mask.
-        x_wpt = self._packet_tree_set.effect_mode(
-            tree_id=tree_id,
-            carrier_audio=x_carrier,
-            mask_q15=None  # Identity mask - wet equals carrier
-        )
+        # AntiClick handles:
+        # - Latency alignment (5-block FIFO)
+        # - Beta ramping (equal-power crossfade)
+        # - OLA seam smoothing
+        output_np = self.anticlick.step(ac_state, carrier_np, wet_np)
 
-        # === Step 4b: Apply DC blocker to wet path ===
-        # The FWPT/IDWPT roundtrip can introduce small low-frequency errors.
-        # DC blocker helps reduce these artifacts, especially at low pitches.
-        x_wpt = self._apply_dc_blocker(voice_id, x_wpt)
+        # Convert back to Q15
+        output = (output_np * 32768.0).astype(np.int32)
+        output = np.clip(output, -32768, 32767).tolist()
 
-        # === Step 5: Blend with latency-aware beta ramp ===
-        # Track if wet just became ready (seam event for OLA)
-        was_not_ready = blend.wet_ready_counter > 0
-        wet_ready = blend.advance_block()
-
-        # Mark seam event when wet transitions from not-ready to ready
-        if was_not_ready and wet_ready and blend.beta_target_q15 > 0:
-            blend._just_became_ready = True
-        else:
-            blend._just_became_ready = False
-
-        if not wet_ready:
-            # During warmup (first 5 blocks), carrier only
-            output = x_carrier
-        else:
-            # Equal-power crossfade between carrier (dry) and wavelet (wet)
-            output = []
-            for i in range(self.block_size):
-                blended = self.equal_power_blend(x_carrier[i], x_wpt[i], blend.beta_q15)
-                output.append(blended)
-
-        # === Step 6: Apply voice gain ===
+        # === Step 4: Apply voice gain ===
         output = [(s * frame.gain_q15) >> 15 for s in output]
 
         # Advance tuning morph
@@ -1212,33 +1124,8 @@ class CarrierLiftPipeline:
         Returns:
             (L, R) stereo sample lists
         """
-        # Render voice
+        # Render voice (AntiClick handles all click prevention)
         samples = self.render_voice(frame)
-
-        # Determine if this is a seam event requiring OLA crossfade
-        # Seam events: voice start/stop, wet-valid transition, tree change
-        # For carrier-only (beta=0) or steady-state, seam=False
-        seam = False
-
-        # Check for wet-valid transition (wet path just became available)
-        if frame.voice_id in self.blend_states:
-            blend = self.blend_states[frame.voice_id]
-            # Seam when wet transitions from not-ready to ready AND beta > 0
-            if hasattr(blend, '_just_became_ready') and blend._just_became_ready:
-                seam = True
-                blend._just_became_ready = False
-
-        # Determine if we're in carrier-only mode (no wet path)
-        is_carrier_only = frame.beta_target_q15 == 0
-
-        # Apply SafetyEngine declick
-        # - OLA only on seam events (not every block)
-        # - C1 patch: disable for carrier-only (phase-continuous), enable for wet blend
-        samples = self.safety.apply_declick(
-            samples, frame.voice_id,
-            seam=seam,
-            apply_c1_patch=not is_carrier_only
-        )
 
         # Convert to stereo (using pan from frame)
         pan_q15 = frame.pan_q15
@@ -1249,19 +1136,16 @@ class CarrierLiftPipeline:
         L = [int(s * left_gain) for s in samples]
         R = [int(s * right_gain) for s in samples]
 
-        # Apply SafetyEngine limiting
-        # IMPORTANT: Both carrier and wavelet synthesis are now phase-continuous,
-        # so we disable master OLA for all modes (it was causing artifacts).
-        # The OLA is only useful for handling discontinuous transitions (seams),
-        # which are rare events, not every-block processing.
-        #
-        # For carrier-only (beta=0):
-        #   - Disable DC removal: carrier is zero-mean over full cycles
-        # For wet blend (beta>0):
-        #   - Enable DC removal: wavelet can have DC offset issues
+        # Apply SafetyEngine limiting (minimal now that AntiClick handles clicks)
+        # AntiClick already handles:
+        #   - Latency alignment (5-block FIFO)
+        #   - Beta ramping (equal-power crossfade)
+        #   - OLA seam smoothing
+        # SafetyEngine now only handles master limiting
+        is_carrier_only = frame.beta_target_q15 == 0
         L, R = self.safety.step_block(
             L, R, self.params,
-            apply_master_ola=False,  # Phase-continuous synthesis doesn't need block OLA
+            apply_master_ola=False,  # AntiClick handles OLA
             apply_dc_removal=not is_carrier_only
         )
 
