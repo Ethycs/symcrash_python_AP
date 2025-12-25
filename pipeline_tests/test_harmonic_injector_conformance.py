@@ -14,28 +14,28 @@ class TestNoteToFrequency:
 
     def test_a4_is_440hz(self):
         """MIDI note 69 (A4) should be 440 Hz."""
-        from harmonic_injector import note_to_freq
+        from symcrash_python_ap.wavelet.harmonic_injector import note_to_freq
 
         freq = note_to_freq(69, 0)
         assert abs(freq - 440.0) < 0.1, f"A4 = {freq:.1f} Hz, expected 440 Hz"
 
     def test_c4_is_261hz(self):
         """MIDI note 60 (C4) should be ~261.6 Hz."""
-        from harmonic_injector import note_to_freq
+        from symcrash_python_ap.wavelet.harmonic_injector import note_to_freq
 
         freq = note_to_freq(60, 0)
         assert abs(freq - 261.6) < 0.5, f"C4 = {freq:.1f} Hz, expected 261.6 Hz"
 
     def test_c3_is_130hz(self):
         """MIDI note 48 (C3) should be ~130.8 Hz."""
-        from harmonic_injector import note_to_freq
+        from symcrash_python_ap.wavelet.harmonic_injector import note_to_freq
 
         freq = note_to_freq(48, 0)
         assert abs(freq - 130.8) < 0.5, f"C3 = {freq:.1f} Hz, expected 130.8 Hz"
 
     def test_a5_is_880hz(self):
         """MIDI note 81 (A5) should be 880 Hz."""
-        from harmonic_injector import note_to_freq
+        from symcrash_python_ap.wavelet.harmonic_injector import note_to_freq
 
         freq = note_to_freq(81, 0)
         assert abs(freq - 880.0) < 0.5, f"A5 = {freq:.1f} Hz, expected 880 Hz"
@@ -46,21 +46,21 @@ class TestFrequencyToLeaf:
 
     def test_low_frequency_maps_to_low_leaf(self):
         """100 Hz should map to a low leaf index."""
-        from harmonic_injector import freq_to_leaf
+        from symcrash_python_ap.wavelet.harmonic_injector import freq_to_leaf
 
         leaf = freq_to_leaf(100)
         assert leaf < 10, f"100 Hz should map to low leaf, got {leaf}"
 
     def test_high_frequency_maps_to_high_leaf(self):
         """10000 Hz should map to a high leaf index."""
-        from harmonic_injector import freq_to_leaf
+        from symcrash_python_ap.wavelet.harmonic_injector import freq_to_leaf
 
         leaf = freq_to_leaf(10000)
         assert leaf > 20, f"10000 Hz should map to high leaf, got {leaf}"
 
     def test_frequency_in_band_range(self):
         """Mapped frequency should be within band limits."""
-        from harmonic_injector import freq_to_leaf, LEAF_EDGES_HZ
+        from symcrash_python_ap.wavelet.harmonic_injector import freq_to_leaf, LEAF_EDGES_HZ
 
         test_freqs = [220, 440, 880, 1760]
         for freq in test_freqs:
@@ -76,7 +76,7 @@ class TestWaveTypeAmplitudes:
 
     def test_sine_only_fundamental(self):
         """Sine wave should only have fundamental."""
-        from harmonic_injector import WaveType, get_partial_amplitude, Q15_ONE
+        from symcrash_python_ap.wavelet.harmonic_injector import WaveType, get_partial_amplitude, Q15_ONE
 
         # Fundamental (k=1) should be full amplitude
         amp_1 = get_partial_amplitude(WaveType.SINE, 1)
@@ -89,7 +89,7 @@ class TestWaveTypeAmplitudes:
 
     def test_saw_has_all_harmonics(self):
         """Saw wave should have all harmonics with 1/k rolloff."""
-        from harmonic_injector import WaveType, get_partial_amplitude, Q15_ONE
+        from symcrash_python_ap.wavelet.harmonic_injector import WaveType, get_partial_amplitude, Q15_ONE
 
         for k in range(1, 9):
             amp_k = get_partial_amplitude(WaveType.SAW, k)
@@ -102,7 +102,7 @@ class TestWaveTypeAmplitudes:
 
     def test_triangle_only_odd_harmonics(self):
         """Triangle wave should have only odd harmonics."""
-        from harmonic_injector import WaveType, get_partial_amplitude
+        from symcrash_python_ap.wavelet.harmonic_injector import WaveType, get_partial_amplitude
 
         for k in range(1, 9):
             amp_k = get_partial_amplitude(WaveType.TRIANGLE, k)
@@ -117,7 +117,7 @@ class TestHarmonicTargetGenerator:
 
     def test_generate_sparse_target(self):
         """Sparse target should have active leaves for harmonics."""
-        from harmonic_injector import HarmonicTargetGenerator, WaveType
+        from symcrash_python_ap.wavelet.harmonic_injector import HarmonicTargetGenerator, WaveType
 
         gen = HarmonicTargetGenerator()
         gen.set_note(0, 57)  # A3 = 220 Hz
@@ -130,7 +130,7 @@ class TestHarmonicTargetGenerator:
 
     def test_generate_dense_target(self):
         """Dense target should have 256 coefficients."""
-        from harmonic_injector import HarmonicTargetGenerator, WaveType, COEFF_LEN
+        from symcrash_python_ap.wavelet.harmonic_injector import HarmonicTargetGenerator, WaveType, COEFF_LEN
 
         gen = HarmonicTargetGenerator()
         gen.set_note(0, 57)  # A3 = 220 Hz
@@ -144,7 +144,7 @@ class TestHarmonicTargetGenerator:
 
     def test_apply_injection(self):
         """Injection should modify coefficient vector."""
-        from harmonic_injector import HarmonicTargetGenerator, WaveType, COEFF_LEN, Q15_ONE
+        from symcrash_python_ap.wavelet.harmonic_injector import HarmonicTargetGenerator, WaveType, COEFF_LEN, Q15_ONE
 
         gen = HarmonicTargetGenerator()
         gen.set_note(0, 57)
@@ -166,7 +166,7 @@ class TestConvenienceFunctions:
 
     def test_create_harmonic_coeffs_length(self):
         """create_harmonic_coeffs should return 256 coefficients."""
-        from harmonic_injector import create_harmonic_coeffs, WaveType, COEFF_LEN
+        from symcrash_python_ap.wavelet.harmonic_injector import create_harmonic_coeffs, WaveType, COEFF_LEN
 
         coeffs = create_harmonic_coeffs(
             frequency=220.0,
@@ -179,7 +179,7 @@ class TestConvenienceFunctions:
 
     def test_create_harmonic_coeffs_non_zero(self):
         """create_harmonic_coeffs should have non-zero coefficients."""
-        from harmonic_injector import create_harmonic_coeffs, WaveType
+        from symcrash_python_ap.wavelet.harmonic_injector import create_harmonic_coeffs, WaveType
 
         coeffs = create_harmonic_coeffs(
             frequency=220.0,
@@ -193,7 +193,7 @@ class TestConvenienceFunctions:
 
     def test_synthesize_harmonic_audio_length(self):
         """synthesize_harmonic_audio should return correct block size."""
-        from harmonic_injector import synthesize_harmonic_audio, WaveType
+        from symcrash_python_ap.wavelet.harmonic_injector import synthesize_harmonic_audio, WaveType
 
         audio, phase = synthesize_harmonic_audio(
             frequency=440.0,
@@ -207,7 +207,7 @@ class TestConvenienceFunctions:
 
     def test_synthesize_harmonic_audio_phase_continuity(self):
         """synthesize_harmonic_audio should return updated phase state."""
-        from harmonic_injector import synthesize_harmonic_audio, WaveType
+        from symcrash_python_ap.wavelet.harmonic_injector import synthesize_harmonic_audio, WaveType
 
         audio1, phase1 = synthesize_harmonic_audio(
             frequency=440.0,

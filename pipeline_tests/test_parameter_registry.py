@@ -6,7 +6,7 @@ Tests for the Closure Appendix v0.1 Parameter Registry implementation.
 """
 
 import pytest
-from src.symcrash_python_ap.parameter_registry import (
+from symcrash_python_ap.parameter_registry import (
     # Constants
     Q15_MIN,
     Q15_MAX,

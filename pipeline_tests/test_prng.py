@@ -6,7 +6,7 @@ Tests for deterministic pseudorandomness per WSE-STD-040.
 """
 
 import pytest
-from src.symcrash_python_ap.prng import (
+from symcrash_python_ap.prng import (
     # Core PRNG
     PCG32,
     # Seeding

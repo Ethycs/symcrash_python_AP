@@ -19,7 +19,7 @@ if str(pkg_path) not in sys.path:
     sys.path.insert(0, str(pkg_path))
 
 # Now import from the package
-from symcrash_python_ap.tree_library import (
+from symcrash_python_ap.wavelet.tree_library import (
     get_tree_library, TREE_BYPASS_DEFAULT, blend_coefficients, ONE_Q15,
     B, L, K, COEFF_LEN, SAMPLE_RATE, NYQUIST
 )

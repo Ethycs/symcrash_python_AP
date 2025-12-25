@@ -89,15 +89,18 @@ class OverlayKind(Enum):
 
 
 class EventLane(IntEnum):
-    """Fixed event lane assignments."""
+    """Fixed event lane assignments (v1 with carrier-first semantics)."""
     EVT_OP_PULSE = 0
     EVT_OP_TOGGLE = 1
     EVT_TREE_MORPH = 2
     EVT_K_MODE = 3
-    EVT_INJECT_NOTE = 4
+    EVT_CARRIER_CFG = 4     # Was EVT_INJECT_NOTE in v0
     EVT_MATERIAL_HIT = 5
     EVT_CLOUD_PUSH = 6
     EVT_RESERVED = 7
+
+    # Backwards compatibility alias
+    EVT_INJECT_NOTE = EVT_CARRIER_CFG
 
 
 # =============================================================================
@@ -129,6 +132,10 @@ class NodeParams:
     waveform: Optional[str] = None
     detune_cents: float = 0.0
     pw: float = 0.5  # Pulse width
+
+    # Carrier-specific fields (v1 Addendum A)
+    role: Optional[str] = None        # "off" | "audible" | "exciter_only"
+    archetype: Optional[str] = None   # TreeArchetype name
 
     # Noise
     color: Optional[str] = None
@@ -284,10 +291,14 @@ class EventPayloadTemplate:
     p0: int = 0
     p1: int = 0
     p2: int = 0
-    # For EVT_INJECT_NOTE
+    # For EVT_INJECT_NOTE (legacy)
     wave_type: Optional[str] = None
     partials_N: Optional[int] = None
     pull_q8: Optional[int] = None
+    # For EVT_CARRIER_CFG (v1 Addendum A)
+    carrier_model: Optional[str] = None    # CarrierModel name
+    carrier_role: Optional[str] = None     # CarrierRole name
+    carrier_archetype: Optional[str] = None  # TreeArchetype name
 
 
 @dataclass
@@ -529,6 +540,11 @@ def _parse_node_params(data: dict) -> NodeParams:
         params.detune_cents = data['detune_cents']
     if 'pw' in data:
         params.pw = data['pw']
+    # Carrier-specific fields (v1 Addendum A)
+    if 'role' in data:
+        params.role = data['role']
+    if 'archetype' in data:
+        params.archetype = data['archetype']
     if 'color' in data:
         params.color = data['color']
     if 'mode' in data:
@@ -670,6 +686,10 @@ def _parse_event_payload_template(data: dict) -> EventPayloadTemplate:
         wave_type=data.get('wave_type'),
         partials_N=data.get('partials_N'),
         pull_q8=data.get('pull_q8'),
+        # EVT_CARRIER_CFG fields (v1 Addendum A)
+        carrier_model=data.get('carrier_model'),
+        carrier_role=data.get('carrier_role'),
+        carrier_archetype=data.get('carrier_archetype'),
     )
 
 

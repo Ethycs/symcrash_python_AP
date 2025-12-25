@@ -6,7 +6,7 @@ Tests for time ownership and temporal responsibility.
 """
 
 import pytest
-from src.symcrash_python_ap.time_ownership import (
+from symcrash_python_ap.voice.time_ownership import (
     # Constants
     BLOCK_SIZE_SAMPLES,
     SAMPLE_RATE_48K,

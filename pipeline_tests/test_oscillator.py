@@ -15,7 +15,7 @@ Tests for:
 
 import pytest
 import math
-from symcrash_python_ap.oscillator import (
+from symcrash_python_ap.wavelet.oscillator import (
     # Constants
     PHASE_BITS,
     PHASE_FRAC_BITS,

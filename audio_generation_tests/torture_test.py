@@ -20,7 +20,7 @@ from pathlib import Path
 import sys
 
 # Add src to path (same pattern as other audio tests)
-sys.path.insert(0, str(Path(__file__).parent.parent / "src" / "symcrash_python_ap"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from test_config import (
     FS, BLOCK_SIZE, TOTAL_BLOCKS, BLOCKS_PER_SEC,
@@ -39,14 +39,14 @@ from test_atoms import (
 )
 
 # Import from the symcrash_python_ap package (now via sys.path)
-from symbol_engine import SymbolEngine
-from wavelet_engine import WaveletEngine
-from material_engine import MaterialEngine
-from safety_engine import SafetyEngine
-from frames import ParamFrame, VoiceFrame
-from fixed import sat16, mul_q15_sat
-from wavelet_packet_trees import PacketTreeSet, COEFF_LEN
-from audio_io import write_audio
+from symcrash_python_ap.symbol import SymbolEngine
+from symcrash_python_ap.wavelet import WaveletEngine
+from symcrash_python_ap.material import MaterialEngine
+from symcrash_python_ap.safety import SafetyEngine
+from symcrash_python_ap.frames import ParamFrame, VoiceFrame
+from symcrash_python_ap.fixed import sat16, mul_q15_sat
+from symcrash_python_ap.wavelet.wavelet_packet_trees import PacketTreeSet, COEFF_LEN
+from symcrash_python_ap.audio_io import write_audio
 
 
 # =============================================================================

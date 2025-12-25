@@ -2,14 +2,14 @@
 
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent / "src" / "symcrash_python_ap"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import numpy as np
-from voice_engine import VoiceEngine, GestureBasis
-from symbol_engine import SymbolExecutor
-from wavelet_engine import WaveletEngine
-from frames import VoiceFrame, ParamFrame
-from fixed import sat16, Q15_ONE
+from symcrash_python_ap.voice.voice_engine import VoiceEngine, GestureBasis
+from symcrash_python_ap.symbol.symbol_engine import SymbolExecutor
+from symcrash_python_ap.wavelet.wavelet_engine import WaveletEngine
+from symcrash_python_ap.frames import VoiceFrame, ParamFrame
+from symcrash_python_ap.fixed import sat16, Q15_ONE
 
 # Constants
 FS = 48000

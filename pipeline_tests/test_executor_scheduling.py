@@ -8,7 +8,7 @@ Tests for executor scheduling, tail ordering, and budget accounting.
 import pytest
 from typing import List
 
-from executor_scheduling import (
+from symcrash_python_ap.symbol.executor_scheduling import (
     # Constants
     C_MAX, COST_TAIL_TOTAL, COST_UNIT_BASE,
     OPERATOR_COSTS, EVENT_LANE_COSTS, EVENT_LANE_DROP_PRIORITY,
@@ -25,11 +25,12 @@ from executor_scheduling import (
     # Executor
     Executor030, ExecutorStats,
 )
-from uart_protocol import (
-    VoiceFrameV0, BackboneEntry, Payload64, PayloadMode, EventLane, NUM_EVENT_LANES
+from symcrash_python_ap.comm import (
+    VoiceFrameV0, BackboneEntry, Payload64, PayloadMode, EventLane,
 )
-from fixed import Q15_ONE, Q15_HALF, sat16
-from operator_library import BAND_SLICES, NUM_BANDS
+from symcrash_python_ap.comm.uart_protocol import NUM_EVENT_LANES
+from symcrash_python_ap.fixed import Q15_ONE, Q15_HALF, sat16
+from symcrash_python_ap.operator_library import BAND_SLICES, NUM_BANDS
 
 
 # =============================================================================

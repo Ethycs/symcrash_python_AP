@@ -10,7 +10,7 @@ import tempfile
 import os
 import json
 
-from src.symcrash_python_ap.instrument_ir import (
+from symcrash_python_ap.instrument_ir import (
     # Enums
     NodeType,
     WaveformType,

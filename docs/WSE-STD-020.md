@@ -454,4 +454,157 @@ I can finalize this as a “frozen PDF-style” section once you answer these **
 1. **block_index width**: keep `uint16` (wrap every ~87s at 750 blocks/s) or go `uint32` (wrap effectively never).
 2. **CRC32 polynomial**: standard Ethernet CRC-32 (0x04C11DB7) vs Castagnoli (0x1EDC6F41). (Either is fine; just pick one.)
 
-If you don’t want to decide: I’ll assume `uint32 block_index` + CRC-32C (Castagnoli), because it’s common in embedded and fast in software.
+If you don't want to decide: I'll assume `uint32 block_index` + CRC-32C (Castagnoli), because it's common in embedded and fast in software.
+
+---
+
+## Addendum A: Carrier Header Extension (VoiceFrame v1)
+
+### A.1 Motivation
+
+The carrier oscillator is promoted to a first-class ABI citizen. This addendum extends
+VoiceFrame v0 with explicit carrier configuration fields, enabling pitch ownership,
+waveform selection, and scaffold/texture blending (η) as per-block parameters.
+
+### A.2 New Enums
+
+#### CarrierModel (u8)
+
+| Value | Name     | Description |
+|------:|----------|-------------|
+| 0     | SINE     | Pure sine carrier |
+| 1     | SAW      | Sawtooth carrier |
+| 2     | PULSE    | Pulse wave (pw_q15 controls width) |
+| 3     | TRI      | Triangle carrier |
+| 4     | PARTIALS | Additive partials from harmonic_amps |
+| 5     | NOISE    | Noise exciter (no pitched carrier) |
+
+#### CarrierRole (u8)
+
+| Value | Name         | Description |
+|------:|--------------|-------------|
+| 0     | OFF          | No carrier; pure wavelet synthesis |
+| 1     | AUDIBLE      | Carrier blended into output via β |
+| 2     | EXCITER_ONLY | Carrier drives IDWPT but not heard directly |
+
+#### TransitionKind (u8)
+
+| Value | Name      | Description |
+|------:|-----------|-------------|
+| 0     | RETRIGGER | Hard reset phase on note-on |
+| 1     | GLIDE     | Portamento pitch slew |
+| 2     | BRIDGE    | Tree crossfade bridge between notes |
+
+### A.3 VoiceFrame v1 ABI Extension
+
+VoiceFrame v1 adds the following fields after the tree control section:
+
+```
+VoiceFrame_v1 extends VoiceFrame_v0 {
+  // ... existing fields from v0 ...
+
+  // Carrier header (NEW - 12 bytes)
+  uint8  carrier_model_u8;      // CarrierModel enum
+  uint8  carrier_role_u8;       // CarrierRole enum
+  uint8  carrier_archetype_u8;  // TreeArchetype (0-4)
+  uint8  transition_kind_u8;    // TransitionKind enum
+  int16  detune_cents_i16;      // Carrier detune in cents
+  uint16 pw_q15;                // Pulse width (for PULSE model)
+  uint16 eta_target_q15;        // Scaffold/texture blend target
+  int16  pitchbend_cents_i16;   // Real-time pitchbend
+
+  // ... events section follows ...
+}
+```
+
+### A.4 Event Lane Update
+
+Lane 4 is renamed from `EVT_INJECT` to `EVT_CARRIER_CFG`:
+
+| Lane | Name (v0)    | Name (v1)       | Consumer        |
+|-----:|--------------|-----------------|-----------------|
+| 0    | EVT_OP_FIRE  | EVT_OP_FIRE     | Symbol          |
+| 1    | EVT_OP_TOGGLE| EVT_OP_TOGGLE   | Symbol          |
+| 2    | EVT_INJECT   | EVT_INJECT      | Symbol          |
+| 3    | EVT_MATERIAL | EVT_MATERIAL    | Material        |
+| 4    | EVT_TREE     | **EVT_CARRIER_CFG** | **Carrier/Wavelet** |
+| 5    | EVT_CLOUD    | EVT_CLOUD       | Voice/Scheduler |
+| 6    | EVT_VOICE    | EVT_VOICE       | Voice           |
+| 7    | EVT_DEBUG    | EVT_DEBUG       | Any             |
+
+#### EVT_CARRIER_CFG Semantics
+
+**Variants:**
+
+| variant | Meaning |
+|--------:|---------|
+| 0 | Set carrier model + role |
+| 1 | Pitch update (detune/pitchbend) |
+| 2 | Archetype change |
+| 3 | Transition kind change |
+
+**Params:**
+
+| Field | Meaning |
+|-------|---------|
+| `param0_q8` | carrier_model (for variant 0) |
+| `param1_q8` | carrier_role (for variant 0) |
+| `param2_q8` | archetype (for variant 2) |
+
+**Normative rule:** The carrier header fields in the VoiceFrame take precedence.
+EVT_CARRIER_CFG events are for dynamic per-block overrides.
+
+### A.5 VF_DELTA Field Mask Extension
+
+For VF_DELTA messages, add carrier fields to the canonical field order:
+
+| Bit | Field (v0)        | Field (v1)            |
+|----:|-------------------|----------------------|
+| 0   | regime_id         | regime_id            |
+| 1   | gear_q15          | gear_q15             |
+| 2   | tree_id_a         | tree_id_a            |
+| 3   | tree_id_b         | tree_id_b            |
+| 4   | tree_blend_q15    | tree_blend_q15       |
+| 5   | gain_q15          | gain_q15             |
+| 6   | traction_q15      | traction_q15         |
+| 7   | backbone          | backbone             |
+| 8   | event_mask        | event_mask           |
+| 9   | event_strength[8] | event_strength[8]    |
+| 10  | payload_mode      | payload_mode         |
+| 11  | payload_common    | payload_common       |
+| 12  | per-lane payloads | per-lane payloads    |
+| **13** | - | **carrier_model_u8** |
+| **14** | - | **carrier_role_u8** |
+| **15** | - | **carrier_archetype_u8** |
+| **16** | - | **transition_kind_u8** |
+| **17** | - | **detune_cents_i16** |
+| **18** | - | **pw_q15** |
+| **19** | - | **eta_target_q15** |
+| **20** | - | **pitchbend_cents_i16** |
+
+### A.6 Completion Rules for Carrier Fields
+
+On voice allocation (note-on), carrier fields initialize to:
+
+- `carrier_model_u8 = SINE (0)`
+- `carrier_role_u8 = preset default (typically AUDIBLE)`
+- `carrier_archetype_u8 = HARMONIC (0)`
+- `transition_kind_u8 = RETRIGGER (0)`
+- `detune_cents_i16 = 0`
+- `pw_q15 = 16384` (0.5 pulse width)
+- `eta_target_q15 = 16384` (0.5 scaffold/texture blend)
+- `pitchbend_cents_i16 = 0`
+
+For VF_DELTA, omitted carrier fields use "keep previous" semantics.
+
+### A.7 Conformance (v1)
+
+An implementation conforms to `WSE-STD-020 v1` iff it:
+
+- Conforms to all v0 requirements
+- Supports CarrierModel, CarrierRole, TransitionKind enums
+- Implements VoiceFrame v1 carrier header fields
+- Handles EVT_CARRIER_CFG lane semantics
+- Applies correct completion rules for carrier fields
+
+---

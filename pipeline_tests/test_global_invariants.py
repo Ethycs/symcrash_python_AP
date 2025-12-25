@@ -34,7 +34,7 @@ class TestG0BlockInvisibility:
 
     def test_static_tone_no_block_artifacts(self, voice_engine, q15_half):
         """Sustain static tone and check for block-rate discontinuities."""
-        from voice_engine import GestureBasis
+        from symcrash_python_ap.voice.voice_engine import GestureBasis
 
         # Allocate voice with simple gesture
         vid = voice_engine.allocate_voice(program_id=1004)  # Static Organ
@@ -70,7 +70,7 @@ class TestG0BlockInvisibility:
 
     def test_tree_morph_no_clicks(self, voice_engine, q15_half, q15_one):
         """Verify tree morphing produces no discontinuities."""
-        from voice_engine import GestureBasis
+        from symcrash_python_ap.voice.voice_engine import GestureBasis
 
         vid = voice_engine.allocate_voice(program_id=1001)  # Glitch Violin
 
@@ -111,7 +111,7 @@ class TestG0BlockInvisibility:
 
     def test_parameter_sweep_continuous(self, voice_engine, q15_half, q15_one):
         """Verify parameter sweeps produce continuous output."""
-        from voice_engine import GestureBasis
+        from symcrash_python_ap.voice.voice_engine import GestureBasis
 
         vid = voice_engine.allocate_voice(program_id=1003)  # Turbulent Choir
 
@@ -161,7 +161,7 @@ class TestG1DeterminismUnderLoad:
 
     def test_identical_runs_match(self, q15_half):
         """Same input sequence produces same output."""
-        from voice_engine import VoiceEngine, GestureBasis
+        from symcrash_python_ap.voice.voice_engine import VoiceEngine, GestureBasis
 
         def run_sequence():
             engine = VoiceEngine(max_voices=4)
@@ -203,8 +203,8 @@ class TestG1DeterminismUnderLoad:
 
     def test_symbol_engine_determinism(self, q15_one):
         """Symbol Engine produces deterministic output."""
-        from symbol_engine import SymbolExecutor
-        from frames import VoiceFrame
+        from symcrash_python_ap.symbol.symbol_engine import SymbolExecutor
+        from symcrash_python_ap.frames import VoiceFrame
 
         def run_executor():
             executor = SymbolExecutor(n_voices=4)
@@ -229,7 +229,7 @@ class TestG1DeterminismUnderLoad:
 
     def test_no_wall_clock_dependency(self, voice_engine, q15_half):
         """Verify no wall-clock time dependency."""
-        from voice_engine import GestureBasis
+        from symcrash_python_ap.voice.voice_engine import GestureBasis
         import time
 
         vid = voice_engine.allocate_voice(program_id=1004)
@@ -279,7 +279,7 @@ class TestG2GracefulDegradation:
 
     def test_max_voices_no_crash(self, q15_half):
         """System handles max voices without crash."""
-        from voice_engine import VoiceEngine, GestureBasis
+        from symcrash_python_ap.voice.voice_engine import VoiceEngine, GestureBasis
 
         engine = VoiceEngine(max_voices=12)
 
@@ -306,8 +306,8 @@ class TestG2GracefulDegradation:
 
     def test_degradation_levels_work(self, q15_one):
         """All degradation levels produce valid output."""
-        from symbol_engine import SymbolExecutor
-        from frames import VoiceFrame
+        from symcrash_python_ap.symbol.symbol_engine import SymbolExecutor
+        from symcrash_python_ap.frames import VoiceFrame
 
         for level in [0, 1, 2, 3]:  # DEGRADE_NONE through DEGRADE_EMERGENCY
             executor = SymbolExecutor(n_voices=4)
@@ -329,7 +329,7 @@ class TestG2GracefulDegradation:
 
     def test_no_silence_under_load(self, q15_half):
         """System never goes completely silent under load."""
-        from voice_engine import VoiceEngine, GestureBasis
+        from symcrash_python_ap.voice.voice_engine import VoiceEngine, GestureBasis
 
         engine = VoiceEngine(max_voices=12)
 
@@ -357,7 +357,7 @@ class TestG2GracefulDegradation:
 
     def test_extreme_parameters_bounded(self, q15_one):
         """Extreme parameters don't cause overflow."""
-        from voice_engine import VoiceEngine, GestureBasis
+        from symcrash_python_ap.voice.voice_engine import VoiceEngine, GestureBasis
 
         engine = VoiceEngine(max_voices=4)
         vid = engine.allocate_voice(program_id=1002)  # Shepard Random

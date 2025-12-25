@@ -1,13 +1,13 @@
 """Debug why audio sounds flat."""
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent / "src" / "symcrash_python_ap"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from voice_engine import VoiceEngine, GestureBasis
-from symbol_engine import SymbolExecutor
-from wavelet_engine import WaveletEngine
-from frames import VoiceFrame
-from fixed import sat16
+from symcrash_python_ap.voice.voice_engine import VoiceEngine, GestureBasis
+from symcrash_python_ap.symbol.symbol_engine import SymbolExecutor
+from symcrash_python_ap.wavelet.wavelet_engine import WaveletEngine
+from symcrash_python_ap.frames import VoiceFrame
+from symcrash_python_ap.fixed import sat16
 import numpy as np
 
 print("=" * 60)

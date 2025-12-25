@@ -6,7 +6,7 @@ Tests for degradation and voice scheduling semantics.
 """
 
 import pytest
-from src.symcrash_python_ap.degradation import (
+from symcrash_python_ap.voice.degradation import (
     # Constants
     ENERGY_EPS_Q15,
     CLOUD_DECAY_Q15,

@@ -6,7 +6,7 @@ Tests for presets, editor operations, and tower completion.
 """
 
 import pytest
-from src.symcrash_python_ap.presets import (
+from symcrash_python_ap.presets import (
     # Constants
     PRESET_MAGIC,
     SAFE_OPERATOR_SET,

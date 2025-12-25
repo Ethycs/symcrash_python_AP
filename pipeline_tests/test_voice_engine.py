@@ -34,7 +34,7 @@ class TestV1MusicalTimeOwnership:
 
     def test_voice_engine_emits_without_symbol(self, voice_engine, q15_half):
         """Voice Engine works independently of Symbol Engine."""
-        from voice_engine import GestureBasis
+        from symcrash_python_ap.voice.voice_engine import GestureBasis
 
         vid = voice_engine.allocate_voice(program_id=1001)
         gesture = GestureBasis(gate=True, pressure_q15=q15_half)
@@ -48,7 +48,7 @@ class TestV1MusicalTimeOwnership:
 
     def test_block_count_advances(self, voice_engine, q15_half):
         """Block count advances correctly."""
-        from voice_engine import GestureBasis
+        from symcrash_python_ap.voice.voice_engine import GestureBasis
 
         initial_count = voice_engine.get_block_count()
 
@@ -62,7 +62,7 @@ class TestV1MusicalTimeOwnership:
 
     def test_voice_has_own_timing(self, voice_engine, q15_half):
         """Each voice maintains independent timing."""
-        from voice_engine import GestureBasis, VoicePhase
+        from symcrash_python_ap.voice.voice_engine import GestureBasis, VoicePhase
 
         # Allocate two voices at different times
         vid1 = voice_engine.allocate_voice(program_id=1001)
@@ -104,7 +104,7 @@ class TestV2ADSRCorrectness:
 
     def test_envelope_continuity(self, voice_engine, q15_half):
         """Envelope changes smoothly across blocks."""
-        from voice_engine import GestureBasis
+        from symcrash_python_ap.voice.voice_engine import GestureBasis
 
         vid = voice_engine.allocate_voice(program_id=1003)  # Turbulent Choir (slow attack)
         gesture = GestureBasis(gate=True, pressure_q15=q15_half)
@@ -124,7 +124,7 @@ class TestV2ADSRCorrectness:
 
     def test_note_off_during_attack(self, voice_engine, q15_half):
         """Note-off during attack transitions to release correctly."""
-        from voice_engine import GestureBasis, VoicePhase
+        from symcrash_python_ap.voice.voice_engine import GestureBasis, VoicePhase
 
         vid = voice_engine.allocate_voice(program_id=1003)  # Slow attack
         gesture = GestureBasis(gate=True, pressure_q15=q15_half)
@@ -153,7 +153,7 @@ class TestV2ADSRCorrectness:
 
     def test_rapid_retrigger(self, voice_engine, q15_half, q15_one):
         """Rapid retriggering doesn't cause clicks."""
-        from voice_engine import GestureBasis
+        from symcrash_python_ap.voice.voice_engine import GestureBasis
 
         vid = voice_engine.allocate_voice(program_id=1004)  # Fast attack organ
         gesture = GestureBasis(gate=True, pressure_q15=q15_half)
@@ -182,7 +182,7 @@ class TestV2ADSRCorrectness:
 
     def test_release_tail_completes(self, voice_engine, q15_half):
         """Release tail runs to completion."""
-        from voice_engine import GestureBasis, VoicePhase
+        from symcrash_python_ap.voice.voice_engine import GestureBasis, VoicePhase
 
         vid = voice_engine.allocate_voice(program_id=1002)  # Long release
         gesture = GestureBasis(gate=True, pressure_q15=q15_half)
@@ -224,7 +224,7 @@ class TestV3RegimeGraphStability:
 
     def test_regime_hysteresis(self, voice_engine, q15_half, q15_one):
         """Regime doesn't flap rapidly at boundaries."""
-        from voice_engine import GestureBasis, Regime
+        from symcrash_python_ap.voice.voice_engine import GestureBasis, Regime
 
         vid = voice_engine.allocate_voice(program_id=1001)
 
@@ -258,7 +258,7 @@ class TestV3RegimeGraphStability:
 
     def test_catastrophe_has_recovery(self, q15_one):
         """Catastrophe regime has path to recovery."""
-        from voice_engine import VoiceEngine, GestureBasis, Regime
+        from symcrash_python_ap.voice.voice_engine import VoiceEngine, GestureBasis, Regime
 
         engine = VoiceEngine(max_voices=4)
         vid = engine.allocate_voice(program_id=1001)
@@ -294,7 +294,7 @@ class TestV3RegimeGraphStability:
 
     def test_all_regimes_reachable(self, q15_one):
         """All regimes can be reached through gesture."""
-        from voice_engine import VoiceEngine, GestureBasis, Regime
+        from symcrash_python_ap.voice.voice_engine import VoiceEngine, GestureBasis, Regime
 
         reached_regimes = set()
 
@@ -353,7 +353,7 @@ class TestV4VoiceIndependence:
 
     def test_voices_dont_affect_each_other(self, voice_engine, q15_half, q15_one):
         """Changes to one voice don't affect others."""
-        from voice_engine import GestureBasis
+        from symcrash_python_ap.voice.voice_engine import GestureBasis
 
         # Allocate two voices
         vid1 = voice_engine.allocate_voice(program_id=1001)
@@ -391,7 +391,7 @@ class TestV4VoiceIndependence:
 
     def test_kill_voice_others_continue(self, voice_engine, q15_half):
         """Killing one voice doesn't affect others."""
-        from voice_engine import GestureBasis
+        from symcrash_python_ap.voice.voice_engine import GestureBasis
 
         # Allocate three voices
         vids = []
@@ -418,7 +418,7 @@ class TestV4VoiceIndependence:
 
     def test_per_voice_state_isolation(self, voice_engine, q15_half, q15_one):
         """Per-voice state is isolated."""
-        from voice_engine import GestureBasis
+        from symcrash_python_ap.voice.voice_engine import GestureBasis
 
         # Create voices with very different gestures
         vid1 = voice_engine.allocate_voice(program_id=1001)
@@ -464,7 +464,7 @@ class TestV5VoiceFrameContractIntegrity:
 
     def test_frame_is_complete(self, voice_engine, q15_half):
         """Each frame contains all required fields."""
-        from voice_engine import GestureBasis
+        from symcrash_python_ap.voice.voice_engine import GestureBasis
 
         vid = voice_engine.allocate_voice(program_id=1001)
         gesture = GestureBasis(gate=True, pressure_q15=q15_half)
@@ -493,7 +493,7 @@ class TestV5VoiceFrameContractIntegrity:
 
     def test_frame_self_contained(self, voice_engine, q15_half):
         """Frame doesn't depend on previous frames."""
-        from voice_engine import GestureBasis
+        from symcrash_python_ap.voice.voice_engine import GestureBasis
 
         vid = voice_engine.allocate_voice(program_id=1001)
         gesture = GestureBasis(gate=True, pressure_q15=q15_half)
@@ -514,7 +514,7 @@ class TestV5VoiceFrameContractIntegrity:
 
     def test_regime_in_frame(self, voice_engine, q15_half):
         """Regime is correctly encoded in frame."""
-        from voice_engine import GestureBasis, Regime
+        from symcrash_python_ap.voice.voice_engine import GestureBasis, Regime
 
         vid = voice_engine.allocate_voice(program_id=1001)
         gesture = GestureBasis(gate=True, pressure_q15=q15_half)
@@ -553,7 +553,7 @@ class TestV6CMMMLegacyAcceptance:
 
     def test_gesture_to_intent(self, q15_one, q15_half):
         """GestureBasis correctly maps to IntentVector."""
-        from voice_engine import (
+        from symcrash_python_ap.voice.voice_engine import (
             GestureBasis, default_gesture_to_intent, I_TONE, I_GLITCH, I_GLUE
         )
 
@@ -573,7 +573,7 @@ class TestV6CMMMLegacyAcceptance:
 
     def test_regime_transitions(self, voice_engine, q15_half):
         """Regime FSM transitions correctly."""
-        from voice_engine import GestureBasis, Regime
+        from symcrash_python_ap.voice.voice_engine import GestureBasis, Regime
 
         vid = voice_engine.allocate_voice(program_id=1001)
         gesture = GestureBasis(gate=True, pressure_q15=q15_half)
@@ -592,7 +592,7 @@ class TestV6CMMMLegacyAcceptance:
 
     def test_family_weights(self, q15_one, q15_half):
         """Family weights computed correctly from intent."""
-        from voice_engine import (
+        from symcrash_python_ap.voice.voice_engine import (
             IntentVector, compute_family_weights, Regime,
             I_TONE, I_BOW, I_GLUE, F_COLOR, F_GLUE, F_CATASTROPHE
         )
@@ -613,7 +613,7 @@ class TestV6CMMMLegacyAcceptance:
 
     def test_tree_morph(self, q15_one):
         """Tree morph transitions correctly."""
-        from voice_engine import TreeMorphState, update_tree_morph
+        from symcrash_python_ap.voice.voice_engine import TreeMorphState, update_tree_morph
 
         state = TreeMorphState(tree_a_id=0)
 
@@ -632,7 +632,7 @@ class TestV6CMMMLegacyAcceptance:
 
     def test_instrument_programs(self, q15_half):
         """All four instrument programs load correctly."""
-        from voice_engine import VoiceEngine, GestureBasis
+        from symcrash_python_ap.voice.voice_engine import VoiceEngine, GestureBasis
 
         for program_id in [1001, 1002, 1003, 1004]:
             engine = VoiceEngine()
@@ -663,7 +663,7 @@ class TestV7CMMStateSnapshot:
 
     def test_voicestate_snapshot_restore(self, q15_half, q15_one):
         """VoiceState can be snapshotted and restored for replay."""
-        from voice_engine import (
+        from symcrash_python_ap.voice.voice_engine import (
             VoiceState, VoicePhase, Regime, GestureBasis, IntentVector,
             ArcState, TreeMorphState, DegradationLevel, TowerLevel,
             I_AIR, NUM_INTENTS, MAX_ARCS
@@ -756,7 +756,7 @@ class TestV8CMMRegimeGraph:
 
     def test_regime_graph_transitions(self, q15_one):
         """RegimeGraph correctly checks EdgeSpec conditions."""
-        from voice_engine import (
+        from symcrash_python_ap.voice.voice_engine import (
             build_default_regime_graph, IntentVector, Regime, I_GLITCH, I_WARP
         )
 
@@ -780,7 +780,7 @@ class TestV8CMMRegimeGraph:
 
     def test_arc_modulation(self, voice_engine, q15_half):
         """ArcSpec modulators apply correctly during transitions."""
-        from voice_engine import GestureBasis
+        from symcrash_python_ap.voice.voice_engine import GestureBasis
 
         vid = voice_engine.allocate_voice(program_id=1001)
         gesture = GestureBasis(gate=True, pressure_q15=q15_half)
@@ -817,7 +817,7 @@ class TestV9CMMRegimeSpecPolicies:
 
     def test_regime_spec_policies(self):
         """RegimeSpec policies correctly influence family weights and events."""
-        from voice_engine import (
+        from symcrash_python_ap.voice.voice_engine import (
             REGIME_SPECS, Regime, TowerLevel, F_CATASTROPHE
         )
 
@@ -836,7 +836,7 @@ class TestV9CMMRegimeSpecPolicies:
 
     def test_degradation_levels(self, voice_engine, q15_half):
         """Degradation levels correctly disable operator families."""
-        from voice_engine import (
+        from symcrash_python_ap.voice.voice_engine import (
             GestureBasis, DegradationLevel, F_TRANSPORT, F_TOPOLOGY, F_GLUE, NUM_FAMILIES
         )
 
@@ -862,7 +862,7 @@ class TestV9CMMRegimeSpecPolicies:
 
     def test_tower_level_assignment(self, voice_engine, q15_half):
         """Tower levels are assigned based on regime."""
-        from voice_engine import GestureBasis, TowerLevel, Regime
+        from symcrash_python_ap.voice.voice_engine import GestureBasis, TowerLevel, Regime
 
         vid = voice_engine.allocate_voice(program_id=1001)
         gesture = GestureBasis(gate=True, pressure_q15=q15_half)
@@ -896,7 +896,7 @@ class TestV10CMMVoiceFrameSerialization:
 
     def test_voiceframe_serialization(self, q15_half):
         """VoiceFrameABI can serialize to bytes."""
-        from voice_engine import VoiceFrameABI
+        from symcrash_python_ap.voice.voice_engine import VoiceFrameABI
 
         frame = VoiceFrameABI(
             program_id=1001,
@@ -922,7 +922,7 @@ class TestV10CMMVoiceFrameSerialization:
 
     def test_voiceframe_abi_fields(self, voice_engine, q15_half):
         """VoiceFrameABI has all required fields."""
-        from voice_engine import GestureBasis, NUM_TREES, NUM_FAMILIES
+        from symcrash_python_ap.voice.voice_engine import GestureBasis, NUM_TREES, NUM_FAMILIES
 
         vid = voice_engine.allocate_voice(program_id=1001)
         gesture = GestureBasis(gate=True, pressure_q15=q15_half, pan_q15=q15_half // 2)

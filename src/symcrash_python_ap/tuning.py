@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Optional
 import math
 
-from .carrier_lift import (
+from .wavelet.carrier_lift import (
     InstrumentTuning, TuningMorphState,
     NUM_LEAVES, Q15_ONE, Q15_HALF, BLOCKS_PER_SECOND
 )

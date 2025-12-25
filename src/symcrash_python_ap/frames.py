@@ -184,6 +184,10 @@ VFP_PACKET_LEN = 136
 NUM_TREES = 5
 Q15_ONE = 32767
 
+# VoiceFramePacketV1 constants (Addendum A: Carrier Header)
+VFP_V1_VERSION = 2
+VFP_V1_PACKET_LEN = 148
+
 
 class VoiceFlags(IntEnum):
     """Voice flags bits per Wire Contract v0b."""
@@ -193,6 +197,30 @@ class VoiceFlags(IntEnum):
     RETRIGGER = 0x0008      # Retrigger envelope
     LEGATO = 0x0010         # Legato mode active
     SUSTAIN = 0x0020        # Sustain pedal active
+
+
+class CarrierModel(IntEnum):
+    """Carrier waveform model per Wire Contract v1 Addendum A."""
+    SINE = 0        # Pure sine carrier
+    SAW = 1         # Sawtooth carrier
+    PULSE = 2       # Pulse wave (pw_q15 controls width)
+    TRI = 3         # Triangle carrier
+    PARTIALS = 4    # Additive partials from harmonic_amps
+    NOISE = 5       # Noise exciter (no pitched carrier)
+
+
+class CarrierRole(IntEnum):
+    """Carrier role per Wire Contract v1 Addendum A."""
+    OFF = 0             # No carrier; pure wavelet synthesis
+    AUDIBLE = 1         # Carrier blended into output via beta
+    EXCITER_ONLY = 2    # Carrier drives IDWPT but not heard directly
+
+
+class TransitionKind(IntEnum):
+    """Note transition kind per Wire Contract v1 Addendum A."""
+    RETRIGGER = 0   # Hard reset phase on note-on
+    GLIDE = 1       # Portamento pitch slew
+    BRIDGE = 2      # Tree crossfade bridge between notes
 
 
 @dataclass
@@ -550,4 +578,358 @@ class VoiceFramePacketV0b:
             tree_a_id=vf.tree_a_id,
             tree_b_id=vf.tree_b_id,
             tree_blend_q15=vf.tree_blend_q15,
+        )
+
+
+# =============================================================================
+# VOICEFRAME PACKET V1 (148 bytes exact)
+# Per docs/Core System/04 - Wire Contract v0b Addendum A: Carrier Header
+# =============================================================================
+
+@dataclass
+class VoiceFramePacketV1:
+    """
+    VoiceFrame Packet v1 - exact 148-byte format with carrier header.
+
+    Extends v0b with carrier configuration fields per Wire Contract Addendum A.
+
+    Layout (148 bytes):
+        0x0000  2     magic u16 = 0x5646 ("VF")
+        0x0002  1     version u8 = 2
+        0x0003  1     packet_len u8 = 148
+        0x0004  2     program_id u16
+        0x0006  2     voice_id u16
+        0x0008  4     frame_seq u32
+        0x000C  2     reject_code u16
+        0x000E  2     hdr_pad u16 = 0
+        0x0010  2     flags u16
+        0x0012  1     regime_id u8
+        0x0013  1     degradation_level u8
+        0x0014  1     note_u8 u8
+        0x0015  1     pad0 u8 = 0
+        0x0016  2     cents_i16 i16
+        0x0018  2     gain_q15 u16
+        0x001A  2     activity_q15 u16
+        0x001C  2     pan_q15 i16
+        0x001E  2     sendA_q15 u16
+        0x0020  2     sendB_q15 u16
+        0x0022  16    w_family_q15[8] u16[8]
+        0x0032  1     tree_a_id u8
+        0x0033  1     tree_b_id u8
+        0x0034  2     tree_blend_q15 u16
+        --- CARRIER HEADER (12 bytes) ---
+        0x0036  1     carrier_model_u8 u8
+        0x0037  1     carrier_role_u8 u8
+        0x0038  1     carrier_archetype_u8 u8
+        0x0039  1     transition_kind_u8 u8
+        0x003A  2     detune_cents_i16 i16
+        0x003C  2     pw_q15 u16
+        0x003E  2     eta_target_q15 u16
+        0x0040  2     pitchbend_cents_i16 i16
+        --- END CARRIER HEADER ---
+        0x0042  1     event_mask u8
+        0x0043  1     pad1 u8 = 0
+        0x0044  16    event_strength_q15[8] u16[8]
+        0x0054  64    event_payload_u64[8] u64[8]
+        0x0094  END (148 bytes)
+    """
+    # Header (16 bytes)
+    magic: int = VFP_MAGIC
+    version: int = VFP_V1_VERSION
+    packet_len: int = VFP_V1_PACKET_LEN
+    program_id: int = 0
+    voice_id: int = 0
+    frame_seq: int = 0
+    reject_code: int = 0
+    hdr_pad: int = 0
+
+    # Control (8 bytes)
+    flags: int = 0
+    regime_id: int = 0
+    degradation_level: int = 0
+    note_u8: int = 60           # MIDI note (0..127)
+    pad0: int = 0
+    cents_i16: int = 0          # Fine tuning in cents
+
+    # Gain/Pan/Send (10 bytes)
+    gain_q15: int = Q15_ONE
+    activity_q15: int = 0
+    pan_q15: int = 0            # -32768..32767 (bipolar)
+    sendA_q15: int = 0
+    sendB_q15: int = 0
+
+    # Family weights (16 bytes)
+    w_family_q15: List[int] = field(default_factory=lambda: [0] * 8)
+
+    # Tree control (4 bytes)
+    tree_a_id: int = 0
+    tree_b_id: int = 0
+    tree_blend_q15: int = 0
+
+    # Carrier header (12 bytes) - NEW in v1
+    carrier_model_u8: int = 0       # CarrierModel enum (SINE=0)
+    carrier_role_u8: int = 1        # CarrierRole enum (AUDIBLE=1)
+    carrier_archetype_u8: int = 0   # TreeArchetype (HARMONIC=0)
+    transition_kind_u8: int = 0     # TransitionKind (RETRIGGER=0)
+    detune_cents_i16: int = 0       # Carrier detune in cents
+    pw_q15: int = 16384             # Pulse width (0.5 default)
+    eta_target_q15: int = 16384     # Scaffold/texture blend (0.5 default)
+    pitchbend_cents_i16: int = 0    # Real-time pitchbend
+
+    # Events (82 bytes)
+    event_mask: int = 0
+    pad1: int = 0
+    event_strength_q15: List[int] = field(default_factory=lambda: [0] * 8)
+    event_payload_u64: List[int] = field(default_factory=lambda: [0] * 8)
+
+    def to_bytes(self) -> bytes:
+        """
+        Serialize to exact 148 bytes (big-endian per spec).
+        """
+        # Header (16 bytes)
+        data = struct.pack('>HBBHHIHH',
+            self.magic,
+            self.version,
+            self.packet_len,
+            self.program_id,
+            self.voice_id,
+            self.frame_seq,
+            self.reject_code,
+            self.hdr_pad
+        )
+
+        # Control (8 bytes)
+        data += struct.pack('>HBBBBh',
+            self.flags,
+            self.regime_id,
+            self.degradation_level,
+            self.note_u8,
+            self.pad0,
+            self.cents_i16
+        )
+
+        # Gain/Pan/Send (10 bytes)
+        data += struct.pack('>HHhHH',
+            self.gain_q15,
+            self.activity_q15,
+            self.pan_q15,
+            self.sendA_q15,
+            self.sendB_q15
+        )
+
+        # Family weights (16 bytes)
+        for i in range(8):
+            data += struct.pack('>H', self.w_family_q15[i] if i < len(self.w_family_q15) else 0)
+
+        # Tree control (4 bytes)
+        data += struct.pack('>BBH',
+            self.tree_a_id,
+            self.tree_b_id,
+            self.tree_blend_q15
+        )
+
+        # Carrier header (12 bytes)
+        data += struct.pack('>BBBBhHHh',
+            self.carrier_model_u8,
+            self.carrier_role_u8,
+            self.carrier_archetype_u8,
+            self.transition_kind_u8,
+            self.detune_cents_i16,
+            self.pw_q15,
+            self.eta_target_q15,
+            self.pitchbend_cents_i16
+        )
+
+        # Event mask and pad (2 bytes)
+        data += struct.pack('>BB', self.event_mask, self.pad1)
+
+        # Event strengths (16 bytes)
+        for i in range(8):
+            data += struct.pack('>H', self.event_strength_q15[i] if i < len(self.event_strength_q15) else 0)
+
+        # Event payloads (64 bytes)
+        for i in range(8):
+            payload = self.event_payload_u64[i] if i < len(self.event_payload_u64) else 0
+            data += struct.pack('>Q', payload)
+
+        assert len(data) == VFP_V1_PACKET_LEN, f"Packet size mismatch: {len(data)} != {VFP_V1_PACKET_LEN}"
+        return data
+
+    @classmethod
+    def from_bytes(cls, data: bytes) -> 'VoiceFramePacketV1':
+        """
+        Deserialize from 148 bytes (big-endian per spec).
+        """
+        if len(data) < VFP_V1_PACKET_LEN:
+            raise ValueError(f"Data too short: {len(data)} < {VFP_V1_PACKET_LEN}")
+
+        offset = 0
+
+        # Header (16 bytes)
+        magic, version, packet_len, program_id, voice_id, frame_seq, reject_code, hdr_pad = \
+            struct.unpack('>HBBHHIHH', data[offset:offset+16])
+        offset += 16
+
+        # Control (8 bytes)
+        flags, regime_id, degradation_level, note_u8, pad0, cents_i16 = \
+            struct.unpack('>HBBBBh', data[offset:offset+8])
+        offset += 8
+
+        # Gain/Pan/Send (10 bytes)
+        gain_q15, activity_q15, pan_q15, sendA_q15, sendB_q15 = \
+            struct.unpack('>HHhHH', data[offset:offset+10])
+        offset += 10
+
+        # Family weights (16 bytes)
+        w_family_q15 = list(struct.unpack('>8H', data[offset:offset+16]))
+        offset += 16
+
+        # Tree control (4 bytes)
+        tree_a_id, tree_b_id, tree_blend_q15 = \
+            struct.unpack('>BBH', data[offset:offset+4])
+        offset += 4
+
+        # Carrier header (12 bytes)
+        carrier_model_u8, carrier_role_u8, carrier_archetype_u8, transition_kind_u8, \
+            detune_cents_i16, pw_q15, eta_target_q15, pitchbend_cents_i16 = \
+            struct.unpack('>BBBBhHHh', data[offset:offset+12])
+        offset += 12
+
+        # Event mask and pad (2 bytes)
+        event_mask, pad1 = struct.unpack('>BB', data[offset:offset+2])
+        offset += 2
+
+        # Event strengths (16 bytes)
+        event_strength_q15 = list(struct.unpack('>8H', data[offset:offset+16]))
+        offset += 16
+
+        # Event payloads (64 bytes)
+        event_payload_u64 = list(struct.unpack('>8Q', data[offset:offset+64]))
+        offset += 64
+
+        return cls(
+            magic=magic,
+            version=version,
+            packet_len=packet_len,
+            program_id=program_id,
+            voice_id=voice_id,
+            frame_seq=frame_seq,
+            reject_code=reject_code,
+            hdr_pad=hdr_pad,
+            flags=flags,
+            regime_id=regime_id,
+            degradation_level=degradation_level,
+            note_u8=note_u8,
+            pad0=pad0,
+            cents_i16=cents_i16,
+            gain_q15=gain_q15,
+            activity_q15=activity_q15,
+            pan_q15=pan_q15,
+            sendA_q15=sendA_q15,
+            sendB_q15=sendB_q15,
+            w_family_q15=w_family_q15,
+            tree_a_id=tree_a_id,
+            tree_b_id=tree_b_id,
+            tree_blend_q15=tree_blend_q15,
+            carrier_model_u8=carrier_model_u8,
+            carrier_role_u8=carrier_role_u8,
+            carrier_archetype_u8=carrier_archetype_u8,
+            transition_kind_u8=transition_kind_u8,
+            detune_cents_i16=detune_cents_i16,
+            pw_q15=pw_q15,
+            eta_target_q15=eta_target_q15,
+            pitchbend_cents_i16=pitchbend_cents_i16,
+            event_mask=event_mask,
+            pad1=pad1,
+            event_strength_q15=event_strength_q15,
+            event_payload_u64=event_payload_u64,
+        )
+
+    def validate(self) -> Tuple[bool, Optional[str]]:
+        """
+        Validate packet structure and constraints.
+
+        Returns (is_valid, error_message).
+        """
+        if self.magic != VFP_MAGIC:
+            return False, f"Invalid magic: 0x{self.magic:04X} != 0x{VFP_MAGIC:04X}"
+
+        if self.version != VFP_V1_VERSION:
+            return False, f"Invalid version: {self.version} != {VFP_V1_VERSION}"
+
+        if self.packet_len != VFP_V1_PACKET_LEN:
+            return False, f"Invalid packet_len: {self.packet_len} != {VFP_V1_PACKET_LEN}"
+
+        if self.hdr_pad != 0:
+            return False, f"hdr_pad must be 0: {self.hdr_pad}"
+
+        if self.pad0 != 0:
+            return False, f"pad0 must be 0: {self.pad0}"
+
+        if self.pad1 != 0:
+            return False, f"pad1 must be 0: {self.pad1}"
+
+        if self.note_u8 > 127:
+            return False, f"note_u8 out of range: {self.note_u8} > 127"
+
+        if self.regime_id > 15:
+            return False, f"regime_id out of range: {self.regime_id} > 15"
+
+        if self.tree_a_id >= NUM_TREES or self.tree_b_id >= NUM_TREES:
+            return False, f"tree_id out of range: a={self.tree_a_id}, b={self.tree_b_id}"
+
+        # Validate carrier fields
+        if self.carrier_model_u8 > 5:
+            return False, f"carrier_model_u8 out of range: {self.carrier_model_u8} > 5"
+
+        if self.carrier_role_u8 > 2:
+            return False, f"carrier_role_u8 out of range: {self.carrier_role_u8} > 2"
+
+        if self.carrier_archetype_u8 > 4:
+            return False, f"carrier_archetype_u8 out of range: {self.carrier_archetype_u8} > 4"
+
+        if self.transition_kind_u8 > 2:
+            return False, f"transition_kind_u8 out of range: {self.transition_kind_u8} > 2"
+
+        # Validate event payloads: lane_id in bits 63..60 must match index
+        for i, payload in enumerate(self.event_payload_u64):
+            if self.event_mask & (1 << i):
+                lane_id = (payload >> 60) & 0x0F
+                if lane_id != i:
+                    return False, f"Lane {i} payload has mismatched lane_id: {lane_id}"
+
+        return True, None
+
+    @staticmethod
+    def from_v0b(v0b: VoiceFramePacketV0b) -> 'VoiceFramePacketV1':
+        """
+        Convert a v0b packet to v1 with default carrier fields.
+        """
+        return VoiceFramePacketV1(
+            program_id=v0b.program_id,
+            voice_id=v0b.voice_id,
+            frame_seq=v0b.frame_seq,
+            reject_code=v0b.reject_code,
+            flags=v0b.flags,
+            regime_id=v0b.regime_id,
+            degradation_level=v0b.degradation_level,
+            note_u8=v0b.note_u8,
+            cents_i16=v0b.cents_i16,
+            gain_q15=v0b.gain_q15,
+            activity_q15=v0b.activity_q15,
+            pan_q15=v0b.pan_q15,
+            sendA_q15=v0b.sendA_q15,
+            sendB_q15=v0b.sendB_q15,
+            w_family_q15=v0b.w_family_q15.copy(),
+            tree_a_id=v0b.tree_a_id,
+            tree_b_id=v0b.tree_b_id,
+            tree_blend_q15=v0b.tree_blend_q15,
+            # Carrier fields use defaults
+            carrier_model_u8=CarrierModel.SINE,
+            carrier_role_u8=CarrierRole.AUDIBLE,
+            carrier_archetype_u8=0,  # HARMONIC
+            transition_kind_u8=TransitionKind.RETRIGGER,
+            event_mask=v0b.event_mask,
+            event_strength_q15=v0b.event_strength_q15.copy(),
+            event_payload_u64=v0b.event_payload_u64.copy(),
         )

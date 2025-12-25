@@ -386,3 +386,121 @@ But the **wiring** is now resolved: Tower IR compiles to a packet; packet determ
 If you want, I can now write the **one-page canonical packet diagram** (byte offsets + field sizes) that your codegen uses as the single source of truth.
 
 ---
+
+## Addendum A: Carrier Header Fields (VoiceFrame Packet v1)
+
+### A.1 Motivation
+
+The carrier oscillator is promoted to a first-class ABI citizen. Pitch ownership,
+waveform selection, and scaffold/texture blending (η) are now explicit per-block fields
+rather than inferred from events.
+
+### A.2 New Enums
+
+#### CarrierModel (u8)
+
+| Value | Name     | Description |
+|------:|----------|-------------|
+| 0     | SINE     | Pure sine carrier |
+| 1     | SAW      | Sawtooth carrier |
+| 2     | PULSE    | Pulse wave (pw_q15 controls width) |
+| 3     | TRI      | Triangle carrier |
+| 4     | PARTIALS | Additive partials from harmonic_amps |
+| 5     | NOISE    | Noise exciter (no pitched carrier) |
+
+#### CarrierRole (u8)
+
+| Value | Name         | Description |
+|------:|--------------|-------------|
+| 0     | OFF          | No carrier; pure wavelet synthesis |
+| 1     | AUDIBLE      | Carrier blended into output via β |
+| 2     | EXCITER_ONLY | Carrier drives IDWPT but not heard directly |
+
+#### TransitionKind (u8)
+
+| Value | Name      | Description |
+|------:|-----------|-------------|
+| 0     | RETRIGGER | Hard reset phase on note-on |
+| 1     | GLIDE     | Portamento pitch slew |
+| 2     | BRIDGE    | Tree crossfade bridge between notes |
+
+### A.3 VoiceFrame Packet v1 Layout (148 bytes)
+
+Version field = 2, packet_len = 148.
+
+| Offset | Size | Field | Description |
+|--------|------|-------|-------------|
+| 0x0000 | 2 | magic | 0x5646 ("VF") |
+| 0x0002 | 1 | version | 2 (v1) |
+| 0x0003 | 1 | packet_len | 148 |
+| 0x0004 | 2 | program_id | |
+| 0x0006 | 2 | voice_id | |
+| 0x0008 | 4 | frame_seq | |
+| 0x000C | 2 | reject_code | |
+| 0x000E | 2 | hdr_pad | 0 |
+| 0x0010 | 2 | flags | VoiceFlags |
+| 0x0012 | 1 | regime_id | |
+| 0x0013 | 1 | degradation_level | |
+| 0x0014 | 1 | note_u8 | MIDI note |
+| 0x0015 | 1 | pad0 | 0 |
+| 0x0016 | 2 | cents_i16 | Fine tuning |
+| 0x0018 | 2 | gain_q15 | |
+| 0x001A | 2 | activity_q15 | |
+| 0x001C | 2 | pan_q15 | |
+| 0x001E | 2 | sendA_q15 | |
+| 0x0020 | 2 | sendB_q15 | |
+| 0x0022 | 16 | w_family_q15[8] | |
+| 0x0032 | 1 | tree_a_id | |
+| 0x0033 | 1 | tree_b_id | |
+| 0x0034 | 2 | tree_blend_q15 | |
+| **0x0036** | **1** | **carrier_model_u8** | CarrierModel enum |
+| **0x0037** | **1** | **carrier_role_u8** | CarrierRole enum |
+| **0x0038** | **1** | **carrier_archetype_u8** | TreeArchetype (0-4) |
+| **0x0039** | **1** | **transition_kind_u8** | TransitionKind enum |
+| **0x003A** | **2** | **detune_cents_i16** | Carrier detune |
+| **0x003C** | **2** | **pw_q15** | Pulse width |
+| **0x003E** | **2** | **eta_target_q15** | Scaffold/texture blend |
+| **0x0040** | **2** | **pitchbend_cents_i16** | Real-time pitchbend |
+| 0x0042 | 1 | event_mask | |
+| 0x0043 | 1 | pad1 | 0 |
+| 0x0044 | 16 | event_strength_q15[8] | |
+| 0x0054 | 64 | event_payload_u64[8] | |
+| 0x0094 | END | | 148 bytes total |
+
+### A.4 Lane 4 Semantics Update: EVT_CARRIER_CFG
+
+Lane 4 is renamed from `EVT_INJECT_NOTE` to `EVT_CARRIER_CFG`.
+
+#### Variants
+
+| variant | Meaning |
+|--------:|---------|
+| 0 | Set carrier model + role |
+| 1 | Pitch update (detune/pitchbend) |
+| 2 | Archetype change |
+| 3 | Transition kind change |
+
+#### Targeting
+
+- `target_kind` MUST be `0 global`
+
+#### Params
+
+| Field | Meaning |
+|-------|---------|
+| `param0_q8` | carrier_model (for variant 0) |
+| `param1_q8` | carrier_role (for variant 0) |
+| `param2_q8` | archetype (for variant 2) |
+
+**Normative rule:** The carrier header fields in the packet take precedence.
+EVT_CARRIER_CFG events are for dynamic per-block overrides when the header
+values should not change but an event-driven update is needed.
+
+### A.5 Backwards Compatibility
+
+- Consumers MUST check `version` field:
+  - version=1: Use v0b layout (136 bytes, no carrier header)
+  - version=2: Use v1 layout (148 bytes, with carrier header)
+- For v1 packets, if `carrier_role_u8 == OFF (0)`, behavior is equivalent to v0b.
+
+---

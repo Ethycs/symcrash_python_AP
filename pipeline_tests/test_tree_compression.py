@@ -15,7 +15,7 @@ class TestLegacyTreeCompression:
 
     def test_balanced_tree_beta_near_0_5(self):
         """Tree 0 (Balanced) should have beta near 0.5."""
-        from tree_compression import build_balanced_tree, TreeAnalyzer
+        from symcrash_python_ap.wavelet.tree_compression import build_balanced_tree, TreeAnalyzer
 
         tree = build_balanced_tree()
         analyzer = TreeAnalyzer()
@@ -27,7 +27,7 @@ class TestLegacyTreeCompression:
 
     def test_bass_heavy_tree_beta_near_0_75(self):
         """Tree 1 (Bass Heavy) should have beta near 0.75."""
-        from tree_compression import build_bass_heavy_tree, TreeAnalyzer
+        from symcrash_python_ap.wavelet.tree_compression import build_bass_heavy_tree, TreeAnalyzer
 
         tree = build_bass_heavy_tree()
         analyzer = TreeAnalyzer()
@@ -39,7 +39,7 @@ class TestLegacyTreeCompression:
 
     def test_treble_heavy_tree_beta_near_0_25(self):
         """Tree 2 (Treble Heavy) should have beta near 0.25."""
-        from tree_compression import build_treble_heavy_tree, TreeAnalyzer
+        from symcrash_python_ap.wavelet.tree_compression import build_treble_heavy_tree, TreeAnalyzer
 
         tree = build_treble_heavy_tree()
         analyzer = TreeAnalyzer()
@@ -56,7 +56,7 @@ class TestBetaRoundTrip:
     @pytest.mark.parametrize("beta", [0.0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1.0])
     def test_beta_round_trip_reasonable(self, beta):
         """Beta round-trip should be reasonably close."""
-        from tree_compression import (
+        from symcrash_python_ap.wavelet.tree_compression import (
             generate_schedule_from_beta, TreeStructure, TreeAnalyzer, Op
         )
 
@@ -84,7 +84,7 @@ class TestWaveletDescriptor:
 
     def test_from_beta_matches_direct(self):
         """WaveletTreeDescriptor.from_beta should match direct schedule generation."""
-        from tree_compression import (
+        from symcrash_python_ap.wavelet.tree_compression import (
             WaveletTreeDescriptor, generate_schedule_from_beta
         )
 
@@ -103,7 +103,7 @@ class TestMidScoopTree:
 
     def test_mid_scoop_needs_extended_params(self):
         """Mid-scoop tree should not fit with beta alone."""
-        from tree_compression import (
+        from symcrash_python_ap.wavelet.tree_compression import (
             WaveletTreeDescriptor, TreeStructure, TreeAnalyzer, Op
         )
 
@@ -131,7 +131,7 @@ class TestTreeADSR:
 
     def test_adsr_attack_phase(self):
         """ADSR should return attack coefficients at t=0."""
-        from tree_compression import TreeADSR
+        from symcrash_python_ap.wavelet.tree_compression import TreeADSR
 
         adsr = TreeADSR(
             attack_coeffs=np.array([0.3, -0.4, 0.0, 0.1]),
@@ -147,7 +147,7 @@ class TestTreeADSR:
 
     def test_adsr_sustain_phase(self):
         """ADSR should return sustain coefficients after decay."""
-        from tree_compression import TreeADSR
+        from symcrash_python_ap.wavelet.tree_compression import TreeADSR
 
         adsr = TreeADSR(
             attack_coeffs=np.array([0.3, -0.4, 0.0, 0.1]),
@@ -167,7 +167,7 @@ class TestTreeADSR:
 
     def test_adsr_release_phase(self):
         """ADSR should transition to release after note off."""
-        from tree_compression import TreeADSR
+        from symcrash_python_ap.wavelet.tree_compression import TreeADSR
 
         adsr = TreeADSR(
             attack_coeffs=np.array([0.3, -0.4, 0.0, 0.1]),

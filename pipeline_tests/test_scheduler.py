@@ -6,7 +6,7 @@ Tests for the Scheduler Spec v01 implementation.
 """
 
 import pytest
-from src.symcrash_python_ap.scheduler import (
+from symcrash_python_ap.voice.scheduler import (
     BlockScheduler,
     VoiceSelector,
     TileScheduler,
@@ -30,7 +30,7 @@ from src.symcrash_python_ap.scheduler import (
     PERIOD_TABLE,
     C_TAIL_VOICE,
 )
-from src.symcrash_python_ap.frames import (
+from symcrash_python_ap.frames import (
     VoiceFramePacketV0b,
     VoiceFlags,
 )

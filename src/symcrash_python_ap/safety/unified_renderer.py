@@ -532,7 +532,7 @@ class HarmonicScaffoldBackend:
 
     def __init__(self):
         # Import here to avoid circular dependency
-        from .oscillator import (
+        from ..wavelet.oscillator import (
             HarmonicScaffold, PhaseAccumulator,
             midi_to_phase_inc, Q15_ONE as OSC_Q15_ONE
         )
@@ -959,7 +959,7 @@ class CarrierLiftPipeline:
             cents: Fine tuning in cents
             velocity_q15: Note velocity (Q15)
         """
-        from .carrier_lift import CarrierLiftVoiceState
+        from ..wavelet.carrier_lift import CarrierLiftVoiceState
 
         # Create voice state
         state = CarrierLiftVoiceState(voice_id=voice_id)
@@ -1032,6 +1032,10 @@ class CarrierLiftPipeline:
         if frame.f0_hz != state.carrier.target_phase_inc:
             self.carrier.set_pitch(voice_id, frame.note, frame.cents)
 
+        # Update carrier harmonics from frame (waveform control)
+        if frame.partial_amps_q15:
+            self.carrier.set_harmonics(voice_id, frame.partial_amps_q15)
+
         # Set wet target from frame (AntiClick handles ramping)
         beta_target = frame.beta_target_q15 / 32767.0
         self.anticlick.set_wet_target(ac_state, beta_target)
@@ -1046,7 +1050,7 @@ class CarrierLiftPipeline:
             # Get frequency for coefficient generation
             f0_hz = frame.f0_hz if frame.f0_hz > 0 else 440.0 * (2.0 ** ((frame.note - 69 + frame.cents / 100.0) / 12.0))
 
-            from .harmonic_injector import create_harmonic_coeffs, WaveType
+            from ..wavelet.harmonic_injector import create_harmonic_coeffs, WaveType
 
             # Determine waveform from partial amplitudes
             partial_amps = frame.partial_amps_q15 if frame.partial_amps_q15 else state.partial_amps_q15
@@ -1066,14 +1070,14 @@ class CarrierLiftPipeline:
 
             # Apply global tuning gains
             tuning_gains = self.tuning.get_current_gains()
-            from .wavelet_trees import NODE_SIZE as WPT_NODE_SIZE
+            from ..wavelet_trees import NODE_SIZE as WPT_NODE_SIZE
             for i in range(256):
                 leaf_idx = i // WPT_NODE_SIZE
                 if leaf_idx < len(tuning_gains):
                     coeffs_256[i] = (coeffs_256[i] * tuning_gains[leaf_idx]) >> 15
 
             # Effect mode: FWPT(carrier) -> mask -> IDWPT
-            from .wavelet_packet_trees import PacketTreeSet
+            from ..wavelet.wavelet_packet_trees import PacketTreeSet
             if not hasattr(self, '_packet_tree_set'):
                 self._packet_tree_set = PacketTreeSet()
 

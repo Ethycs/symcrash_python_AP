@@ -48,15 +48,18 @@ CRC32C_POLY = 0x82F63B78
 # =============================================================================
 
 class EventLane(IntEnum):
-    """Event lane IDs per WSE-STD-020 Section 2.3."""
+    """Event lane IDs per WSE-STD-020 Section 2.3 + Addendum A."""
     EVT_OP_FIRE = 0      # Fire one-shot operator/event
     EVT_OP_TOGGLE = 1    # Toggle persistent op_enable bits
     EVT_INJECT = 2       # Injection (impulse/noise/burst)
     EVT_MATERIAL = 3     # Material engine override
-    EVT_TREE = 4         # Tree morph or switch event
+    EVT_CARRIER_CFG = 4  # Carrier configuration (was EVT_TREE in v0)
     EVT_CLOUD = 5        # Cloud/foreground reclassify hint
     EVT_VOICE = 6        # Note lifecycle / state events
     EVT_DEBUG = 7        # Debug marker / capture request
+
+    # Backwards compatibility alias
+    EVT_TREE = EVT_CARRIER_CFG
 
 
 # =============================================================================

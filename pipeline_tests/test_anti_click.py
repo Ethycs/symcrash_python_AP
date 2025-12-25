@@ -20,7 +20,7 @@ class TestAntiClickConfig:
 
     def test_default_config_values(self):
         """Default config has expected values."""
-        from anti_click import AntiClickConfig
+        from symcrash_python_ap.safety.anti_click import AntiClickConfig
 
         cfg = AntiClickConfig()
 
@@ -33,7 +33,7 @@ class TestAntiClickConfig:
 
     def test_custom_config(self):
         """Custom config values are respected."""
-        from anti_click import AntiClickConfig
+        from symcrash_python_ap.safety.anti_click import AntiClickConfig
 
         cfg = AntiClickConfig(
             block_size=128,
@@ -57,7 +57,7 @@ class TestAntiClickState:
 
     def test_init_state_creates_valid_state(self):
         """init_state creates properly initialized state."""
-        from anti_click import AntiClickOperator, AntiClickConfig
+        from symcrash_python_ap.safety.anti_click import AntiClickOperator, AntiClickConfig
 
         op = AntiClickOperator(AntiClickConfig())
         st = op.init_state()
@@ -72,7 +72,7 @@ class TestAntiClickState:
 
     def test_init_state_tail_size(self):
         """Tail buffer has correct size based on ola_K."""
-        from anti_click import AntiClickOperator, AntiClickConfig
+        from symcrash_python_ap.safety.anti_click import AntiClickOperator, AntiClickConfig
 
         cfg = AntiClickConfig(ola_K=32)
         op = AntiClickOperator(cfg)
@@ -82,7 +82,7 @@ class TestAntiClickState:
 
     def test_init_state_no_ola(self):
         """State without OLA has no tail buffer."""
-        from anti_click import AntiClickOperator, AntiClickConfig
+        from symcrash_python_ap.safety.anti_click import AntiClickOperator, AntiClickConfig
 
         cfg = AntiClickConfig(ola_K=0)
         op = AntiClickOperator(cfg)
@@ -96,7 +96,7 @@ class TestNoteOnOff:
 
     def test_note_on_resets_state(self):
         """note_on resets state to initial values."""
-        from anti_click import AntiClickOperator, AntiClickConfig
+        from symcrash_python_ap.safety.anti_click import AntiClickOperator, AntiClickConfig
 
         op = AntiClickOperator(AntiClickConfig())
         st = op.init_state()
@@ -115,7 +115,7 @@ class TestNoteOnOff:
 
     def test_note_on_clears_tail(self):
         """note_on clears the OLA tail buffer."""
-        from anti_click import AntiClickOperator, AntiClickConfig
+        from symcrash_python_ap.safety.anti_click import AntiClickOperator, AntiClickConfig
 
         op = AntiClickOperator(AntiClickConfig())
         st = op.init_state()
@@ -129,7 +129,7 @@ class TestNoteOnOff:
 
     def test_note_on_clears_fifo(self):
         """note_on clears the carrier FIFO."""
-        from anti_click import AntiClickOperator, AntiClickConfig
+        from symcrash_python_ap.safety.anti_click import AntiClickOperator, AntiClickConfig
 
         op = AntiClickOperator(AntiClickConfig())
         st = op.init_state()
@@ -149,7 +149,7 @@ class TestSetWetTarget:
 
     def test_set_wet_target_clamps(self):
         """set_wet_target clamps to [0, 1] range."""
-        from anti_click import AntiClickOperator, AntiClickConfig
+        from symcrash_python_ap.safety.anti_click import AntiClickOperator, AntiClickConfig
 
         op = AntiClickOperator(AntiClickConfig())
         st = op.init_state()
@@ -165,7 +165,7 @@ class TestSetWetTarget:
 
     def test_beta_ramps_toward_target(self):
         """Beta ramps toward target over multiple blocks."""
-        from anti_click import AntiClickOperator, AntiClickConfig
+        from symcrash_python_ap.safety.anti_click import AntiClickOperator, AntiClickConfig
 
         cfg = AntiClickConfig(bloom_time_s=0.05)
         op = AntiClickOperator(cfg)
@@ -194,7 +194,7 @@ class TestCarrierBeforeWet:
 
     def test_outputs_carrier_before_wet_ready(self):
         """Outputs carrier directly before wet becomes ready."""
-        from anti_click import AntiClickOperator, AntiClickConfig
+        from symcrash_python_ap.safety.anti_click import AntiClickOperator, AntiClickConfig
 
         op = AntiClickOperator(AntiClickConfig())
         st = op.init_state()
@@ -211,7 +211,7 @@ class TestCarrierBeforeWet:
 
     def test_wet_ready_set_when_wet_provided(self):
         """wet_ready is set when wet signal is first provided."""
-        from anti_click import AntiClickOperator, AntiClickConfig
+        from symcrash_python_ap.safety.anti_click import AntiClickOperator, AntiClickConfig
 
         op = AntiClickOperator(AntiClickConfig())
         st = op.init_state()
@@ -231,7 +231,7 @@ class TestLatencyAlignment:
 
     def test_carrier_delayed_by_latency_blocks(self):
         """Carrier is delayed by wet_latency_blocks."""
-        from anti_click import AntiClickOperator, AntiClickConfig
+        from symcrash_python_ap.safety.anti_click import AntiClickOperator, AntiClickConfig
 
         cfg = AntiClickConfig(wet_latency_blocks=3, ola_K=0)
         op = AntiClickOperator(cfg)
@@ -258,7 +258,7 @@ class TestMixing:
 
     def test_pure_dry_at_beta_zero(self):
         """Pure carrier output when beta=0."""
-        from anti_click import AntiClickOperator, AntiClickConfig
+        from symcrash_python_ap.safety.anti_click import AntiClickOperator, AntiClickConfig
 
         cfg = AntiClickConfig(ola_K=0)
         op = AntiClickOperator(cfg)
@@ -277,7 +277,7 @@ class TestMixing:
 
     def test_pure_wet_at_beta_one(self):
         """Pure wet output when beta=1."""
-        from anti_click import AntiClickOperator, AntiClickConfig
+        from symcrash_python_ap.safety.anti_click import AntiClickOperator, AntiClickConfig
 
         cfg = AntiClickConfig(ola_K=0, wet_latency_blocks=1)
         op = AntiClickOperator(cfg)
@@ -298,7 +298,7 @@ class TestMixing:
 
     def test_equal_power_crossfade_at_half(self):
         """Equal-power crossfade at beta=0.5 has expected weights."""
-        from anti_click import equal_power_weights
+        from symcrash_python_ap.safety.anti_click import equal_power_weights
 
         dry, wet = equal_power_weights(0.5)
 
@@ -309,7 +309,7 @@ class TestMixing:
 
     def test_equal_power_extremes(self):
         """Equal-power crossfade extremes are correct."""
-        from anti_click import equal_power_weights
+        from symcrash_python_ap.safety.anti_click import equal_power_weights
 
         dry0, wet0 = equal_power_weights(0.0)
         assert abs(dry0 - 1.0) < 0.001
@@ -325,7 +325,7 @@ class TestOLA:
 
     def test_ola_blends_block_boundaries(self):
         """OLA smooths transition between blocks."""
-        from anti_click import AntiClickOperator, AntiClickConfig
+        from symcrash_python_ap.safety.anti_click import AntiClickOperator, AntiClickConfig
 
         cfg = AntiClickConfig(ola_K=16, wet_latency_blocks=1)
         op = AntiClickOperator(cfg)
@@ -352,7 +352,7 @@ class TestOLA:
 
     def test_no_ola_when_ola_k_zero(self):
         """No OLA smoothing when ola_K=0."""
-        from anti_click import AntiClickOperator, AntiClickConfig
+        from symcrash_python_ap.safety.anti_click import AntiClickOperator, AntiClickConfig
 
         cfg = AntiClickConfig(ola_K=0, wet_latency_blocks=1)
         op = AntiClickOperator(cfg)
@@ -376,7 +376,7 @@ class TestOLA:
 
     def test_ola_not_applied_for_pure_carrier(self):
         """OLA is not applied when output is pure carrier (beta=0)."""
-        from anti_click import AntiClickOperator, AntiClickConfig
+        from symcrash_python_ap.safety.anti_click import AntiClickOperator, AntiClickConfig
 
         cfg = AntiClickConfig(ola_K=16)
         op = AntiClickOperator(cfg)
@@ -401,7 +401,7 @@ class TestQ15Interface:
 
     def test_step_q15_converts_correctly(self):
         """step_q15 converts Q15 I/O correctly."""
-        from anti_click import AntiClickOperator, AntiClickConfig
+        from symcrash_python_ap.safety.anti_click import AntiClickOperator, AntiClickConfig
 
         cfg = AntiClickConfig(ola_K=0)
         op = AntiClickOperator(cfg)
@@ -416,7 +416,7 @@ class TestQ15Interface:
 
     def test_step_q15_clips_output(self):
         """step_q15 clips output to Q15 range."""
-        from anti_click import AntiClickOperator, AntiClickConfig
+        from symcrash_python_ap.safety.anti_click import AntiClickOperator, AntiClickConfig
 
         cfg = AntiClickConfig(ola_K=0)
         op = AntiClickOperator(cfg)
@@ -440,7 +440,7 @@ class TestHannWindow:
 
     def test_hann_window_shape(self):
         """Hann window has expected shape."""
-        from anti_click import hann_window
+        from symcrash_python_ap.safety.anti_click import hann_window
 
         w = hann_window(16)
 
@@ -451,7 +451,7 @@ class TestHannWindow:
 
     def test_hann_window_single_sample(self):
         """Hann window of length 1 is all ones."""
-        from anti_click import hann_window
+        from symcrash_python_ap.safety.anti_click import hann_window
 
         w = hann_window(1)
 
@@ -464,7 +464,7 @@ class TestClickFreeOutput:
 
     def test_no_clicks_during_wet_bloom(self):
         """No clicks during wet fade-in."""
-        from anti_click import AntiClickOperator, AntiClickConfig
+        from symcrash_python_ap.safety.anti_click import AntiClickOperator, AntiClickConfig
 
         cfg = AntiClickConfig(bloom_time_s=0.01)  # Fast bloom
         op = AntiClickOperator(cfg)
@@ -492,7 +492,7 @@ class TestClickFreeOutput:
 
     def test_no_clicks_on_voice_restart(self):
         """No clicks when voice restarts."""
-        from anti_click import AntiClickOperator, AntiClickConfig
+        from symcrash_python_ap.safety.anti_click import AntiClickOperator, AntiClickConfig
 
         cfg = AntiClickConfig()
         op = AntiClickOperator(cfg)
@@ -530,7 +530,7 @@ class TestClampUtility:
 
     def test_clamp_within_range(self):
         """Clamp returns value within range."""
-        from anti_click import clamp
+        from symcrash_python_ap.safety.anti_click import clamp
 
         assert clamp(0.5, 0.0, 1.0) == 0.5
         assert clamp(-0.5, 0.0, 1.0) == 0.0
@@ -538,7 +538,7 @@ class TestClampUtility:
 
     def test_clamp_edge_values(self):
         """Clamp handles edge values correctly."""
-        from anti_click import clamp
+        from symcrash_python_ap.safety.anti_click import clamp
 
         assert clamp(0.0, 0.0, 1.0) == 0.0
         assert clamp(1.0, 0.0, 1.0) == 1.0

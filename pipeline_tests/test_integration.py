@@ -29,7 +29,7 @@ class TestI1AutomaticTransmission:
 
     def test_pressure_sweep_smooth(self, q15_one, q15_half):
         """Pressure sweep produces smooth changes."""
-        from voice_engine import VoiceEngine, GestureBasis
+        from symcrash_python_ap.voice.voice_engine import VoiceEngine, GestureBasis
 
         engine = VoiceEngine(max_voices=4)
         vid = engine.allocate_voice(program_id=1001)
@@ -62,8 +62,8 @@ class TestI1AutomaticTransmission:
 
     def test_gesture_to_sound_continuous(self, q15_half, q15_one):
         """Gesture changes produce continuous sound changes."""
-        from voice_engine import VoiceEngine, GestureBasis
-        from symbol_engine import SymbolExecutor, ExecutorInput
+        from symcrash_python_ap.voice.voice_engine import VoiceEngine, GestureBasis
+        from symcrash_python_ap.symbol.symbol_engine import SymbolExecutor, ExecutorInput
 
         voice_engine = VoiceEngine(max_voices=4)
         symbol_engine = SymbolExecutor(n_voices=4)
@@ -95,7 +95,7 @@ class TestI1AutomaticTransmission:
 
     def test_regime_transitions_musical(self, q15_half, q15_one):
         """Regime transitions sound musical, not mechanical."""
-        from voice_engine import VoiceEngine, GestureBasis, Regime
+        from symcrash_python_ap.voice.voice_engine import VoiceEngine, GestureBasis, Regime
 
         engine = VoiceEngine(max_voices=4)
         vid = engine.allocate_voice(program_id=1001)
@@ -155,7 +155,7 @@ class TestI2VoiceDropoutTest:
 
     def test_rapid_allocate_free(self, q15_half):
         """Rapid voice allocation/freeing is stable."""
-        from voice_engine import VoiceEngine, GestureBasis
+        from symcrash_python_ap.voice.voice_engine import VoiceEngine, GestureBasis
 
         engine = VoiceEngine(max_voices=8)
         active_voices = []
@@ -184,7 +184,7 @@ class TestI2VoiceDropoutTest:
 
     def test_voice_kill_no_dc(self, q15_half):
         """Killing voice doesn't leave DC offset."""
-        from voice_engine import VoiceEngine, GestureBasis
+        from symcrash_python_ap.voice.voice_engine import VoiceEngine, GestureBasis
 
         engine = VoiceEngine(max_voices=4)
 
@@ -208,7 +208,7 @@ class TestI2VoiceDropoutTest:
 
     def test_simultaneous_noteoff(self, q15_half):
         """Multiple simultaneous note-offs are handled."""
-        from voice_engine import VoiceEngine, GestureBasis
+        from symcrash_python_ap.voice.voice_engine import VoiceEngine, GestureBasis
 
         engine = VoiceEngine(max_voices=8)
 
@@ -250,7 +250,7 @@ class TestI3LongFormMusicalTest:
 
     def test_extended_run_stability(self, q15_half, q15_one):
         """Extended run doesn't drift or collapse."""
-        from voice_engine import VoiceEngine, GestureBasis
+        from symcrash_python_ap.voice.voice_engine import VoiceEngine, GestureBasis
 
         engine = VoiceEngine(max_voices=4)
 
@@ -287,7 +287,7 @@ class TestI3LongFormMusicalTest:
 
     def test_multi_voice_long_run(self, q15_half):
         """Multiple voices over extended period remain stable."""
-        from voice_engine import VoiceEngine, GestureBasis
+        from symcrash_python_ap.voice.voice_engine import VoiceEngine, GestureBasis
 
         engine = VoiceEngine(max_voices=8)
 
@@ -316,7 +316,7 @@ class TestI3LongFormMusicalTest:
 
     def test_no_memory_accumulation(self, q15_half):
         """System doesn't accumulate unbounded state."""
-        from voice_engine import VoiceEngine, GestureBasis
+        from symcrash_python_ap.voice.voice_engine import VoiceEngine, GestureBasis
         import sys
 
         engine = VoiceEngine(max_voices=4)
@@ -356,7 +356,7 @@ class TestFinalAcceptance:
 
     def test_voice_engine_standalone(self, q15_half):
         """Voice Engine alone can produce a performance."""
-        from voice_engine import VoiceEngine, GestureBasis
+        from symcrash_python_ap.voice.voice_engine import VoiceEngine, GestureBasis
 
         engine = VoiceEngine(max_voices=4)
 
@@ -388,9 +388,9 @@ class TestFinalAcceptance:
 
     def test_engines_separable(self, q15_half):
         """Symbol and Wavelet engines work with raw math input."""
-        from symbol_engine import SymbolExecutor
-        from wavelet_engine import WaveletEngine
-        from frames import VoiceFrame
+        from symcrash_python_ap.symbol.symbol_engine import SymbolExecutor
+        from symcrash_python_ap.wavelet.wavelet_engine import WaveletEngine
+        from symcrash_python_ap.frames import VoiceFrame
 
         # Symbol engine with pure math input
         symbol = SymbolExecutor(n_voices=4)
@@ -417,7 +417,7 @@ class TestFinalAcceptance:
 
     def test_continuous_control_responsive(self, q15_half, q15_one):
         """System responds continuously to gesture changes."""
-        from voice_engine import VoiceEngine, GestureBasis
+        from symcrash_python_ap.voice.voice_engine import VoiceEngine, GestureBasis
 
         engine = VoiceEngine(max_voices=4)
         vid = engine.allocate_voice(program_id=1001)

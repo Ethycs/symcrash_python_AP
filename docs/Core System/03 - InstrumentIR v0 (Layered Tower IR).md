@@ -508,7 +508,135 @@ This is the bridge to the ABI; v0 rules:
 
 ---
 
-If you want, next I’ll write **FrameEmitter v0** as a canonical spec:
+If you want, next I'll write **FrameEmitter v0** as a canonical spec:
 
 - exact rules to go from (regime + overlays + maps) → $VoiceFramePacket\ v0b$
-- including fixed-point conversion, lane arbitration, and “no advance on skip/suppress” determinism rules.
+- including fixed-point conversion, lane arbitration, and "no advance on skip/suppress" determinism rules.
+
+---
+
+## Addendum A: Carrier-First Semantics
+
+### A.1 L0 Osc Node Extensions
+
+The `Osc` node type gains carrier-specific fields:
+
+```yaml
+nodes:
+  - id: N_OSC
+    type: Osc
+    params:
+      waveform: "saw"        # sine|saw|pulse|tri|partials|noise
+      detune_cents: 0
+      pw: 0.5                # pulse width (for pulse waveform)
+      role: "audible"        # off|audible|exciter_only (NEW)
+      archetype: "harmonic"  # harmonic|bright|hollow|noisy|transient (NEW)
+```
+
+**Field definitions:**
+
+- `role`: Carrier role enum
+  - `"off"` → CarrierRole.OFF (0): No carrier; pure wavelet synthesis
+  - `"audible"` → CarrierRole.AUDIBLE (1): Carrier blended into output via β
+  - `"exciter_only"` → CarrierRole.EXCITER_ONLY (2): Carrier drives IDWPT but not heard directly
+
+- `archetype`: TreeArchetype for scaffold generation
+  - `"harmonic"` → TreeArchetype.HARMONIC (0)
+  - `"bright"` → TreeArchetype.BRIGHT (1)
+  - `"hollow"` → TreeArchetype.HOLLOW (2)
+  - `"noisy"` → TreeArchetype.NOISY (3)
+  - `"transient"` → TreeArchetype.TRANSIENT (4)
+
+### A.2 L1 Macro Semantics: Carrier Targets
+
+The M_HARM macro now affects carrier configuration instead of EVT_INJECT_NOTE:
+
+```yaml
+macro_semantics:
+  M_HARM:
+    affects:
+      - {target: "carrier.eta", map: "harmonic_dial"}
+      - {target: "carrier.detune", map: "harmonic_detune"}
+```
+
+Valid carrier targets:
+
+| Target | Type | Description |
+|--------|------|-------------|
+| `carrier.model` | CarrierModel | Waveform selection (SINE, SAW, PULSE, TRI, PARTIALS, NOISE) |
+| `carrier.role` | CarrierRole | OFF, AUDIBLE, or EXCITER_ONLY |
+| `carrier.archetype` | TreeArchetype | Scaffold generation mode |
+| `carrier.detune` | i16 | Detune in cents |
+| `carrier.pw` | Q15 | Pulse width (for PULSE model) |
+| `carrier.eta` | Q15 | Scaffold/texture blend target |
+| `carrier.pitchbend` | i16 | Real-time pitchbend in cents |
+| `carrier.transition` | TransitionKind | RETRIGGER, GLIDE, or BRIDGE |
+
+### A.3 L3 Output Fields
+
+Add carrier fields to `outputs.frame_fields`:
+
+```yaml
+outputs:
+  frame_fields:
+    - gain_q15
+    - activity_q15
+    - w_family_q15[8]
+    - op_enable_mask_u32
+    - tree_a_id, tree_b_id, tree_blend_q15
+    # Carrier header (NEW)
+    - carrier_model_u8
+    - carrier_role_u8
+    - carrier_archetype_u8
+    - transition_kind_u8
+    - detune_cents_i16
+    - pw_q15
+    - eta_target_q15
+    - pitchbend_cents_i16
+    # Events
+    - event_mask_u8
+    - event_strength_q15[8]
+    - event_payload_u64[8]
+```
+
+### A.4 Lane Mapping Update
+
+Lane 4 is renamed from `EVT_INJECT_NOTE` to `EVT_CARRIER_CFG`:
+
+```yaml
+frame_emitter_policy:
+  lanes:
+    EVT_OP_PULSE: 0
+    EVT_OP_TOGGLE: 1
+    EVT_TREE_MORPH: 2
+    EVT_K_MODE: 3
+    EVT_CARRIER_CFG: 4    # Was EVT_INJECT_NOTE
+    EVT_MATERIAL_HIT: 5
+    EVT_CLOUD_PUSH: 6
+```
+
+### A.5 Compiler Rules
+
+#### TransitionKind Selection
+
+The compiler selects TransitionKind based on note context:
+
+| Condition | TransitionKind |
+|-----------|----------------|
+| New note without legato | RETRIGGER (0) |
+| Legato flag set + previous note exists | GLIDE (1) |
+| Tree crossfade active during note transition | BRIDGE (2) |
+
+#### CarrierRole Selection
+
+The compiler selects CarrierRole from L0 Osc node params:
+
+| L0 Osc `role` param | CarrierRole |
+|---------------------|-------------|
+| `"off"` or missing | OFF (0) |
+| `"audible"` | AUDIBLE (1) |
+| `"exciter_only"` | EXCITER_ONLY (2) |
+
+**Default:** If no `role` is specified, default to `AUDIBLE` for backwards compatibility with carrier-enabled instruments.
+
+---

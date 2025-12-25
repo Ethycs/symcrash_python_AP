@@ -17,7 +17,7 @@ class TestCtrlDeltaPacket:
 
     def test_empty_packet_serializes(self):
         """Empty packet (no fields) serializes correctly."""
-        from ctrl_delta import CtrlDeltaPacket, CTRL_DELTA_HEADER_LEN
+        from symcrash_python_ap.comm.ctrl_delta import CtrlDeltaPacket, CTRL_DELTA_HEADER_LEN
 
         pkt = CtrlDeltaPacket()
         data = pkt.to_bytes()
@@ -27,8 +27,8 @@ class TestCtrlDeltaPacket:
 
     def test_single_field_roundtrip(self):
         """Single field survives encode/decode."""
-        from ctrl_delta import CtrlDeltaPacket, ScopeType
-        from parameter_registry import FieldMask
+        from symcrash_python_ap.comm.ctrl_delta import CtrlDeltaPacket, ScopeType
+        from symcrash_python_ap.parameter_registry import FieldMask
 
         pkt = CtrlDeltaPacket(
             scope_type=ScopeType.VOICE,
@@ -46,8 +46,8 @@ class TestCtrlDeltaPacket:
 
     def test_multiple_fields_roundtrip(self):
         """Multiple fields survive encode/decode."""
-        from ctrl_delta import CtrlDeltaPacket, ScopeType
-        from parameter_registry import FieldMask, UpdateMode
+        from symcrash_python_ap.comm.ctrl_delta import CtrlDeltaPacket, ScopeType
+        from symcrash_python_ap.parameter_registry import FieldMask, UpdateMode
 
         pkt = CtrlDeltaPacket(
             scope_type=ScopeType.VOICE,
@@ -74,8 +74,8 @@ class TestCtrlDeltaPacket:
 
     def test_group_field_family_weights(self):
         """Group field (FAMILY_WEIGHTS) serializes correctly."""
-        from ctrl_delta import CtrlDeltaPacket
-        from parameter_registry import FieldMask
+        from symcrash_python_ap.comm.ctrl_delta import CtrlDeltaPacket
+        from symcrash_python_ap.parameter_registry import FieldMask
 
         weights = [1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000]
 
@@ -90,8 +90,8 @@ class TestCtrlDeltaPacket:
 
     def test_delta_mode_preserved(self):
         """DELTA mode flag survives roundtrip."""
-        from ctrl_delta import CtrlDeltaPacket
-        from parameter_registry import FieldMask, UpdateMode
+        from symcrash_python_ap.comm.ctrl_delta import CtrlDeltaPacket
+        from symcrash_python_ap.parameter_registry import FieldMask, UpdateMode
 
         pkt = CtrlDeltaPacket(mode=UpdateMode.DELTA)
         pkt.field_mask = 1 << FieldMask.GAIN_Q15
@@ -108,8 +108,8 @@ class TestMaskedUpdateConversion:
 
     def test_from_masked_update(self):
         """CtrlDeltaPacket.from_masked_update() works."""
-        from ctrl_delta import CtrlDeltaPacket, ScopeType
-        from parameter_registry import MaskedUpdate, FieldMask, UpdateMode
+        from symcrash_python_ap.comm.ctrl_delta import CtrlDeltaPacket, ScopeType
+        from symcrash_python_ap.parameter_registry import MaskedUpdate, FieldMask, UpdateMode
 
         update = MaskedUpdate(mode=UpdateMode.ABS)
         update.set(FieldMask.GAIN_Q15, 25000)
@@ -124,8 +124,8 @@ class TestMaskedUpdateConversion:
 
     def test_to_masked_update(self):
         """CtrlDeltaPacket.to_masked_update() works."""
-        from ctrl_delta import CtrlDeltaPacket
-        from parameter_registry import FieldMask, UpdateMode
+        from symcrash_python_ap.comm.ctrl_delta import CtrlDeltaPacket
+        from symcrash_python_ap.parameter_registry import FieldMask, UpdateMode
 
         pkt = CtrlDeltaPacket(mode=UpdateMode.DELTA)
         pkt.field_mask = 1 << FieldMask.DRIVE_Q15
@@ -143,8 +143,8 @@ class TestValidation:
 
     def test_valid_packet_passes(self):
         """Well-formed packet passes validation."""
-        from ctrl_delta import CtrlDeltaPacket, ScopeType
-        from parameter_registry import FieldMask
+        from symcrash_python_ap.comm.ctrl_delta import CtrlDeltaPacket, ScopeType
+        from symcrash_python_ap.parameter_registry import FieldMask
 
         pkt = CtrlDeltaPacket(scope_type=ScopeType.VOICE, scope_id=0)
         pkt.field_mask = 1 << FieldMask.GAIN_Q15
@@ -156,8 +156,8 @@ class TestValidation:
 
     def test_missing_value_fails(self):
         """Field set in mask but no value fails validation."""
-        from ctrl_delta import CtrlDeltaPacket
-        from parameter_registry import FieldMask
+        from symcrash_python_ap.comm.ctrl_delta import CtrlDeltaPacket
+        from symcrash_python_ap.parameter_registry import FieldMask
 
         pkt = CtrlDeltaPacket()
         pkt.field_mask = 1 << FieldMask.GAIN_Q15
@@ -169,7 +169,7 @@ class TestValidation:
 
     def test_invalid_magic_fails_decode(self):
         """Invalid magic byte fails decode."""
-        from ctrl_delta import CtrlDeltaPacket
+        from symcrash_python_ap.comm.ctrl_delta import CtrlDeltaPacket
 
         bad_data = bytes([0xFF] + [0] * 9)  # Wrong magic
 
@@ -178,7 +178,7 @@ class TestValidation:
 
     def test_truncated_header_fails(self):
         """Truncated header fails decode."""
-        from ctrl_delta import CtrlDeltaPacket
+        from symcrash_python_ap.comm.ctrl_delta import CtrlDeltaPacket
 
         short_data = bytes([0xCD, 1])  # Only 2 bytes
 
@@ -191,8 +191,8 @@ class TestBandwidth:
 
     def test_ctrl_delta_smaller_than_vfp(self):
         """CTRL-DELTA is much smaller than VoiceFramePacket."""
-        from ctrl_delta import CtrlDeltaPacket, bandwidth_comparison
-        from parameter_registry import FieldMask
+        from symcrash_python_ap.comm.ctrl_delta import CtrlDeltaPacket, bandwidth_comparison
+        from symcrash_python_ap.parameter_registry import FieldMask
 
         # Create a typical update (4 fields)
         pkt = CtrlDeltaPacket()
@@ -216,7 +216,7 @@ class TestBandwidth:
 
     def test_bandwidth_comparison(self):
         """Bandwidth comparison shows CTRL-DELTA is feasible."""
-        from ctrl_delta import bandwidth_comparison
+        from symcrash_python_ap.comm.ctrl_delta import bandwidth_comparison
 
         bw = bandwidth_comparison()
 
@@ -232,7 +232,7 @@ class TestBandwidth:
 
     def test_estimate_bandwidth(self):
         """estimate_bandwidth() returns reasonable values."""
-        from ctrl_delta import estimate_bandwidth
+        from symcrash_python_ap.comm.ctrl_delta import estimate_bandwidth
 
         # 12 voices, 0.5 updates/voice, 4 fields/update, 750 Hz blocks
         bw = estimate_bandwidth(
@@ -251,8 +251,8 @@ class TestIntegrationWithParameterBank:
 
     def test_apply_ctrl_delta_to_bank(self):
         """CTRL-DELTA can be applied to ParameterBank."""
-        from ctrl_delta import CtrlDeltaPacket
-        from parameter_registry import (
+        from symcrash_python_ap.comm.ctrl_delta import CtrlDeltaPacket
+        from symcrash_python_ap.parameter_registry import (
             ParameterRegistry, ParameterBank, FieldMask, UpdateMode
         )
 
@@ -274,8 +274,8 @@ class TestIntegrationWithParameterBank:
 
     def test_delta_update_applied_correctly(self):
         """DELTA mode updates are applied correctly."""
-        from ctrl_delta import CtrlDeltaPacket
-        from parameter_registry import (
+        from symcrash_python_ap.comm.ctrl_delta import CtrlDeltaPacket
+        from symcrash_python_ap.parameter_registry import (
             ParameterRegistry, ParameterBank, FieldMask, UpdateMode
         )
 

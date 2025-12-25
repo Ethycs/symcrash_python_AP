@@ -10,20 +10,20 @@ import struct
 from typing import List
 
 # Import from uart_protocol
-from uart_protocol import (
-    # Constants
-    SYNC_WORD, PROTOCOL_VERSION, NUM_EVENT_LANES, MAX_BACKBONE_ENTRIES,
+from symcrash_python_ap.comm import (
+    # Constants - import directly from module for constants
+    VoiceFrameV0, VoiceFrameDelta, VoiceLatch,
+    UARTPacket, MockUART,
+    BackboneEntry, Payload64,
     # Enums
     EventLane, MsgType, PayloadMode, TargetKind, ErrorCode, AckStatus, FieldMask,
-    # CRC
-    crc32c,
-    # Data structures
-    BackboneEntry, Payload64, VoiceFrameV0, VoiceFrameDelta, VoiceLatch,
-    UARTPacket, MockUART,
-    # Pattern table
-    resolve_pattern, PatternEntry, DEFAULT_PATTERN_TABLE,
+    PatternEntry,
 )
-from fixed import Q15_ONE, Q15_HALF
+from symcrash_python_ap.comm.uart_protocol import (
+    SYNC_WORD, PROTOCOL_VERSION, NUM_EVENT_LANES, MAX_BACKBONE_ENTRIES,
+    crc32c, resolve_pattern, DEFAULT_PATTERN_TABLE,
+)
+from symcrash_python_ap.fixed import Q15_ONE, Q15_HALF
 
 
 # =============================================================================

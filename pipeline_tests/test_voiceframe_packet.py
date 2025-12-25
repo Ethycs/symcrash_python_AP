@@ -6,7 +6,7 @@ Tests for the 136-byte wire format per Wire Contract v0b.
 """
 
 import pytest
-from src.symcrash_python_ap.frames import (
+from symcrash_python_ap.frames import (
     VoiceFramePacketV0b,
     VoiceFlags,
     VFP_MAGIC,
@@ -344,7 +344,7 @@ class TestConversion:
 
     def test_from_voice_frame(self):
         """Should convert from internal VoiceFrame."""
-        from src.symcrash_python_ap.frames import VoiceFrame
+        from symcrash_python_ap.frames import VoiceFrame
 
         vf = VoiceFrame(
             voice_id=7,

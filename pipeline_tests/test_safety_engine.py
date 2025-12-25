@@ -301,7 +301,7 @@ class TestSymbolTailInvariants:
 
     def test_s1_finite_coefficients(self):
         """S1: All coefficients representable as int16 after processing."""
-        from safety_engine import SymbolTail, COEFF_LEN
+        from symcrash_python_ap.safety.safety_engine import SymbolTail, COEFF_LEN
 
         tail = SymbolTail()
 
@@ -316,7 +316,7 @@ class TestSymbolTailInvariants:
 
     def test_s2_per_leaf_caps(self):
         """S2: Per-leaf energy caps are enforced."""
-        from safety_engine import SymbolTail, COEFF_LEN, COEFF_PER_LEAF, LEAF_COUNT, E_LEAF_MAX
+        from symcrash_python_ap.safety.safety_engine import SymbolTail, COEFF_LEN, COEFF_PER_LEAF, LEAF_COUNT, E_LEAF_MAX
 
         tail = SymbolTail()
 
@@ -336,7 +336,7 @@ class TestSymbolTailInvariants:
 
     def test_s3_fine_band_cap(self):
         """S3: Fine-band total energy cap is enforced."""
-        from safety_engine import SymbolTail, COEFF_LEN, COEFF_PER_LEAF, FINE_BAND_SET, E_FINE_MAX
+        from symcrash_python_ap.safety.safety_engine import SymbolTail, COEFF_LEN, COEFF_PER_LEAF, FINE_BAND_SET, E_FINE_MAX
 
         tail = SymbolTail()
 
@@ -355,7 +355,7 @@ class TestSymbolTailInvariants:
 
     def test_s5_spectral_tilt_detection(self):
         """S5: Spectral tilt detector identifies extreme tilt."""
-        from safety_engine import SymbolTail, COEFF_LEN, COEFF_PER_LEAF, FINE_BAND_SET
+        from symcrash_python_ap.safety.safety_engine import SymbolTail, COEFF_LEN, COEFF_PER_LEAF, FINE_BAND_SET
 
         tail = SymbolTail()
 
@@ -375,7 +375,7 @@ class TestSymbolTailInvariants:
 
     def test_fine_clamp_reduces_energy(self):
         """FineClamp reduces excess per-leaf energy."""
-        from safety_engine import SymbolTail, COEFF_LEN, COEFF_PER_LEAF, E_LEAF_MAX
+        from symcrash_python_ap.safety.safety_engine import SymbolTail, COEFF_LEN, COEFF_PER_LEAF, E_LEAF_MAX
 
         tail = SymbolTail()
 
@@ -393,7 +393,7 @@ class TestSymbolTailInvariants:
 
     def test_normalize_scale_preserves_structure(self):
         """NormalizeScale preserves relative coefficient structure."""
-        from safety_engine import SymbolTail, COEFF_LEN
+        from symcrash_python_ap.safety.safety_engine import SymbolTail, COEFF_LEN
 
         tail = SymbolTail()
 
@@ -410,7 +410,7 @@ class TestSymbolTailInvariants:
 
     def test_emergency_simplify_zeros_fine_leaves(self):
         """EmergencySimplify zeros fine leaves."""
-        from safety_engine import SymbolTail, COEFF_LEN, COEFF_PER_LEAF, FINE_BAND_SET
+        from symcrash_python_ap.safety.safety_engine import SymbolTail, COEFF_LEN, COEFF_PER_LEAF, FINE_BAND_SET
 
         tail = SymbolTail()
 
@@ -433,7 +433,7 @@ class TestSAFEPredicate:
 
     def test_check_coeff_safe_clean_input(self):
         """SAFE predicate passes for clean coefficient input."""
-        from safety_engine import check_coeff_safe, COEFF_LEN
+        from symcrash_python_ap.safety.safety_engine import check_coeff_safe, COEFF_LEN
 
         # Normal coefficients
         coeffs = [1000 if i % 3 == 0 else -500 for i in range(COEFF_LEN)]
@@ -444,7 +444,7 @@ class TestSAFEPredicate:
 
     def test_check_coeff_safe_detects_overflow(self):
         """SAFE predicate detects overflow in coefficients."""
-        from safety_engine import check_coeff_safe, COEFF_LEN
+        from symcrash_python_ap.safety.safety_engine import check_coeff_safe, COEFF_LEN
 
         # Coefficients with overflow
         coeffs = [50000] * COEFF_LEN  # Out of int16 range
@@ -456,7 +456,7 @@ class TestSAFEPredicate:
 
     def test_check_audio_safe_clean_input(self):
         """SAFE predicate passes for clean audio input."""
-        from safety_engine import check_audio_safe
+        from symcrash_python_ap.safety.safety_engine import check_audio_safe
 
         # Normal audio
         audio = [1000 if i % 2 == 0 else -1000 for i in range(64)]
@@ -467,7 +467,7 @@ class TestSAFEPredicate:
 
     def test_check_audio_safe_detects_peak_violation(self):
         """SAFE predicate detects peak violation (A1)."""
-        from safety_engine import check_audio_safe, PEAK_MAX
+        from symcrash_python_ap.safety.safety_engine import check_audio_safe, PEAK_MAX
 
         # Audio at max
         audio = [32767] * 64
@@ -479,7 +479,7 @@ class TestSAFEPredicate:
 
     def test_check_audio_safe_detects_slew_violation(self):
         """SAFE predicate detects slew violation (A2)."""
-        from safety_engine import check_audio_safe, SLEW_MAX
+        from symcrash_python_ap.safety.safety_engine import check_audio_safe, SLEW_MAX
 
         # Audio with huge step change
         audio = [0] * 32 + [32767] * 32
@@ -491,7 +491,7 @@ class TestSAFEPredicate:
 
     def test_check_audio_safe_detects_dc_violation(self):
         """SAFE predicate detects DC offset violation (A3)."""
-        from safety_engine import check_audio_safe, DC_MAX
+        from symcrash_python_ap.safety.safety_engine import check_audio_safe, DC_MAX
 
         # Audio with DC bias
         audio = [16000] * 64
@@ -503,7 +503,7 @@ class TestSAFEPredicate:
 
     def test_is_block_safe_combined(self):
         """is_block_safe checks both coefficient and audio."""
-        from safety_engine import is_block_safe, COEFF_LEN
+        from symcrash_python_ap.safety.safety_engine import is_block_safe, COEFF_LEN
 
         # Clean inputs
         coeffs = [1000] * COEFF_LEN
@@ -527,7 +527,7 @@ class TestDegradeLevels:
 
     def test_degrade_levels_exist(self):
         """DegradeLevel enum has expected values."""
-        from safety_engine import DegradeLevel
+        from symcrash_python_ap.safety.safety_engine import DegradeLevel
 
         assert DegradeLevel.NONE == 0
         assert DegradeLevel.REDUCE_RANK == 1
@@ -537,7 +537,7 @@ class TestDegradeLevels:
 
     def test_degrade_levels_ordered(self):
         """Degrade levels are properly ordered (increasing severity)."""
-        from safety_engine import DegradeLevel
+        from symcrash_python_ap.safety.safety_engine import DegradeLevel
 
         levels = [
             DegradeLevel.NONE,
@@ -567,7 +567,7 @@ class TestSlewLimiter:
 
     def test_slew_limit_enforced(self):
         """Slew limiter enforces A2 invariant."""
-        from symcrash_python_ap.safety import SafetyEngine, SLEW_MAX
+        from symcrash_python_ap.safety.safety_engine import SafetyEngine, SLEW_MAX
 
         engine = SafetyEngine(block_size=64)
 
@@ -589,7 +589,7 @@ class TestSlewLimiter:
 
     def test_slew_limit_preserves_slow_signals(self):
         """Slew limiter preserves signals within limit."""
-        from symcrash_python_ap.safety import SafetyEngine, SLEW_MAX
+        from symcrash_python_ap.safety.safety_engine import SafetyEngine, SLEW_MAX
 
         engine = SafetyEngine(block_size=64)
 
@@ -604,7 +604,7 @@ class TestSlewLimiter:
 
     def test_step_block_applies_slew(self):
         """step_block applies slew limiting when enabled."""
-        from symcrash_python_ap.safety import SafetyEngine, SLEW_MAX
+        from symcrash_python_ap.safety.safety_engine import SafetyEngine, SLEW_MAX
         from symcrash_python_ap.frames import ParamFrame
 
         engine = SafetyEngine(block_size=64)
@@ -645,7 +645,7 @@ class TestC1DiscontinuityPatcher:
 
     def test_detect_discontinuity_finds_click(self):
         """Discontinuity detector finds interior clicks."""
-        from symcrash_python_ap.safety import SafetyEngine, SLEW_MAX
+        from symcrash_python_ap.safety.safety_engine import SafetyEngine, SLEW_MAX
 
         engine = SafetyEngine(block_size=64)
 

@@ -32,7 +32,7 @@ class TestO1VoiceLifecycle:
 
     def test_voice_allocate_transitions_to_allocated(self, block_orchestrator):
         """voice_allocate transitions slot to ALLOCATED."""
-        from orchestrator import VoiceState
+        from symcrash_python_ap.voice.orchestrator import VoiceState
 
         # Initially FREE
         assert block_orchestrator.voice_slots[0].state == VoiceState.FREE
@@ -53,7 +53,7 @@ class TestO1VoiceLifecycle:
 
     def test_voice_on_transitions_to_active(self, block_orchestrator):
         """voice_on transitions slot to ACTIVE."""
-        from orchestrator import VoiceState
+        from symcrash_python_ap.voice.orchestrator import VoiceState
 
         block_orchestrator.voice_allocate(0, owner_id=1)
         assert block_orchestrator.voice_slots[0].state == VoiceState.ALLOCATED
@@ -64,7 +64,7 @@ class TestO1VoiceLifecycle:
 
     def test_voice_on_does_not_arm_microfade(self, block_orchestrator):
         """voice_on does NOT arm microfade."""
-        from frames import VoiceFrame
+        from symcrash_python_ap.frames import VoiceFrame
 
         block_orchestrator.voice_allocate(0, owner_id=1)
 
@@ -87,7 +87,7 @@ class TestO1VoiceLifecycle:
 
     def test_voice_free_transitions_to_free(self, block_orchestrator):
         """voice_free transitions slot back to FREE."""
-        from orchestrator import VoiceState
+        from symcrash_python_ap.voice.orchestrator import VoiceState
 
         block_orchestrator.voice_allocate(0, owner_id=1)
         block_orchestrator.voice_on(0)
@@ -99,7 +99,7 @@ class TestO1VoiceLifecycle:
 
     def test_voice_free_preserves_prev_sample(self, block_orchestrator):
         """voice_free preserves prev_sample for next allocate."""
-        from frames import VoiceFrame
+        from symcrash_python_ap.frames import VoiceFrame
 
         block_orchestrator.voice_allocate(0, owner_id=1)
         block_orchestrator.voice_on(0)
@@ -152,7 +152,7 @@ class TestO2ScheduledRendering:
 
     def test_step_block_returns_audio_and_schedule(self, block_orchestrator):
         """step_block returns stereo audio and schedule result."""
-        from scheduler import ScheduleResult
+        from symcrash_python_ap.voice.scheduler import ScheduleResult
 
         L, R, schedule = block_orchestrator.step_block()
 
@@ -162,7 +162,7 @@ class TestO2ScheduledRendering:
 
     def test_only_serviced_voices_contribute_audio(self, block_orchestrator, q15_half):
         """Only voices in schedule.serviced contribute to output."""
-        from frames import VoiceFramePacketV0b, VoiceFlags
+        from symcrash_python_ap.frames import VoiceFramePacketV0b, VoiceFlags
 
         # Set up one active voice with loud coefficients
         frame = VoiceFramePacketV0b(
@@ -206,7 +206,7 @@ class TestO3EmissionGroupFiltering:
 
     def test_schedule_contains_emission_flags(self, block_orchestrator, q15_half):
         """Schedule result contains mid_due and top_due flags."""
-        from frames import VoiceFramePacketV0b, VoiceFlags
+        from symcrash_python_ap.frames import VoiceFramePacketV0b, VoiceFlags
 
         # Set up active voice
         frame = VoiceFramePacketV0b(
@@ -240,7 +240,7 @@ class TestO4FrameUpdates:
 
     def test_update_frame_stores_frame(self, block_orchestrator, q15_half):
         """update_frame stores frame for voice."""
-        from frames import VoiceFramePacketV0b
+        from symcrash_python_ap.frames import VoiceFramePacketV0b
 
         frame = VoiceFramePacketV0b(voice_id=5, gain_q15=q15_half)
         block_orchestrator.update_frame(5, frame)
@@ -249,8 +249,8 @@ class TestO4FrameUpdates:
 
     def test_gate_rise_auto_allocates(self, block_orchestrator, q15_half):
         """GATE_RISE on FREE voice auto-allocates."""
-        from frames import VoiceFramePacketV0b, VoiceFlags
-        from orchestrator import VoiceState
+        from symcrash_python_ap.frames import VoiceFramePacketV0b, VoiceFlags
+        from symcrash_python_ap.voice.orchestrator import VoiceState
 
         frame = VoiceFramePacketV0b(
             voice_id=3,
@@ -267,8 +267,8 @@ class TestO4FrameUpdates:
 
     def test_gate_fall_transitions_to_releasing(self, block_orchestrator, q15_half):
         """GATE_FALL transitions to RELEASING."""
-        from frames import VoiceFramePacketV0b, VoiceFlags
-        from orchestrator import VoiceState
+        from symcrash_python_ap.frames import VoiceFramePacketV0b, VoiceFlags
+        from symcrash_python_ap.voice.orchestrator import VoiceState
 
         # First activate
         frame1 = VoiceFramePacketV0b(
@@ -305,7 +305,7 @@ class TestO5SchedulerIntegration:
 
     def test_multiple_blocks_progress_counters(self, block_orchestrator, q15_half):
         """Multiple blocks advance scheduler counters."""
-        from frames import VoiceFramePacketV0b, VoiceFlags
+        from symcrash_python_ap.frames import VoiceFramePacketV0b, VoiceFlags
 
         # Set up active voice
         frame = VoiceFramePacketV0b(
@@ -326,7 +326,7 @@ class TestO5SchedulerIntegration:
 
     def test_voice_summary_reflects_states(self, block_orchestrator):
         """get_voice_summary reflects current voice states."""
-        from orchestrator import VoiceState
+        from symcrash_python_ap.voice.orchestrator import VoiceState
 
         # Initially all FREE
         summary = block_orchestrator.get_voice_summary()
@@ -366,7 +366,7 @@ class TestO5SchedulerIntegration:
 @pytest.fixture
 def block_orchestrator():
     """Fresh BlockOrchestrator instance with small voice count for testing."""
-    from orchestrator import BlockOrchestrator
+    from symcrash_python_ap.voice.orchestrator import BlockOrchestrator
     return BlockOrchestrator(n_voices=8)
 
 

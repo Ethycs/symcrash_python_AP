@@ -14,7 +14,7 @@ Covers:
 
 import pytest
 
-from symcrash_python_ap.wavelet_packet_trees import (
+from symcrash_python_ap.wavelet.wavelet_packet_trees import (
     PacketTreeSet, PacketSynthesizer,
     BLOCK_SIZE, LEAF_COUNT, COEFF_LEN, NODE_SIZE,
     export_rom_tables, export_verilog_rom,

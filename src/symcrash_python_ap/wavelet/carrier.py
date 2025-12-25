@@ -158,6 +158,22 @@ class CarrierOscillator:
         else:
             state.set_frequency(freq)
 
+    def set_harmonics(self, voice_id: int, harmonic_amps: List[int]) -> None:
+        """
+        Set harmonic amplitudes for a voice.
+
+        Args:
+            voice_id: Voice identifier
+            harmonic_amps: Q15 amplitudes for harmonics 1-8
+        """
+        if voice_id not in self.states:
+            return
+
+        state = self.states[voice_id]
+        state.harmonic_amps_q15 = list(harmonic_amps[:8])
+        while len(state.harmonic_amps_q15) < 8:
+            state.harmonic_amps_q15.append(0)
+
     def gate_on(self, voice_id: int) -> None:
         """Trigger envelope attack for voice."""
         state = self.get_or_create_state(voice_id)
