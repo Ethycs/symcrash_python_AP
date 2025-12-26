@@ -6,3 +6,45 @@ __pycache__/
 audio_out/
 voicebank_output/
 src/symcrash_python_ap.zip
+
+# C/C++ compiled files
+*.o
+*.obj
+*.so
+*.dll
+*.dylib
+*.a
+*.lib
+*.exe
+*.out
+*.app
+
+# C/C++ build directories
+build/
+Build/
+cmake-build-*/
+.cmake/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+cmake_install.cmake
+install_manifest.txt
+CTestTestfile.cmake
+_deps
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Debugger and profiling
+*.dSYM/
+*.gch
+*.pch
+core
+vgcore.*
