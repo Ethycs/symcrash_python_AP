@@ -76,7 +76,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     target_compile_definitions(symcrash_controls PRIVATE DEBUG=1)
 endif()
 
-# Disable stdio over USB/UART - we use custom CDC for protocol
+# Disable pico stdio - we write directly to CDC interfaces
 pico_enable_stdio_usb(symcrash_controls 0)
 pico_enable_stdio_uart(symcrash_controls 0)
 

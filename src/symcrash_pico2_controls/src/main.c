@@ -19,43 +19,48 @@
 #include "pico/cyw43_arch.h"
 #include "config.h"
 #include "dual_uart_link.h"
+#include "mcp3008.h"
 
 #if TRANSPORT_USB_MODE
 #include "tusb.h"
 #endif
 
-// Forward declaration from init.c
+// Forward declarations from init.c
 extern void system_init(void);
+extern void led_toggle(void);
 
 int main(void) {
     // Initialize all hardware and software subsystems
     system_init();
 
-    // Main loop - send test messages over USB CDC
-    uint32_t counter = 0;
-    uint16_t test_value = 0;
+    // Timing for ADC scanning
+    uint32_t last_adc_scan = 0;
+    uint32_t last_led_toggle = 0;
+    const uint32_t ADC_SCAN_INTERVAL_MS = 1;      // 1 kHz ADC scanning
+    const uint32_t LED_TOGGLE_INTERVAL_MS = 1000; // 1 Hz LED heartbeat
 
     while (true) {
+        uint32_t now = to_ms_since_boot(get_absolute_time());
+
 #if TRANSPORT_USB_MODE
         tud_task();  // Keep USB alive
 #endif
         dual_uart_process();
 
-        sleep_ms(100);
-        counter++;
-
-        // Toggle LED every second
-        if (counter % 10 == 0) {
-            static bool led_state = true;
-            led_state = !led_state;
-            cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, led_state);
+        // Scan ADC at 1 kHz
+        if (now - last_adc_scan >= ADC_SCAN_INTERVAL_MS) {
+            last_adc_scan = now;
+            mcp3008_scan_all();  // This triggers callbacks for changed values
         }
 
-        // Send test message every second
-        if (counter % 10 == 0) {
-            test_value = (test_value + 1000) % 32768;
-            dual_uart_send_macro(0, test_value);
+        // LED heartbeat every second
+        if (now - last_led_toggle >= LED_TOGGLE_INTERVAL_MS) {
+            last_led_toggle = now;
+            led_toggle();
         }
+
+        // Small sleep to prevent tight looping
+        sleep_us(100);
     }
 
     return 0;

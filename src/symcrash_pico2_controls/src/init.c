@@ -32,6 +32,12 @@
 #include "tusb.h"
 #endif
 
+// =============================================================================
+// LED Control (Pico 2 W uses CYW43)
+// =============================================================================
+
+static bool g_cyw43_initialized = false;
+
 /**
  * @brief Initialize CYW43 for LED control (Pico 2 W)
  */
@@ -39,14 +45,26 @@ static bool init_cyw43(void) {
     if (cyw43_arch_init()) {
         return false;
     }
+    g_cyw43_initialized = true;
     return true;
 }
 
 /**
  * @brief Set LED state (Pico 2 W uses CYW43)
  */
-static void led_set(bool on) {
-    cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, on ? 1 : 0);
+void led_set(bool on) {
+    if (g_cyw43_initialized) {
+        cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, on ? 1 : 0);
+    }
+}
+
+/**
+ * @brief Toggle LED state
+ */
+void led_toggle(void) {
+    static bool led_state = false;
+    led_state = !led_state;
+    led_set(led_state);
 }
 
 /**
@@ -60,6 +78,25 @@ static void startup_blink(void) {
         sleep_ms(100);
     }
 }
+
+// =============================================================================
+// ADC Callback - sends SetMacro on pot change
+// =============================================================================
+
+/**
+ * @brief Callback when a potentiometer value changes
+ */
+static void on_pot_change(adc_channel_t channel, adc_value_t value) {
+    // Convert 10-bit ADC (0-1023) to Q15 (0-32767)
+    q15_t q15_value = mcp3008_to_q15(value);
+
+    // Send SetMacro message for this pot (pot channel = macro ID)
+    dual_uart_send_macro((macro_id_t)channel, q15_value);
+}
+
+// =============================================================================
+// System Initialization
+// =============================================================================
 
 /**
  * @brief Initialize all hardware subsystems
@@ -83,7 +120,11 @@ void system_init(void) {
         sleep_ms(10);
     }
 
-    // Communication
+    // Initialize MCP3008 ADC for potentiometers
+    mcp3008_init();
+    mcp3008_set_callback(on_pot_change);
+
+    // Initialize communication
     dual_uart_init();
 
     // LED on to show init complete
