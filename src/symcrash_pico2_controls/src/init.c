@@ -1,6 +1,6 @@
 /**
  * @file init.c
- * @brief System initialization
+ * @brief System initialization for Pico 2 W
  */
 
 #include "config.h"
@@ -26,15 +26,27 @@
 #include "event_loop.h"
 
 #include "pico/stdlib.h"
-#include "hardware/gpio.h"
+#include "pico/cyw43_arch.h"
+
+#if TRANSPORT_USB_MODE
+#include "tusb.h"
+#endif
 
 /**
- * @brief Initialize status LED
+ * @brief Initialize CYW43 for LED control (Pico 2 W)
  */
-static void init_led(void) {
-    gpio_init(LED_STATUS);
-    gpio_set_dir(LED_STATUS, GPIO_OUT);
-    gpio_put(LED_STATUS, 0);
+static bool init_cyw43(void) {
+    if (cyw43_arch_init()) {
+        return false;
+    }
+    return true;
+}
+
+/**
+ * @brief Set LED state (Pico 2 W uses CYW43)
+ */
+static void led_set(bool on) {
+    cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, on ? 1 : 0);
 }
 
 /**
@@ -42,9 +54,9 @@ static void init_led(void) {
  */
 static void startup_blink(void) {
     for (int i = 0; i < 3; i++) {
-        gpio_put(LED_STATUS, 1);
+        led_set(true);
         sleep_ms(100);
-        gpio_put(LED_STATUS, 0);
+        led_set(false);
         sleep_ms(100);
     }
 }
@@ -53,44 +65,27 @@ static void startup_blink(void) {
  * @brief Initialize all hardware subsystems
  */
 void system_init(void) {
-    // Initialize stdio for debug output
-    stdio_init_all();
+    // FIRST: Initialize CYW43 for LED control
+    if (!init_cyw43()) {
+        // Can't even blink LED to show error - just halt
+        while (1) tight_loop_contents();
+    }
 
-    // Status LED
-    init_led();
+    // Blink to show we're alive
     startup_blink();
+
+    // Initialize TinyUSB for dual CDC
+    tusb_init();
+
+    // Brief wait for USB enumeration
+    for (int i = 0; i < 100; i++) {
+        tud_task();
+        sleep_ms(10);
+    }
 
     // Communication
     dual_uart_init();
 
-    // Hardware abstraction
-    mcp3008_init();
-    buttons_init();
-    encoder_init();
-    gc9a01_init();
-
-    // Control mapping (registers HAL callbacks)
-    control_map_init();
-
-    // UI
-    menu_init();
-    display_pages_init();
-
-    // Event loop timers
-    event_loop_init();
-
-    // Show startup screen
-    display_pages_invalidate();
-    display_pages_render();
-
-    // Try to connect to synthesis engine
-    error_t err = dual_uart_connect();
-    if (err == ERR_OK) {
-        gpio_put(LED_STATUS, 1);  // LED on = connected
-    }
-
-    // Update display with connection status
-    display_pages_set_connected(dual_uart_is_connected());
-    display_pages_invalidate();
-    display_pages_render();
+    // LED on to show init complete
+    led_set(true);
 }

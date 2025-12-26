@@ -10,6 +10,13 @@
 #define SYMCRASH_CONFIG_H
 
 // =============================================================================
+// Transport Mode Selection
+// =============================================================================
+// Set to 1 for USB CDC mode (dual virtual COM ports over USB)
+// Set to 0 for hardware UART mode (physical GPIO pins)
+#define TRANSPORT_USB_MODE  1
+
+// =============================================================================
 // C-UART (Control Channel) - UART0
 // Reliable, acknowledged communication for control messages
 // =============================================================================
@@ -109,7 +116,14 @@
 // Status LEDs
 // =============================================================================
 
-#define LED_STATUS          25      // GP25 - Onboard LED (active high)
+// On Pico 2 W, onboard LED is controlled via CYW43 WiFi chip
+// Use cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, value) instead of gpio_put
+// For standard Pico 2, LED is on GP25
+#ifdef PICO_CYW43_SUPPORTED
+#define LED_STATUS          CYW43_WL_GPIO_LED_PIN  // Pico 2 W - via WiFi chip
+#else
+#define LED_STATUS          25      // Standard Pico 2 - GP25
+#endif
 
 // LED blink patterns (in ms)
 #define LED_BLINK_FAST      100

@@ -81,9 +81,8 @@ error_t dual_uart_send_note(midi_note_t note, velocity_t velocity, bool on) {
 }
 
 error_t dual_uart_send_macro(macro_id_t macro_id, q15_t value) {
-    if (g_state != LINK_STATE_CONNECTED) {
-        return ERR_NOT_CONNECTED;
-    }
+    // Allow sending even when not fully connected (for testing/startup)
+    // The transport layer will handle the actual send
 
     frame_t frame;
     msg_build_set_macro(&frame, macro_id, value, dual_uart_get_apply_block());

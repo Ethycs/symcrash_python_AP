@@ -95,6 +95,16 @@ void event_loop_run(void) {
         if (g_event_flags & EVT_ADC_SCAN) {
             g_event_flags &= ~EVT_ADC_SCAN;
             mcp3008_scan_all();
+
+            // DEBUG: Send a test message every ~1 second (every 1000 ADC scans)
+            static uint32_t test_counter = 0;
+            if (++test_counter >= 1000) {
+                test_counter = 0;
+                // Send macro 0 with incrementing value
+                static uint16_t test_value = 0;
+                test_value = (test_value + 1000) % 32768;
+                dual_uart_send_macro(0, test_value);
+            }
         }
 
         // Process buttons and encoders

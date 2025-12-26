@@ -15,8 +15,16 @@ target_include_directories(symcrash_protocol PUBLIC
     ${CMAKE_SOURCE_DIR}/include
 )
 
+# Base libraries
 target_link_libraries(symcrash_protocol
     pico_stdlib
     hardware_uart
     hardware_dma
+)
+
+# USB CDC support - TRANSPORT_USB_MODE is defined in config.h
+# TinyUSB is needed for USB CDC mode
+target_link_libraries(symcrash_protocol
+    tinyusb_device
+    tinyusb_board
 )

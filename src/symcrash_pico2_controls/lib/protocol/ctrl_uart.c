@@ -1,6 +1,10 @@
 /**
  * @file ctrl_uart.c
  * @brief C-UART (Control Channel) driver implementation
+ *
+ * Supports two transport modes (compile-time switch via TRANSPORT_USB_MODE):
+ * - USB CDC mode: Virtual COM port over USB
+ * - Hardware UART mode: Physical GPIO pins
  */
 
 #include "ctrl_uart.h"
@@ -10,9 +14,15 @@
 #include "messages.h"
 
 #include "pico/stdlib.h"
+#include <string.h>
+
+#if TRANSPORT_USB_MODE
+#include "tusb.h"
+#define CTRL_CDC_ITF 0  // CDC interface 0 for control channel
+#else
 #include "hardware/uart.h"
 #include "hardware/irq.h"
-#include <string.h>
+#endif
 
 // =============================================================================
 // Ring Buffer
@@ -70,15 +80,82 @@ static uint32_t g_send_time_ms = 0;
 static uint8_t g_retry_count = 0;
 
 // =============================================================================
-// UART IRQ Handler
+// Transport Layer Abstraction
 // =============================================================================
 
+#if TRANSPORT_USB_MODE
+
+// USB CDC implementation
+static bool transport_is_connected(void) {
+    return tud_cdc_n_connected(CTRL_CDC_ITF);
+}
+
+static uint32_t transport_available(void) {
+    return tud_cdc_n_available(CTRL_CDC_ITF);
+}
+
+static int32_t transport_read(uint8_t *buf, uint32_t len) {
+    return tud_cdc_n_read(CTRL_CDC_ITF, buf, len);
+}
+
+static uint32_t transport_write(const uint8_t *buf, uint32_t len) {
+    uint32_t written = 0;
+    while (written < len) {
+        uint32_t available = tud_cdc_n_write_available(CTRL_CDC_ITF);
+        if (available == 0) {
+            tud_cdc_n_write_flush(CTRL_CDC_ITF);
+            tud_task();
+            continue;
+        }
+        uint32_t to_write = (len - written < available) ? (len - written) : available;
+        written += tud_cdc_n_write(CTRL_CDC_ITF, buf + written, to_write);
+    }
+    tud_cdc_n_write_flush(CTRL_CDC_ITF);
+    return written;
+}
+
+static void transport_write_byte(uint8_t byte) {
+    tud_cdc_n_write_char(CTRL_CDC_ITF, byte);
+    tud_cdc_n_write_flush(CTRL_CDC_ITF);
+}
+
+#else
+
+// Hardware UART implementation
 static void ctrl_uart_rx_handler(void) {
     while (uart_is_readable(C_UART_ID)) {
         uint8_t byte = uart_getc(C_UART_ID);
         ring_push(&g_rx_buffer, byte);
     }
 }
+
+static bool transport_is_connected(void) {
+    return true;  // Hardware UART is always "connected"
+}
+
+static uint32_t transport_available(void) {
+    return (g_rx_buffer.head - g_rx_buffer.tail + RX_BUFFER_SIZE) % RX_BUFFER_SIZE;
+}
+
+static int32_t transport_read(uint8_t *buf, uint32_t len) {
+    uint32_t read = 0;
+    uint8_t byte;
+    while (read < len && ring_pop(&g_rx_buffer, &byte)) {
+        buf[read++] = byte;
+    }
+    return read;
+}
+
+static uint32_t transport_write(const uint8_t *buf, uint32_t len) {
+    uart_write_blocking(C_UART_ID, buf, len);
+    return len;
+}
+
+static void transport_write_byte(uint8_t byte) {
+    uart_putc_raw(C_UART_ID, byte);
+}
+
+#endif
 
 // =============================================================================
 // Initialization
@@ -89,7 +166,11 @@ void ctrl_uart_init(void) {
     memset(&g_rx_buffer, 0, sizeof(g_rx_buffer));
     memset(&g_tx_buffer, 0, sizeof(g_tx_buffer));
 
-    // Initialize UART
+#if TRANSPORT_USB_MODE
+    // USB CDC is initialized by TinyUSB in main
+    // Nothing extra needed here
+#else
+    // Initialize hardware UART
     uart_init(C_UART_ID, C_UART_BAUD);
 
     // Set pin functions
@@ -106,6 +187,7 @@ void ctrl_uart_init(void) {
     irq_set_exclusive_handler(irq, ctrl_uart_rx_handler);
     irq_set_enabled(irq, true);
     uart_set_irq_enables(C_UART_ID, true, false);
+#endif
 
     g_state = CTRL_STATE_IDLE;
 }
@@ -132,8 +214,8 @@ static void send_frame_internal(const frame_t *frame) {
     size_t cobs_len = cobs_encode(raw_buf, raw_len, cobs_buf);
 
     // Send COBS-encoded data + delimiter
-    uart_write_blocking(C_UART_ID, cobs_buf, cobs_len);
-    uart_putc_raw(C_UART_ID, COBS_DELIMITER);
+    transport_write(cobs_buf, cobs_len);
+    transport_write_byte(COBS_DELIMITER);
 }
 
 error_t ctrl_uart_send(const frame_t *frame) {
@@ -179,7 +261,7 @@ error_t ctrl_uart_send_async(const frame_t *frame) {
 }
 
 void ctrl_uart_send_raw(const uint8_t *data, size_t len) {
-    uart_write_blocking(C_UART_ID, data, len);
+    transport_write(data, len);
 }
 
 // =============================================================================
@@ -230,6 +312,19 @@ static void process_received_frame(const uint8_t *data, uint16_t len) {
 }
 
 void ctrl_uart_process(void) {
+#if TRANSPORT_USB_MODE
+    // Poll USB
+    tud_task();
+
+    // Read available bytes from USB CDC
+    while (tud_cdc_n_available(CTRL_CDC_ITF)) {
+        uint8_t byte;
+        if (tud_cdc_n_read(CTRL_CDC_ITF, &byte, 1) == 1) {
+            ring_push(&g_rx_buffer, byte);
+        }
+    }
+#endif
+
     uint8_t byte;
 
     // Process received bytes
@@ -271,10 +366,17 @@ void ctrl_uart_process(void) {
 }
 
 bool ctrl_uart_is_connected(void) {
-    return g_state == CTRL_STATE_CONNECTED;
+    return g_state == CTRL_STATE_CONNECTED && transport_is_connected();
 }
 
 error_t ctrl_uart_connect(void) {
+    // In USB mode, wait for host connection
+#if TRANSPORT_USB_MODE
+    if (!tud_cdc_n_connected(CTRL_CDC_ITF)) {
+        return ERR_NOT_CONNECTED;
+    }
+#endif
+
     frame_t hello;
     msg_build_hello(&hello, 0x0001);  // Build ID 1
 

@@ -33,6 +33,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/packaging-25.0-pyh29332c3_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/pluggy-1.6.0-pyhf9edf01_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/pygments-2.19.2-pyhd8ed1ab_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/pyserial-3.5-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/pytest-9.0.2-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/python-3.14.2-h4b44e0e_100_cp314.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/python_abi-3.14-8_cp314.conda
@@ -398,6 +399,17 @@ packages:
   - pkg:pypi/pygments?source=hash-mapping
   size: 889287
   timestamp: 1750615908735
+- conda: https://conda.anaconda.org/conda-forge/noarch/pyserial-3.5-pyhd8ed1ab_1.conda
+  sha256: 48b51797fa1f5d8b2ed5d5f155a18993bb02616eef7a3b053a9125d7650bbe59
+  md5: 0127bf00a534e0c7b8075090f162bf82
+  depends:
+  - python >=3.9
+  license: BSD-3-Clause
+  license_family: BSD
+  purls:
+  - pkg:pypi/pyserial?source=hash-mapping
+  size: 69380
+  timestamp: 1734140304034
 - conda: https://conda.anaconda.org/conda-forge/noarch/pytest-9.0.2-pyhcf101f3_0.conda
   sha256: 9e749fb465a8bedf0184d8b8996992a38de351f7c64e967031944978de03a520
   md5: 2b694bad8a50dc2f712f5368de866480
@@ -458,7 +470,7 @@ packages:
 - pypi: .
   name: symcrash-python-ap
   version: 0.1.0
-  sha256: 2bf70d6a9826391141eaf12bfb03591c8a59a46b59ed00f8db13d62bbf6e695c
+  sha256: d2f5ca999069985a4551500a7139f249bcd8fc9fc88a149992f4c9cca15a0078
   requires_python: '>=3.11'
   editable: true
 - conda: https://conda.anaconda.org/conda-forge/win-64/tbb-2022.3.0-hd094cb3_1.conda
