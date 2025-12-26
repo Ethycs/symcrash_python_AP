@@ -18,6 +18,9 @@ if (EXISTS ${picoVscode})
 endif()
 # ====================================================================================
 
+# Set board to Pico 2 (RP2350)
+set(PICO_BOARD pico2 CACHE STRING "Board type")
+
 # Include Pico SDK (must be before project())
 include(pico_sdk_import.cmake)
 
