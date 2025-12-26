@@ -43,3 +43,22 @@ pico_enable_stdio_usb(gc9a01_simple 0)
 pico_enable_stdio_uart(gc9a01_simple 0)
 
 pico_add_extra_outputs(gc9a01_simple)
+
+# ============================================================================
+# Pot Display Test - MCP3008 values on GC9A01 LCD
+# ============================================================================
+add_executable(pot_display
+    pot_display.c
+)
+
+target_link_libraries(pot_display
+    pico_stdlib
+    pico_cyw43_arch_none
+    hardware_spi
+    hardware_gpio
+)
+
+pico_enable_stdio_usb(pot_display 0)
+pico_enable_stdio_uart(pot_display 0)
+
+pico_add_extra_outputs(pot_display)

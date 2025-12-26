@@ -122,7 +122,22 @@ void system_init(void) {
 
     // Initialize MCP3008 ADC for potentiometers
     mcp3008_init();
-    mcp3008_set_callback(on_pot_change);
+
+    // Initialize GC9A01 LCD displays (uses full Adafruit init sequence)
+    gc9a01_init();
+
+    // Initialize display pages
+    display_pages_init();
+
+    // Initialize buttons and encoder
+    buttons_init();
+    encoder_init();
+
+    // Initialize control mapping (connects pots to macros and display)
+    control_map_init();
+
+    // Initialize menu
+    menu_init();
 
     // Initialize communication
     dual_uart_init();

@@ -187,29 +187,135 @@ static void init_display_hw(display_id_t display) {
     sleep_ms(120);
 }
 
+// Additional GC9A01 registers for full Adafruit init
+#define GC9A01_TEON      0x35
+#define GC9A01_POWER2    0xC3
+#define GC9A01_POWER3    0xC4
+#define GC9A01_POWER4    0xC9
+#define GC9A01_FRAMERATE 0xE8
+#define GC9A01_INREGEN1  0xFE
+#define GC9A01_INREGEN2  0xEF
+#define GC9A01_GAMMA1    0xF0
+#define GC9A01_GAMMA2    0xF1
+#define GC9A01_GAMMA3    0xF2
+#define GC9A01_GAMMA4    0xF3
+
 static void init_display_registers(display_id_t display) {
-    // Software reset
-    write_command(display, GC9A01_SWRESET);
-    sleep_ms(120);
+    // Full Adafruit GC9A01A initialization sequence
+    // Required for proper display operation - minimal init doesn't work
+
+    // Internal register enable sequence
+    write_command(display, GC9A01_INREGEN2);
+    uint8_t eb_val = 0x14;
+    write_command_data(display, 0xEB, &eb_val, 1);
+    write_command(display, GC9A01_INREGEN1);
+    write_command(display, GC9A01_INREGEN2);
+    write_command_data(display, 0xEB, &eb_val, 1);
+
+    // Undocumented registers 0x84-0x8F
+    uint8_t r84 = 0x40; write_command_data(display, 0x84, &r84, 1);
+    uint8_t r85 = 0xFF; write_command_data(display, 0x85, &r85, 1);
+    uint8_t r86 = 0xFF; write_command_data(display, 0x86, &r86, 1);
+    uint8_t r87 = 0xFF; write_command_data(display, 0x87, &r87, 1);
+    uint8_t r88 = 0x0A; write_command_data(display, 0x88, &r88, 1);
+    uint8_t r89 = 0x21; write_command_data(display, 0x89, &r89, 1);
+    uint8_t r8a = 0x00; write_command_data(display, 0x8A, &r8a, 1);
+    uint8_t r8b = 0x80; write_command_data(display, 0x8B, &r8b, 1);
+    uint8_t r8c = 0x01; write_command_data(display, 0x8C, &r8c, 1);
+    uint8_t r8d = 0x01; write_command_data(display, 0x8D, &r8d, 1);
+    uint8_t r8e = 0xFF; write_command_data(display, 0x8E, &r8e, 1);
+    uint8_t r8f = 0xFF; write_command_data(display, 0x8F, &r8f, 1);
+
+    // Display function control
+    uint8_t b6[] = {0x00, 0x00};
+    write_command_data(display, 0xB6, b6, 2);
+
+    // Memory access control (orientation)
+    uint8_t madctl = 0x48;  // MX | BGR
+    write_command_data(display, GC9A01_MADCTL, &madctl, 1);
+
+    // Pixel format: 16-bit RGB565
+    uint8_t colmod = 0x05;
+    write_command_data(display, GC9A01_COLMOD, &colmod, 1);
+
+    // Undocumented register 0x90
+    uint8_t r90[] = {0x08, 0x08, 0x08, 0x08};
+    write_command_data(display, 0x90, r90, 4);
+
+    uint8_t rbd = 0x06; write_command_data(display, 0xBD, &rbd, 1);
+    uint8_t rbc = 0x00; write_command_data(display, 0xBC, &rbc, 1);
+
+    uint8_t rff[] = {0x60, 0x01, 0x04};
+    write_command_data(display, 0xFF, rff, 3);
+
+    // Power control
+    uint8_t pc2 = 0x13; write_command_data(display, GC9A01_POWER2, &pc2, 1);
+    uint8_t pc3 = 0x13; write_command_data(display, GC9A01_POWER3, &pc3, 1);
+    uint8_t pc4 = 0x22; write_command_data(display, GC9A01_POWER4, &pc4, 1);
+
+    uint8_t rbe = 0x11; write_command_data(display, 0xBE, &rbe, 1);
+
+    uint8_t re1[] = {0x10, 0x0E};
+    write_command_data(display, 0xE1, re1, 2);
+
+    uint8_t rdf[] = {0x21, 0x0C, 0x02};
+    write_command_data(display, 0xDF, rdf, 3);
+
+    // Gamma settings
+    uint8_t g1[] = {0x45, 0x09, 0x08, 0x08, 0x26, 0x2A};
+    write_command_data(display, GC9A01_GAMMA1, g1, 6);
+
+    uint8_t g2[] = {0x43, 0x70, 0x72, 0x36, 0x37, 0x6F};
+    write_command_data(display, GC9A01_GAMMA2, g2, 6);
+
+    write_command_data(display, GC9A01_GAMMA3, g1, 6);
+    write_command_data(display, GC9A01_GAMMA4, g2, 6);
+
+    uint8_t red[] = {0x1B, 0x0B};
+    write_command_data(display, 0xED, red, 2);
+
+    uint8_t rae = 0x77; write_command_data(display, 0xAE, &rae, 1);
+    uint8_t rcd = 0x63; write_command_data(display, 0xCD, &rcd, 1);
+
+    // Frame rate
+    uint8_t fr = 0x34;
+    write_command_data(display, GC9A01_FRAMERATE, &fr, 1);
+
+    // More undocumented registers for display timing
+    uint8_t r62[] = {0x18, 0x0D, 0x71, 0xED, 0x70, 0x70, 0x18, 0x0F, 0x71, 0xEF, 0x70, 0x70};
+    write_command_data(display, 0x62, r62, 12);
+
+    uint8_t r63[] = {0x18, 0x11, 0x71, 0xF1, 0x70, 0x70, 0x18, 0x13, 0x71, 0xF3, 0x70, 0x70};
+    write_command_data(display, 0x63, r63, 12);
+
+    uint8_t r64[] = {0x28, 0x29, 0xF1, 0x01, 0xF1, 0x00, 0x07};
+    write_command_data(display, 0x64, r64, 7);
+
+    uint8_t r66[] = {0x3C, 0x00, 0xCD, 0x67, 0x45, 0x45, 0x10, 0x00, 0x00, 0x00};
+    write_command_data(display, 0x66, r66, 10);
+
+    uint8_t r67[] = {0x00, 0x3C, 0x00, 0x00, 0x00, 0x01, 0x54, 0x10, 0x32, 0x98};
+    write_command_data(display, 0x67, r67, 10);
+
+    uint8_t r74[] = {0x10, 0x85, 0x80, 0x00, 0x00, 0x4E, 0x00};
+    write_command_data(display, 0x74, r74, 7);
+
+    uint8_t r98[] = {0x3E, 0x07};
+    write_command_data(display, 0x98, r98, 2);
+
+    // Tearing effect line on
+    write_command(display, GC9A01_TEON);
+
+    // Inversion on (required for correct colors)
+    write_command(display, GC9A01_INVON);
 
     // Exit sleep mode
     write_command(display, GC9A01_SLPOUT);
-    sleep_ms(120);
-
-    // Pixel format: 16-bit RGB565
-    uint8_t colmod = 0x55;  // 16 bits/pixel
-    write_command_data(display, GC9A01_COLMOD, &colmod, 1);
-
-    // Memory access control (orientation)
-    uint8_t madctl = MADCTL_MX | MADCTL_BGR;
-    write_command_data(display, GC9A01_MADCTL, &madctl, 1);
-
-    // Inversion on (GC9A01 requires this for correct colors)
-    write_command(display, GC9A01_INVON);
+    sleep_ms(150);
 
     // Display on
     write_command(display, GC9A01_DISPON);
-    sleep_ms(20);
+    sleep_ms(150);
 }
 
 void gc9a01_init(void) {

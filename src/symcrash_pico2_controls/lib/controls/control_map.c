@@ -8,6 +8,7 @@
 #include "mcp3008.h"
 #include "gpio_buttons.h"
 #include "rotary_encoder.h"
+#include "display_pages.h"
 #include "config.h"
 
 // =============================================================================
@@ -85,7 +86,10 @@ void control_map_process_knob(uint8_t knob_id, uint16_t value) {
     // Convert 10-bit ADC to Q15
     q15_t q15_value = adc10_to_q15(value);
 
-    // Send SetMacro message
+    // Update display with current value
+    display_pages_update_macro(macro, q15_value);
+
+    // Send SetMacro message over UART
     dual_uart_send_macro(macro, q15_value);
 }
 

@@ -115,8 +115,8 @@ static void lcd_init(void) {
     gpio_put(PIN_RST, 1);
     sleep_ms(150);
 
-    // Initialize SPI - use slower speed (10 MHz) to be safe
-    spi_init(LCD_SPI, 10000000);
+    // Initialize SPI - 62.5 MHz for fast display updates
+    spi_init(LCD_SPI, 62500000);
     // Mode 0 (CPOL=0, CPHA=0) - standard for GC9A01
     spi_set_format(LCD_SPI, 8, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
 

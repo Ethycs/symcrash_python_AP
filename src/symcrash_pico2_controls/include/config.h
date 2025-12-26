@@ -66,15 +66,15 @@
 // =============================================================================
 
 #define LCD_SPI_ID          spi1
-#define SPI1_SCK_PIN        14      // GP14 - SPI1 SCK (valid: GP14, GP18)
-#define SPI1_MOSI_PIN       15      // GP15 - SPI1 TX (valid: GP15, GP19)
-#define SPI1_BAUD           40000000 // 40 MHz SPI clock
+#define SPI1_SCK_PIN        10      // GP10 - SPI1 SCK
+#define SPI1_MOSI_PIN       11      // GP11 - SPI1 TX (MOSI/SDA)
+#define SPI1_BAUD           62500000 // 62.5 MHz SPI clock (max stable)
 
-// Display 0 - User's actual wiring
+// Display 0 - Actual wiring
 #define LCD0_CS_PIN         13      // GP13 - Display 0 CS
-#define LCD0_DC_PIN         7       // GP7  - Display 0 DC (data/command)
+#define LCD0_DC_PIN         5       // GP5  - Display 0 DC (Data/Command)
 #define LCD0_RST_PIN        9       // GP9  - Display 0 Reset
-#define LCD0_BL_PIN         8       // GP8  - Display 0 Backlight (if connected)
+#define LCD0_BL_PIN         8       // GP8  - Display 0 Backlight (optional)
 
 // Display 1 (not connected yet)
 #define LCD1_CS_PIN         20      // GP20 - Display 1 CS

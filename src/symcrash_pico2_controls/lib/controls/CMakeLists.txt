@@ -9,6 +9,7 @@ add_library(symcrash_controls_lib STATIC
 target_include_directories(symcrash_controls_lib PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/lib/ui
 )
 
 target_link_libraries(symcrash_controls_lib
