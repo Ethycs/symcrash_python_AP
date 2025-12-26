@@ -174,6 +174,28 @@ class CarrierOscillator:
         while len(state.harmonic_amps_q15) < 8:
             state.harmonic_amps_q15.append(0)
 
+    def set_envelope_instant(self, voice_id: int, micro_attack_samples: int = 32) -> None:
+        """
+        Set envelope to near-instant attack/sustain (for external ADSR control).
+
+        Uses a very short micro-attack (32 samples = 0.67ms @ 48kHz) to prevent
+        clicks while keeping attack punchy. The caller handles the main ADSR
+        shaping via gain_q15 in VoiceFrame.
+
+        Args:
+            voice_id: Voice identifier
+            micro_attack_samples: Minimum attack ramp to prevent clicks (default 32)
+        """
+        if voice_id not in self.states:
+            return
+
+        state = self.states[voice_id]
+        # Use micro-attack to prevent clicks, then instant sustain
+        state.envelope.attack_samples = micro_attack_samples  # ~0.67ms
+        state.envelope.decay_samples = 0
+        state.envelope.sustain_q15 = Q15_ONE
+        state.envelope.release_samples = 480  # 10ms release for safety
+
     def gate_on(self, voice_id: int) -> None:
         """Trigger envelope attack for voice."""
         state = self.get_or_create_state(voice_id)

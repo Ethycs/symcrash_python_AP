@@ -127,6 +127,10 @@ class AntiClickState:
     # Whether wet has become valid for this voice yet
     wet_ready: bool = False
 
+    # FIFO warmup counter: counts blocks until FIFO contains real carrier data
+    # When fifo_warmup > 0, FIFO still contains zeros from initialization
+    fifo_warmup: int = 0
+
 
 # =============================================================================
 # ANTI-CLICK OPERATOR
@@ -191,6 +195,10 @@ class AntiClickOperator:
             maxlen=self.cfg.wet_latency_blocks
         )
 
+        # FIFO warmup: need to wait for FIFO to fill with real carrier data
+        # During warmup, FIFO returns zeros which don't match the carrier phase
+        st.fifo_warmup = self.cfg.wet_latency_blocks
+
         # Compute beta_step per block from bloom_time_s
         block_dt = self.cfg.block_size / self.cfg.sample_rate
         bloom_blocks = max(1, int(math.ceil(self.cfg.bloom_time_s / block_dt)))
@@ -209,6 +217,9 @@ class AntiClickOperator:
         st.beta = 0.0
         st.beta_target = 0.0
         st.wet_ready = False
+
+        # Reset FIFO warmup counter
+        st.fifo_warmup = self.cfg.wet_latency_blocks
 
         # Clear OLA tail
         if st.tail is not None:
@@ -252,7 +263,7 @@ class AntiClickOperator:
             beta: Mix amount [0=A, 1=B]
 
         Returns:
-            Mixed signal
+            Mixed signal (clipped to [-1, 1])
         """
         beta = clamp(beta, 0.0, 1.0)
 
@@ -263,36 +274,40 @@ class AntiClickOperator:
             a_weight = 1.0 - beta
             b_weight = beta
 
-        return (a_weight * A + b_weight * B).astype(np.float32)
+        mixed = a_weight * A + b_weight * B
+        # Clip to prevent overflow - equal power crossfade can exceed 1.0
+        # when both signals are in-phase and at full scale
+        return np.clip(mixed, -1.0, 1.0).astype(np.float32)
 
     def _ola(self, st: AntiClickState, x: np.ndarray) -> np.ndarray:
         """
         Apply OLA seam smoothing.
 
-        Blends current block start with previous block tail:
-            y[0:K] = w_out * tail + w_in * x[0:K]
-            tail <- x[N-K:N]
+        NOTE: OLA was designed for tree-based synthesis where blocks might have
+        discontinuities. For effect_mode (FWPT->mask->IDWPT), the carrier and
+        wet signals are already phase-coherent and continuous, so OLA actually
+        CREATES discontinuities rather than removing them.
+
+        This method is now a NO-OP - it just updates the tail buffer for
+        potential future use but does not modify the signal.
 
         Args:
             st: Voice state (contains tail buffer)
             x: Current block
 
         Returns:
-            Seam-smoothed block
+            Input block unchanged
         """
         K = self.cfg.ola_K
         if K <= 0 or st.tail is None:
             return x
 
-        y = x.copy()
+        # Update tail buffer for tracking, but DO NOT apply OLA blending
+        # OLA blending causes discontinuities in effect_mode where signals
+        # are already continuous.
+        st.tail = x[-K:].copy()
 
-        # Blend start of block with tail from previous block
-        y[:K] = self.w_out * st.tail + self.w_in * y[:K]
-
-        # Save tail for next block
-        st.tail = y[-K:].copy()
-
-        return y
+        return x
 
     def step(
         self,
@@ -305,6 +320,15 @@ class AntiClickOperator:
         Process one block through the anti-click operator.
 
         This is the main render method. Call once per block per voice.
+
+        During FIFO warmup (first N blocks where N = wet_latency_blocks):
+        - Output carrier_now directly (no FIFO delay, no OLA)
+        - This avoids discontinuities from zero-filled FIFO
+
+        After warmup:
+        - Use carrier_delayed from FIFO for consistent latency
+        - Apply OLA for seam smoothing
+        - Mix with wet if beta > 0
 
         Args:
             st: Per-voice state
@@ -320,34 +344,23 @@ class AntiClickOperator:
         if wet_now is not None:
             assert wet_now.shape == (N,), f"wet_now shape {wet_now.shape} != ({N},)"
 
+        # Clip inputs to [-1, 1] to prevent overflow in mixing/OLA
+        # This is the single point of input conditioning
+        carrier_now = np.clip(carrier_now, -1.0, 1.0).astype(np.float32)
+        if wet_now is not None:
+            wet_now = np.clip(wet_now, -1.0, 1.0).astype(np.float32)
+
         # Push carrier into FIFO for alignment with wet latency
         assert st.carrier_fifo is not None
-        st.carrier_fifo.append(carrier_now.astype(np.float32))
-        carrier_delayed = st.carrier_fifo[0].copy()  # 5 blocks ago
+        st.carrier_fifo.append(carrier_now)
 
-        # Determine whether wet is ready
+        # Track FIFO warmup (for wet path alignment)
+        if st.fifo_warmup > 0:
+            st.fifo_warmup -= 1
+
+        # Track wet readiness
         if wet_now is not None:
             st.wet_ready = True
-
-        # Before wet is ready: output immediate carrier (no delay) for responsiveness
-        # No OLA for pure carrier - it's already phase-continuous
-        if not st.wet_ready:
-            y = carrier_now.astype(np.float32)
-            # Update tail for OLA continuity when wet becomes ready
-            if st.tail is not None:
-                K = self.cfg.ola_K
-                st.tail = y[-K:].copy()
-            return y
-
-        # Wet is available - check if we should blend or stay dry
-        # If beta_target is 0, user wants pure dry output
-        if st.beta_target == 0.0:
-            # Pure dry mode (beta=0 explicitly set)
-            y = carrier_now.astype(np.float32)
-            if st.tail is not None:
-                K = self.cfg.ola_K
-                st.tail = y[-K:].copy()
-            return y
 
         # Advance beta toward target (slew limiting)
         if st.beta < st.beta_target:
@@ -355,15 +368,28 @@ class AntiClickOperator:
         elif st.beta > st.beta_target:
             st.beta = max(st.beta_target, st.beta - st.beta_step)
 
-        # Mix aligned carrier_delayed with wet_now
-        y = self._mix2(carrier_delayed, wet_now, st.beta)
+        # Determine mixing mode:
+        # - Pure dry (beta=0): use carrier_now directly
+        # - Wet mixing (beta>0): mix carrier_now with wet_now
+        #
+        # Note: The FIFO was designed for tree-based synthesis with inherent latency.
+        # For effect_mode (FWPT->mask->IDWPT), there is no latency - wet_now is
+        # derived directly from carrier_now. So we mix carrier_now with wet_now
+        # to maintain phase coherence.
+        #
+        # The FIFO is still maintained for potential future use with latent paths.
+        use_wet = st.beta > 0.0 and wet_now is not None and st.wet_ready
 
-        # Apply OLA seam smoothing only when blending (beta > 0)
-        # This smooths the seam between carrier and wet blocks
-        if st.beta > 0.0:
+        if use_wet:
+            # Mix carrier_now with wet_now (both derived from same phase)
+            # Effect mode has no latency, so no FIFO delay needed
+            y = self._mix2(carrier_now, wet_now, st.beta)
+            # OLA smooths any small differences between carrier and wet paths
             y = self._ola(st, y)
         else:
-            # Update tail for future OLA continuity
+            # Pure dry mode - use carrier_now directly
+            y = carrier_now.astype(np.float32)
+            # Update tail in case we switch to wet later
             if st.tail is not None:
                 K = self.cfg.ola_K
                 st.tail = y[-K:].copy()

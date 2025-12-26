@@ -323,8 +323,13 @@ class TestMixing:
 class TestOLA:
     """Tests for Overlap-Add seam smoothing."""
 
-    def test_ola_blends_block_boundaries(self):
-        """OLA smooths transition between blocks."""
+    def test_ola_does_not_blend_for_effect_mode(self):
+        """OLA blending is disabled for effect_mode (signals are already continuous).
+
+        OLA was designed for tree-based synthesis with potential block discontinuities.
+        For effect_mode (FWPT->mask->IDWPT), carrier and wet are phase-coherent, so
+        OLA blending is not needed and actually creates artifacts.
+        """
         from symcrash_python_ap.safety.anti_click import AntiClickOperator, AntiClickConfig
 
         cfg = AntiClickConfig(ola_K=16, wet_latency_blocks=1)
@@ -337,18 +342,16 @@ class TestOLA:
         # First block: zeros
         carrier1 = np.zeros((64,), dtype=np.float32)
         wet1 = np.zeros((64,), dtype=np.float32)
-        out1 = op.step(st, carrier1, wet1)
+        op.step(st, carrier1, wet1)
 
         # Second block: ones
         carrier2 = np.ones((64,), dtype=np.float32)
         wet2 = np.ones((64,), dtype=np.float32)
         out2 = op.step(st, carrier2, wet2)
 
-        # First K samples of out2 should be blended (not pure 1.0)
-        K = cfg.ola_K
-        assert out2[0] < 1.0, "OLA should blend first sample"
-        assert out2[K-1] < 1.0, "OLA should blend up to K samples"
-        assert out2[K] == 1.0 or abs(out2[K] - 1.0) < 0.01, "Beyond K should be unchanged"
+        # OLA blending is intentionally disabled - output should be pure wet
+        # (no blending between blocks since effect_mode signals are continuous)
+        np.testing.assert_array_almost_equal(out2, wet2)
 
     def test_no_ola_when_ola_k_zero(self):
         """No OLA smoothing when ola_K=0."""

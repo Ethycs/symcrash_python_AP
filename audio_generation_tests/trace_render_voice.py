@@ -4,9 +4,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src" / "symcrash_python_ap"))
 
 import numpy as np
-from symcrash_python_ap.unified_renderer import CarrierLiftPipeline
+from symcrash_python_ap.safety.unified_renderer import CarrierLiftPipeline
 from symcrash_python_ap.frames import VoiceFrame
-from symcrash_python_ap.carrier_lift import Q15_ONE, Q15_HALF, BLOCK_SIZE
+from symcrash_python_ap.wavelet.carrier_lift import Q15_ONE, Q15_HALF, BLOCK_SIZE
 
 FS = 48000
 BLOCKS_PER_SEC = FS // BLOCK_SIZE
@@ -85,9 +85,9 @@ def test_wavelet_backend_direct():
     print("TEST: WaveletBackend direct")
     print("=" * 60)
 
-    from symcrash_python_ap.wavelet_engine import WaveletEngine
+    from symcrash_python_ap.wavelet.wavelet_engine import WaveletEngine
     from symcrash_python_ap.frames import VoiceFrame as WE_VoiceFrame
-    from symcrash_python_ap.harmonic_injector import create_harmonic_coeffs, WaveType
+    from symcrash_python_ap.wavelet.harmonic_injector import create_harmonic_coeffs, WaveType
 
     engine = WaveletEngine(block_size=BLOCK_SIZE)
     engine.voice_allocate(0)

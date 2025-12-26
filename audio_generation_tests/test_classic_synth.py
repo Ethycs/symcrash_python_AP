@@ -30,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src" / "symcrash_python_a
 from test_config import FS, BLOCK_SIZE
 from audio_io import write_audio
 
-from symcrash_python_ap.harmonic_injector import (
+from symcrash_python_ap.wavelet.harmonic_injector import (
     WaveType,
     synthesize_harmonic_audio,
     create_harmonic_coeffs,

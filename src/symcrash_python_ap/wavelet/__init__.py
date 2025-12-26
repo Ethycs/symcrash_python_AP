@@ -79,6 +79,12 @@ from .sine_core import (
     OscillatorState,
 )
 
+from .backends import (
+    SynthesisBackend,
+    HarmonicScaffoldBackend,
+    WaveletBackend,
+)
+
 __all__ = [
     # Main engine
     'WaveletEngine',
@@ -136,4 +142,8 @@ __all__ = [
     'Partial',
     # Sine core
     'OscillatorState',
+    # Backends
+    'SynthesisBackend',
+    'HarmonicScaffoldBackend',
+    'WaveletBackend',
 ]

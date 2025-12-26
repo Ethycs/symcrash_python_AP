@@ -141,6 +141,8 @@ from .operators import (
     build_sheaf_project,
     build_operator_library,
     print_library_summary,
+    OP_NAME_TO_ID,
+    get_operator_id,
 )
 
 from .apply import (
@@ -179,6 +181,7 @@ __all__ = [
     'build_emergency_simplify', 'build_fold_pressure', 'build_cusp_injection',
     'build_swallowtail_mask', 'build_sheaf_project',
     'build_operator_library', 'print_library_summary',
+    'OP_NAME_TO_ID', 'get_operator_id',
     # Application
     'apply_diag', 'apply_permute', 'apply_lowrank', 'apply_banded_intra',
     'apply_inject', 'apply_proj_energy_cap', 'apply_operator', 'compose_word',

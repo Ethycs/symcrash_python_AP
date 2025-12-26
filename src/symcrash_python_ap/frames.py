@@ -103,6 +103,12 @@ class VoiceFrame:
     note: int = 60               # MIDI note number
     cents: int = 0               # Fine tuning in cents
 
+    # Operator configuration (from preset L3_cmmm)
+    # ops_enable: List of operator names to apply (e.g., ["TILT", "COMPRESS_K"])
+    # families: Dict mapping operator name to strength (0.0-1.0)
+    ops_enable: List[str] = field(default_factory=list)
+    families: dict = field(default_factory=dict)
+
     # Legacy compatibility: convert float betas to IDs
     @property
     def tree_a(self) -> float:

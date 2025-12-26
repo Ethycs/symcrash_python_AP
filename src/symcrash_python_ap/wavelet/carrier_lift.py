@@ -179,10 +179,10 @@ class CarrierState:
     # Envelope
     envelope: EnvelopeState = field(default_factory=EnvelopeState)
 
-    # Harmonic content (8 harmonics for additive synthesis)
-    # These define the carrier's timbral character
+    # Harmonic content (16 harmonics for additive synthesis)
+    # More harmonics = better waveform fidelity (8 gives triangular saw, 16+ gives proper saw)
     harmonic_amps_q15: List[int] = field(
-        default_factory=lambda: [Q15_ONE] + [0] * 7
+        default_factory=lambda: [Q15_ONE] + [0] * 15
     )
 
     # DC blocking state

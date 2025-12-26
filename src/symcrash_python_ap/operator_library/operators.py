@@ -769,6 +769,46 @@ def build_operator_library() -> Dict[int, Operator]:
 
 
 # =============================================================================
+# NAME TO ID MAPPING
+# =============================================================================
+
+# Map operator names (as used in presets) to operator IDs
+OP_NAME_TO_ID = {
+    "IDENTITY": 0,
+    "TILT": 1,
+    "FINE_CLAMP": 2,
+    "INTRA_MIX": 3,
+    "DIFFUSE_UP": 4,
+    "DIFFUSE_DOWN": 5,
+    "BAND_SHEAR": 6,
+    "LOWRANK_MORPH": 7,
+    "GLOBAL_PULSE": 8,
+    "SWAP_BANDS": 9,
+    "ROTATE_NODES": 10,
+    "NORMALIZE_SCALE": 11,
+    "GLUE_PAIR": 12,
+    "IMPULSE": 13,
+    "NOISE_BAND": 14,
+    "PRESSURE_RAMP": 15,
+    "GATE_MASK": 16,
+    "QUASI_ROTATE": 17,
+    "MORPH_MIX": 18,
+    "EMERGENCY_SIMPLIFY": 19,
+    "FOLD_PRESSURE": 20,
+    "CUSP_INJECTION": 21,
+    "SWALLOWTAIL_MASK": 22,
+    "SHEAF_PROJECT": 23,
+    # Aliases for common preset names
+    "COMPRESS_K": 2,  # FINE_CLAMP is the compression operator
+}
+
+
+def get_operator_id(name: str) -> int:
+    """Get operator ID from name. Returns 0 (Identity) if not found."""
+    return OP_NAME_TO_ID.get(name.upper(), 0)
+
+
+# =============================================================================
 # SUMMARY
 # =============================================================================
 

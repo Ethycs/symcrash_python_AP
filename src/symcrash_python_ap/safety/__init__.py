@@ -1,6 +1,9 @@
 """Safety Engine - Audio safety, limiting, and click prevention.
 
-Includes OLA, limiting, DC correction, and unified anti-click rendering.
+Includes OLA, limiting, DC correction, and the UnifiedOutputStage closure layer.
+
+The UnifiedOutputStage (formerly CarrierLiftPipeline) is the single authority
+for ensuring no discontinuities reach the audio output.
 """
 
 from .safety_engine import (
@@ -22,16 +25,17 @@ from .anti_click import (
 )
 
 from .unified_renderer import (
-    UnifiedRenderer,
+    # Main class (v2 architecture)
+    UnifiedOutputStage,
+    # Backwards compatibility aliases
+    CarrierLiftPipeline,
+    UnifiedRenderer,  # Deprecated
+    # Backend protocol and adapters
     SynthesisBackend,
-    RenderFrame,
-    DiscontinuityFlags,
-    VoiceState,
     HarmonicScaffoldBackend,
     WaveletBackend,
-    StandardWaveletPipeline,
-    StandardHarmonicPipeline,
-    CarrierLiftPipeline,
+    # Deprecated data class
+    RenderFrame,
 )
 
 __all__ = [
@@ -49,15 +53,13 @@ __all__ = [
     'AntiClickOperator',
     'AntiClickConfig',
     'AntiClickState',
-    # Unified renderer
-    'UnifiedRenderer',
+    # Unified output stage (v2 architecture)
+    'UnifiedOutputStage',
+    # Backwards compatibility
+    'CarrierLiftPipeline',
+    'UnifiedRenderer',  # Deprecated
     'SynthesisBackend',
-    'RenderFrame',
-    'DiscontinuityFlags',
-    'VoiceState',
     'HarmonicScaffoldBackend',
     'WaveletBackend',
-    'StandardWaveletPipeline',
-    'StandardHarmonicPipeline',
-    'CarrierLiftPipeline',
+    'RenderFrame',  # Deprecated
 ]
