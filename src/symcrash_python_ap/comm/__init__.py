@@ -64,6 +64,14 @@ from .uart_listener import (
     Colors,
 )
 
+from .pico2_receiver import (
+    Pico2Receiver,
+    MacroState,
+    ReceiverStats,
+    find_pico2_port,
+    create_receiver,
+)
+
 __all__ = [
     # UART Protocol (WSE-STD-020)
     'VoiceFrameV0',
@@ -114,4 +122,10 @@ __all__ = [
     # Listener
     'InteractiveListener',
     'Colors',
+    # Pico2 Hardware Controller
+    'Pico2Receiver',
+    'MacroState',
+    'ReceiverStats',
+    'find_pico2_port',
+    'create_receiver',
 ]

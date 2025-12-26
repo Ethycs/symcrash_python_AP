@@ -38,6 +38,9 @@ add_subdirectory(lib/hal)
 add_subdirectory(lib/controls)
 add_subdirectory(lib/ui)
 
+# Add tests subdirectory
+add_subdirectory(tests)
+
 # Main executable
 add_executable(symcrash_controls
     src/main.c
