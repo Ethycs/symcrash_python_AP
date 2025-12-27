@@ -190,11 +190,21 @@ def apply_degradation(
 
         # Check nonlinear constraint
         if predicted.uses_nonlinear and not budget.allow_nonlinear:
-            # Remove nonlinear backbone/event ops
-            backbone = [op for op in backbone
-                       if not get_operator_cost(op).nonlinear or get_operator_cost(op).is_tail]
+            old_backbone, old_events, old_tail = backbone, events, tail
+
+            # First: force tail down to a linear tail (MIN or EMERGENCY)
+            if tail in (TailMode.FULL, TailMode.MID):
+                tail = TailMode.MIN
+
+            # Then: drop any remaining nonlinear non-tail ops from backbone/events
+            backbone = [op for op in backbone if not get_operator_cost(op).nonlinear]
             events = [op for op in events if not get_operator_cost(op).nonlinear]
+
             steps += 1
+
+            # If nothing changed and we're still nonlinear, force emergency tail
+            if (backbone, events, tail) == (old_backbone, old_events, old_tail):
+                tail = TailMode.EMERGENCY
             continue
 
         # Success - fits budget
@@ -208,7 +218,7 @@ def apply_degradation(
                 pattern_id=get_pattern_for_k(K).pattern_id,
                 degradation_steps=steps,
                 final_ticks=predicted.total_ticks,
-                is_emergency=(tail == TailMode.EMERGENCY and K == 1 and not backbone),
+                is_emergency=(tail == TailMode.EMERGENCY and K == 1 and not backbone and not events),
             )
 
         steps += 1

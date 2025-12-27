@@ -31,6 +31,7 @@ gradually - no need for dual-render.
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any, Tuple
 import math
+import numpy as np
 
 # Q15 constants
 Q15_ONE = 32767
@@ -39,6 +40,9 @@ Q15_SCALE = 32768
 
 # Default block size
 BLOCK_SIZE = 64
+
+# VM integration flag - set to True to use hybrid VM executor
+USE_VM_EXECUTOR = True
 
 
 # =============================================================================
@@ -51,6 +55,10 @@ from ..wavelet.backends import (
     HarmonicScaffoldBackend,
     WaveletBackend,
 )
+
+# VM Executor (WSE-STD-VM-HYBRID v0)
+if USE_VM_EXECUTOR:
+    from ..vm import vm_step_block, VMState, DecodedPlan, Tables
 
 
 # =============================================================================
@@ -160,6 +168,11 @@ class UnifiedOutputStage:
         self.voice_states: Dict[int, CarrierLiftVoiceState] = {}
         self.ac_states: Dict[int, AntiClickState] = {}
 
+        # VM executor state (WSE-STD-VM-HYBRID v0)
+        if USE_VM_EXECUTOR:
+            self.vm_states: Dict[int, VMState] = {}
+            self.vm_tables = Tables()
+
         # Initialize with harmonic tuning
         self.tuning.set_tuning_immediate(TUNING_HARMONIC)
 
@@ -203,6 +216,13 @@ class UnifiedOutputStage:
         # Safety
         self.safety.voice_on(voice_id)
 
+        # Initialize VM state (WSE-STD-VM-HYBRID v0)
+        if USE_VM_EXECUTOR:
+            f0_hz = 440.0 * (2.0 ** ((note - 69 + cents / 100.0) / 12.0))
+            vm_state = VMState.create(voice_id)
+            vm_state.reset_for_note_on(f0_hz=f0_hz)
+            self.vm_states[voice_id] = vm_state
+
     def voice_off(self, voice_id: int) -> None:
         """Signal voice release."""
         if voice_id in self.voice_states:
@@ -215,6 +235,9 @@ class UnifiedOutputStage:
         self.ac_states.pop(voice_id, None)
         self.carrier.remove_state(voice_id)
         self.safety.voice_off(voice_id)
+        # Clean up VM state
+        if USE_VM_EXECUTOR:
+            self.vm_states.pop(voice_id, None)
 
     def set_tuning(self, tuning_name: str, morph_time_sec: float = 2.0) -> None:
         """
@@ -236,13 +259,44 @@ class UnifiedOutputStage:
         Returns:
             List of Q15 audio samples
         """
-        import numpy as np
         voice_id = frame.voice_id
 
         # Ensure voice is allocated
         if voice_id not in self.voice_states:
             self.voice_on(voice_id, frame.note, frame.cents)
 
+        # =====================================================================
+        # VM EXECUTOR PATH (WSE-STD-VM-HYBRID v0)
+        # =====================================================================
+        if USE_VM_EXECUTOR:
+            # Get or create VM state
+            if voice_id not in self.vm_states:
+                f0_hz = frame.f0_hz if frame.f0_hz > 0 else 440.0 * (2.0 ** ((frame.note - 69 + frame.cents / 100.0) / 12.0))
+                vm_state = VMState.create(voice_id)
+                vm_state.reset_for_note_on(f0_hz=f0_hz)
+                self.vm_states[voice_id] = vm_state
+
+            # Execute one block through VM
+            vm_state = self.vm_states[voice_id]
+            vm_state, output_block = vm_step_block(vm_state, frame, self.vm_tables)
+            self.vm_states[voice_id] = vm_state
+
+            # VM output is int16 numpy array, convert to list
+            output = output_block.tolist()
+
+            # Advance tuning morph (still needed for global state)
+            self.tuning.advance_block()
+
+            # Mark first block done
+            state = self.voice_states[voice_id]
+            if state.is_starting:
+                state.after_first_block()
+
+            return output
+
+        # =====================================================================
+        # LEGACY PATH (original implementation)
+        # =====================================================================
         state = self.voice_states[voice_id]
         ac_state = self.ac_states[voice_id]
 
