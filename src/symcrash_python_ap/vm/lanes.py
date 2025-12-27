@@ -422,9 +422,10 @@ def lane_banded(state: VMState, instr: BackboneEntry, mask: int) -> None:
 
             coeff_idx = node * NODE_LEN
             for i in range(coeff_idx + 1, min(coeff_idx + NODE_LEN - 1, COEFF_LEN - 1)):
-                # [0.25, 0.5, 0.25] kernel
-                mixed = (tmp[i-1] + 2 * tmp[i] + tmp[i+1]) >> 2
-                state.coeff_state[i] = tmp[i] + ((mixed - tmp[i]) * strength) >> 15
+                # [0.25, 0.5, 0.25] kernel (use Python int to avoid overflow)
+                mixed = (int(tmp[i-1]) + 2 * int(tmp[i]) + int(tmp[i+1])) >> 2
+                base = int(tmp[i])
+                state.coeff_state[i] = base + ((mixed - base) * strength) >> 15
 
     elif op_id == 4:  # DiffuseUp
         # Energy transport: fine → coarse
@@ -434,17 +435,15 @@ def lane_banded(state: VMState, instr: BackboneEntry, mask: int) -> None:
             if not (mask & (1 << (node - 1))):
                 continue
 
-            # Transfer energy up
+            # Transfer energy up (use Python int to avoid overflow)
             src_idx = node * NODE_LEN
             dst_idx = (node - 1) * NODE_LEN
 
-            transfer = (state.coeff_state[src_idx] * strength) >> 16
-            state.coeff_state[dst_idx] = min(32767, max(-32768,
-                state.coeff_state[dst_idx] + transfer
-            ))
-            state.coeff_state[src_idx] = min(32767, max(-32768,
-                state.coeff_state[src_idx] - transfer
-            ))
+            src_val = int(state.coeff_state[src_idx])
+            dst_val = int(state.coeff_state[dst_idx])
+            transfer = (src_val * strength) >> 16
+            state.coeff_state[dst_idx] = min(32767, max(-32768, dst_val + transfer))
+            state.coeff_state[src_idx] = min(32767, max(-32768, src_val - transfer))
 
     elif op_id == 5:  # DiffuseDown
         # Energy transport: coarse → fine
@@ -454,17 +453,15 @@ def lane_banded(state: VMState, instr: BackboneEntry, mask: int) -> None:
             if not (mask & (1 << (node + 1))):
                 continue
 
-            # Transfer energy down
+            # Transfer energy down (use Python int to avoid overflow)
             src_idx = node * NODE_LEN
             dst_idx = (node + 1) * NODE_LEN
 
-            transfer = (state.coeff_state[src_idx] * strength) >> 16
-            state.coeff_state[dst_idx] = min(32767, max(-32768,
-                state.coeff_state[dst_idx] + transfer
-            ))
-            state.coeff_state[src_idx] = min(32767, max(-32768,
-                state.coeff_state[src_idx] - transfer
-            ))
+            src_val = int(state.coeff_state[src_idx])
+            dst_val = int(state.coeff_state[dst_idx])
+            transfer = (src_val * strength) >> 16
+            state.coeff_state[dst_idx] = min(32767, max(-32768, dst_val + transfer))
+            state.coeff_state[src_idx] = min(32767, max(-32768, src_val - transfer))
 
 
 def lane_permute(state: VMState, instr: BackboneEntry, mask: int) -> None:
@@ -537,9 +534,11 @@ def lane_permute(state: VMState, instr: BackboneEntry, mask: int) -> None:
             dst_idx = target * NODE_LEN
             for i in range(NODE_LEN):
                 if src_idx + i < COEFF_LEN and dst_idx + i < COEFF_LEN:
-                    # Blend instead of hard swap
+                    # Blend instead of hard swap (use Python int to avoid overflow)
+                    dst_val = int(tmp[dst_idx + i])
+                    src_val = int(tmp[src_idx + i])
                     state.coeff_state[dst_idx + i] = min(32767, max(-32768,
-                        (tmp[dst_idx + i] * (Q15_ONE - strength) + tmp[src_idx + i] * strength) >> 15
+                        (dst_val * (Q15_ONE - strength) + src_val * strength) >> 15
                     ))
 
 
@@ -550,14 +549,14 @@ def lane_lowrank(state: VMState, instr: BackboneEntry, mask: int) -> None:
 
     if op_id == 7:  # LowRankMorph
         # UV^T rank-2 motif
-        # Compute mean across active nodes
+        # Compute mean across active nodes (use Python int to avoid overflow)
         active_count = 0
         mean = 0
         for node in range(L_TOTAL_NODES):
             if mask & (1 << node):
                 coeff_idx = node * NODE_LEN
                 if coeff_idx < COEFF_LEN:
-                    mean += state.coeff_state[coeff_idx]
+                    mean += int(state.coeff_state[coeff_idx])
                     active_count += 1
 
         if active_count > 0:
@@ -570,9 +569,10 @@ def lane_lowrank(state: VMState, instr: BackboneEntry, mask: int) -> None:
 
                 coeff_idx = node * NODE_LEN
                 for i in range(coeff_idx, min(coeff_idx + NODE_LEN, COEFF_LEN)):
-                    diff = mean - state.coeff_state[i]
+                    val = int(state.coeff_state[i])
+                    diff = mean - val
                     state.coeff_state[i] = min(32767, max(-32768,
-                        state.coeff_state[i] + ((diff * strength) >> 15)
+                        val + ((diff * strength) >> 15)
                     ))
 
 
@@ -589,17 +589,19 @@ def lane_proj(state: VMState, instr: BackboneEntry, mask: int) -> None:
             if not (mask & (1 << (node + 1))):
                 continue
 
-            # Make adjacent nodes more similar
+            # Make adjacent nodes more similar (use Python int to avoid overflow)
             idx_a = node * NODE_LEN
             idx_b = (node + 1) * NODE_LEN
 
             if idx_a < COEFF_LEN and idx_b < COEFF_LEN:
-                avg = (state.coeff_state[idx_a] + state.coeff_state[idx_b]) >> 1
+                val_a = int(state.coeff_state[idx_a])
+                val_b = int(state.coeff_state[idx_b])
+                avg = (val_a + val_b) >> 1
                 state.coeff_state[idx_a] = min(32767, max(-32768,
-                    state.coeff_state[idx_a] + ((avg - state.coeff_state[idx_a]) * strength) >> 15
+                    val_a + ((avg - val_a) * strength) >> 15
                 ))
                 state.coeff_state[idx_b] = min(32767, max(-32768,
-                    state.coeff_state[idx_b] + ((avg - state.coeff_state[idx_b]) * strength) >> 15
+                    val_b + ((avg - val_b) * strength) >> 15
                 ))
 
 
