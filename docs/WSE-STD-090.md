@@ -1,7 +1,3 @@
-Below is a **normative, paste-ready standard** that closes the loop on your control/transport architecture and cleanly fits everything you’ve already frozen.
-
----
-
 # **WSE-STD-090 — Dual UART Transport & Control Plane**
 
 **Status:** Normative

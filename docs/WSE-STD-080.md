@@ -1,9 +1,3 @@
-Got it. I’ll **write the WSE** as a **normative standard**, in the same style as your other WSE specs, and I’ll **freeze decisions** rather than explore options.
-
-Below is a **final, paste-ready standard**.
-
----
-
 # **WSE-STD-080 — Continuity, Regularity, and Click Freedom**
 
 **Status:** Normative

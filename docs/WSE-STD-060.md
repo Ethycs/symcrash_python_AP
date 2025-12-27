@@ -1,9 +1,3 @@
-Below is a **normative, freeze-ready specification** written in standards language.
-
-This is intentionally boring, strict, and unambiguous — it is meant to **end arguments** between Python, FPGA, and editor code.
-
----
-
 # **WSE-STD-060 — Time Ownership & Temporal Responsibility**
 
 **Status:** FROZEN (v0)

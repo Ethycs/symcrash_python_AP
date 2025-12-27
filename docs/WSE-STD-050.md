@@ -1,7 +1,3 @@
-Below is a **normative, drop-in spec** for **WSE-STD-050** written in the same style as your other standards. It is intentionally *boring*, explicit, and FPGA-friendly. No new machinery is introduced.
-
----
-
 # **WSE-STD-050 — Degradation + Voice Scheduling Semantics (v0)**
 
 ## Status

@@ -1,14 +1,3 @@
-Below is a **normative, FPGA-friendly** `WSE-STD-020` for **VoiceFrame ABI + Event Command Bus over UART (v0)**, written so Python + FPGA + editor can’t diverge.
-
-I’m going to assume:
-
-* **Two UART RX into FPGA** (UART0 = high-rate frames, UART1 = UI/MIDI/control) but the protocol is identical on both; you can route message types however you want.
-* **TreeID is the primary selector**.
-* Controls may send **absolute** or **delta** updates.
-* Tail ops are mandatory and reserved outside budget (covered in STD-030; referenced here only for ordering expectations).
-
----
-
 # WSE-STD-020 — VoiceFrame ABI + Event Command Bus (UART v0)
 
 ## 0. Scope

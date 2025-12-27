@@ -1,5 +1,3 @@
-Below is a **normative, freeze-ready specification** for:
-
 # **WSE-STD-070 — Presets, Editor Operations, and Tower Completion (v0)**
 
 This document **closes the architecture**. It defines how presets are represented, how editors are allowed to modify instruments, and how incomplete descriptions are deterministically completed across **Tower Levels L0–L5**.

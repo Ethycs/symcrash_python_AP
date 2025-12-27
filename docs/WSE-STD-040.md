@@ -1,10 +1,3 @@
-Below is a **complete, normative draft** of **WSE-STD-040** written in spec language.
-It is designed to be *bit-exact implementable*, FPGA-friendly, and compatible with your time-slicing / cloud-voice model.
-
-I’ve frozen decisions where ambiguity would cause divergence, and explicitly marked what is *reserved for future extension*.
-
----
-
 # **WSE-STD-040 — Deterministic Pseudorandomness (PRNG) Standard**
 
 **Status:** Frozen (v0)
