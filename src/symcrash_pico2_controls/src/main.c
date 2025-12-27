@@ -61,10 +61,10 @@ int main(void) {
             mcp3008_scan_all();  // Triggers callbacks for changed values
         }
 
-        // Scan buttons and encoder at 200 Hz
+        // Scan encoder at 200 Hz (buttons disabled - GP5 conflict with LCD DC)
         if (now - last_button_scan >= BUTTON_SCAN_INTERVAL_MS) {
             last_button_scan = now;
-            buttons_update();
+            // buttons_update();  // Disabled - BTN_0/GP5 conflicts with LCD DC pin
             encoder_update();
         }
 

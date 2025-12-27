@@ -99,12 +99,21 @@ static int32_t transport_read(uint8_t *buf, uint32_t len) {
 }
 
 static uint32_t transport_write(const uint8_t *buf, uint32_t len) {
+    // Don't block if USB not connected - just discard data
+    if (!tud_cdc_n_connected(CTRL_CDC_ITF)) {
+        return len;  // Pretend we wrote it
+    }
+
     uint32_t written = 0;
-    while (written < len) {
+    uint32_t attempts = 0;
+    const uint32_t max_attempts = 100;  // Prevent infinite loop
+
+    while (written < len && attempts < max_attempts) {
         uint32_t available = tud_cdc_n_write_available(CTRL_CDC_ITF);
         if (available == 0) {
             tud_cdc_n_write_flush(CTRL_CDC_ITF);
             tud_task();
+            attempts++;
             continue;
         }
         uint32_t to_write = (len - written < available) ? (len - written) : available;
@@ -115,6 +124,9 @@ static uint32_t transport_write(const uint8_t *buf, uint32_t len) {
 }
 
 static void transport_write_byte(uint8_t byte) {
+    if (!tud_cdc_n_connected(CTRL_CDC_ITF)) {
+        return;  // Discard if not connected
+    }
     tud_cdc_n_write_char(CTRL_CDC_ITF, byte);
     tud_cdc_n_write_flush(CTRL_CDC_ITF);
 }
@@ -366,7 +378,13 @@ void ctrl_uart_process(void) {
 }
 
 bool ctrl_uart_is_connected(void) {
-    return g_state == CTRL_STATE_CONNECTED && transport_is_connected();
+    // For USB CDC mode, just check if the port is open
+    // Protocol state is separate from physical connection
+#if TRANSPORT_USB_MODE
+    return transport_is_connected();
+#else
+    return g_state == CTRL_STATE_CONNECTED;
+#endif
 }
 
 error_t ctrl_uart_connect(void) {

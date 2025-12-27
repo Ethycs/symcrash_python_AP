@@ -156,7 +156,13 @@ link_state_t dual_uart_get_state(void) {
 }
 
 bool dual_uart_is_connected(void) {
+    // In USB CDC mode, check if USB host has opened the CDC port
+    // This is more useful than protocol state for display purposes
+#if TRANSPORT_USB_MODE
+    return ctrl_uart_is_connected();
+#else
     return g_state == LINK_STATE_CONNECTED;
+#endif
 }
 
 void dual_uart_get_stats(link_stats_t *stats) {

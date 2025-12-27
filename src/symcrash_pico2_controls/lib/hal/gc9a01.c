@@ -180,11 +180,12 @@ static void init_display_hw(display_id_t display) {
     gpio_put(pins->dc_pin, 0);
     gpio_put(pins->rst_pin, 1);
 
-    // Hardware reset
+    // Hardware reset (matching pot_display timing)
+    sleep_ms(50);
     gpio_put(pins->rst_pin, 0);
-    sleep_ms(10);
+    sleep_ms(50);
     gpio_put(pins->rst_pin, 1);
-    sleep_ms(120);
+    sleep_ms(150);
 }
 
 // Additional GC9A01 registers for full Adafruit init
@@ -319,15 +320,15 @@ static void init_display_registers(display_id_t display) {
 }
 
 void gc9a01_init(void) {
-    // Initialize SPI
+    // Initialize SPI with explicit format (required for GC9A01)
     spi_init(LCD_SPI_ID, SPI1_BAUD);
+    spi_set_format(LCD_SPI_ID, 8, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
 
     gpio_set_function(SPI1_SCK_PIN, GPIO_FUNC_SPI);
     gpio_set_function(SPI1_MOSI_PIN, GPIO_FUNC_SPI);
 
-    // Initialize both displays
+    // Initialize display 0 only (display 1 not connected yet)
     gc9a01_init_display(DISPLAY_0);
-    gc9a01_init_display(DISPLAY_1);
 }
 
 void gc9a01_init_display(display_id_t display) {

@@ -80,21 +80,6 @@ static void startup_blink(void) {
 }
 
 // =============================================================================
-// ADC Callback - sends SetMacro on pot change
-// =============================================================================
-
-/**
- * @brief Callback when a potentiometer value changes
- */
-static void on_pot_change(adc_channel_t channel, adc_value_t value) {
-    // Convert 10-bit ADC (0-1023) to Q15 (0-32767)
-    q15_t q15_value = mcp3008_to_q15(value);
-
-    // Send SetMacro message for this pot (pot channel = macro ID)
-    dual_uart_send_macro((macro_id_t)channel, q15_value);
-}
-
-// =============================================================================
 // System Initialization
 // =============================================================================
 
@@ -129,12 +114,17 @@ void system_init(void) {
     // Initialize display pages
     display_pages_init();
 
-    // Initialize buttons and encoder
-    buttons_init();
+    // Initialize encoder (buttons disabled - BTN_0/GP5 conflicts with LCD DC pin)
+    // TODO: Reassign button pins to avoid LCD conflict
+    // buttons_init();
     encoder_init();
 
     // Initialize control mapping (connects pots to macros and display)
     control_map_init();
+
+    // Force display update with initial pot values
+    // This ensures pots are shown before entering main loop
+    display_pages_render();
 
     // Initialize menu
     menu_init();

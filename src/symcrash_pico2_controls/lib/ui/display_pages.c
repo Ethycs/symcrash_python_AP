@@ -19,9 +19,10 @@
 
 static bool g_connected = false;
 static int16_t g_macro_values[8] = {0};
+static int16_t g_displayed_values[8] = {-1, -1, -1, -1, -1, -1, -1, -1};  // Track what's shown
 static uint8_t g_current_preset = 0;
 static const char *g_preset_name = "Init";
-static bool g_needs_redraw = true;
+static bool g_needs_full_redraw = true;  // Full screen redraw needed
 
 // Preset names (placeholder)
 static const char *g_preset_names[] = {
@@ -64,67 +65,79 @@ static void draw_arc(display_id_t disp, uint16_t cx, uint16_t cy,
 // Page Renderers
 // =============================================================================
 
-static void render_status_page(void) {
-    // Display 0: Status page
-    gc9a01_fill(DISPLAY_0, COLOR_BLACK);
-
-    // Title
-    gc9a01_draw_string_centered(DISPLAY_0, 20, "SYMCRASH", COLOR_CYAN, COLOR_BLACK, 2);
-
-    // Connection status
-    color_t status_color = g_connected ? COLOR_GREEN : COLOR_RED;
-    const char *status_text = g_connected ? "CONNECTED" : "OFFLINE";
-    gc9a01_draw_string_centered(DISPLAY_0, 60, status_text, status_color, COLOR_BLACK, 1);
-
-    // Preset info
-    char preset_str[32];
-    snprintf(preset_str, sizeof(preset_str), "PRESET %d", g_current_preset + 1);
-    gc9a01_draw_string_centered(DISPLAY_0, 100, preset_str, COLOR_WHITE, COLOR_BLACK, 2);
-
-    if (g_current_preset < 8) {
-        gc9a01_draw_string_centered(DISPLAY_0, 140, g_preset_names[g_current_preset],
-                                     COLOR_YELLOW, COLOR_BLACK, 1);
+// Helper to draw a single pot row
+static void draw_pot_row(int i, bool force) {
+    // Skip if value hasn't changed (unless forced)
+    if (!force && g_macro_values[i] == g_displayed_values[i]) {
+        return;
     }
+    g_displayed_values[i] = g_macro_values[i];
 
-    // Draw decorative circle border
-    gc9a01_circle(DISPLAY_0, LCD_WIDTH/2, LCD_HEIGHT/2, 115, COLOR_DARK_GRAY);
-    gc9a01_circle(DISPLAY_0, LCD_WIDTH/2, LCD_HEIGHT/2, 116, COLOR_DARK_GRAY);
+    const char *pot_names[] = {"P0", "P1", "P2", "P3", "P4", "P5"};
+    uint16_t y = 60 + i * 28;
+
+    // Convert Q15 to percentage
+    int percent = (g_macro_values[i] * 100) / 32767;
+
+    // Format line
+    char line[20];
+    snprintf(line, sizeof(line), "%s %3d%%", pot_names[i], percent);
+
+    // Color based on value
+    color_t color;
+    if (percent < 25) color = COLOR_BLUE;
+    else if (percent < 50) color = COLOR_CYAN;
+    else if (percent < 75) color = COLOR_GREEN;
+    else color = COLOR_YELLOW;
+
+    // Clear text area and redraw
+    gc9a01_fill_rect(DISPLAY_0, 20, y, 115, 20, COLOR_BLACK);
+    gc9a01_draw_string(DISPLAY_0, 20, y, line, color, COLOR_BLACK, 2);
+
+    // Draw bar graph
+    uint16_t bar_x = 140;
+    uint16_t bar_w = 80;
+    uint16_t bar_h = 20;
+    uint16_t filled = (g_macro_values[i] * bar_w) / 32767;
+
+    // Background (full bar)
+    gc9a01_fill_rect(DISPLAY_0, bar_x, y, bar_w, bar_h, COLOR_DARK_GRAY);
+    // Filled portion
+    if (filled > 0) {
+        gc9a01_fill_rect(DISPLAY_0, bar_x, y, filled, bar_h, color);
+    }
+}
+
+static void render_status_page(void) {
+    if (g_needs_full_redraw) {
+        // Full screen redraw
+        gc9a01_fill(DISPLAY_0, COLOR_BLACK);
+
+        // Title
+        gc9a01_draw_string_centered(DISPLAY_0, 10, "SYMCRASH", COLOR_CYAN, COLOR_BLACK, 2);
+
+        // Connection status
+        color_t status_color = g_connected ? COLOR_GREEN : COLOR_RED;
+        const char *status_text = g_connected ? "CONNECTED" : "OFFLINE";
+        gc9a01_draw_string_centered(DISPLAY_0, 40, status_text, status_color, COLOR_BLACK, 1);
+
+        // Draw all pot values
+        for (int i = 0; i < 6; i++) {
+            draw_pot_row(i, true);
+        }
+
+        g_needs_full_redraw = false;
+    } else {
+        // Incremental update - only redraw changed pots
+        for (int i = 0; i < 6; i++) {
+            draw_pot_row(i, false);
+        }
+    }
 }
 
 static void render_macros_page(void) {
-    // Display 1: Macro values
-    gc9a01_fill(DISPLAY_1, COLOR_BLACK);
-
-    // Title
-    gc9a01_draw_string_centered(DISPLAY_1, 10, "MACROS", COLOR_WHITE, COLOR_BLACK, 1);
-
-    // Draw 6 macro values in a grid
-    const char *macro_names[] = {"CUT", "RES", "DRV", "ATK", "REL", "MIX"};
-
-    for (int i = 0; i < 6; i++) {
-        int row = i / 3;
-        int col = i % 3;
-
-        int x = 30 + col * 70;
-        int y = 40 + row * 90;
-
-        // Macro name
-        gc9a01_draw_string(DISPLAY_1, x, y, macro_names[i], COLOR_GRAY, COLOR_BLACK, 1);
-
-        // Value bar
-        int bar_width = (g_macro_values[i] * 50) / 32767;
-        gc9a01_fill_rect(DISPLAY_1, x, y + 15, 50, 8, COLOR_DARK_GRAY);
-        gc9a01_fill_rect(DISPLAY_1, x, y + 15, bar_width, 8, COLOR_CYAN);
-
-        // Value text
-        char val_str[8];
-        int percent = (g_macro_values[i] * 100) / 32767;
-        snprintf(val_str, sizeof(val_str), "%d%%", percent);
-        gc9a01_draw_string(DISPLAY_1, x, y + 28, val_str, COLOR_WHITE, COLOR_BLACK, 1);
-    }
-
-    // Border
-    gc9a01_circle(DISPLAY_1, LCD_WIDTH/2, LCD_HEIGHT/2, 115, COLOR_DARK_GRAY);
+    // Same as status page for now (single display mode)
+    render_status_page();
 }
 
 static void render_preset_page(void) {
@@ -155,73 +168,59 @@ static void render_preset_page(void) {
 // =============================================================================
 
 void display_pages_init(void) {
-    g_needs_redraw = true;
+    g_needs_full_redraw = true;
     g_connected = false;
     g_current_preset = 0;
 
     for (int i = 0; i < 8; i++) {
         g_macro_values[i] = 0;
+        g_displayed_values[i] = -1;  // Force redraw on first render
     }
 }
 
 void display_pages_render(void) {
-    if (!g_needs_redraw) {
-        return;  // Only redraw when needed
-    }
-
+    // Always call render - it handles incremental updates internally
     menu_page_t page = menu_get_page();
 
     switch (page) {
         case PAGE_STATUS:
-            render_status_page();
-            render_macros_page();
-            break;
-
         case PAGE_MACROS:
+        case PAGE_SETTINGS:
             render_status_page();
-            render_macros_page();
             break;
 
         case PAGE_PRESET:
             render_preset_page();
-            render_macros_page();
-            break;
-
-        case PAGE_SETTINGS:
-            // TODO: Settings page
-            render_status_page();
-            render_macros_page();
             break;
 
         default:
+            render_status_page();
             break;
     }
-
-    g_needs_redraw = false;
 }
 
 void display_pages_invalidate(void) {
-    g_needs_redraw = true;
+    g_needs_full_redraw = true;
 }
 
 void display_pages_set_connected(bool connected) {
     if (g_connected != connected) {
         g_connected = connected;
-        g_needs_redraw = true;
+        g_needs_full_redraw = true;  // Connection change needs full redraw
     }
 }
 
 void display_pages_update_macro(uint8_t macro_id, int16_t value) {
-    if (macro_id < 8 && g_macro_values[macro_id] != value) {
+    if (macro_id < 8) {
         g_macro_values[macro_id] = value;
-        g_needs_redraw = true;
+        // Don't set g_needs_full_redraw - incremental update will handle it
     }
 }
 
 void display_pages_set_preset(uint8_t preset_idx, const char *name) {
     if (preset_idx != g_current_preset) {
         g_current_preset = preset_idx;
-        g_needs_redraw = true;
+        g_needs_full_redraw = true;  // Preset change needs full redraw
     }
     if (name != NULL) {
         g_preset_name = name;

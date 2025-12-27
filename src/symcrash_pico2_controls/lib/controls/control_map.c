@@ -72,6 +72,13 @@ void control_map_init(void) {
     for (int i = 0; i < NUM_BUTTONS; i++) {
         g_note_states[i] = false;
     }
+
+    // Read and display initial pot values
+    // This ensures pots show their positions on startup, not just when changed
+    for (int i = 0; i < NUM_POTS; i++) {
+        adc_value_t value = mcp3008_read_smoothed(i);
+        control_map_process_knob(i, value);
+    }
 }
 
 // =============================================================================
