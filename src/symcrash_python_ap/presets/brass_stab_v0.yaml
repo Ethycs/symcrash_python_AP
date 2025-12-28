@@ -1,0 +1,85 @@
+# Brass Stab v0 - WSE-STD-PRESET v0
+# =================================
+#
+# Punchy brass stab with carrier + material texture (no filter).
+# Classic subtractive synthesis character via wavelet backbone shaping.
+#
+# Target sound: thick, punchy brass section stab
+# - Near-instant attack (~2.7ms)
+# - Fast decay to mid sustain
+# - Rich saw harmonics
+# - Slight material texture for body
+#
+# Macros (not modulated in v0):
+# - IMPACT: Not bound (fixed envelope)
+# - BRIGHT: Not bound (fixed tilt)
+# - BODY: Not bound (fixed density)
+
+preset:
+  preset_id: "BRASS_STAB_V0"
+  preset_version: "v0"
+  author: "symcrash"
+  description: "Punchy brass stab. Carrier + material (no filter)."
+
+compat:
+  voiceframe_std: "WSE-STD-020 v1"
+  vm_std: "WSE-STD-VM-HYBRID v0"
+  operator_lib_id: "WSE-OPLIB-24 v0"
+
+latch_defaults:
+  pattern_id: 0
+  tail_mode: "FULL"
+  tree_a_id: 0
+  tree_b_id: 0
+  tree_blend_q15: 0
+  carrier:
+    model: "SAW"
+    role: "AUDIBLE"
+    transition: "RETRIGGER"
+    detune_cents: 0
+    pulse_width_q15: 16384
+
+env:
+  amp:
+    attack_ms: 2.67          # ~2 blocks at 750 blocks/sec
+    decay_ms: 120.0          # ~90 blocks
+    sustain: 0.5             # sustain_q15: 16384
+    release_ms: 100.0        # ~75 blocks
+
+material:
+  beta_start_q15: 4915       # 0.15 (mostly dry at attack)
+  beta_target_q15: 11468     # 0.35 (bring in texture)
+  beta_ramp_blocks: 8        # ~10.7ms ramp
+
+backbone:
+  - op: "TILT"
+    strength_q15: 14746      # 0.45
+  - op: "INTRA_MIX"
+    strength_q15: 8192       # 0.25
+  - op: "DIFFUSE_DOWN"
+    strength_q15: 6554       # 0.20
+
+carrier:
+  # Saw harmonics: 1/n falloff for 8 harmonics
+  # These match the acceptance test expectations
+  harmonic_amps_q15:
+    - 32767    # fundamental
+    - 16383    # 2nd harmonic (1/2)
+    - 10922    # 3rd harmonic (1/3)
+    - 8191     # 4th harmonic (1/4)
+    - 6553     # 5th harmonic (1/5)
+    - 5461     # 6th harmonic (1/6)
+    - 4681     # 7th harmonic (1/7)
+    - 4096     # 8th harmonic (1/8)
+
+# Macros section (for future use - not modulated in v0)
+macros:
+  BRIGHT:
+    target: brightness
+    default_q15: 16384       # 0.5 (neutral)
+  BODY:
+    target: density
+    default_q15: 16384       # 0.5 (neutral)
+  IMPACT:
+    target: energy_intent
+    default_q15: 0           # Not used in v0

@@ -191,11 +191,11 @@ FROZEN_BLOCK_HASHES: List[str] = [
     "cbdea5193f5a3b44f50f536bf1132f5392e26af9ebe58f8a5d8d7d1ca6b01263",
     "a52b53784999eb001733325c2881b88cf8ed8e43b2088d2f9ec6f6cf8a544386",
     "a6c03667d07e8d1b7c90938c79ea4853e39f33ecc5e22270204295874cac5277",
-    "8cb9004cd7bc382f8b9fa9ee240c31609c50fdc5e2c40dbb5a03b6f177a36bda",
+    "b71ea212f06a3484ecb3bdeb6ec845734df289131190774329ce58bb1bc4cd10",
 ]
 
 # Final trace hash (hash of all block hashes concatenated)
-FROZEN_TRACE_HASH = "999e7b6be0bc68ecc7d2e416e28b36ca7171d9f121d75b110982f2ed07aacab0"
+FROZEN_TRACE_HASH = "6481e993b83174a4359326155de5dae8341c54bef9e31e9969f09c62e8958394"
 
 
 # =============================================================================

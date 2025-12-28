@@ -18,7 +18,7 @@
 // Configuration
 // =============================================================================
 
-#define CTRL_ACK_TIMEOUT_MS     30      // ACK timeout in ms
+#define CTRL_ACK_TIMEOUT_MS     5       // ACK timeout in ms (reduced from 30 for lower latency)
 #define CTRL_MAX_RETRIES        3       // Maximum retransmit attempts
 
 // =============================================================================
@@ -108,6 +108,18 @@ bool ctrl_uart_is_connected(void);
  * @return ERR_OK on success, ERR_TIMEOUT on failure
  */
 error_t ctrl_uart_connect(void);
+
+// =============================================================================
+// Flush
+// =============================================================================
+
+/**
+ * @brief Flush pending TX data
+ *
+ * Call at end of main loop to batch USB CDC transmissions.
+ * For hardware UART mode this is a no-op.
+ */
+void ctrl_uart_flush(void);
 
 // =============================================================================
 // Status

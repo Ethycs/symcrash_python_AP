@@ -19,6 +19,8 @@
 #include "pico/cyw43_arch.h"
 #include "config.h"
 #include "dual_uart_link.h"
+#include "ctrl_uart.h"
+#include "data_uart.h"
 #include "mcp3008.h"
 #include "gpio_buttons.h"
 #include "rotary_encoder.h"
@@ -81,8 +83,16 @@ int main(void) {
             led_toggle();
         }
 
-        // Small sleep to prevent tight looping
-        sleep_us(100);
+#if TRANSPORT_USB_MODE
+        // Batch flush all pending USB CDC data at end of loop iteration
+        // This reduces latency by sending multiple messages per USB frame
+        ctrl_uart_flush();
+        data_uart_flush();
+#endif
+
+        // NOTE: sleep_us(100) removed for lower latency
+        // tight_loop_contents() is a no-op that prevents compiler optimization
+        tight_loop_contents();
     }
 
     return 0;

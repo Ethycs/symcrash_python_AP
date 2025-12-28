@@ -91,6 +91,18 @@ void data_uart_stop_streaming(void);
 bool data_uart_is_streaming(void);
 
 // =============================================================================
+// Flush
+// =============================================================================
+
+/**
+ * @brief Flush pending TX data
+ *
+ * Call at end of main loop to batch USB CDC transmissions.
+ * For hardware UART mode this is a no-op.
+ */
+void data_uart_flush(void);
+
+// =============================================================================
 // Status
 // =============================================================================
 

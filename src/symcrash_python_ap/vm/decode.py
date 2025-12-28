@@ -244,7 +244,9 @@ def decode_frame(
     # Gain ramping
     # -------------------------------------------------------------------------
     plan.gain_prev_q15 = prev_gain_q15
-    plan.gain_curr_q15 = getattr(frame, 'gain_q15', 32767) or 32767
+    # NOTE: Don't use `or 32767` here - 0 is a valid gain value (silence)
+    gain = getattr(frame, 'gain_q15', None)
+    plan.gain_curr_q15 = 32767 if gain is None else gain
 
     # -------------------------------------------------------------------------
     # Backbone instructions

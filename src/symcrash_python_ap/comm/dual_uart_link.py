@@ -1087,7 +1087,7 @@ class DualUARTLink:
                     bytesize=serial.EIGHTBITS,
                     parity=serial.PARITY_NONE,
                     stopbits=serial.STOPBITS_ONE,
-                    timeout=0.1
+                    timeout=0.001  # Reduced from 0.1 for lower latency
                 )
 
             if self.d_uart_port:
@@ -1097,7 +1097,7 @@ class DualUARTLink:
                     bytesize=serial.EIGHTBITS,
                     parity=serial.PARITY_NONE,
                     stopbits=serial.STOPBITS_ONE,
-                    timeout=0.1,
+                    timeout=0.001,  # Reduced from 0.1 for lower latency
                     rtscts=True  # RTS/CTS recommended for D-UART
                 )
 

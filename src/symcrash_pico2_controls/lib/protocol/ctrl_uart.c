@@ -119,7 +119,8 @@ static uint32_t transport_write(const uint8_t *buf, uint32_t len) {
         uint32_t to_write = (len - written < available) ? (len - written) : available;
         written += tud_cdc_n_write(CTRL_CDC_ITF, buf + written, to_write);
     }
-    tud_cdc_n_write_flush(CTRL_CDC_ITF);
+    // NOTE: Per-write flush removed for latency optimization
+    // Call ctrl_uart_flush() at end of main loop to batch transmit
     return written;
 }
 
@@ -128,7 +129,8 @@ static void transport_write_byte(uint8_t byte) {
         return;  // Discard if not connected
     }
     tud_cdc_n_write_char(CTRL_CDC_ITF, byte);
-    tud_cdc_n_write_flush(CTRL_CDC_ITF);
+    // NOTE: Per-byte flush removed for latency optimization
+    // Call ctrl_uart_flush() at end of main loop to batch transmit
 }
 
 #else
@@ -399,6 +401,19 @@ error_t ctrl_uart_connect(void) {
     msg_build_hello(&hello, 0x0001);  // Build ID 1
 
     return ctrl_uart_send(&hello);
+}
+
+// =============================================================================
+// Flush
+// =============================================================================
+
+void ctrl_uart_flush(void) {
+#if TRANSPORT_USB_MODE
+    if (tud_cdc_n_connected(CTRL_CDC_ITF)) {
+        tud_cdc_n_write_flush(CTRL_CDC_ITF);
+    }
+#endif
+    // Hardware UART doesn't need explicit flush (blocking write)
 }
 
 // =============================================================================

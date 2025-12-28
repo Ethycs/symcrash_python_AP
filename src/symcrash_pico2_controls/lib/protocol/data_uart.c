@@ -92,23 +92,29 @@ static int32_t transport_read(uint8_t *buf, uint32_t len) {
 
 static uint32_t transport_write(const uint8_t *buf, uint32_t len) {
     uint32_t written = 0;
-    while (written < len) {
+    uint32_t attempts = 0;
+    const uint32_t max_attempts = 100;  // Prevent infinite loop
+
+    while (written < len && attempts < max_attempts) {
         uint32_t available = tud_cdc_n_write_available(DATA_CDC_ITF);
         if (available == 0) {
             tud_cdc_n_write_flush(DATA_CDC_ITF);
             tud_task();
+            attempts++;
             continue;
         }
         uint32_t to_write = (len - written < available) ? (len - written) : available;
         written += tud_cdc_n_write(DATA_CDC_ITF, buf + written, to_write);
     }
-    tud_cdc_n_write_flush(DATA_CDC_ITF);
+    // NOTE: Per-write flush removed for latency optimization
+    // Call data_uart_flush() at end of main loop to batch transmit
     return written;
 }
 
 static void transport_write_byte(uint8_t byte) {
     tud_cdc_n_write_char(DATA_CDC_ITF, byte);
-    tud_cdc_n_write_flush(DATA_CDC_ITF);
+    // NOTE: Per-byte flush removed for latency optimization
+    // Call data_uart_flush() at end of main loop to batch transmit
 }
 
 #else
@@ -301,6 +307,19 @@ void data_uart_stop_streaming(void) {
 
 bool data_uart_is_streaming(void) {
     return g_state == DATA_STATE_STREAMING;
+}
+
+// =============================================================================
+// Flush
+// =============================================================================
+
+void data_uart_flush(void) {
+#if TRANSPORT_USB_MODE
+    if (tud_cdc_n_connected(DATA_CDC_ITF)) {
+        tud_cdc_n_write_flush(DATA_CDC_ITF);
+    }
+#endif
+    // Hardware UART doesn't need explicit flush (blocking write)
 }
 
 // =============================================================================

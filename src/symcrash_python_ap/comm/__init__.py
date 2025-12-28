@@ -72,6 +72,18 @@ from .pico2_receiver import (
     create_receiver,
 )
 
+from .pico2_synth_bridge import (
+    Pico2SynthBridge,
+    ADSRState,
+    FilterState,
+    create_bridge,
+)
+
+from .pico2_controller import (
+    Pico2Controller,
+    create_controller,
+)
+
 __all__ = [
     # UART Protocol (WSE-STD-020)
     'VoiceFrameV0',
@@ -128,4 +140,12 @@ __all__ = [
     'ReceiverStats',
     'find_pico2_port',
     'create_receiver',
+    # Pico2 Synth Bridge
+    'Pico2SynthBridge',
+    'ADSRState',
+    'FilterState',
+    'create_bridge',
+    # Pico2 Unified Controller
+    'Pico2Controller',
+    'create_controller',
 ]

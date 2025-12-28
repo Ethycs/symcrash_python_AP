@@ -73,7 +73,8 @@ static void draw_pot_row(int i, bool force) {
     }
     g_displayed_values[i] = g_macro_values[i];
 
-    const char *pot_names[] = {"P0", "P1", "P2", "P3", "P4", "P5"};
+    // ADSR + Filter labels for synth control
+    const char *pot_names[] = {"ATK", "DCY", "SUS", "REL", "CUT", "RES"};
     uint16_t y = 60 + i * 28;
 
     // Convert Q15 to percentage

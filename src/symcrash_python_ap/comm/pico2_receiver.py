@@ -151,7 +151,7 @@ class Pico2Receiver:
                 bytesize=serial.EIGHTBITS,
                 parity=serial.PARITY_NONE,
                 stopbits=serial.STOPBITS_ONE,
-                timeout=0.1
+                timeout=0.001  # Reduced from 0.1 for lower latency
             )
             return True
         except serial.SerialException as e:
@@ -341,7 +341,7 @@ class Pico2Receiver:
                     self._rx_buffer.extend(data)
                     self._process_buffer()
                 else:
-                    time.sleep(0.001)
+                    time.sleep(0.0001)  # Reduced from 0.001 for faster polling
             except serial.SerialException as e:
                 print(f"[Pico2Receiver] Serial error: {e}")
                 time.sleep(0.1)
