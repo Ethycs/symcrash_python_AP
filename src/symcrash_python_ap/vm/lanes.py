@@ -94,14 +94,48 @@ def sin_q15(eta_q15: int) -> int:
 
 
 # =============================================================================
-# LANE 1: CARRIER RENDER
+# LANE 1: CARRIER RENDER (Vectorized)
 # =============================================================================
+
+def _parabola_sine_vectorized(phase_norm: np.ndarray) -> np.ndarray:
+    """
+    Vectorized parabola sine approximation.
+
+    sin(x) ≈ 4x(1-x) for x in [0,1], scaled to Q15.
+    Input: phase_norm in [0, 65535] (16-bit phase)
+    Output: sine values in Q15 [-32767, 32767]
+    """
+    result = np.zeros_like(phase_norm, dtype=np.int32)
+
+    # First quarter: 0 to 16383 (rising)
+    q1 = phase_norm < 16384
+    x1 = phase_norm[q1]
+    result[q1] = (4 * x1 * (16384 - x1)) >> 14
+
+    # Second quarter: 16384 to 32767 (falling)
+    q2 = (phase_norm >= 16384) & (phase_norm < 32768)
+    x2 = 32768 - phase_norm[q2]
+    result[q2] = (4 * x2 * (16384 - x2)) >> 14
+
+    # Third quarter: 32768 to 49151 (negative rising)
+    q3 = (phase_norm >= 32768) & (phase_norm < 49152)
+    x3 = phase_norm[q3] - 32768
+    result[q3] = -((4 * x3 * (16384 - x3)) >> 14)
+
+    # Fourth quarter: 49152 to 65535 (negative falling)
+    q4 = phase_norm >= 49152
+    x4 = 65536 - phase_norm[q4]
+    result[q4] = -((4 * x4 * (16384 - x4)) >> 14)
+
+    return result
+
 
 def lane_carrier_render(state: VMState, cfg: DecodedPlan) -> np.ndarray:
     """
-    Render carrier oscillator for one block.
+    Render carrier oscillator for one block (vectorized).
 
     Phase-continuous additive synthesis with up to 16 harmonics.
+    Uses NumPy for vectorized sine computation.
 
     Args:
         state: VM state (modified in place)
@@ -110,85 +144,82 @@ def lane_carrier_render(state: VMState, cfg: DecodedPlan) -> np.ndarray:
     Returns:
         carrier_buf: int16 array of BLOCK_SAMPLES
     """
-    carrier_buf = np.zeros(BLOCK_SAMPLES, dtype=np.int16)
-
     if cfg.carrier_role == CarrierRole.OFF:
-        return carrier_buf
+        return np.zeros(BLOCK_SAMPLES, dtype=np.int16)
 
     # Get carrier parameters
     target_phase_inc = cfg.carrier_params.phase_inc
-    harmonic_amps = cfg.carrier_params.harmonic_amps_q15
+    harmonic_amps = np.array(cfg.carrier_params.harmonic_amps_q15, dtype=np.int32)
 
     # Update pitch slew target
     if state.target_phase_inc != target_phase_inc:
         state.target_phase_inc = target_phase_inc
-        # Calculate slew rate (smooth over ~10ms)
         diff = target_phase_inc - state.phase_inc
         state.pitch_slew_rate = diff // (BLOCK_SAMPLES * 8)
 
-    # Render samples
+    # Generate phase increments for the block (handling pitch slew)
+    phase_incs = np.empty(BLOCK_SAMPLES, dtype=np.int64)
+    current_inc = state.phase_inc
+    slew_rate = state.pitch_slew_rate
+
     for i in range(BLOCK_SAMPLES):
-        # Apply pitch slew
-        if state.pitch_slew_rate != 0:
-            if state.pitch_slew_rate > 0 and state.phase_inc < state.target_phase_inc:
-                state.phase_inc = min(state.phase_inc + state.pitch_slew_rate, state.target_phase_inc)
-            elif state.pitch_slew_rate < 0 and state.phase_inc > state.target_phase_inc:
-                state.phase_inc = max(state.phase_inc + state.pitch_slew_rate, state.target_phase_inc)
+        if slew_rate != 0:
+            if slew_rate > 0 and current_inc < target_phase_inc:
+                current_inc = min(current_inc + slew_rate, target_phase_inc)
+            elif slew_rate < 0 and current_inc > target_phase_inc:
+                current_inc = max(current_inc + slew_rate, target_phase_inc)
             else:
-                state.pitch_slew_rate = 0
+                slew_rate = 0
+        phase_incs[i] = current_inc
 
-        # Additive synthesis with harmonics
-        sample = 0
-        for h in range(16):
-            amp = harmonic_amps[h]
-            if amp == 0:
-                continue
+    # Update state
+    state.phase_inc = current_inc
+    state.pitch_slew_rate = slew_rate
 
-            # Phase for this harmonic
-            h_phase = (state.phase * (h + 1)) & 0xFFFFFFFF
+    # Compute all phases for the block using cumulative sum
+    # phase[i] = state.phase + sum(phase_incs[0:i])
+    phase_offsets = np.cumsum(phase_incs)
+    base_phases = (state.phase + phase_offsets - phase_incs) & 0xFFFFFFFF  # Before advance
+    state.phase = (state.phase + phase_offsets[-1]) & 0xFFFFFFFF
 
-            # Convert phase to sine value (Q15)
-            # phase is 32-bit, use top bits for lookup
-            phase_norm = (h_phase >> 16) & 0xFFFF
-            # Simple sine approximation using parabola
-            # sin(x) ≈ 4x(1-x) for x in [0,1]
-            if phase_norm < 16384:
-                # First quarter: rising
-                x = phase_norm
-                sin_val = (4 * x * (16384 - x)) >> 14
-            elif phase_norm < 32768:
-                # Second quarter: falling
-                x = 32768 - phase_norm
-                sin_val = (4 * x * (16384 - x)) >> 14
-            elif phase_norm < 49152:
-                # Third quarter: negative rising
-                x = phase_norm - 32768
-                sin_val = -((4 * x * (16384 - x)) >> 14)
-            else:
-                # Fourth quarter: negative falling
-                x = 65536 - phase_norm
-                sin_val = -((4 * x * (16384 - x)) >> 14)
+    # Vectorized harmonic synthesis
+    # Find active harmonics
+    active_h = np.where(harmonic_amps != 0)[0]
+    if len(active_h) == 0:
+        return np.zeros(BLOCK_SAMPLES, dtype=np.int16)
 
-            # Accumulate with harmonic amplitude
-            sample += (sin_val * amp) >> 15
+    # Initialize output
+    samples = np.zeros(BLOCK_SAMPLES, dtype=np.int32)
 
-        # Advance phase
-        state.phase = (state.phase + state.phase_inc) & 0xFFFFFFFF
+    # Process each active harmonic (vectorized over samples)
+    for h in active_h:
+        amp = harmonic_amps[h]
+        # Phase for this harmonic: base_phase * (h + 1)
+        h_phases = (base_phases * (h + 1)) & 0xFFFFFFFF
+        # Extract 16-bit phase for lookup
+        phase_norm = ((h_phases >> 16) & 0xFFFF).astype(np.int32)
+        # Compute sine values
+        sin_vals = _parabola_sine_vectorized(phase_norm)
+        # Accumulate
+        samples += (sin_vals * amp) >> 15
 
-        # DC blocking (1-pole highpass)
-        # y[n] = x[n] - x[n-1] + 0.995 * y[n-1]
-        dc_coeff = 32604  # ~0.995 in Q15
-        x = sample
-        y = x - state.dc_block_x1 + ((state.dc_block_y1 * dc_coeff) >> 15)
-        state.dc_block_x1 = x
-        state.dc_block_y1 = y
-        sample = y
+    # DC blocking (1-pole highpass) - must be sequential
+    dc_coeff = 32604  # ~0.995 in Q15
+    dc_x1 = state.dc_block_x1
+    dc_y1 = state.dc_block_y1
 
-        # Clamp to int16
-        sample = max(-32768, min(32767, sample))
-        carrier_buf[i] = sample
+    for i in range(BLOCK_SAMPLES):
+        x = samples[i]
+        y = x - dc_x1 + ((dc_y1 * dc_coeff) >> 15)
+        dc_x1 = x
+        dc_y1 = y
+        samples[i] = y
 
-    return carrier_buf
+    state.dc_block_x1 = dc_x1
+    state.dc_block_y1 = dc_y1
+
+    # Clamp and return
+    return np.clip(samples, -32768, 32767).astype(np.int16)
 
 
 # =============================================================================
@@ -771,8 +802,12 @@ def lane_idwpt_render(
 
 
 # =============================================================================
-# LANE 9: MIX + GAIN
+# LANE 9: MIX + GAIN (Vectorized)
 # =============================================================================
+
+# Precomputed alpha values for interpolation (Q15)
+_ALPHA_Q15 = np.array([(i * Q15_ONE) // BLOCK_SAMPLES for i in range(BLOCK_SAMPLES)], dtype=np.int32)
+
 
 def lane_mix_gain(
     cfg: DecodedPlan,
@@ -780,7 +815,7 @@ def lane_mix_gain(
     texture_buf: np.ndarray,
 ) -> np.ndarray:
     """
-    Apply eta blend and gain ramp to produce final output.
+    Apply eta blend and gain ramp to produce final output (vectorized).
 
     Uses equal-power crossfade for eta and linear ramp for gain.
     All math is integer-only for bit-exact determinism.
@@ -793,39 +828,37 @@ def lane_mix_gain(
     Returns:
         output: int16 array of BLOCK_SAMPLES
     """
-    output = np.zeros(BLOCK_SAMPLES, dtype=np.int16)
+    # Vectorized eta interpolation
+    eta_delta = cfg.eta_curr_q15 - cfg.eta_prev_q15
+    eta_vals = cfg.eta_prev_q15 + ((_ALPHA_Q15 * eta_delta) >> 15)
+
+    # Vectorized equal-power crossfade weights
+    # Map eta (0 to 32767) to phase (0 to 0x40000000 for 0° to 90°)
+    phases = ((eta_vals.astype(np.int64) * 0x40000000) >> 15).astype(np.uint32)
+
+    # Compute sine/cosine for all samples at once using LUT
+    # This is the key optimization - batch lookup
+    dry_weights = np.empty(BLOCK_SAMPLES, dtype=np.int32)
+    wet_weights = np.empty(BLOCK_SAMPLES, dtype=np.int32)
 
     for i in range(BLOCK_SAMPLES):
-        # Interpolation factor for this sample (Q15 fixed-point)
-        # alpha = i / BLOCK_SAMPLES, but we compute in Q15
-        alpha_q15 = (i * Q15_ONE) // BLOCK_SAMPLES
+        dry_weights[i] = _cosine_q15(int(phases[i]))
+        wet_weights[i] = _sine_q15(int(phases[i]))
 
-        # Eta interpolation (dry/wet blend) - all integer
-        eta_delta = cfg.eta_curr_q15 - cfg.eta_prev_q15
-        eta = cfg.eta_prev_q15 + ((alpha_q15 * eta_delta) >> 15)
+    # Mix carrier and texture (int32 to avoid overflow)
+    carrier_i32 = carrier_buf.astype(np.int32)
+    texture_i32 = texture_buf.astype(np.int32)
+    mixed = (carrier_i32 * dry_weights + texture_i32 * wet_weights) >> 15
 
-        # Equal-power crossfade weights using lookup tables
-        # dry = cos(eta * pi/2), wet = sin(eta * pi/2)
-        # eta is 0 to Q15_ONE, representing 0 to pi/2 angle
-        dry_weight = cos_q15(eta)
-        wet_weight = sin_q15(eta)
+    # Vectorized gain interpolation
+    gain_delta = cfg.gain_curr_q15 - cfg.gain_prev_q15
+    gain_vals = cfg.gain_prev_q15 + ((_ALPHA_Q15 * gain_delta) >> 15)
 
-        # Mix carrier and texture (use Python ints to avoid overflow)
-        carrier_val = int(carrier_buf[i])
-        texture_val = int(texture_buf[i])
-        mixed = (carrier_val * dry_weight + texture_val * wet_weight) >> 15
+    # Apply gain
+    samples = (mixed * gain_vals) >> 15
 
-        # Gain interpolation - all integer
-        gain_delta = cfg.gain_curr_q15 - cfg.gain_prev_q15
-        gain = cfg.gain_prev_q15 + ((alpha_q15 * gain_delta) >> 15)
-
-        # Apply gain
-        sample = (mixed * gain) >> 15
-
-        # Clamp to int16
-        output[i] = max(-32768, min(32767, sample))
-
-    return output
+    # Clamp and return
+    return np.clip(samples, -32768, 32767).astype(np.int16)
 
 
 __all__ = [

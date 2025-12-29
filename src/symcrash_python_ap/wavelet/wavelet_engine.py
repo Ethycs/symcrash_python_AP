@@ -48,6 +48,14 @@ R_CURVATURE_MAX = 0x1000  # Maximum second difference (curvature)
 # Microfade constants (per WSE-STD-070 Section 4)
 MICROFADE_LEN = 32        # Samples for allocation microfade (fade-in from 0)
 
+# Precomputed leaf envelope for coefficient expansion
+# sin((coeff_idx + 0.5) / NODE_SIZE * pi) for NODE_SIZE=4
+# This avoids 256 math.sin calls per block per voice
+_LEAF_ENVELOPE_Q15 = [
+    int(round(math.sin((i + 0.5) / 4 * math.pi) * Q15_ONE))
+    for i in range(4)  # NODE_SIZE = 4
+]
+
 
 def _build_cosine_bridge_lut(n: int) -> List[int]:
     """
@@ -1074,16 +1082,15 @@ class IDWPTLift:
         leaves = leaf_gains_q15[:LEAF_COUNT] if len(leaf_gains_q15) >= LEAF_COUNT else leaf_gains_q15
 
         for leaf_idx, gain in enumerate(leaves):
-            # Create NODE_SIZE coefficients per leaf
+            # Create NODE_SIZE coefficients per leaf using precomputed envelope
+            # _LEAF_ENVELOPE_Q15 contains sin((i + 0.5) / 4 * pi) in Q15 format
             for coeff_idx in range(NODE_SIZE):
-                # Apply envelope within leaf (Hann-like for smooth edges)
-                # This prevents harsh transitions between leaves
-                t = (coeff_idx + 0.5) / NODE_SIZE
-                envelope = math.sin(t * math.pi)  # 0 at edges, 1 at center
-
-                # Scale gain by envelope
-                coeff = int(gain * envelope)
-                coeffs.append(sat16(coeff))
+                # Use precomputed Q15 envelope, then Q15 multiply with gain
+                envelope_q15 = _LEAF_ENVELOPE_Q15[coeff_idx]
+                # gain is already Q15, envelope_q15 is Q15
+                # Multiply: (gain * envelope) >> 15
+                coeff = mul_q15_sat(gain, envelope_q15)
+                coeffs.append(coeff)
 
         # Pad to 256 if needed (shouldn't happen with 64 leaves × 4 coeffs)
         while len(coeffs) < 256:

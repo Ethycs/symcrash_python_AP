@@ -15,6 +15,15 @@ Covers:
 import pytest
 import numpy as np
 
+# Standard constants (not exported from symbol module)
+COEFF_LEN = 256  # Total coefficient vector length
+BAND_SLICES = [
+    slice(0, 64),    # LOW
+    slice(64, 128),  # MID
+    slice(128, 192), # HIGH
+    slice(192, 256), # VERY_HIGH
+]
+
 
 class TestS1StatelessnessMusicalTime:
     """
@@ -143,7 +152,7 @@ class TestS2OperatorLegalityEnforcement:
 
     def test_energy_conservation(self, q15_half):
         """Total energy doesn't grow unbounded."""
-        from symcrash_python_ap.symbol import SymbolExecutor, COEFF_LEN
+        from symcrash_python_ap.symbol import SymbolExecutor
         from symcrash_python_ap import VoiceFrame
 
         executor = SymbolExecutor(n_voices=4)
@@ -306,7 +315,7 @@ class TestS4EventLaneIsolation:
 
     def test_impulse_targets_correct_band(self, q15_half):
         """Impulse events target correct frequency band."""
-        from symcrash_python_ap.symbol import SymbolExecutor, BAND_SLICES
+        from symcrash_python_ap.symbol import SymbolExecutor
         from symcrash_python_ap import VoiceFrame
 
         executor = SymbolExecutor(n_voices=4)
@@ -328,7 +337,7 @@ class TestS4EventLaneIsolation:
 
     def test_noise_isolated_to_band(self, q15_half):
         """Noise injection is isolated to target band."""
-        from symcrash_python_ap.symbol import SymbolExecutor, BAND_SLICES
+        from symcrash_python_ap.symbol import SymbolExecutor
         from symcrash_python_ap import VoiceFrame
 
         executor = SymbolExecutor(n_voices=4)
@@ -446,7 +455,7 @@ class TestSymbolExecutorAcceptance:
 
     def test_determinism(self, q15_one):
         """Test 1: Repeated runs produce identical results."""
-        from symcrash_python_ap.symbol import SymbolExecutor, COEFF_LEN
+        from symcrash_python_ap.symbol import SymbolExecutor
         from symcrash_python_ap import VoiceFrame
 
         executor = SymbolExecutor(n_voices=4)
@@ -488,7 +497,7 @@ class TestSymbolExecutorAcceptance:
 
     def test_totality(self, q15_one):
         """Test 2: No input produces undefined behavior."""
-        from symcrash_python_ap.symbol import SymbolExecutor, COEFF_LEN
+        from symcrash_python_ap.symbol import SymbolExecutor
         from symcrash_python_ap import VoiceFrame
 
         executor = SymbolExecutor(n_voices=4)
@@ -510,7 +519,7 @@ class TestSymbolExecutorAcceptance:
 
     def test_boundedness(self, q15_one):
         """Test 3: Coefficients remain bounded after processing."""
-        from symcrash_python_ap.symbol import SymbolExecutor, COEFF_LEN
+        from symcrash_python_ap.symbol import SymbolExecutor
         from symcrash_python_ap import VoiceFrame
 
         executor = SymbolExecutor(n_voices=4)
@@ -573,7 +582,7 @@ class TestSymbolExecutorAcceptance:
 
     def test_morph_correctness(self, q15_one):
         """Test 5: Tree morph sequences don't corrupt state."""
-        from symcrash_python_ap.symbol import SymbolExecutor, COEFF_LEN
+        from symcrash_python_ap.symbol import SymbolExecutor
         from symcrash_python_ap import VoiceFrame
 
         executor = SymbolExecutor(n_voices=4)

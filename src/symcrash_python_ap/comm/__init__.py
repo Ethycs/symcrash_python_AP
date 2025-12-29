@@ -69,6 +69,7 @@ from .pico2_receiver import (
     MacroState,
     ReceiverStats,
     find_pico2_port,
+    find_pico2_ports,
     create_receiver,
 )
 
@@ -139,6 +140,7 @@ __all__ = [
     'MacroState',
     'ReceiverStats',
     'find_pico2_port',
+    'find_pico2_ports',
     'create_receiver',
     # Pico2 Synth Bridge
     'Pico2SynthBridge',

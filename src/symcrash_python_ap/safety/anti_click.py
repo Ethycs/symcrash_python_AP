@@ -31,14 +31,20 @@ Usage:
 from __future__ import annotations
 from dataclasses import dataclass, field
 from collections import deque
-from typing import Optional, Tuple, Deque, List
-import math
+from typing import Optional, Tuple, Deque, List, Dict
+from functools import lru_cache
 
 import numpy as np
+
+# Use sine_core for deterministic, bit-exact trig (no math.sin/cos in hot paths)
+from ..wavelet.sine_core import sine_q15, cosine_q15, PHASE_MASK
 
 # Q15 constants for fixed-point compatibility
 Q15_ONE = 32767
 Q15_SCALE = 32768
+
+# Phase constant for 90 degrees (pi/2)
+PHASE_90_DEG = 0x40000000
 
 
 # =============================================================================
@@ -50,6 +56,10 @@ def clamp(x: float, lo: float, hi: float) -> float:
     return lo if x < lo else hi if x > hi else x
 
 
+# Pre-computed weight cache for common beta values (avoids trig calls)
+_WEIGHT_CACHE: Dict[int, Tuple[float, float]] = {}
+
+
 def equal_power_weights(beta: float) -> Tuple[float, float]:
     """
     Equal-power crossfade weights for beta in [0,1].
@@ -59,11 +69,33 @@ def equal_power_weights(beta: float) -> Tuple[float, float]:
     - beta=1: (0, 1) = pure wet
     - beta=0.5: (0.707, 0.707) = equal power mix
 
-    Uses: dry = cos(pi/2 * beta), wet = sin(pi/2 * beta)
+    Uses sine_core LUT for deterministic, bit-exact results.
+    Results are cached to avoid repeated LUT lookups.
     """
     beta = clamp(beta, 0.0, 1.0)
-    dry = math.cos(0.5 * math.pi * beta)
-    wet = math.sin(0.5 * math.pi * beta)
+
+    # Quantize beta to 12-bit resolution for caching (4096 distinct values)
+    # This provides ~0.02% precision which is inaudible
+    beta_key = int(beta * 4096)
+
+    if beta_key in _WEIGHT_CACHE:
+        return _WEIGHT_CACHE[beta_key]
+
+    # Convert beta [0,1] to phase [0, pi/2] for sine_core
+    # beta=0 -> phase=0, beta=1 -> phase=0x40000000 (90 degrees)
+    phase = int(beta * PHASE_90_DEG) & PHASE_MASK
+
+    # wet = sin(pi/2 * beta), dry = cos(pi/2 * beta)
+    wet_q15 = sine_q15(phase)
+    dry_q15 = cosine_q15(phase)
+
+    # Convert Q15 to float for mixing (normalize by 32767)
+    wet = wet_q15 / Q15_ONE
+    dry = dry_q15 / Q15_ONE
+
+    # Cache the result
+    _WEIGHT_CACHE[beta_key] = (dry, wet)
+
     return dry, wet
 
 
@@ -73,11 +105,24 @@ def hann_window(K: int) -> np.ndarray:
 
     Used for OLA in/out windows that form a partition of unity:
     w_out + w_in = 1 (approximately exact with complementary Hann halves)
+
+    Uses sine_core LUT for deterministic, bit-exact results.
+    Formula: w[n] = 0.5 - 0.5 * cos(2π * n / (K-1))
     """
     if K <= 1:
         return np.ones((K,), dtype=np.float32)
-    n = np.arange(K, dtype=np.float32)
-    return 0.5 - 0.5 * np.cos(2.0 * math.pi * n / (K - 1))
+
+    window = np.empty((K,), dtype=np.float32)
+    for n in range(K):
+        # Map n to phase: 2π * n / (K-1) corresponds to one full cycle
+        # Phase 0 to 2^32 = one full cycle, so multiply by 2^32
+        # phase = (n / (K-1)) * 2^32
+        phase = int((n / (K - 1)) * (1 << 32)) & PHASE_MASK
+        cos_q15 = cosine_q15(phase)
+        # Convert Q15 to float and apply formula: 0.5 - 0.5 * cos(...)
+        window[n] = 0.5 - 0.5 * (cos_q15 / Q15_ONE)
+
+    return window
 
 
 # =============================================================================
@@ -201,7 +246,9 @@ class AntiClickOperator:
 
         # Compute beta_step per block from bloom_time_s
         block_dt = self.cfg.block_size / self.cfg.sample_rate
-        bloom_blocks = max(1, int(math.ceil(self.cfg.bloom_time_s / block_dt)))
+        # ceil(a/b) = (a + b - 1) // b for positive values
+        # bloom_blocks = ceil(bloom_time_s / block_dt)
+        bloom_blocks = max(1, int((self.cfg.bloom_time_s + block_dt - 1e-9) / block_dt))
         st.beta_step = 1.0 / bloom_blocks
 
         return st

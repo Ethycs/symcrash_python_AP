@@ -8,7 +8,7 @@ This module is the SINGLE AUTHORITY for ensuring no discontinuities reach
 the audio output. It implements the v2 Carrier + Lift architecture:
 
     Carrier (Baby Fourier) -> AntiClick -> Safety -> Output
-           \-> IDWPT Lift -/
+           |-> IDWPT Lift -|
 
 Key Responsibilities:
 1. **note-off / steal never pops** - AntiClickOperator handles all transitions
@@ -30,7 +30,6 @@ gradually - no need for dual-render.
 
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any, Tuple
-import math
 import numpy as np
 
 # Q15 constants
@@ -55,6 +54,9 @@ from ..wavelet.backends import (
     HarmonicScaffoldBackend,
     WaveletBackend,
 )
+
+# Use sine_core for bit-exact trig (no math.sin/cos in hot paths)
+from ..wavelet.sine_core import sine_q15, cosine_q15, PHASE_MASK
 
 # VM Executor (WSE-STD-VM-HYBRID v0)
 if USE_VM_EXECUTOR:
@@ -424,11 +426,20 @@ class UnifiedOutputStage:
         """
         samples = self.render_voice(frame)
 
-        # Convert to stereo
+        # Convert to stereo using sine_core for bit-exact pan law
+        # pan_q15 range: -32768 (full left) to +32767 (full right)
+        # Map to phase [0, pi/2] for equal-power panning
+        # pan_norm in [0, 1] -> phase in [0, 0x40000000]
         pan_q15 = frame.pan_q15
-        pan_norm = (pan_q15 + Q15_SCALE) / (2 * Q15_SCALE)
-        left_gain = math.cos(pan_norm * math.pi / 2)
-        right_gain = math.sin(pan_norm * math.pi / 2)
+        pan_norm = (pan_q15 + Q15_SCALE) / (2 * Q15_SCALE)  # [0, 1]
+        # Phase for pi/2 is 0x40000000, so multiply pan_norm by that
+        pan_phase = int(pan_norm * 0x40000000) & PHASE_MASK
+        # left = cos(phase), right = sin(phase) for equal-power pan
+        left_q15 = cosine_q15(pan_phase)
+        right_q15 = sine_q15(pan_phase)
+        # Convert Q15 to float gain
+        left_gain = left_q15 / Q15_ONE
+        right_gain = right_q15 / Q15_ONE
 
         L = [int(s * left_gain) for s in samples]
         R = [int(s * right_gain) for s in samples]

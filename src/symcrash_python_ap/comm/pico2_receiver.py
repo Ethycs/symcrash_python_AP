@@ -25,12 +25,15 @@ from dataclasses import dataclass, field
 
 from .dual_uart_link import (
     cobs_decode,
+    cobs_encode,
     crc32c,
     FRAME_MAGIC,
     FRAME_HEADER_SIZE,
     ControlMsgType,
     SetMacro,
     FrameHeader,
+    HelloAck,
+    DualUARTPacket,
 )
 from ..parameter_registry import (
     ParameterBank,
@@ -153,6 +156,9 @@ class Pico2Receiver:
                 stopbits=serial.STOPBITS_ONE,
                 timeout=0.001  # Reduced from 0.1 for lower latency
             )
+            # Explicitly set DTR to signal connection to Pico2
+            # This triggers tud_cdc_n_connected() to return true
+            self._serial.dtr = True
             return True
         except serial.SerialException as e:
             print(f"[Pico2Receiver] Failed to connect: {e}")
@@ -390,8 +396,50 @@ class Pico2Receiver:
         self.stats.frames_valid += 1
 
         # Handle message by type
-        if header.msg_type == ControlMsgType.SET_MACRO:
+        if header.msg_type == ControlMsgType.HELLO:
+            self._handle_hello(header.seq)
+        elif header.msg_type == ControlMsgType.SET_MACRO:
             self._handle_set_macro(payload)
+
+    def _handle_hello(self, seq: int):
+        """Handle HELLO message from Pico2 - send HELLO_ACK to establish connection."""
+        print("[Pico2Receiver] Received HELLO, sending HELLO_ACK")
+
+        # Create HELLO_ACK payload
+        hello_ack = HelloAck(
+            block_id=0,
+            credit_bytes=4096,
+            max_payload=512,
+            protocol_version=0x01,
+        )
+
+        # Build frame header
+        header = FrameHeader(
+            magic=FRAME_MAGIC,
+            version=0x01,
+            channel=0,  # Control channel
+            msg_type=ControlMsgType.HELLO_ACK,
+            flags=0,
+            seq=seq,
+            length=len(hello_ack.to_bytes()),
+            crc32=0,  # Will be computed
+        )
+
+        # Serialize header (first 10 bytes) + placeholder CRC
+        header_bytes = header.to_bytes()[:10] + b'\x00\x00\x00\x00'
+        payload_bytes = hello_ack.to_bytes()
+
+        # Compute CRC over header (with zero CRC field) + payload
+        computed_crc = crc32c(header_bytes + payload_bytes)
+
+        # Rebuild header with correct CRC
+        header.crc32 = computed_crc
+        frame_data = header.to_bytes() + payload_bytes
+
+        # COBS encode and send
+        encoded = cobs_encode(frame_data)
+        if self._serial and self._serial.is_open:
+            self._serial.write(encoded + b'\x00')
 
     def _handle_set_macro(self, payload: bytes):
         """Handle a SetMacro message."""
@@ -443,27 +491,59 @@ class Pico2Receiver:
 # CONVENIENCE FUNCTIONS
 # =============================================================================
 
-def find_pico2_port() -> Optional[str]:
+def find_pico2_ports() -> tuple[Optional[str], Optional[str]]:
     """
-    Auto-detect Pico2 USB CDC port.
+    Auto-detect Pico2 USB CDC ports (dual CDC device).
+
+    The Pico2 presents two virtual COM ports:
+    - Control channel (CDC 0): Used for commands and SetMacro messages
+    - Data channel (CDC 1): Used for streaming voice data
 
     Returns:
-        Port name if found, None otherwise
+        Tuple of (control_port, data_port), either may be None if not found
     """
     try:
         from serial.tools import list_ports
 
+        # Find all Pico2 ports
+        pico_ports = []
         for port in list_ports.comports():
-            # Look for Raspberry Pi Pico
-            if "Pico" in port.description or "2E8A" in (port.hwid or ""):
-                return port.device
-            # Also check for generic CDC
-            if "CDC" in port.description:
-                return port.device
+            # Look for Raspberry Pi Pico (VID 0x2E8A)
+            if "2E8A" in (port.hwid or ""):
+                pico_ports.append(port.device)
+            elif "Pico" in port.description:
+                pico_ports.append(port.device)
+            elif "Symcrash" in port.description:
+                pico_ports.append(port.device)
 
-        return None
+        if not pico_ports:
+            return None, None
+
+        # Sort ports - typically lower COM number is CDC 0 (control)
+        pico_ports.sort()
+
+        if len(pico_ports) >= 2:
+            # Dual CDC: first is control, second is data
+            return pico_ports[0], pico_ports[1]
+        else:
+            # Single port found (maybe only one interface or old firmware)
+            return pico_ports[0], None
+
     except ImportError:
-        return None
+        return None, None
+
+
+def find_pico2_port() -> Optional[str]:
+    """
+    Auto-detect Pico2 USB CDC control port.
+
+    For dual CDC devices, returns the control channel port (CDC 0).
+
+    Returns:
+        Port name if found, None otherwise
+    """
+    control_port, _ = find_pico2_ports()
+    return control_port
 
 
 def create_receiver(port: str = None) -> Pico2Receiver:
@@ -477,9 +557,12 @@ def create_receiver(port: str = None) -> Pico2Receiver:
         Configured Pico2Receiver
     """
     if port is None:
-        port = find_pico2_port()
-        if port:
-            print(f"[Pico2Receiver] Auto-detected port: {port}")
+        control_port, data_port = find_pico2_ports()
+        if control_port:
+            print(f"[Pico2Receiver] Auto-detected control port: {control_port}")
+            if data_port:
+                print(f"[Pico2Receiver] Auto-detected data port: {data_port}")
+            port = control_port
         else:
             print("[Pico2Receiver] No Pico2 detected, port must be specified manually")
 

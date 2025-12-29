@@ -2713,6 +2713,10 @@ class VoiceEngine:
         """Get number of active voices."""
         return sum(1 for v in self.voices.values() if v.phase != VoicePhase.FREE)
 
+    def active_voices(self) -> List[int]:
+        """Get list of active voice IDs."""
+        return [vid for vid, v in self.voices.items() if v.phase != VoicePhase.FREE]
+
     def get_voice_regime(self, voice_id: int) -> Optional[Regime]:
         """Get current regime for a voice."""
         if voice_id not in self.voices:

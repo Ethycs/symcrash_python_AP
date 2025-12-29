@@ -376,7 +376,7 @@ def blend_coefficients(c_a: List[int], c_b: List[int], alpha_q15: int) -> List[i
     Returns:
         Blended coefficient vector (256 values)
     """
-    from fixed import MIX_Q15
+    from ..fixed import MIX_Q15
 
     n = min(len(c_a), len(c_b), COEFF_LEN)
     c_blend = [0] * COEFF_LEN
