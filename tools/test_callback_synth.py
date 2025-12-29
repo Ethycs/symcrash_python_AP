@@ -65,19 +65,19 @@ def audio_callback(outdata, frames, time_info, status):
                 is_active=True,
             )
 
-            left, right = stage.render_block(frame)
-            for i in range(BLOCK_SIZE):
-                outdata[output_idx + i, 0] = left[i] / Q15_ONE
+            # Use render_voice() directly (faster, mono output)
+            samples = stage.render_voice(frame)
+            # samples is a list - use numpy slice assignment (faster than loop)
+            outdata[output_idx:output_idx + BLOCK_SIZE, 0] = np.array(samples, dtype=np.float32) / Q15_ONE
         else:
-            for i in range(BLOCK_SIZE):
-                outdata[output_idx + i, 0] = 0.0
+            outdata[output_idx:output_idx + BLOCK_SIZE, 0] = 0.0
 
         output_idx += BLOCK_SIZE
         blocks_rendered += 1
 
     # Fill remainder with silence
-    for i in range(remainder):
-        outdata[output_idx + i, 0] = 0.0
+    if remainder > 0:
+        outdata[output_idx:output_idx + remainder, 0] = 0.0
 
 
 print("Starting audio stream (3 seconds)...")

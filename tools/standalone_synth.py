@@ -5,7 +5,7 @@ Standalone Synthesis Test
 
 Test synthesis pipeline without Pico2 hardware.
 Uses keyboard input to trigger notes.
-Uses pre-rendering in a background thread + sd.play() (reliable on Windows).
+Uses sd.OutputStream callback for real-time audio.
 
 Controls:
 - SPACE: Toggle note on/off
@@ -17,7 +17,6 @@ Controls:
 
 import sys
 import threading
-import queue
 from typing import Optional
 
 # Platform-specific keyboard input
@@ -81,7 +80,6 @@ from symcrash_python_ap.frames import VoiceFrame
 SAMPLE_RATE = 44100
 BLOCK_SIZE = 64
 Q15_ONE = 32767
-CHUNK_BLOCKS = 50  # Render 50 blocks at a time (~73ms at 44100Hz)
 
 
 class StandaloneSynth:
@@ -90,8 +88,7 @@ class StandaloneSynth:
         self.stage = UnifiedOutputStage(block_size=BLOCK_SIZE)
 
         self.running = False
-        self.render_thread = None
-        self.play_thread = None
+        self.stream = None
 
         self.current_note = 60
         self.current_voice_id = None
@@ -100,91 +97,78 @@ class StandaloneSynth:
         self.blocks_rendered = 0
         self.lock = threading.Lock()
 
-        # Queue for rendered audio chunks
-        self.audio_queue = queue.Queue(maxsize=4)
+    def _audio_callback(self, outdata, frames, time_info, status):
+        """Audio callback - fill output buffer with synthesized audio."""
+        if status:
+            print(f"Audio status: {status}")
 
-    def _render_loop(self):
-        """Background thread that continuously renders audio chunks."""
-        while self.running:
-            chunk_samples = []
+        num_blocks = frames // BLOCK_SIZE
+        remainder = frames % BLOCK_SIZE
+        output_idx = 0
 
-            for _ in range(CHUNK_BLOCKS):
-                voice_frames = self.engine.step_all()
+        for _ in range(num_blocks):
+            voice_frames = self.engine.step_all()
 
-                # Find first active voice
-                active_frame = None
-                for vf in voice_frames:
-                    if vf.is_active and vf.gain_q15 > 0:
-                        active_frame = vf
-                        break
+            # Find first active voice
+            active_frame = None
+            for vf in voice_frames:
+                if vf.is_active and vf.gain_q15 > 0:
+                    active_frame = vf
+                    break
 
-                if active_frame is not None:
-                    with self.lock:
-                        note = self.current_note
-                    f0_hz = 440.0 * (2.0 ** ((note - 69) / 12.0))
-                    frame = VoiceFrame(
-                        voice_id=active_frame.voice_id,
-                        note=note,
-                        f0_hz=f0_hz,
-                        gain_q15=active_frame.gain_q15,
-                        is_active=True,
-                    )
-
-                    left, right = self.stage.render_block(frame)
-                    # Convert to float
-                    left_float = np.array(left, dtype=np.float32) / Q15_ONE
-                    chunk_samples.extend(left_float)
-                else:
-                    # Silence
-                    chunk_samples.extend([0.0] * BLOCK_SIZE)
-
+            if active_frame is not None:
                 with self.lock:
-                    self.blocks_rendered += 1
+                    note = self.current_note
+                f0_hz = 440.0 * (2.0 ** ((note - 69) / 12.0))
+                frame = VoiceFrame(
+                    voice_id=active_frame.voice_id,
+                    note=note,
+                    f0_hz=f0_hz,
+                    gain_q15=active_frame.gain_q15,
+                    is_active=True,
+                )
 
-            # Put chunk in queue (blocks if queue is full)
-            if chunk_samples:
-                audio = np.array(chunk_samples, dtype=np.float32)
-                try:
-                    self.audio_queue.put(audio, timeout=0.5)
-                except queue.Full:
-                    pass  # Drop chunk if queue full
+                # Use render_voice() (faster than render_block)
+                samples = self.stage.render_voice(frame)
+                outdata[output_idx:output_idx + BLOCK_SIZE, 0] = np.array(samples, dtype=np.float32) / Q15_ONE
+            else:
+                outdata[output_idx:output_idx + BLOCK_SIZE, 0] = 0.0
 
-    def _play_loop(self):
-        """Background thread that plays audio chunks from queue."""
-        while self.running:
-            try:
-                audio = self.audio_queue.get(timeout=0.1)
-                sd.play(audio, SAMPLE_RATE)
-                sd.wait()
-            except queue.Empty:
-                pass
+            output_idx += BLOCK_SIZE
+
+            with self.lock:
+                self.blocks_rendered += 1
+
+        # Fill remainder with silence
+        if remainder > 0:
+            outdata[output_idx:output_idx + remainder, 0] = 0.0
 
     def start(self):
-        """Start the synthesizer."""
+        """Start the synthesizer with real-time audio callback."""
         # Use device 4 (Realtek Digital Output - proven working)
         sd.default.device = 4
         print(f"Using audio device 4: {sd.query_devices(4)['name']}")
 
         self.running = True
 
-        # Start render thread
-        self.render_thread = threading.Thread(target=self._render_loop, daemon=True)
-        self.render_thread.start()
-
-        # Start play thread
-        self.play_thread = threading.Thread(target=self._play_loop, daemon=True)
-        self.play_thread.start()
-
+        # Start audio stream with callback
+        self.stream = sd.OutputStream(
+            samplerate=SAMPLE_RATE,
+            channels=1,
+            callback=self._audio_callback,
+            blocksize=BLOCK_SIZE * 16,  # Buffer 16 blocks
+            latency='high',
+        )
+        self.stream.start()
         return True
 
     def stop(self):
         """Stop the synthesizer."""
         self.running = False
-        if self.render_thread:
-            self.render_thread.join(timeout=1.0)
-        if self.play_thread:
-            self.play_thread.join(timeout=1.0)
-        sd.stop()
+        if self.stream:
+            self.stream.stop()
+            self.stream.close()
+            self.stream = None
 
     def note_on(self, note: int = 60, velocity: int = 100):
         """Trigger a note."""
@@ -225,12 +209,11 @@ class StandaloneSynth:
             print(f"Status: blocks={self.blocks_rendered} "
                   f"note={self.current_note} "
                   f"voice={self.current_voice_id} "
-                  f"active={self.note_active} "
-                  f"queue={self.audio_queue.qsize()}")
+                  f"active={self.note_active}")
 
 
 def main():
-    print("Standalone Synthesis Test")
+    print("Standalone Synthesis Test (Real-time)")
     print("=" * 60)
 
     synth = StandaloneSynth()
