@@ -35,37 +35,6 @@ extern void system_init(void);
 extern void led_toggle(void);
 
 int main(void) {
-    // =========================================================================
-    // CS PIN TEST MODE - Hold both CS pins HIGH to verify GPIO output works
-    // =========================================================================
-    #define CS_TEST_MODE 0  // Set to 0 for normal operation
-
-    #if CS_TEST_MODE
-    // Minimal init for CS test
-    stdio_init_all();
-
-    // Initialize just the CS pins as GPIO outputs
-    gpio_init(13);  // LCD0 CS
-    gpio_init(2);   // LCD1 CS (GP2)
-    gpio_set_dir(13, GPIO_OUT);
-    gpio_set_dir(2, GPIO_OUT);
-
-    // Drive both HIGH
-    gpio_put(13, 1);
-    gpio_put(2, 1);
-
-    // Also enable pullups
-    gpio_pull_up(13);
-    gpio_pull_up(2);
-
-    // Infinite loop - measure GP3 and GP13 with multimeter
-    // Both should read ~3.3V
-    while (true) {
-        tight_loop_contents();
-    }
-    #endif
-    // =========================================================================
-
     // Initialize all hardware and software subsystems
     system_init();
 

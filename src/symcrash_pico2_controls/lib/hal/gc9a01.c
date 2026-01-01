@@ -264,8 +264,8 @@ static void init_display_registers(display_id_t display, bool rotate_180) {
 
     // Memory access control (orientation)
     // 0x48 = MX | BGR (normal)
-    // 0xC8 = MY | MX | BGR (180° rotation)
-    uint8_t madctl = rotate_180 ? 0xC8 : 0x48;
+    // 0x88 = MY | BGR (Y-flip only, for Display 1)
+    uint8_t madctl = rotate_180 ? 0x88 : 0x48;
     write_command_data(display, GC9A01_MADCTL, &madctl, 1);
 
     // Pixel format: 16-bit RGB565
