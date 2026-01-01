@@ -275,6 +275,102 @@ class TestVoiceFrameEmitter:
         # After release, should be very quiet
         assert frame.gain_q15 < 1000
 
+    def test_eta_override(self):
+        """set_eta() overrides preset beta ramp."""
+        compiler = PresetCompiler()
+        preset_dict = {
+            'preset': {'preset_id': 'TEST'},
+            'material': {
+                'beta_start_q15': 0,
+                'beta_target_q15': 32767,
+                'beta_ramp_blocks': 100,
+            },
+        }
+        compiled = compiler.compile(preset_dict)
+
+        emitter = VoiceFrameEmitter(preset=compiled)
+        emitter.note_on(note=60, velocity_q15=32767)
+
+        # Without override, first frame should have low eta (from ramp start)
+        frame1 = emitter.emit_frame()
+        assert frame1.beta_target_q15 < 5000  # Near start of ramp
+
+        # Set override
+        emitter.set_eta(16384)  # 0.5
+
+        # With override, eta should be exactly the override value
+        frame2 = emitter.emit_frame()
+        assert frame2.beta_target_q15 == 16384
+
+        # Clear override
+        emitter.set_eta(None)
+
+        # Should return to ramp (now at block 2)
+        frame3 = emitter.emit_frame()
+        assert frame3.beta_target_q15 != 16384  # Should be ramp value
+
+    def test_detune_changes_frequency(self):
+        """set_detune() shifts frequency."""
+        compiler = PresetCompiler()
+        preset_dict = {'preset': {'preset_id': 'TEST'}}
+        compiled = compiler.compile(preset_dict)
+
+        emitter = VoiceFrameEmitter(preset=compiled)
+        emitter.note_on(note=69, velocity_q15=32767)  # A4 = 440 Hz
+
+        # Without detune
+        frame1 = emitter.emit_frame()
+        assert abs(frame1.f0_hz - 440.0) < 0.1
+
+        # Detune by +1200 cents (1 octave up)
+        emitter.set_detune(1200)
+        frame2 = emitter.emit_frame()
+        assert abs(frame2.f0_hz - 880.0) < 0.1  # Should be 880 Hz
+
+        # Detune by -1200 cents (1 octave down)
+        emitter.set_detune(-1200)
+        frame3 = emitter.emit_frame()
+        assert abs(frame3.f0_hz - 220.0) < 0.1  # Should be 220 Hz
+
+    def test_detune_in_cents_reflects_in_frame(self):
+        """Frame cents field includes detune."""
+        compiler = PresetCompiler()
+        preset_dict = {'preset': {'preset_id': 'TEST'}}
+        compiled = compiler.compile(preset_dict)
+
+        emitter = VoiceFrameEmitter(preset=compiled)
+        emitter.note_on(note=60, velocity_q15=32767, cents=50)  # +50 cents
+
+        # Add detune
+        emitter.set_detune(100)  # +100 cents
+
+        frame = emitter.emit_frame()
+        assert frame.cents == 150  # 50 + 100
+
+    def test_reset_clears_overrides(self):
+        """reset() clears eta override and detune."""
+        compiler = PresetCompiler()
+        preset_dict = {'preset': {'preset_id': 'TEST'}}
+        compiled = compiler.compile(preset_dict)
+
+        emitter = VoiceFrameEmitter(preset=compiled)
+        emitter.note_on(note=60, velocity_q15=32767)
+
+        # Set overrides
+        emitter.set_eta(16384)
+        emitter.set_detune(1200)
+
+        # Verify they're set
+        assert emitter.get_eta() == 16384
+        assert emitter.get_detune() == 1200
+
+        # Reset
+        emitter.reset()
+
+        # Overrides should be cleared
+        assert emitter._eta_override_q15 is None
+        assert emitter._detune_cents == 0
+
 
 # =============================================================================
 # MACRO RUNTIME TESTS

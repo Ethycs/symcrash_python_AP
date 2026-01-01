@@ -1,6 +1,6 @@
 /**
  * @file mcp3008.c
- * @brief MCP3008 SPI ADC driver implementation
+ * @brief MCP3008 SPI ADC driver implementation (dual ADC support)
  */
 
 #include "mcp3008.h"
@@ -23,8 +23,65 @@ typedef struct {
     bool changed;               // Value changed flag
 } channel_state_t;
 
-static channel_state_t g_channels[8];
+// Support up to 16 channels (2 ADCs x 8 channels each)
+static channel_state_t g_channels[16];
 static adc_change_callback_t g_callback = NULL;
+
+// CS pins for each ADC
+static const uint8_t g_cs_pins[MCP3008_NUM_ADCS] = {
+    MCP3008_0_CS_PIN,
+    MCP3008_1_CS_PIN
+};
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+/**
+ * @brief Get ADC ID and local channel from global channel number
+ */
+static void channel_to_adc(adc_channel_t global_channel, mcp3008_id_t *adc_id, uint8_t *local_channel) {
+    if (global_channel < NUM_POTS_ADC0) {
+        *adc_id = MCP3008_ADC0;
+        *local_channel = global_channel;
+    } else {
+        *adc_id = MCP3008_ADC1;
+        *local_channel = global_channel - NUM_POTS_ADC0;
+    }
+}
+
+/**
+ * @brief Read raw value from specific ADC and channel
+ */
+static adc_value_t read_adc_channel(mcp3008_id_t adc_id, uint8_t local_channel) {
+    if (adc_id >= MCP3008_NUM_ADCS || local_channel > 7) {
+        return 0;
+    }
+
+    uint8_t cs_pin = g_cs_pins[adc_id];
+
+    // MCP3008 SPI protocol:
+    // Send: Start bit (1), Single-ended mode (1), Channel (D2-D0)
+    // Receive: 10-bit result
+
+    uint8_t tx[3] = {
+        0x01,                               // Start bit
+        (0x80 | (local_channel << 4)),      // Single-ended, channel select
+        0x00                                // Dummy byte
+    };
+    uint8_t rx[3] = {0};
+
+    gpio_put(cs_pin, 0);                    // CS low
+    spi_write_read_blocking(MCP3008_SPI_ID, tx, rx, 3);
+    gpio_put(cs_pin, 1);                    // CS high
+
+    // Extract 10-bit result from rx[1] and rx[2]
+    // rx[1]: lower 2 bits of result (bits 9-8)
+    // rx[2]: lower 8 bits of result (bits 7-0)
+    uint16_t result = ((rx[1] & 0x03) << 8) | rx[2];
+
+    return (adc_value_t)result;
+}
 
 // =============================================================================
 // Initialization
@@ -42,13 +99,15 @@ void mcp3008_init(void) {
     gpio_set_function(SPI0_MOSI_PIN, GPIO_FUNC_SPI);
     gpio_set_function(SPI0_MISO_PIN, GPIO_FUNC_SPI);
 
-    // CS pin as GPIO output (directly controlled)
-    gpio_init(MCP3008_CS_PIN);
-    gpio_set_dir(MCP3008_CS_PIN, GPIO_OUT);
-    gpio_put(MCP3008_CS_PIN, 1);  // CS high (inactive)
+    // Initialize CS pins for both ADCs
+    for (int adc = 0; adc < MCP3008_NUM_ADCS; adc++) {
+        gpio_init(g_cs_pins[adc]);
+        gpio_set_dir(g_cs_pins[adc], GPIO_OUT);
+        gpio_put(g_cs_pins[adc], 1);  // CS high (inactive)
+    }
 
-    // Initialize channel states
-    for (int i = 0; i < 8; i++) {
+    // Initialize channel states for all channels
+    for (int i = 0; i < NUM_POTS; i++) {
         g_channels[i].raw = 0;
         g_channels[i].smoothed = 0;
         g_channels[i].last_sent = 0;
@@ -67,35 +126,19 @@ void mcp3008_set_callback(adc_change_callback_t callback) {
 // =============================================================================
 
 adc_value_t mcp3008_read_raw(adc_channel_t channel) {
-    if (channel > 7) {
+    if (channel >= NUM_POTS) {
         return 0;
     }
 
-    // MCP3008 SPI protocol:
-    // Send: Start bit (1), Single-ended mode (1), Channel (D2-D0)
-    // Receive: 10-bit result
+    mcp3008_id_t adc_id;
+    uint8_t local_channel;
+    channel_to_adc(channel, &adc_id, &local_channel);
 
-    uint8_t tx[3] = {
-        0x01,                           // Start bit
-        (0x80 | (channel << 4)),        // Single-ended, channel select
-        0x00                            // Dummy byte
-    };
-    uint8_t rx[3] = {0};
-
-    gpio_put(MCP3008_CS_PIN, 0);        // CS low
-    spi_write_read_blocking(MCP3008_SPI_ID, tx, rx, 3);
-    gpio_put(MCP3008_CS_PIN, 1);        // CS high
-
-    // Extract 10-bit result from rx[1] and rx[2]
-    // rx[1]: lower 2 bits of result (bits 9-8)
-    // rx[2]: lower 8 bits of result (bits 7-0)
-    uint16_t result = ((rx[1] & 0x03) << 8) | rx[2];
-
-    return (adc_value_t)result;
+    return read_adc_channel(adc_id, local_channel);
 }
 
 adc_value_t mcp3008_read_smoothed(adc_channel_t channel) {
-    if (channel > 7) {
+    if (channel >= NUM_POTS) {
         return 0;
     }
 
@@ -119,7 +162,7 @@ adc_value_t mcp3008_read_smoothed(adc_channel_t channel) {
 }
 
 adc_value_t mcp3008_get_value(adc_channel_t channel) {
-    if (channel > 7) {
+    if (channel >= NUM_POTS) {
         return 0;
     }
     return g_channels[channel].smoothed;
@@ -150,14 +193,14 @@ void mcp3008_scan_all(void) {
 }
 
 bool mcp3008_changed(adc_channel_t channel) {
-    if (channel > 7) {
+    if (channel >= NUM_POTS) {
         return false;
     }
     return g_channels[channel].changed;
 }
 
 void mcp3008_clear_changed(adc_channel_t channel) {
-    if (channel <= 7) {
+    if (channel < NUM_POTS) {
         g_channels[channel].changed = false;
     }
 }
@@ -167,13 +210,13 @@ void mcp3008_clear_changed(adc_channel_t channel) {
 // =============================================================================
 
 void mcp3008_set_smoothing(adc_channel_t channel, uint8_t factor) {
-    if (channel <= 7) {
+    if (channel < NUM_POTS) {
         g_channels[channel].smoothing = factor;
     }
 }
 
 void mcp3008_set_deadband(adc_channel_t channel, uint16_t deadband) {
-    if (channel <= 7) {
+    if (channel < NUM_POTS) {
         g_channels[channel].deadband = deadband;
     }
 }

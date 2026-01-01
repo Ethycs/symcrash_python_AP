@@ -114,10 +114,9 @@ void system_init(void) {
     // Initialize display pages
     display_pages_init();
 
-    // Initialize encoder (buttons disabled - BTN_0/GP5 conflicts with LCD DC pin)
-    // TODO: Reassign button pins to avoid LCD conflict
-    // buttons_init();
-    encoder_init();
+    // Initialize encoder (moved to GP20/21/22 to avoid LCD conflicts)
+    // buttons_init();  // Disabled - BTN_0/GP5 conflicts with LCD DC pin
+    // encoder_init();  // TEMP DISABLED to test crosstalk
 
     // Initialize control mapping (connects pots to macros and display)
     control_map_init();

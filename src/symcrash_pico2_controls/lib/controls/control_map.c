@@ -15,9 +15,10 @@
 // Mapping Tables
 // =============================================================================
 
-// Knob ID -> Macro ID mapping
+// Knob ID -> Macro ID mapping (10 pots: 6 on ADC0 + 4 on ADC1)
 static macro_id_t g_knob_to_macro[NUM_POTS] = {
-    0, 1, 2, 3, 4, 5  // Default: knob N -> macro N
+    0, 1, 2, 3, 4, 5,  // ADC0: ADSR + Filter (pots 0-5)
+    6, 7, 8, 9         // ADC1: Oscillator (pots 6-9)
 };
 
 // Button ID -> MIDI note mapping

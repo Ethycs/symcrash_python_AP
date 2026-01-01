@@ -37,24 +37,41 @@
 #define D_UART_BAUD         3000000 // 3 Mbps
 
 // =============================================================================
-// MCP3008 ADC on SPI0 (6 potentiometers)
+// MCP3008 ADCs on SPI0 (10 potentiometers total)
 // =============================================================================
 
 #define MCP3008_SPI_ID      spi0
 #define SPI0_SCK_PIN        18      // GP18 - SPI0 SCK
 #define SPI0_MOSI_PIN       19      // GP19 - SPI0 TX (MOSI)
 #define SPI0_MISO_PIN       16      // GP16 - SPI0 RX (MISO)
-#define MCP3008_CS_PIN      17      // GP17 - Chip Select
 #define SPI0_BAUD           1000000 // 1 MHz SPI clock
 
-// MCP3008 Channel Assignments (6 pots on channels 0-5)
-#define POT_MACRO_0         0       // CH0 - Macro 0 (e.g., Cutoff)
-#define POT_MACRO_1         1       // CH1 - Macro 1 (e.g., Resonance)
-#define POT_MACRO_2         2       // CH2 - Macro 2 (e.g., Drive)
-#define POT_MACRO_3         3       // CH3 - Macro 3 (e.g., Attack)
-#define POT_MACRO_4         4       // CH4 - Macro 4 (e.g., Release)
-#define POT_MACRO_5         5       // CH5 - Macro 5 (e.g., Mix)
-#define NUM_POTS            6
+// MCP3008 #0 - First 6 pots (ADSR + Filter)
+#define MCP3008_0_CS_PIN    17      // GP17 - Chip Select for ADC 0
+
+// MCP3008 #1 - Additional 4 pots (Oscillator control)
+#define MCP3008_1_CS_PIN    27      // GP27 - Chip Select for ADC 1
+
+// Legacy alias for single-ADC code
+#define MCP3008_CS_PIN      MCP3008_0_CS_PIN
+
+// Channel Assignments - ADC 0 (6 pots on channels 0-5)
+#define POT_MACRO_0         0       // CH0 - Attack
+#define POT_MACRO_1         1       // CH1 - Decay
+#define POT_MACRO_2         2       // CH2 - Sustain
+#define POT_MACRO_3         3       // CH3 - Release
+#define POT_MACRO_4         4       // CH4 - Filter Cutoff
+#define POT_MACRO_5         5       // CH5 - Filter Resonance
+
+// Channel Assignments - ADC 1 (4 pots on channels 0-3)
+#define POT_MACRO_6         6       // ADC1:CH0 - Harmonic Mix / Brightness
+#define POT_MACRO_7         7       // ADC1:CH1 - Eta (Dry/Wet)
+#define POT_MACRO_8         8       // ADC1:CH2 - Detune / Spread
+#define POT_MACRO_9         9       // ADC1:CH3 - Master Gain
+
+#define NUM_POTS_ADC0       6       // Pots on first MCP3008
+#define NUM_POTS_ADC1       4       // Pots on second MCP3008
+#define NUM_POTS            10      // Total pots
 
 // ADC scanning parameters
 #define ADC_SCAN_RATE_HZ    1000    // 1 kHz scanning rate
@@ -76,10 +93,10 @@
 #define LCD0_RST_PIN        9       // GP9  - Display 0 Reset
 #define LCD0_BL_PIN         8       // GP8  - Display 0 Backlight (optional)
 
-// Display 1 (not connected yet)
-#define LCD1_CS_PIN         20      // GP20 - Display 1 CS
-#define LCD1_DC_PIN         21      // GP21 - Display 1 DC
-#define LCD1_RST_PIN        22      // GP22 - Display 1 Reset
+// Display 1 (second screen)
+#define LCD1_CS_PIN         2       // GP2  - Display 1 CS
+#define LCD1_DC_PIN         5       // GP5  - Display 1 DC (shared DC possible)
+#define LCD1_RST_PIN        9       // GP9  - Display 1 Reset (shared RST possible)
 
 // Display parameters
 #define LCD_WIDTH           240     // GC9A01 is 240x240 round
@@ -90,9 +107,12 @@
 // Rotary Encoder
 // =============================================================================
 
-#define ENC0_A_PIN          2       // GP2 - Encoder A
-#define ENC0_B_PIN          3       // GP3 - Encoder B
-#define ENC0_SW_PIN         4       // GP4 - Encoder Switch
+// Encoder pins - moved to avoid conflicts
+// Original: GP2, GP3, GP4 - caused issues with LCD1
+// New: GP20, GP21, GP22 - unused GPIOs
+#define ENC0_A_PIN          20      // GP20 - Encoder A
+#define ENC0_B_PIN          21      // GP21 - Encoder B
+#define ENC0_SW_PIN         22      // GP22 - Encoder Switch
 #define NUM_ENCODERS        1
 
 // Encoder parameters

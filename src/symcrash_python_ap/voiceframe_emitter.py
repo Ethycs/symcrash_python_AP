@@ -73,6 +73,8 @@ class VoiceFrameEmitter:
     - Envelope (ADSR)
     - Beta ramp (dry/wet blend)
     - Note state (pitch, velocity)
+    - Eta override (manual dry/wet control)
+    - Detune (pitch offset in cents)
     """
     preset: CompiledPreset
 
@@ -93,6 +95,10 @@ class VoiceFrameEmitter:
 
     # Note state
     _is_note_on: bool = False
+
+    # Controller overrides (set via set_eta() and set_detune())
+    _eta_override_q15: Optional[int] = None  # None = use preset ramp, 0-32767 = override
+    _detune_cents: int = 0  # Additional detune from controller (-2400 to +2400 typical)
 
     def __post_init__(self):
         """Initialize envelope from preset."""
@@ -134,6 +140,40 @@ class VoiceFrameEmitter:
         if self._envelope:
             self._envelope.release_note()
 
+    def set_eta(self, eta_q15: Optional[int]) -> None:
+        """
+        Set dry/wet blend override.
+
+        Args:
+            eta_q15: Blend value (0=dry, 32767=wet), or None to use preset ramp
+        """
+        if eta_q15 is None:
+            self._eta_override_q15 = None
+        else:
+            self._eta_override_q15 = max(0, min(Q15_ONE, eta_q15))
+
+    def set_detune(self, cents: int) -> None:
+        """
+        Set additional detune offset.
+
+        This is added to the note's cents value for frequency calculation.
+        Typical range: -2400 to +2400 (±2 octaves).
+
+        Args:
+            cents: Detune in cents (100 cents = 1 semitone)
+        """
+        self._detune_cents = cents
+
+    def get_eta(self) -> int:
+        """Get current eta (dry/wet) value in Q15."""
+        if self._eta_override_q15 is not None:
+            return self._eta_override_q15
+        return self._beta_current_q15
+
+    def get_detune(self) -> int:
+        """Get current detune in cents."""
+        return self._detune_cents
+
     def emit_frame(self) -> VoiceFrame:
         """
         Emit next VoiceFrame for this block.
@@ -152,7 +192,7 @@ class VoiceFrameEmitter:
         # Apply velocity scaling
         gain_q15 = (gain_q15 * self.velocity_q15) >> 15
 
-        # Compute beta ramp
+        # Compute beta ramp (preset-driven)
         beta_target = self.preset.material.beta_target_q15
         ramp_blocks = self.preset.material.beta_ramp_blocks
 
@@ -164,17 +204,21 @@ class VoiceFrameEmitter:
         else:
             self._beta_current_q15 = beta_target
 
-        # Compute f0_hz from MIDI note
-        f0_hz = midi_to_hz(self.note, self.cents)
+        # Determine effective eta: override takes precedence over preset ramp
+        effective_eta_q15 = self._eta_override_q15 if self._eta_override_q15 is not None else self._beta_current_q15
+
+        # Compute f0_hz from MIDI note + cents + detune
+        total_cents = self.cents + self._detune_cents
+        f0_hz = midi_to_hz(self.note, total_cents)
 
         # Build VoiceFrame
         frame = VoiceFrame(
             voice_id=self.voice_id,
             f0_hz=f0_hz,
             note=self.note,
-            cents=self.cents,
+            cents=total_cents,  # Include detune in frame
             gain_q15=gain_q15,
-            beta_target_q15=self._beta_current_q15,
+            beta_target_q15=effective_eta_q15,
             partial_amps_q15=list(self.preset.harmonic_amps_q15),
             ops_enable=self.preset.backbone_ops(),
             families=self.preset.backbone_families(),
@@ -209,6 +253,8 @@ class VoiceFrameEmitter:
         self.block_index = 0
         self._is_note_on = False
         self._beta_current_q15 = self.preset.material.beta_start_q15
+        self._eta_override_q15 = None
+        self._detune_cents = 0
         if self._envelope:
             self._envelope.reset()
 

@@ -35,12 +35,19 @@ from ..voice.voice_engine import VoiceEngine, GestureBasis
 # =============================================================================
 
 # Macro ID -> Parameter mapping
+# ADC0: ADSR + Filter (pots 0-5)
 MACRO_ATTACK = 0
 MACRO_DECAY = 1
 MACRO_SUSTAIN = 2
 MACRO_RELEASE = 3
 MACRO_CUTOFF = 4
 MACRO_RESO = 5
+
+# ADC1: Oscillator controls (pots 6-9)
+MACRO_HARMONICS = 6   # Harmonic mix / brightness
+MACRO_ETA = 7         # Dry/wet blend (carrier vs wavelet texture)
+MACRO_DETUNE = 8      # Detune / spread
+MACRO_GAIN = 9        # Master gain
 
 # Block timing constants (matching voice_engine.py)
 BLOCK_SIZE = 64
@@ -76,6 +83,15 @@ class FilterState:
     reso_q15: int = 0         # 0.0
 
 
+@dataclass
+class OscillatorState:
+    """Current oscillator parameter state."""
+    harmonics_q15: int = 0        # Harmonic mix (0 = fundamental only)
+    eta_q15: int = 16384          # Dry/wet blend (0.5 = balanced)
+    detune_q15: int = 0           # Detune amount
+    gain_q15: int = 24576         # Master gain (~0.75)
+
+
 class Pico2SynthBridge:
     """
     Bridges Pico2 hardware controller to VoiceEngine.
@@ -105,6 +121,7 @@ class Pico2SynthBridge:
         # State tracking
         self.adsr = ADSRState()
         self.filter = FilterState()
+        self.osc = OscillatorState()
 
         # Create receiver with callback
         self.receiver = Pico2Receiver(port=self.port)
@@ -163,6 +180,15 @@ class Pico2SynthBridge:
             self._update_cutoff(value_q15)
         elif macro_id == MACRO_RESO:
             self._update_reso(value_q15)
+        # Oscillator controls (ADC1)
+        elif macro_id == MACRO_HARMONICS:
+            self._update_harmonics(value_q15)
+        elif macro_id == MACRO_ETA:
+            self._update_eta(value_q15)
+        elif macro_id == MACRO_DETUNE:
+            self._update_detune(value_q15)
+        elif macro_id == MACRO_GAIN:
+            self._update_gain(value_q15)
 
     def _update_attack(self, value_q15: int):
         """Update attack time."""
@@ -249,6 +275,43 @@ class Pico2SynthBridge:
                 self.engine.update_gesture(vid, gesture)
 
     # =========================================================================
+    # OSCILLATOR CONTROLS (ADC1)
+    # =========================================================================
+
+    def _update_harmonics(self, value_q15: int):
+        """Update harmonic mix / brightness.
+
+        This controls how much higher harmonics are mixed into the sound.
+        0 = fundamental only, 32767 = full harmonic content.
+        """
+        self.osc.harmonics_q15 = value_q15
+        # Note: This will be used by VoiceFrame.partial_amps_q15 in the render path
+
+    def _update_eta(self, value_q15: int):
+        """Update dry/wet blend (carrier vs wavelet texture).
+
+        0 = pure carrier (dry), 32767 = pure wavelet texture (wet).
+        """
+        self.osc.eta_q15 = value_q15
+        # Note: This maps to VoiceFrame.beta_target_q15 in the render path
+
+    def _update_detune(self, value_q15: int):
+        """Update detune / spread amount.
+
+        0 = no detune, 32767 = maximum detune spread.
+        """
+        self.osc.detune_q15 = value_q15
+        # Note: Could be used for voice spreading or chorus effects
+
+    def _update_gain(self, value_q15: int):
+        """Update master gain.
+
+        Controls the overall output level.
+        """
+        self.osc.gain_q15 = value_q15
+        # Note: This can override the ADSR envelope gain for master volume control
+
+    # =========================================================================
     # LIFECYCLE
     # =========================================================================
 
@@ -304,14 +367,31 @@ class Pico2SynthBridge:
             "RES": f"{100 * self.filter.reso_q15 / Q15_MAX:.0f}%",
         }
 
+    def get_osc_display(self) -> Dict[str, str]:
+        """
+        Get oscillator values formatted for display.
+
+        Returns:
+            Dict with HARM, ETA, DET, GAIN as strings
+        """
+        return {
+            "HARM": f"{100 * self.osc.harmonics_q15 / Q15_MAX:.0f}%",
+            "ETA": f"{100 * self.osc.eta_q15 / Q15_MAX:.0f}%",
+            "DET": f"{100 * self.osc.detune_q15 / Q15_MAX:.0f}%",
+            "GAIN": f"{100 * self.osc.gain_q15 / Q15_MAX:.0f}%",
+        }
+
     def print_status(self):
         """Print current parameter status."""
         print("[Pico2SynthBridge] Status:")
         adsr = self.get_adsr_display()
         filter_ = self.get_filter_display()
+        osc = self.get_osc_display()
         print(f"  ADSR: ATK={adsr['ATK']} DCY={adsr['DCY']} "
               f"SUS={adsr['SUS']} REL={adsr['REL']}")
         print(f"  Filter: CUT={filter_['CUT']} RES={filter_['RES']}")
+        print(f"  Osc: HARM={osc['HARM']} ETA={osc['ETA']} "
+              f"DET={osc['DET']} GAIN={osc['GAIN']}")
 
 
 # =============================================================================

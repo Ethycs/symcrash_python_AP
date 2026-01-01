@@ -123,11 +123,42 @@ static const uint8_t font5x7[][5] = {
 // =============================================================================
 
 static void select_display(display_id_t display) {
+    // Wait for any in-flight SPI to complete
+    while (spi_is_busy(LCD_SPI_ID)) {
+        tight_loop_contents();
+    }
+
+    // ALWAYS explicitly drive both CS pins - no optimization
+    // This ensures the non-selected display CS is definitely HIGH
+    gpio_put(g_displays[DISPLAY_0].cs_pin, 1);
+    gpio_put(g_displays[DISPLAY_1].cs_pin, 1);
+
+    // Delay to ensure CS lines fully settle
+    for (volatile int i = 0; i < 20; i++) {
+        __asm volatile ("nop");
+    }
+
+    // Now select the target display
     gpio_put(g_displays[display].cs_pin, 0);
+
+    // Delay after selecting
+    for (volatile int i = 0; i < 20; i++) {
+        __asm volatile ("nop");
+    }
 }
 
 static void deselect_display(display_id_t display) {
+    // Wait for SPI to complete before deselecting
+    while (spi_is_busy(LCD_SPI_ID)) {
+        tight_loop_contents();
+    }
+
+    // Deselect the specified display
     gpio_put(g_displays[display].cs_pin, 1);
+
+    // Also ensure the OTHER display is deselected
+    display_id_t other = (display == DISPLAY_0) ? DISPLAY_1 : DISPLAY_0;
+    gpio_put(g_displays[other].cs_pin, 1);
 }
 
 static void set_dc_command(display_id_t display) {
@@ -201,7 +232,7 @@ static void init_display_hw(display_id_t display) {
 #define GC9A01_GAMMA3    0xF2
 #define GC9A01_GAMMA4    0xF3
 
-static void init_display_registers(display_id_t display) {
+static void init_display_registers(display_id_t display, bool rotate_180) {
     // Full Adafruit GC9A01A initialization sequence
     // Required for proper display operation - minimal init doesn't work
 
@@ -232,7 +263,9 @@ static void init_display_registers(display_id_t display) {
     write_command_data(display, 0xB6, b6, 2);
 
     // Memory access control (orientation)
-    uint8_t madctl = 0x48;  // MX | BGR
+    // 0x48 = MX | BGR (normal)
+    // 0xC8 = MY | MX | BGR (180° rotation)
+    uint8_t madctl = rotate_180 ? 0xC8 : 0x48;
     write_command_data(display, GC9A01_MADCTL, &madctl, 1);
 
     // Pixel format: 16-bit RGB565
@@ -327,13 +360,49 @@ void gc9a01_init(void) {
     gpio_set_function(SPI1_SCK_PIN, GPIO_FUNC_SPI);
     gpio_set_function(SPI1_MOSI_PIN, GPIO_FUNC_SPI);
 
-    // Initialize display 0 only (display 1 not connected yet)
-    gc9a01_init_display(DISPLAY_0);
+    // Initialize GPIO pins for BOTH displays first (before any reset)
+    // This is important because they share DC and RST pins
+    for (int i = 0; i < 2; i++) {
+        const display_pins_t *pins = &g_displays[i];
+        gpio_init(pins->cs_pin);
+        gpio_set_dir(pins->cs_pin, GPIO_OUT);
+        gpio_put(pins->cs_pin, 1);  // CS high (inactive)
+        // Enable pullup as backup to keep CS high when not driven
+        gpio_pull_up(pins->cs_pin);
+        // Set high drive strength for cleaner edges
+        gpio_set_drive_strength(pins->cs_pin, GPIO_DRIVE_STRENGTH_12MA);
+    }
+
+    // Shared DC and RST - only init once
+    gpio_init(LCD0_DC_PIN);
+    gpio_set_dir(LCD0_DC_PIN, GPIO_OUT);
+    gpio_put(LCD0_DC_PIN, 0);
+
+    gpio_init(LCD0_RST_PIN);
+    gpio_set_dir(LCD0_RST_PIN, GPIO_OUT);
+    gpio_put(LCD0_RST_PIN, 1);
+
+    // Single hardware reset for BOTH displays (shared RST line)
+    sleep_ms(50);
+    gpio_put(LCD0_RST_PIN, 0);
+    sleep_ms(50);
+    gpio_put(LCD0_RST_PIN, 1);
+    sleep_ms(150);
+
+    // Now initialize registers for each display (no more resets)
+    // Display 0: normal orientation
+    init_display_registers(DISPLAY_0, false);
+    gc9a01_fill(DISPLAY_0, COLOR_BLACK);
+
+    // Display 1: rotated 180 degrees
+    init_display_registers(DISPLAY_1, true);
+    gc9a01_fill(DISPLAY_1, COLOR_BLACK);
 }
 
 void gc9a01_init_display(display_id_t display) {
     init_display_hw(display);
-    init_display_registers(display);
+    // Display 1 is rotated 180 degrees
+    init_display_registers(display, display == DISPLAY_1);
 
     // Clear to black
     gc9a01_fill(display, COLOR_BLACK);
@@ -345,24 +414,44 @@ void gc9a01_init_display(display_id_t display) {
 
 void gc9a01_set_window(display_id_t display, uint16_t x0, uint16_t y0,
                        uint16_t x1, uint16_t y1) {
+    // IMPORTANT: Keep CS asserted throughout the entire window setup
+    // The GC9A01 expects CS to stay low during CASET/RASET/RAMWR sequence
+    // Toggling CS between commands can cause crosstalk issues with dual displays
+
+    select_display(display);
+
     uint8_t data[4];
 
     // Column address set
+    set_dc_command(display);
+    uint8_t cmd = GC9A01_CASET;
+    spi_write_blocking(LCD_SPI_ID, &cmd, 1);
+    set_dc_data(display);
     data[0] = x0 >> 8;
     data[1] = x0 & 0xFF;
     data[2] = x1 >> 8;
     data[3] = x1 & 0xFF;
-    write_command_data(display, GC9A01_CASET, data, 4);
+    spi_write_blocking(LCD_SPI_ID, data, 4);
 
     // Row address set
+    set_dc_command(display);
+    cmd = GC9A01_RASET;
+    spi_write_blocking(LCD_SPI_ID, &cmd, 1);
+    set_dc_data(display);
     data[0] = y0 >> 8;
     data[1] = y0 & 0xFF;
     data[2] = y1 >> 8;
     data[3] = y1 & 0xFF;
-    write_command_data(display, GC9A01_RASET, data, 4);
+    spi_write_blocking(LCD_SPI_ID, data, 4);
 
-    // RAM write command
-    write_command(display, GC9A01_RAMWR);
+    // RAM write command - leave CS asserted and DC in data mode
+    // for the subsequent pixel writes
+    set_dc_command(display);
+    cmd = GC9A01_RAMWR;
+    spi_write_blocking(LCD_SPI_ID, &cmd, 1);
+    set_dc_data(display);
+
+    // Note: CS stays LOW - caller must call deselect_display after writing pixels
 }
 
 void gc9a01_write_pixels(display_id_t display, const uint16_t *data, size_t len) {
@@ -380,9 +469,7 @@ void gc9a01_write_pixels(display_id_t display, const uint16_t *data, size_t len)
 
 void gc9a01_fill(display_id_t display, color_t color) {
     gc9a01_set_window(display, 0, 0, LCD_WIDTH - 1, LCD_HEIGHT - 1);
-
-    select_display(display);
-    set_dc_data(display);
+    // set_window leaves CS asserted and DC in data mode
 
     uint8_t buf[2] = { color >> 8, color & 0xFF };
     for (uint32_t i = 0; i < LCD_WIDTH * LCD_HEIGHT; i++) {
@@ -396,9 +483,12 @@ void gc9a01_set_pixel(display_id_t display, uint16_t x, uint16_t y, color_t colo
     if (x >= LCD_WIDTH || y >= LCD_HEIGHT) return;
 
     gc9a01_set_window(display, x, y, x, y);
+    // set_window leaves CS asserted and DC in data mode
 
     uint8_t buf[2] = { color >> 8, color & 0xFF };
-    write_data(display, buf, 2);
+    spi_write_blocking(LCD_SPI_ID, buf, 2);
+
+    deselect_display(display);
 }
 
 void gc9a01_fill_rect(display_id_t display, uint16_t x, uint16_t y,
@@ -408,9 +498,7 @@ void gc9a01_fill_rect(display_id_t display, uint16_t x, uint16_t y,
     if (y + h > LCD_HEIGHT) h = LCD_HEIGHT - y;
 
     gc9a01_set_window(display, x, y, x + w - 1, y + h - 1);
-
-    select_display(display);
-    set_dc_data(display);
+    // set_window leaves CS asserted and DC in data mode
 
     uint8_t buf[2] = { color >> 8, color & 0xFF };
     for (uint32_t i = 0; i < w * h; i++) {
