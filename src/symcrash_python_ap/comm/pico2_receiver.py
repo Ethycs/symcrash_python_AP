@@ -50,7 +50,7 @@ from ..parameter_registry import (
 # CONSTANTS
 # =============================================================================
 
-NUM_MACROS = 8  # Maximum macro channels (from Pico2 config)
+NUM_MACROS = 10  # Maximum macro channels (6 ADSR+Filter + 4 Oscillator)
 
 
 # =============================================================================
@@ -294,6 +294,33 @@ class Pico2Receiver:
         Callback signature: callback(macro_id: int, value_q15: int)
         """
         self._macro_callbacks.append(callback)
+
+    def inject_macro(self, macro_id: int, value_q15: int):
+        """
+        Inject a macro value change programmatically.
+
+        This allows software controls (like ImGui) to send macro changes
+        through the same callback chain as hardware messages.
+
+        Args:
+            macro_id: Macro channel (0-9)
+            value_q15: Q15 value (0-32767)
+        """
+        # Update state
+        with self._lock:
+            if 0 <= macro_id < NUM_MACROS:
+                state = self._macros[macro_id]
+                state.value_q15 = value_q15
+                state.value_float = value_q15 / Q15_MAX
+                state.last_update = time.time()
+                state.changed = True
+
+        # Fire callbacks (same as _handle_set_macro)
+        for callback in self._macro_callbacks:
+            try:
+                callback(macro_id, value_q15)
+            except Exception as e:
+                print(f"[Pico2Receiver] Callback error: {e}")
 
     def remove_macro_callback(self, callback: Callable[[int, int], None]):
         """Remove a macro callback."""

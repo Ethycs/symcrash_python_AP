@@ -105,17 +105,20 @@ class Pico2SynthBridge:
         engine: VoiceEngine,
         port: Optional[str] = None,
         program_id: int = 1001,
+        virtual_mode: bool = False,
     ):
         """
         Initialize the synth bridge.
 
         Args:
             engine: VoiceEngine instance to control
-            port: Serial port (auto-detect if None)
+            port: Serial port (auto-detect if None, ignored in virtual_mode)
             program_id: Default instrument program ID
+            virtual_mode: If True, run without hardware (ImGui only)
         """
         self.engine = engine
-        self.port = port or find_pico2_port()
+        self.virtual_mode = virtual_mode
+        self.port = None if virtual_mode else (port or find_pico2_port())
         self.program_id = program_id
 
         # State tracking
@@ -123,7 +126,7 @@ class Pico2SynthBridge:
         self.filter = FilterState()
         self.osc = OscillatorState()
 
-        # Create receiver with callback
+        # Create receiver with callback (works even without port for inject_macro)
         self.receiver = Pico2Receiver(port=self.port)
         self.receiver.add_macro_callback(self._on_macro_change)
 
@@ -285,7 +288,11 @@ class Pico2SynthBridge:
         0 = fundamental only, 32767 = full harmonic content.
         """
         self.osc.harmonics_q15 = value_q15
-        # Note: This will be used by VoiceFrame.partial_amps_q15 in the render path
+
+        # Apply to all active voices
+        for vid in self.engine.active_voices():
+            if vid in self.engine.voices:
+                self.engine.voices[vid].harmonics_q15 = value_q15
 
     def _update_eta(self, value_q15: int):
         """Update dry/wet blend (carrier vs wavelet texture).
@@ -293,23 +300,41 @@ class Pico2SynthBridge:
         0 = pure carrier (dry), 32767 = pure wavelet texture (wet).
         """
         self.osc.eta_q15 = value_q15
-        # Note: This maps to VoiceFrame.beta_target_q15 in the render path
+
+        # Apply to all active voices
+        for vid in self.engine.active_voices():
+            if vid in self.engine.voices:
+                self.engine.voices[vid].eta_q15 = value_q15
 
     def _update_detune(self, value_q15: int):
         """Update detune / spread amount.
 
-        0 = no detune, 32767 = maximum detune spread.
+        Maps Q15 (0-32767) to cents (-2400 to +2400 = ±2 octaves).
+        Center position (16384) = no detune.
         """
         self.osc.detune_q15 = value_q15
-        # Note: Could be used for voice spreading or chorus effects
+
+        # Convert Q15 to signed cents: 0 -> -2400, 16384 -> 0, 32767 -> +2400
+        # Formula: cents = (value_q15 - 16384) * 2400 / 16384
+        centered = value_q15 - 16384  # -16384 to +16383
+        detune_cents = (centered * 2400) // 16384
+
+        # Apply to all active voices
+        for vid in self.engine.active_voices():
+            if vid in self.engine.voices:
+                self.engine.voices[vid].detune_cents = detune_cents
 
     def _update_gain(self, value_q15: int):
         """Update master gain.
 
-        Controls the overall output level.
+        Controls the overall output level (multiplied with ADSR envelope).
         """
         self.osc.gain_q15 = value_q15
-        # Note: This can override the ADSR envelope gain for master volume control
+
+        # Apply to all active voices
+        for vid in self.engine.active_voices():
+            if vid in self.engine.voices:
+                self.engine.voices[vid].master_gain_q15 = value_q15
 
     # =========================================================================
     # LIFECYCLE
@@ -322,6 +347,10 @@ class Pico2SynthBridge:
         Returns:
             True if started successfully
         """
+        if self.virtual_mode:
+            print("[Pico2SynthBridge] Starting in virtual mode (no hardware)")
+            return True
+
         if self.port is None:
             print("[Pico2SynthBridge] No port specified and auto-detect failed")
             return False
@@ -400,19 +429,21 @@ class Pico2SynthBridge:
 
 def create_bridge(
     engine: VoiceEngine,
-    port: Optional[str] = None
+    port: Optional[str] = None,
+    virtual_mode: bool = False,
 ) -> Pico2SynthBridge:
     """
     Create a Pico2SynthBridge with auto-detection.
 
     Args:
         engine: VoiceEngine to control
-        port: Serial port (auto-detect if None)
+        port: Serial port (auto-detect if None, ignored in virtual_mode)
+        virtual_mode: If True, run without hardware (ImGui only)
 
     Returns:
         Configured Pico2SynthBridge
     """
-    return Pico2SynthBridge(engine, port=port)
+    return Pico2SynthBridge(engine, port=port, virtual_mode=virtual_mode)
 
 
 # =============================================================================

@@ -38,12 +38,17 @@ from .pico2_synth_bridge import (
     Pico2SynthBridge,
     ADSRState,
     FilterState,
+    OscillatorState,
     MACRO_ATTACK,
     MACRO_DECAY,
     MACRO_SUSTAIN,
     MACRO_RELEASE,
     MACRO_CUTOFF,
     MACRO_RESO,
+    MACRO_HARMONICS,
+    MACRO_ETA,
+    MACRO_DETUNE,
+    MACRO_GAIN,
 )
 from ..voice.voice_engine import VoiceEngine
 from ..macro_runtime import MacroRuntime
@@ -140,7 +145,7 @@ class Pico2Controller:
                 print(f"[Pico2Controller] User callback error: {e}")
 
     def _route_to_voice_engine(self, macro_id: int, value_q15: int):
-        """Route macro to VoiceEngine ADSR/Filter parameters."""
+        """Route macro to VoiceEngine ADSR/Filter/Oscillator parameters."""
         # Delegate to synth bridge's internal handlers
         if macro_id == MACRO_ATTACK:
             self.synth_bridge._update_attack(value_q15)
@@ -154,6 +159,15 @@ class Pico2Controller:
             self.synth_bridge._update_cutoff(value_q15)
         elif macro_id == MACRO_RESO:
             self.synth_bridge._update_reso(value_q15)
+        # Oscillator controls (ADC1: pots 6-9)
+        elif macro_id == MACRO_HARMONICS:
+            self.synth_bridge._update_harmonics(value_q15)
+        elif macro_id == MACRO_ETA:
+            self.synth_bridge._update_eta(value_q15)
+        elif macro_id == MACRO_DETUNE:
+            self.synth_bridge._update_detune(value_q15)
+        elif macro_id == MACRO_GAIN:
+            self.synth_bridge._update_gain(value_q15)
 
     def _route_to_macro_runtime(self, macro_id: int, value_q15: int):
         """Route macro to MacroRuntime preset macros."""
@@ -217,6 +231,10 @@ class Pico2Controller:
         """Get current filter parameter state."""
         return self.synth_bridge.filter
 
+    def get_osc_state(self) -> OscillatorState:
+        """Get current oscillator parameter state."""
+        return self.synth_bridge.osc
+
     def get_preset_macro(self, preset_macro: str) -> int:
         """
         Get current value of a preset macro (from MacroRuntime).
@@ -236,9 +254,12 @@ class Pico2Controller:
         # ADSR/Filter from synth bridge
         adsr = self.synth_bridge.get_adsr_display()
         filter_ = self.synth_bridge.get_filter_display()
+        osc = self.synth_bridge.get_osc_display()
         print(f"  ADSR: ATK={adsr['ATK']} DCY={adsr['DCY']} "
               f"SUS={adsr['SUS']} REL={adsr['REL']}")
         print(f"  Filter: CUT={filter_['CUT']} RES={filter_['RES']}")
+        print(f"  OSC: HARM={osc['HARM']} ETA={osc['ETA']} "
+              f"DET={osc['DET']} GAIN={osc['GAIN']}")
 
         # Preset macros from macro runtime
         bright = self.macro_runtime.get_preset_macro("BRIGHT")

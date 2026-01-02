@@ -25,6 +25,7 @@ import sys
 import time
 import threading
 import argparse
+import queue
 from typing import Optional, List, Tuple
 
 # Platform-specific keyboard input
@@ -155,14 +156,17 @@ class Pico2LiveSynth:
 
         # Audio streaming
         self.stream: Optional[sd.OutputStream] = None
+        self.audio_queue: queue.Queue = queue.Queue(maxsize=AUDIO_BUFFER_BLOCKS * 2)
 
         # State
         self.running = False
+        self.render_thread: Optional[threading.Thread] = None
         self.current_voice_id: Optional[int] = None
         self.current_note = 60  # C4
 
         # Stats
         self.blocks_rendered = 0
+        self.buffer_underruns = 0
         self.lock = threading.Lock()
 
     # =========================================================================
@@ -178,7 +182,11 @@ class Pico2LiveSynth:
 
         self.running = True
 
-        # Start audio output (renders directly in callback - no render thread needed)
+        # Start render thread
+        self.render_thread = threading.Thread(target=self._render_loop, daemon=True)
+        self.render_thread.start()
+
+        # Start audio output
         if AUDIO_AVAILABLE:
             self._start_audio()
 
@@ -192,6 +200,10 @@ class Pico2LiveSynth:
             self.stream.stop()
             self.stream.close()
             self.stream = None
+
+        if self.render_thread:
+            self.render_thread.join(timeout=1.0)
+            self.render_thread = None
 
         self.bridge.stop()
 
@@ -215,64 +227,91 @@ class Pico2LiveSynth:
         return 0
 
     def _start_audio(self):
-        """Start audio output stream with direct rendering in callback."""
+        """Start audio output stream."""
         output_device = self._find_output_device()
 
         def audio_callback(outdata, frames, time_info, status):
             if status:
                 print(f"Audio status: {status}")
 
-            num_blocks = frames // BLOCK_SIZE
-            remainder = frames % BLOCK_SIZE
-            output_idx = 0
+            try:
+                # Get pre-rendered audio block
+                left, right = self.audio_queue.get_nowait()
 
-            for _ in range(num_blocks):
-                # Step the voice engine
-                voice_frames = self.engine.step_all()
+                # Convert Q15 to float32 and write stereo
+                left_float = np.array(left, dtype=np.float32) / Q15_ONE
+                right_float = np.array(right, dtype=np.float32) / Q15_ONE
 
-                # Find first active voice
-                active_frame = None
-                for vf in voice_frames:
-                    if vf.is_active and vf.gain_q15 > 0:
-                        active_frame = vf
-                        break
+                # Debug: check for non-zero audio occasionally
+                if self.blocks_rendered % 500 == 0:
+                    max_val = max(abs(left_float).max(), abs(right_float).max())
+                    if max_val > 0.001:
+                        print(f"[AUDIO] Block {self.blocks_rendered}: max={max_val:.4f}")
 
-                if active_frame is not None:
-                    note = self.current_note
-                    f0_hz = 440.0 * (2.0 ** ((note - 69) / 12.0))
-                    frame = VoiceFrame(
-                        voice_id=active_frame.voice_id,
-                        note=note,
-                        f0_hz=f0_hz,
-                        gain_q15=active_frame.gain_q15,
-                        is_active=True,
-                    )
+                # Interleave to stereo
+                outdata[:, 0] = left_float
+                outdata[:, 1] = right_float
 
-                    # Use render_voice() directly (faster than render_block)
-                    samples = self.stage.render_voice(frame)
-                    outdata[output_idx:output_idx + BLOCK_SIZE, 0] = np.array(samples, dtype=np.float32) / Q15_ONE
-                else:
-                    outdata[output_idx:output_idx + BLOCK_SIZE, 0] = 0.0
-
-                output_idx += BLOCK_SIZE
-
+            except queue.Empty:
+                # Buffer underrun - output silence
+                outdata.fill(0)
                 with self.lock:
-                    self.blocks_rendered += 1
-
-            # Fill remainder with silence
-            if remainder > 0:
-                outdata[output_idx:output_idx + remainder, 0] = 0.0
+                    self.buffer_underruns += 1
 
         self.stream = sd.OutputStream(
             samplerate=SAMPLE_RATE,
-            blocksize=BLOCK_SIZE * 16,  # Buffer 16 blocks for stability
-            channels=1,  # Mono output (faster)
+            blocksize=BLOCK_SIZE,
+            channels=2,
             dtype='float32',
             callback=audio_callback,
             device=output_device,
-            latency='high',
         )
         self.stream.start()
+
+    # =========================================================================
+    # RENDER LOOP
+    # =========================================================================
+
+    def _render_loop(self):
+        """Background thread that renders audio blocks."""
+        while self.running:
+            try:
+                # Check if we need to render more blocks
+                if self.audio_queue.qsize() < AUDIO_BUFFER_BLOCKS:
+                    self._render_block()
+                else:
+                    # Buffer is full, wait a bit
+                    time.sleep(0.0001)
+            except Exception as e:
+                print(f"Render error: {e}")
+                time.sleep(0.001)
+
+    def _render_block(self):
+        """Render one audio block."""
+        # Step the voice engine to get voice frames
+        voice_frames = self.engine.step_all()
+
+        # Create VoiceFrame for the synthesis stage
+        # Use first active voice, or silent if none
+        frame = self._create_voice_frame(voice_frames)
+
+        # Debug: log occasionally
+        with self.lock:
+            if self.blocks_rendered % 500 == 0:
+                active_count = len([vf for vf in voice_frames if vf.is_active])
+                print(f"[DEBUG] Block {self.blocks_rendered}: active_voices={active_count} "
+                      f"note={frame.note} f0={frame.f0_hz:.1f}Hz gain={frame.gain_q15} is_active={frame.is_active}")
+
+        # Render through the synthesis pipeline
+        left, right = self.stage.render_block(frame)
+
+        # Queue for audio output
+        try:
+            self.audio_queue.put_nowait((left, right))
+            with self.lock:
+                self.blocks_rendered += 1
+        except queue.Full:
+            pass  # Drop block if buffer is full
 
     def _create_voice_frame(self, voice_frames) -> VoiceFrame:
         """
@@ -384,7 +423,9 @@ class Pico2LiveSynth:
 
         # Audio stats
         with self.lock:
-            print(f"  Audio: blocks={self.blocks_rendered}")
+            print(f"  Audio: blocks={self.blocks_rendered} "
+                  f"underruns={self.buffer_underruns} "
+                  f"queue={self.audio_queue.qsize()}")
 
         # Voice status
         active = self.engine.active_voices()

@@ -1833,6 +1833,12 @@ class VoiceState:
     # Note info
     note_u8: int = 60  # MIDI note number
     cents_i16: int = 0  # Fine tuning in cents
+    detune_cents: int = 0  # Additional detune from controller (-2400 to +2400)
+
+    # Oscillator controls (from Pico2 controller)
+    eta_q15: int = 16384  # Dry/wet blend (0=dry, 32767=wet)
+    harmonics_q15: int = 0  # Harmonic mix (0=fundamental only)
+    master_gain_q15: int = 24576  # Master gain override (~0.75)
 
     # Activity level (for voice stealing)
     activity_q15: int = 0

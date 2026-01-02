@@ -94,8 +94,113 @@ def sin_q15(eta_q15: int) -> int:
 
 
 # =============================================================================
-# LANE 1: CARRIER RENDER (Vectorized)
+# FAST VECTORIZED SINE/COSINE FOR MIX LANE
 # =============================================================================
+# Precompute full equal-power crossfade tables for 0-32767 eta range.
+# This eliminates per-sample function call overhead.
+
+# Quarter-wave sine table (1025 entries for interpolation)
+_QW_SIZE = 1024
+_QW_TABLE: Optional[np.ndarray] = None
+
+
+def _init_qw_table() -> np.ndarray:
+    """Initialize quarter-wave sine table (lazy)."""
+    global _QW_TABLE
+    if _QW_TABLE is None:
+        # Generate quarter-wave sine [0, pi/2]
+        angles = np.linspace(0, np.pi / 2, _QW_SIZE + 1)
+        _QW_TABLE = (np.sin(angles) * Q15_ONE).astype(np.int32)
+    return _QW_TABLE
+
+
+def _sincos_batch_q15(phases: np.ndarray) -> tuple:
+    """
+    Batch sine/cosine lookup for equal-power crossfade.
+
+    Args:
+        phases: uint32 array of phases (0 to 0x40000000 for 0° to 90°)
+
+    Returns:
+        (cos_vals, sin_vals) - both int32 arrays in Q15
+
+    Note: Phases are restricted to [0, 0x40000000] (first quadrant only)
+    since eta is always in [0, 32767] for crossfade.
+    """
+    table = _init_qw_table()
+
+    # Scale phases to table indices with 12-bit fraction
+    # phases are in [0, 0x40000000], scale to [0, 1024] with fraction
+    # (phase / 0x40000000) * 1024 = phase >> 20
+    scaled = phases >> 18  # 22-bit value: 10-bit index + 12-bit frac
+
+    indices = (scaled >> 12).astype(np.int32)
+    fracs = (scaled & 0xFFF).astype(np.int32)
+
+    # Clamp indices
+    indices = np.clip(indices, 0, _QW_SIZE - 1)
+
+    # Linear interpolation: y = y0 + (y1 - y0) * frac / 4096
+    y0 = table[indices]
+    y1 = table[indices + 1]
+    sin_vals = y0 + ((y1 - y0) * fracs >> 12)
+
+    # Cosine = sin(90° - phase) = table[1024 - idx] (approximately)
+    # For first quadrant: cos(θ) = sin(π/2 - θ)
+    cos_indices = _QW_SIZE - indices
+    cos_indices = np.clip(cos_indices, 0, _QW_SIZE - 1)
+    # Flip fraction for cosine
+    cos_fracs = 4096 - fracs
+    cy0 = table[cos_indices]
+    cy1 = table[np.clip(cos_indices + 1, 0, _QW_SIZE)]
+    # For descending side, we interpolate backwards
+    cos_vals = cy0 - ((cy0 - table[np.clip(cos_indices - 1, 0, _QW_SIZE)]) * fracs >> 12)
+
+    return cos_vals, sin_vals
+
+
+# =============================================================================
+# LANE 1: CARRIER RENDER (Optimized with pre-allocated buffers)
+# =============================================================================
+
+# Pre-allocated buffers for carrier render (avoid per-block allocations)
+_CARRIER_SAMPLES = np.zeros(BLOCK_SAMPLES, dtype=np.int32)
+_CARRIER_PHASES = np.zeros(BLOCK_SAMPLES, dtype=np.int64)
+_CARRIER_OUTPUT = np.zeros(BLOCK_SAMPLES, dtype=np.int16)
+
+
+def _parabola_sine_inplace(phase_norm: np.ndarray, out: np.ndarray) -> None:
+    """
+    In-place parabola sine approximation.
+
+    sin(x) ≈ 4x(1-x) for x in [0,1], scaled to Q15.
+    Writes directly to out array to avoid allocation.
+    """
+    # Use vectorized operations but write to existing buffer
+    # Phase is 16-bit: 0-65535 maps to 0-2π
+    # Quarter 1: 0-16383 (rising positive)
+    # Quarter 2: 16384-32767 (falling positive)
+    # Quarter 3: 32768-49151 (rising negative)
+    # Quarter 4: 49152-65535 (falling negative)
+
+    for i in range(len(phase_norm)):
+        p = phase_norm[i]
+        if p < 16384:
+            # Q1: rising
+            out[i] = (4 * p * (16384 - p)) >> 14
+        elif p < 32768:
+            # Q2: falling
+            x = 32768 - p
+            out[i] = (4 * x * (16384 - x)) >> 14
+        elif p < 49152:
+            # Q3: negative rising
+            x = p - 32768
+            out[i] = -((4 * x * (16384 - x)) >> 14)
+        else:
+            # Q4: negative falling
+            x = 65536 - p
+            out[i] = -((4 * x * (16384 - x)) >> 14)
+
 
 def _parabola_sine_vectorized(phase_norm: np.ndarray) -> np.ndarray:
     """
@@ -104,30 +209,25 @@ def _parabola_sine_vectorized(phase_norm: np.ndarray) -> np.ndarray:
     sin(x) ≈ 4x(1-x) for x in [0,1], scaled to Q15.
     Input: phase_norm in [0, 65535] (16-bit phase)
     Output: sine values in Q15 [-32767, 32767]
+
+    Uses half-wave symmetry: sin(x + π) = -sin(x)
+    So we only need to compute the first half (0-32767) and negate for second half.
     """
-    result = np.zeros_like(phase_norm, dtype=np.int32)
+    # Use half-wave symmetry
+    is_negative = phase_norm >= 32768
+    # Fold to first half: [0, 32767]
+    p = np.where(is_negative, phase_norm - 32768, phase_norm)
 
-    # First quarter: 0 to 16383 (rising)
-    q1 = phase_norm < 16384
-    x1 = phase_norm[q1]
-    result[q1] = (4 * x1 * (16384 - x1)) >> 14
+    # Now compute for first half only (quarter symmetry within)
+    is_falling = p >= 16384
+    # Fold to first quarter: [0, 16383]
+    x = np.where(is_falling, 32768 - p, p)
 
-    # Second quarter: 16384 to 32767 (falling)
-    q2 = (phase_norm >= 16384) & (phase_norm < 32768)
-    x2 = 32768 - phase_norm[q2]
-    result[q2] = (4 * x2 * (16384 - x2)) >> 14
+    # Parabola: 4x(16384-x) >> 14
+    result = (4 * x * (16384 - x)) >> 14
 
-    # Third quarter: 32768 to 49151 (negative rising)
-    q3 = (phase_norm >= 32768) & (phase_norm < 49152)
-    x3 = phase_norm[q3] - 32768
-    result[q3] = -((4 * x3 * (16384 - x3)) >> 14)
-
-    # Fourth quarter: 49152 to 65535 (negative falling)
-    q4 = phase_norm >= 49152
-    x4 = 65536 - phase_norm[q4]
-    result[q4] = -((4 * x4 * (16384 - x4)) >> 14)
-
-    return result
+    # Apply sign for second half
+    return np.where(is_negative, -result, result).astype(np.int32)
 
 
 def lane_carrier_render(state: VMState, cfg: DecodedPlan) -> np.ndarray:
@@ -135,7 +235,7 @@ def lane_carrier_render(state: VMState, cfg: DecodedPlan) -> np.ndarray:
     Render carrier oscillator for one block (vectorized).
 
     Phase-continuous additive synthesis with up to 16 harmonics.
-    Uses NumPy for vectorized sine computation.
+    Uses NumPy vectorization with pre-allocated output buffer.
 
     Args:
         state: VM state (modified in place)
@@ -144,12 +244,15 @@ def lane_carrier_render(state: VMState, cfg: DecodedPlan) -> np.ndarray:
     Returns:
         carrier_buf: int16 array of BLOCK_SAMPLES
     """
+    global _CARRIER_SAMPLES, _CARRIER_PHASES, _CARRIER_OUTPUT
+
     if cfg.carrier_role == CarrierRole.OFF:
-        return np.zeros(BLOCK_SAMPLES, dtype=np.int16)
+        _CARRIER_OUTPUT.fill(0)
+        return _CARRIER_OUTPUT
 
     # Get carrier parameters
     target_phase_inc = cfg.carrier_params.phase_inc
-    harmonic_amps = np.array(cfg.carrier_params.harmonic_amps_q15, dtype=np.int32)
+    harmonic_amps = cfg.carrier_params.harmonic_amps_q15
 
     # Update pitch slew target
     if state.target_phase_inc != target_phase_inc:
@@ -157,43 +260,41 @@ def lane_carrier_render(state: VMState, cfg: DecodedPlan) -> np.ndarray:
         diff = target_phase_inc - state.phase_inc
         state.pitch_slew_rate = diff // (BLOCK_SAMPLES * 8)
 
-    # Generate phase increments for the block (handling pitch slew)
-    phase_incs = np.empty(BLOCK_SAMPLES, dtype=np.int64)
-    current_inc = state.phase_inc
+    # Fast path: no slew (common case) - avoid loop entirely
     slew_rate = state.pitch_slew_rate
+    current_inc = state.phase_inc
 
-    for i in range(BLOCK_SAMPLES):
-        if slew_rate != 0:
+    if slew_rate == 0:
+        # Vectorized phase generation
+        sample_indices = np.arange(BLOCK_SAMPLES, dtype=np.int64)
+        base_phases = (state.phase + sample_indices * current_inc) & 0xFFFFFFFF
+        state.phase = (state.phase + BLOCK_SAMPLES * current_inc) & 0xFFFFFFFF
+    else:
+        # Slew case - must iterate
+        phase = state.phase
+        for i in range(BLOCK_SAMPLES):
+            _CARRIER_PHASES[i] = phase
             if slew_rate > 0 and current_inc < target_phase_inc:
                 current_inc = min(current_inc + slew_rate, target_phase_inc)
             elif slew_rate < 0 and current_inc > target_phase_inc:
                 current_inc = max(current_inc + slew_rate, target_phase_inc)
             else:
                 slew_rate = 0
-        phase_incs[i] = current_inc
+            phase = (phase + current_inc) & 0xFFFFFFFF
+        state.phase = phase
+        state.phase_inc = current_inc
+        state.pitch_slew_rate = slew_rate
+        base_phases = _CARRIER_PHASES
 
-    # Update state
-    state.phase_inc = current_inc
-    state.pitch_slew_rate = slew_rate
-
-    # Compute all phases for the block using cumulative sum
-    # phase[i] = state.phase + sum(phase_incs[0:i])
-    phase_offsets = np.cumsum(phase_incs)
-    base_phases = (state.phase + phase_offsets - phase_incs) & 0xFFFFFFFF  # Before advance
-    state.phase = (state.phase + phase_offsets[-1]) & 0xFFFFFFFF
+    # Clear samples buffer
+    _CARRIER_SAMPLES.fill(0)
 
     # Vectorized harmonic synthesis
-    # Find active harmonics
-    active_h = np.where(harmonic_amps != 0)[0]
-    if len(active_h) == 0:
-        return np.zeros(BLOCK_SAMPLES, dtype=np.int16)
-
-    # Initialize output
-    samples = np.zeros(BLOCK_SAMPLES, dtype=np.int32)
-
-    # Process each active harmonic (vectorized over samples)
-    for h in active_h:
+    for h in range(len(harmonic_amps)):
         amp = harmonic_amps[h]
+        if amp == 0:
+            continue
+
         # Phase for this harmonic: base_phase * (h + 1)
         h_phases = (base_phases * (h + 1)) & 0xFFFFFFFF
         # Extract 16-bit phase for lookup
@@ -201,25 +302,28 @@ def lane_carrier_render(state: VMState, cfg: DecodedPlan) -> np.ndarray:
         # Compute sine values
         sin_vals = _parabola_sine_vectorized(phase_norm)
         # Accumulate
-        samples += (sin_vals * amp) >> 15
+        _CARRIER_SAMPLES += (sin_vals * amp) >> 15
 
-    # DC blocking (1-pole highpass) - must be sequential
+    # DC blocking (1-pole highpass) - sequential IIR
     dc_coeff = 32604  # ~0.995 in Q15
     dc_x1 = state.dc_block_x1
     dc_y1 = state.dc_block_y1
 
     for i in range(BLOCK_SAMPLES):
-        x = samples[i]
+        x = int(_CARRIER_SAMPLES[i])
         y = x - dc_x1 + ((dc_y1 * dc_coeff) >> 15)
         dc_x1 = x
         dc_y1 = y
-        samples[i] = y
+        _CARRIER_SAMPLES[i] = y
 
     state.dc_block_x1 = dc_x1
     state.dc_block_y1 = dc_y1
 
-    # Clamp and return
-    return np.clip(samples, -32768, 32767).astype(np.int16)
+    # Clamp to output buffer
+    np.clip(_CARRIER_SAMPLES, -32768, 32767, out=_CARRIER_SAMPLES)
+    _CARRIER_OUTPUT[:] = _CARRIER_SAMPLES.astype(np.int16)
+
+    return _CARRIER_OUTPUT
 
 
 # =============================================================================
@@ -662,58 +766,56 @@ def lane_tail(state: VMState, cfg: DecodedPlan) -> None:
 
 
 def _tail_fine_clamp(state: VMState, mask: int) -> None:
-    """Per-band energy cap using integer-only math."""
+    """Per-band energy cap using vectorized operations."""
     # Max energy per node: allow each coefficient to be at most Q15_ONE
-    # Total squared energy = NODE_LEN * Q15_ONE^2
     max_energy_per_node = NODE_LEN * Q15_ONE * Q15_ONE
 
+    # Reshape coefficients into nodes for vectorized operations
+    # Only process first L_TOTAL_NODES * NODE_LEN coefficients
+    n_coeffs = min(L_TOTAL_NODES * NODE_LEN, COEFF_LEN)
+    coeff_view = state.coeff_state[:n_coeffs].reshape(L_TOTAL_NODES, NODE_LEN).astype(np.int64)
+
+    # Compute energy per node (sum of squares)
+    energies = (coeff_view * coeff_view).sum(axis=1)
+
+    # Find nodes that are over budget and in mask
     for node in range(L_TOTAL_NODES):
         if not (mask & (1 << node)):
             continue
-
-        # Compute node energy (sum of squared coefficients) - raw, not Q15
-        coeff_idx = node * NODE_LEN
-        energy = 0
-        for i in range(coeff_idx, min(coeff_idx + NODE_LEN, COEFF_LEN)):
-            val = int(state.coeff_state[i])  # Convert to Python int to avoid overflow
-            energy += val * val
-
-        # If over budget, scale down using integer sqrt
-        if energy > max_energy_per_node:
-            # scale = sqrt(max_energy / energy) in Q15
-            scale_q15 = isqrt_ratio_q15(max_energy_per_node, energy)
-            for i in range(coeff_idx, min(coeff_idx + NODE_LEN, COEFF_LEN)):
+        if energies[node] > max_energy_per_node:
+            scale_q15 = isqrt_ratio_q15(max_energy_per_node, int(energies[node]))
+            coeff_idx = node * NODE_LEN
+            end_idx = min(coeff_idx + NODE_LEN, COEFF_LEN)
+            for i in range(coeff_idx, end_idx):
                 val = int(state.coeff_state[i])
                 state.coeff_state[i] = (val * scale_q15) >> 15
 
 
 def _tail_normalize_scale(state: VMState, mask: int) -> None:
-    """Per-band energy normalization using integer-only math."""
+    """Per-band energy normalization using vectorized operations."""
     target_energy = Q15_HALF * NODE_LEN
+
+    # Reshape for vectorized energy computation
+    n_coeffs = min(L_TOTAL_NODES * NODE_LEN, COEFF_LEN)
+    coeff_view = state.coeff_state[:n_coeffs].reshape(L_TOTAL_NODES, NODE_LEN).astype(np.int64)
+
+    # Compute energy per node (sum of val^2 >> 15)
+    energies = ((coeff_view * coeff_view) >> 15).sum(axis=1)
 
     for node in range(L_TOTAL_NODES):
         if not (mask & (1 << node)):
             continue
 
-        # Compute node energy (use Python int to avoid numpy overflow)
-        coeff_idx = node * NODE_LEN
-        energy = 0
-        for i in range(coeff_idx, min(coeff_idx + NODE_LEN, COEFF_LEN)):
-            val = int(state.coeff_state[i])  # Convert to Python int
-            energy += (val * val) >> 15
-
+        energy = int(energies[node])
         if energy > 0:
-            # Scale to target energy using integer sqrt
-            # scale = sqrt(target_energy / energy) in Q15
             scale = isqrt_ratio_q15(target_energy, energy)
-            scale = max(Q15_HALF // 2, min(Q15_ONE * 2, scale))  # Limit scale range
+            scale = max(Q15_HALF // 2, min(Q15_ONE * 2, scale))
 
-            for i in range(coeff_idx, min(coeff_idx + NODE_LEN, COEFF_LEN)):
-                # Use Python int to avoid numpy overflow
+            coeff_idx = node * NODE_LEN
+            end_idx = min(coeff_idx + NODE_LEN, COEFF_LEN)
+            for i in range(coeff_idx, end_idx):
                 val = int(state.coeff_state[i])
-                state.coeff_state[i] = min(32767, max(-32768,
-                    (val * scale) >> 15
-                ))
+                state.coeff_state[i] = min(32767, max(-32768, (val * scale) >> 15))
 
 
 def _tail_sheaf_project(state: VMState, mask: int) -> None:
@@ -754,51 +856,56 @@ def _tail_emergency_simplify(state: VMState, mask: int) -> None:
 # LANE 8: IDWPT RENDER
 # =============================================================================
 
+# Import fused lifting for real-time IDWPT (faster than separate FWPT+IDWPT)
+from ..wavelet.fast_lifting import effect_mode_fused
+
+
 def lane_idwpt_render(
     state: VMState,
     cfg: DecodedPlan,
     carrier_buf: np.ndarray,
 ) -> np.ndarray:
     """
-    Render IDWPT texture from coefficient state.
+    Render IDWPT texture from coefficient state using fast_lifting.
 
-    This is a placeholder - actual IDWPT requires the wavelet engine.
-    For now, generates simple AM/FM modulated tone based on coefficients.
+    Uses the Carrier + Lift architecture:
+    1. Convert carrier to list
+    2. Build mask from coeff_state (256 -> 64 leaves) using NumPy
+    3. Apply effect_mode_fast: carrier -> FWPT -> mask -> IDWPT
+    4. Return wet audio
 
     Args:
-        state: VM state
-        cfg: Decoded plan
-        carrier_buf: Carrier buffer (for excitation)
+        state: VM state (contains coeff_state as mask source)
+        cfg: Decoded plan (contains tree info, mask_u32)
+        carrier_buf: Carrier buffer (int16 numpy array)
 
     Returns:
         texture_buf: int16 array of BLOCK_SAMPLES
     """
-    texture_buf = np.zeros(BLOCK_SAMPLES, dtype=np.int16)
-
     if not cfg.idwpt_enable:
-        return texture_buf
+        return np.zeros(BLOCK_SAMPLES, dtype=np.int16)
 
-    # Simple placeholder: modulate carrier by coefficient energy
-    # Real implementation would use proper IDWPT synthesis
+    # Convert carrier to list (tolist() is faster than astype().tolist())
+    carrier_list = carrier_buf.tolist()
 
-    # Compute overall coefficient energy (use Python int to avoid overflow)
-    total_energy = 0
-    for node in range(L_TOTAL_NODES):
-        if cfg.mask_u32 & (1 << node):
-            coeff_idx = node * NODE_LEN
-            if coeff_idx < COEFF_LEN:
-                total_energy += abs(int(state.coeff_state[coeff_idx]))
+    # Build 64-element mask using NumPy (fast vectorized operations)
+    # Reshape coeff_state into 64 groups of 4 and sum absolute values
+    coeff_view = state.coeff_state[:COEFF_LEN].reshape(64, COEFF_LEN // 64)
+    leaf_energies = np.abs(coeff_view).sum(axis=1).astype(np.int32)
 
-    # Normalize energy to modulation depth
-    mod_depth = min(Q15_ONE, total_energy // 8)
+    # Apply mask_u32 (32 nodes -> 64 leaves)
+    # Node i controls leaves 2*i and 2*i+1
+    node_mask = np.array([(cfg.mask_u32 >> i) & 1 for i in range(32)], dtype=np.int32)
+    leaf_mask = np.repeat(node_mask, 2)  # Expand to 64 leaves
 
-    # Apply AM to carrier (use Python int to avoid overflow)
-    for i in range(BLOCK_SAMPLES):
-        # Simple AM modulation
-        modulated = (int(carrier_buf[i]) * mod_depth) >> 15
-        texture_buf[i] = modulated
+    # Apply node mask and clamp to Q15
+    mask_q15 = np.minimum(leaf_energies * leaf_mask, Q15_ONE).tolist()
 
-    return texture_buf
+    # Apply fused effect mode: carrier -> FWPT -> mask -> IDWPT -> wet
+    wet_list = effect_mode_fused(carrier_list, mask_q15)
+
+    # Convert back to numpy int16
+    return np.array(wet_list, dtype=np.int16)
 
 
 # =============================================================================
@@ -836,14 +943,8 @@ def lane_mix_gain(
     # Map eta (0 to 32767) to phase (0 to 0x40000000 for 0° to 90°)
     phases = ((eta_vals.astype(np.int64) * 0x40000000) >> 15).astype(np.uint32)
 
-    # Compute sine/cosine for all samples at once using LUT
-    # This is the key optimization - batch lookup
-    dry_weights = np.empty(BLOCK_SAMPLES, dtype=np.int32)
-    wet_weights = np.empty(BLOCK_SAMPLES, dtype=np.int32)
-
-    for i in range(BLOCK_SAMPLES):
-        dry_weights[i] = _cosine_q15(int(phases[i]))
-        wet_weights[i] = _sine_q15(int(phases[i]))
+    # Batch sine/cosine lookup - no Python loops
+    dry_weights, wet_weights = _sincos_batch_q15(phases)
 
     # Mix carrier and texture (int32 to avoid overflow)
     carrier_i32 = carrier_buf.astype(np.int32)
