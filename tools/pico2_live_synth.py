@@ -122,7 +122,11 @@ NUM_VOICES = 4
 Q15_ONE = 32767
 
 # Buffer configuration
-AUDIO_BUFFER_BLOCKS = 8  # Number of blocks to buffer
+# At 48kHz/64 samples = 750 blocks/sec, each block = 1.33ms
+# Benchmarks show full render path takes ~1500us (112% of 1333us budget)
+# Need extra buffering to handle GIL jitter and occasional spikes
+# 32 blocks = ~43ms buffer latency
+AUDIO_BUFFER_BLOCKS = 32  # Number of blocks to buffer
 
 
 # =============================================================================
@@ -230,6 +234,11 @@ class Pico2LiveSynth:
         """Start audio output stream."""
         output_device = self._find_output_device()
 
+        # Pre-allocate conversion buffers (reused each callback to avoid allocation)
+        left_f32 = np.zeros(BLOCK_SIZE, dtype=np.float32)
+        right_f32 = np.zeros(BLOCK_SIZE, dtype=np.float32)
+        q15_scale = np.float32(1.0 / Q15_ONE)
+
         def audio_callback(outdata, frames, time_info, status):
             if status:
                 print(f"Audio status: {status}")
@@ -238,25 +247,18 @@ class Pico2LiveSynth:
                 # Get pre-rendered audio block
                 left, right = self.audio_queue.get_nowait()
 
-                # Convert Q15 to float32 and write stereo
-                left_float = np.array(left, dtype=np.float32) / Q15_ONE
-                right_float = np.array(right, dtype=np.float32) / Q15_ONE
+                # Convert Q15 int16 arrays to float32 (vectorized, in-place)
+                np.multiply(left, q15_scale, out=left_f32, casting='unsafe')
+                np.multiply(right, q15_scale, out=right_f32, casting='unsafe')
 
-                # Debug: check for non-zero audio occasionally
-                if self.blocks_rendered % 500 == 0:
-                    max_val = max(abs(left_float).max(), abs(right_float).max())
-                    if max_val > 0.001:
-                        print(f"[AUDIO] Block {self.blocks_rendered}: max={max_val:.4f}")
-
-                # Interleave to stereo
-                outdata[:, 0] = left_float
-                outdata[:, 1] = right_float
+                # Write to output
+                outdata[:, 0] = left_f32
+                outdata[:, 1] = right_f32
 
             except queue.Empty:
                 # Buffer underrun - output silence
                 outdata.fill(0)
-                with self.lock:
-                    self.buffer_underruns += 1
+                self.buffer_underruns += 1
 
         self.stream = sd.OutputStream(
             samplerate=SAMPLE_RATE,
@@ -295,21 +297,20 @@ class Pico2LiveSynth:
         # Use first active voice, or silent if none
         frame = self._create_voice_frame(voice_frames)
 
-        # Debug: log occasionally
-        with self.lock:
-            if self.blocks_rendered % 500 == 0:
-                active_count = len([vf for vf in voice_frames if vf.is_active])
-                print(f"[DEBUG] Block {self.blocks_rendered}: active_voices={active_count} "
-                      f"note={frame.note} f0={frame.f0_hz:.1f}Hz gain={frame.gain_q15} is_active={frame.is_active}")
+        # Debug: log occasionally (every ~4 seconds to reduce overhead)
+        if self.blocks_rendered % 3000 == 0:
+            active_count = len([vf for vf in voice_frames if vf.is_active])
+            print(f"[DEBUG] Block {self.blocks_rendered}: active={active_count} "
+                  f"note={frame.note} gain={frame.gain_q15} "
+                  f"eta={frame.beta_target_q15} harm={frame.partial_amps_q15[1] if frame.partial_amps_q15 else 0}")
 
         # Render through the synthesis pipeline
         left, right = self.stage.render_block(frame)
 
-        # Queue for audio output
+        # Queue for audio output (no lock needed - blocks_rendered is only for stats)
         try:
             self.audio_queue.put_nowait((left, right))
-            with self.lock:
-                self.blocks_rendered += 1
+            self.blocks_rendered += 1
         except queue.Full:
             pass  # Drop block if buffer is full
 
@@ -344,20 +345,39 @@ class Pico2LiveSynth:
                 is_active=False,
             )
 
+        # Get VoiceState to read control parameters (eta, harmonics, gain)
+        voice_state = self.engine.voices.get(active_frame.voice_id)
+
         # Use the current_note since VoiceEngine doesn't track note numbers
         # (It's gesture-based, not MIDI-centric)
         note = self.current_note
-        cents = 0
 
-        # Calculate f0_hz from note
+        # Read control values from VoiceState (set by Pico2SynthBridge)
+        eta_q15 = voice_state.eta_q15 if voice_state else 24576
+        master_gain_q15 = voice_state.master_gain_q15 if voice_state else 24576
+        harmonics_q15 = voice_state.harmonics_q15 if voice_state else 0  # 0 = pure sine
+        detune_cents = voice_state.detune_cents if voice_state else 0
+
+        # Calculate f0_hz from note + detune
+        cents = detune_cents
         f0_hz = 440.0 * (2.0 ** ((note - 69 + cents / 100.0) / 12.0))
+
+        # Scale gain by master_gain control
+        scaled_gain = (active_frame.gain_q15 * master_gain_q15) >> 15
+
+        # Compute partial amplitudes from harmonics control
+        # harmonics_q15 controls higher harmonic mix (0=fundamental only, 32767=full)
+        base_amps = [32767, 16384, 10923, 8192, 6554, 5461, 4681, 4096]
+        partial_amps = [base_amps[0]]  # Fundamental always at full
+        for amp in base_amps[1:]:
+            partial_amps.append((amp * harmonics_q15) >> 15)
 
         return VoiceFrame(
             voice_id=active_frame.voice_id,
             note=note,
             cents=cents,
             f0_hz=f0_hz,
-            gain_q15=active_frame.gain_q15,
+            gain_q15=scaled_gain,
             pan_q15=active_frame.pan_q15,
             tree_a_id=active_frame.tree_a_id,
             tree_b_id=active_frame.tree_b_id,
@@ -367,6 +387,8 @@ class Pico2LiveSynth:
             is_starting=active_frame.is_starting,
             is_stopping=active_frame.is_stopping,
             is_active=active_frame.is_active,
+            beta_target_q15=eta_q15,
+            partial_amps_q15=partial_amps,
         )
 
     # =========================================================================
@@ -381,6 +403,18 @@ class Pico2LiveSynth:
         self.current_voice_id = self.engine.allocate_voice(program_id=1001)
 
         if self.current_voice_id is not None:
+            # Apply current pot values to newly allocated voice
+            # (newly allocated voices get defaults, not current pot values)
+            vid = self.current_voice_id
+            if vid in self.engine.voices:
+                vs = self.engine.voices[vid]
+                vs.eta_q15 = self.bridge.osc.eta_q15
+                vs.harmonics_q15 = self.bridge.osc.harmonics_q15
+                vs.master_gain_q15 = self.bridge.osc.gain_q15
+                # Convert detune_q15 to cents
+                centered = self.bridge.osc.detune_q15 - 16384
+                vs.detune_cents = (centered * 2400) // 16384
+
             # Create gesture
             pressure = (velocity * Q15_ONE) // 127
             gesture = GestureBasis(
@@ -421,11 +455,10 @@ class Pico2LiveSynth:
         # Hardware bridge status
         self.bridge.print_status()
 
-        # Audio stats
-        with self.lock:
-            print(f"  Audio: blocks={self.blocks_rendered} "
-                  f"underruns={self.buffer_underruns} "
-                  f"queue={self.audio_queue.qsize()}")
+        # Audio stats (no lock needed - these are just stats for display)
+        print(f"  Audio: blocks={self.blocks_rendered} "
+              f"underruns={self.buffer_underruns} "
+              f"queue={self.audio_queue.qsize()}")
 
         # Voice status
         active = self.engine.active_voices()

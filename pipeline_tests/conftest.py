@@ -64,3 +64,10 @@ def wavelet_engine():
     """Fresh Wavelet Engine instance."""
     from symcrash_python_ap.wavelet import WaveletEngine
     return WaveletEngine(block_size=64)
+
+
+@pytest.fixture
+def unified_output_stage():
+    """Fresh Unified Output Stage instance."""
+    from symcrash_python_ap.safety.unified_renderer import UnifiedOutputStage
+    return UnifiedOutputStage(block_size=64)

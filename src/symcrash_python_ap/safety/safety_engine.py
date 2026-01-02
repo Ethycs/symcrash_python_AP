@@ -1888,18 +1888,24 @@ class SafetyEngine:
         # Simple HF reduction: blend with previous sample
         blend = Q15_ONE - self.q_hf_cut
 
+        # Track previous samples for HF filter (use previous block's last samples for i=0)
+        prev_yL = self.prev_sample_L if hasattr(self, 'prev_sample_L') else 0
+        prev_yR = self.prev_sample_R if hasattr(self, 'prev_sample_R') else 0
+
         for i in range(self.B):
             # Apply gain
             yL = mul_q15_sat(L[i], self.q_gain)
             yR = mul_q15_sat(R[i], self.q_gain)
 
-            # HF reduction (simple lowpass blend)
-            if i > 0 and blend > 0:
+            # HF reduction (simple lowpass blend) - now includes first sample
+            if blend > 0:
                 yL = sat16(mul_q15_sat(yL, self.q_hf_cut) +
-                          mul_q15_sat(outL[i-1], blend))
+                          mul_q15_sat(prev_yL, blend))
                 yR = sat16(mul_q15_sat(yR, self.q_hf_cut) +
-                          mul_q15_sat(outR[i-1], blend))
+                          mul_q15_sat(prev_yR, blend))
 
+            prev_yL = yL
+            prev_yR = yR
             outL.append(yL)
             outR.append(yR)
 
@@ -1926,15 +1932,19 @@ class SafetyEngine:
             else:
                 target_gain = Q15_ONE
 
-            # Asymmetric slew (fast attack, slow release)
+            # Asymmetric slew (fast attack, slow release) - independent per channel
             self.lim_L.gain = slew_q15_asym(
                 self.lim_L.gain, target_gain,
                 self.ATTACK_RATE, self.RELEASE_RATE
             )
+            self.lim_R.gain = slew_q15_asym(
+                self.lim_R.gain, target_gain,
+                self.ATTACK_RATE, self.RELEASE_RATE
+            )
 
-            # Apply gain
+            # Apply gain - use per-channel limiter gain
             yL = mul_q15_sat(L[i], self.lim_L.gain)
-            yR = mul_q15_sat(R[i], self.lim_L.gain)
+            yR = mul_q15_sat(R[i], self.lim_R.gain)
 
             # Final hard clip (should rarely trigger)
             yL = sat16(yL)

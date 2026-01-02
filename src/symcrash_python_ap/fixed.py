@@ -398,3 +398,86 @@ def vec_dot_q15(a: List[int], b: List[int]) -> int:
     return shift_round_sat16(acc, Q15_SHIFT)
 
 
+# =============================================================================
+# PITCH TABLE (WSE-STD-PITCH v0)
+# =============================================================================
+
+# Precomputed phase increments for MIDI notes 0-127 at 48kHz sample rate
+# phase_inc = int(round(440.0 * (2 ** ((note - 69) / 12.0)) / 48000.0 * (2**32)))
+# Computed at module load time with double precision, then frozen as integers
+
+PITCH_SAMPLE_RATE = 48000
+PITCH_PHASE_BITS = 32
+
+
+def _build_pitch_table() -> List[int]:
+    """Build MIDI note to phase_inc table (computed once at load)."""
+    table = []
+    for note in range(128):
+        freq = 440.0 * (2.0 ** ((note - 69) / 12.0))
+        phase_inc = int(round((freq / PITCH_SAMPLE_RATE) * (2**PITCH_PHASE_BITS)))
+        table.append(phase_inc)
+    return table
+
+
+_PITCH_TABLE = _build_pitch_table()
+
+# Ratio for 1 cent in Q32.0: (2^(1/1200) - 1) * 2^32 ≈ 2485961
+# Used for linear interpolation of cents
+_CENT_RATIO_Q32 = 2485961
+
+
+def midi_to_phase_inc_fixed(note: int, cents: int = 0) -> int:
+    """
+    Convert MIDI note + cents to phase increment using integer LUT.
+
+    This is the bit-exact version (WSE-STD-001 compliant) that avoids
+    floating-point noise. Uses precomputed table for notes and linear
+    interpolation for cents with RSHIFT_RNE rounding.
+
+    Args:
+        note: MIDI note number (0-127)
+        cents: Fine tuning in cents (-9999 to +9999)
+
+    Returns:
+        32-bit phase increment for oscillator at 48kHz sample rate
+    """
+    # Clamp note to valid range
+    note = max(0, min(127, note))
+    base_inc = _PITCH_TABLE[note]
+
+    if cents == 0:
+        return base_inc
+
+    # For larger cent ranges, use semitone stepping
+    if abs(cents) >= 100:
+        # Handle full semitones
+        semitones = cents // 100
+        remaining_cents = cents % 100
+
+        # Handle negative cents properly
+        if cents < 0 and remaining_cents != 0:
+            semitones -= 1
+            remaining_cents += 100
+
+        target_note = note + semitones
+        if target_note < 0 or target_note > 127:
+            # Out of range - clamp
+            target_note = max(0, min(127, target_note))
+            remaining_cents = 0
+
+        base_inc = _PITCH_TABLE[target_note]
+        cents = remaining_cents
+
+    if cents == 0:
+        return base_inc
+
+    # Linear interpolation for remaining cents (0-99)
+    # delta = base_inc * cents * (2^(1/1200) - 1)
+    # Using WSE-STD-001 compliant RSHIFT_RNE for bit-exact rounding
+    product = base_inc * cents * _CENT_RATIO_Q32
+    delta = RSHIFT_RNE(product, 32)
+
+    return base_inc + delta
+
+

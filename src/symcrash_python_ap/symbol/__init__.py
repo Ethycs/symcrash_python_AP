@@ -15,6 +15,17 @@ from .symbol_engine import (
     DegradePolicy,
     InstrumentProgram,
     ExecutorInput,
+    # Constants
+    NUM_FAMILIES,
+    F_COLOR,
+    F_TRANSPORT,
+    F_LOCAL,
+    F_TOPOLOGY,
+    F_GLUE,
+    DEGRADE_NONE,
+    DEGRADE_LIGHT,
+    DEGRADE_HEAVY,
+    DEGRADE_EMERGENCY,
 )
 
 from .executor_scheduling import (
@@ -40,6 +51,17 @@ __all__ = [
     'DegradePolicy',
     'InstrumentProgram',
     'ExecutorInput',
+    # Constants
+    'NUM_FAMILIES',
+    'F_COLOR',
+    'F_TRANSPORT',
+    'F_LOCAL',
+    'F_TOPOLOGY',
+    'F_GLUE',
+    'DEGRADE_NONE',
+    'DEGRADE_LIGHT',
+    'DEGRADE_HEAVY',
+    'DEGRADE_EMERGENCY',
     # Executor scheduling (WSE-STD-030)
     'Executor030',
     'ExecutorStats',

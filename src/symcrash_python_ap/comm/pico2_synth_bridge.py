@@ -87,8 +87,8 @@ class FilterState:
 class OscillatorState:
     """Current oscillator parameter state."""
     harmonics_q15: int = 0        # Harmonic mix (0 = fundamental only)
-    eta_q15: int = 16384          # Dry/wet blend (0.5 = balanced)
-    detune_q15: int = 0           # Detune amount
+    eta_q15: int = 0              # Dry/wet blend (0 = pure carrier/dry)
+    detune_q15: int = 16384       # Detune amount (center = no detune)
     gain_q15: int = 24576         # Master gain (~0.75)
 
 

@@ -141,10 +141,12 @@ class TestClampSymmetry:
 
         output = lane_mix_gain(cfg, carrier, texture)
 
-        # Output should be approximately the input (scaled by gain and cos)
+        # Output should be approximately the input (scaled by gain, cos, and headroom)
         # At eta=0, cos_q15(0) = 32767 (approx 1.0)
-        # So output ≈ carrier * 32767/32768 * 32767/32768 ≈ 16382-16384
-        assert np.all(np.abs(output - carrier) < 10), "Clamp incorrectly modified valid values"
+        # MIX_HEADROOM = 23170/32767 ≈ 0.707 (1/√2) to prevent clipping on coherent mix
+        # So output ≈ carrier * 32767/32768 * 23170/32768 * 32767/32768 ≈ 11583
+        expected = (16384 * 32767 // 32768) * 23170 // 32768
+        assert np.all(np.abs(output - expected) < 10), f"Output {output[0]} not close to expected {expected}"
 
 
 # =============================================================================

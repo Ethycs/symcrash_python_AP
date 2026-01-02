@@ -62,6 +62,10 @@ class VMState:
     target_phase_inc: int = 0         # Target for pitch slew
     pitch_slew_rate: int = 0          # Per-sample delta for portamento
 
+    # Pitch tracking (to avoid floating-point noise triggering unnecessary updates)
+    last_note: int = -1               # Last set MIDI note (-1 = not set)
+    last_cents: int = 0               # Last set cents value
+
     # Harmonics (up to 16)
     harmonic_amps_q15: List[int] = field(default_factory=lambda: [0] * 16)
 
@@ -101,6 +105,15 @@ class VMState:
     # -------------------------------------------------------------------------
     eta_prev_q15: int = 0         # Previous block's eta (dry/wet)
     gain_prev_q15: int = 0        # Previous block's gain
+
+    # -------------------------------------------------------------------------
+    # Wet path OLA state (for IDWPT block boundary smoothing)
+    # -------------------------------------------------------------------------
+    # OLA is applied to wet path ONLY, not carrier (carrier is phase-continuous)
+    wet_ola_tail: np.ndarray = field(
+        default_factory=lambda: np.zeros(8, dtype=np.int16)
+    )
+    wet_ola_initialized: bool = False
 
     @classmethod
     def create(cls, voice_id: int = 0, prng_seed: Optional[int] = None) -> 'VMState':
@@ -173,6 +186,10 @@ class VMState:
         self.eta_prev_q15 = 0
         self.gain_prev_q15 = 0
 
+        # Reset wet OLA state
+        self.wet_ola_tail.fill(0)
+        self.wet_ola_initialized = False
+
     def trigger_release(self) -> None:
         """Trigger note release (enter release phase)."""
         if self.envelope.phase in (EnvelopePhase.ATTACK, EnvelopePhase.DECAY, EnvelopePhase.SUSTAIN):
@@ -210,6 +227,9 @@ class VMState:
             'wet_ready': self.wet_ready,
             'eta_prev_q15': self.eta_prev_q15,
             'gain_prev_q15': self.gain_prev_q15,
+            # Wet path OLA state
+            'wet_ola_tail': self.wet_ola_tail.tolist(),
+            'wet_ola_initialized': self.wet_ola_initialized,
         }
 
     @classmethod
@@ -242,6 +262,10 @@ class VMState:
         state.wet_ready = snapshot['wet_ready']
         state.eta_prev_q15 = snapshot['eta_prev_q15']
         state.gain_prev_q15 = snapshot['gain_prev_q15']
+        # Restore wet OLA state
+        if 'wet_ola_tail' in snapshot:
+            state.wet_ola_tail = np.array(snapshot['wet_ola_tail'], dtype=np.int16)
+            state.wet_ola_initialized = snapshot.get('wet_ola_initialized', False)
         return state
 
 

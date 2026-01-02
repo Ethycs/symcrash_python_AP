@@ -58,6 +58,9 @@ from ..wavelet.backends import (
 # Use sine_core for bit-exact trig (no math.sin/cos in hot paths)
 from ..wavelet.sine_core import sine_q15, cosine_q15, PHASE_MASK
 
+# Fixed-point math for Q15 multiplication without float truncation
+from ..fixed import mul_q15_sat
+
 # VM Executor (WSE-STD-VM-HYBRID v0)
 if USE_VM_EXECUTOR:
     from ..vm import vm_step_block, VMState, DecodedPlan, Tables
@@ -302,9 +305,11 @@ class UnifiedOutputStage:
         state = self.voice_states[voice_id]
         ac_state = self.ac_states[voice_id]
 
-        # Update pitch if changed
-        if frame.f0_hz != state.carrier.target_phase_inc:
+        # Update pitch if changed (compare note/cents, not f0_hz vs phase_inc)
+        if frame.note != state.note or frame.cents != state.cents:
             self.carrier.set_pitch(voice_id, frame.note, frame.cents)
+            state.note = frame.note
+            state.cents = frame.cents
 
         # Update carrier harmonics from frame (waveform control)
         if frame.partial_amps_q15:
@@ -437,18 +442,19 @@ class UnifiedOutputStage:
         # left = cos(phase), right = sin(phase) for equal-power pan
         left_q15 = cosine_q15(pan_phase)
         right_q15 = sine_q15(pan_phase)
-        # Convert Q15 to float gain
-        left_gain = left_q15 / Q15_ONE
-        right_gain = right_q15 / Q15_ONE
 
-        L = [int(s * left_gain) for s in samples]
-        R = [int(s * right_gain) for s in samples]
+        # Apply pan gains in Q15 (no float truncation)
+        L = [mul_q15_sat(s, left_q15) for s in samples]
+        R = [mul_q15_sat(s, right_q15) for s in samples]
 
-        # Apply SafetyEngine limiting (AntiClick already handled clicks)
+        # Apply SafetyEngine processing
+        # NOTE: OLA is now applied in lane_idwpt_render to the wet path ONLY.
+        # The carrier is phase-continuous and applying OLA to it corrupts the signal.
+        # Master OLA is disabled here since wet path OLA is handled at the correct layer.
         is_carrier_only = frame.beta_target_q15 == 0
         L, R = self.safety.step_block(
             L, R, self.params,
-            apply_master_ola=False,
+            apply_master_ola=False,  # OLA handled in VM lane_idwpt_render
             apply_dc_removal=not is_carrier_only
         )
 

@@ -25,13 +25,13 @@ from symcrash_python_ap.wavelet_trees import PacketNode
 class TestTreeStructure:
     """Verify tree structure invariants."""
 
-    def test_all_trees_have_32_leaves(self):
-        """Each tree must have exactly 32 leaves."""
+    def test_all_trees_have_64_leaves(self):
+        """Each tree must have exactly 64 leaves (D=6 master tree)."""
         tree_set = PacketTreeSet()
 
         for tree_id, rom in tree_set.trees.items():
             n_leaves = len(rom.leaf_list)
-            assert n_leaves == 32, f"Tree {tree_id} ({rom.name}): expected 32 leaves, got {n_leaves}"
+            assert n_leaves == LEAF_COUNT, f"Tree {tree_id} ({rom.name}): expected {LEAF_COUNT} leaves, got {n_leaves}"
 
     def test_trees_are_frequency_ordered(self):
         """Leaves should be in frequency order."""
@@ -46,11 +46,11 @@ class TestTreeStructure:
             assert is_sorted, f"Tree {tree_id} ({rom.name}): leaves not frequency ordered"
 
     def test_complex_mask_length(self):
-        """Complex mask should have 32 entries."""
+        """Complex mask should have LEAF_COUNT entries."""
         tree_set = PacketTreeSet()
 
         for tree_id, rom in tree_set.trees.items():
-            assert len(rom.complex_mask) == 32, f"Tree {tree_id}: complex_mask wrong length"
+            assert len(rom.complex_mask) == LEAF_COUNT, f"Tree {tree_id}: complex_mask wrong length"
 
     def test_leaf_depth_range(self):
         """Leaf depths should be in valid range."""
@@ -220,8 +220,8 @@ def test_verify_trees():
         n_complex = sum(rom.complex_mask)
 
         # Basic structure
-        assert n_leaves == 32
-        assert 0 <= n_complex <= 32
+        assert n_leaves == LEAF_COUNT
+        assert 0 <= n_complex <= LEAF_COUNT
 
         # Depth distribution
         depths = {}

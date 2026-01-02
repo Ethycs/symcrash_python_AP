@@ -90,8 +90,9 @@ class VoiceFrame:
     # Harmonic amplitudes for leaf generation (Q15)
     # Index 0 = fundamental, index 1 = 2nd harmonic, etc.
     # These are distributed across leaves via Gaussian soft assignment
+    # Default: pure sine (fundamental only), use harmonics knob to add richness
     partial_amps_q15: List[int] = field(
-        default_factory=lambda: [32767, 16384, 8192, 4096, 2048, 1024, 512, 256]
+        default_factory=lambda: [32767, 0, 0, 0, 0, 0, 0, 0]
     )
 
     # Transient window flag

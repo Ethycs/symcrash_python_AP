@@ -52,8 +52,9 @@ class TestW1NoMusicalSemantics:
         assert len(audio) == 64, f"Wrong output length: {len(audio)}"
         assert any(a != 0 for a in audio), "Output is all zeros"
 
-    def test_same_coeffs_same_output(self, wavelet_engine, q15_half):
-        """Same coefficients produce same output (pure synthesis, no regularity state)."""
+    def test_same_coeffs_same_output(self, q15_half):
+        """Same coefficients produce same output when using fresh engines."""
+        from symcrash_python_ap.wavelet import WaveletEngine
         from symcrash_python_ap.frames import VoiceFrame
 
         coeffs = [1000] * 256
@@ -65,11 +66,13 @@ class TestW1NoMusicalSemantics:
             coeff_q15=coeffs,
         )
 
-        # Disable regularity to test pure wavelet synthesis determinism
-        # RegularityOperator maintains state between calls (prev_sample, slew)
-        # which is intentional for click-free audio but breaks this test
-        audio1 = wavelet_engine.render_voice(vf, apply_regularity=False)
-        audio2 = wavelet_engine.render_voice(vf, apply_regularity=False)
+        # Use fresh engines for determinism test
+        # (phase state advances between calls on the same engine)
+        engine1 = WaveletEngine(block_size=64)
+        engine2 = WaveletEngine(block_size=64)
+
+        audio1 = engine1.render_voice(vf, apply_regularity=False)
+        audio2 = engine2.render_voice(vf, apply_regularity=False)
 
         assert audio1 == audio2, "Same input produced different output"
 

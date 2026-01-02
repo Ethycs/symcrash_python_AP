@@ -65,7 +65,9 @@ class EventEntry:
 class CarrierParams:
     """Carrier oscillator parameters for a block."""
     f0_hz: float = 440.0
-    phase_inc: int = 0       # Computed from f0_hz
+    phase_inc: int = 0       # Computed from note/cents via LUT
+    note: int = 60           # MIDI note number
+    cents: int = 0           # Fine tuning in cents
     harmonic_amps_q15: List[int] = field(default_factory=lambda: [32767] + [0] * 15)
     model_id: int = 0        # Oscillator model (0 = additive sine)
 
@@ -197,9 +199,15 @@ def decode_frame(
     # -------------------------------------------------------------------------
     # Carrier parameters
     # -------------------------------------------------------------------------
+    # Use fixed-point LUT for bit-exact pitch conversion (no floating-point noise)
+    from ..fixed import midi_to_phase_inc_fixed
+
+    note = getattr(frame, 'note', 60)
+    cents = getattr(frame, 'cents', 0)
+    phase_inc = midi_to_phase_inc_fixed(note, cents)
+
+    # Keep f0_hz for compatibility/display (but don't use for phase_inc)
     f0_hz = getattr(frame, 'f0_hz', 440.0) or 440.0
-    sample_rate = 48000  # TODO: Get from config
-    phase_inc = int((f0_hz / sample_rate) * (2**32))
 
     # Harmonic amplitudes: use frame value, latch from previous, or default
     if hasattr(frame, 'partial_amps_q15') and frame.partial_amps_q15:
@@ -220,12 +228,17 @@ def decode_frame(
     plan.carrier_params = CarrierParams(
         f0_hz=f0_hz,
         phase_inc=phase_inc,
+        note=note,
+        cents=cents,
         harmonic_amps_q15=harmonic_amps,
         model_id=0,
     )
 
     # Carrier role
-    beta_target = getattr(frame, 'beta_target_q15', 24576) or 24576
+    # NOTE: Don't use `or 24576` here - 0 is a valid value (pure carrier)
+    beta_target = getattr(frame, 'beta_target_q15', None)
+    if beta_target is None:
+        beta_target = 24576
     if beta_target >= 32000:
         plan.carrier_role = CarrierRole.EXCITER_ONLY
     elif beta_target <= 1000:

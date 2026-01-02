@@ -204,7 +204,7 @@ def render_process_main(
                 master_gain = voice_state.master_gain_q15 if voice_state else 32767
                 scaled_gain = (active_frame.gain_q15 * master_gain) >> 15
 
-                harmonics_q15 = voice_state.harmonics_q15 if voice_state else 16384
+                harmonics_q15 = voice_state.harmonics_q15 if voice_state else 0  # 0 = pure sine
                 base_amps = [32767, 16384, 10923, 8192, 6554, 5461, 4681, 4096]
                 partial_amps = [base_amps[0]]
                 for amp in base_amps[1:]:

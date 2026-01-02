@@ -14,7 +14,11 @@ from .decode import DecodedPlan, BackboneEntry, CarrierRole
 from .tables import Lane, get_operator_lane, BLOCK_SAMPLES, COEFF_LEN, NODE_LEN, L_TOTAL_NODES
 
 # Use canonical sine_core for bit-exact trig lookups
-from ..wavelet.sine_core import sine_q15 as _sine_q15, cosine_q15 as _cosine_q15
+from ..wavelet.sine_core import (
+    sine_q15 as _sine_q15,
+    cosine_q15 as _cosine_q15,
+    sine_q15_vectorized as _sine_vectorized,
+)
 
 # Q15 constants
 Q15_ONE = 32767
@@ -130,33 +134,89 @@ def _sincos_batch_q15(phases: np.ndarray) -> tuple:
     table = _init_qw_table()
 
     # Scale phases to table indices with 12-bit fraction
-    # phases are in [0, 0x40000000], scale to [0, 1024] with fraction
-    # (phase / 0x40000000) * 1024 = phase >> 20
-    scaled = phases >> 18  # 22-bit value: 10-bit index + 12-bit frac
+    # phases are in [0, 0x40000000] (30-bit), scale to [0, 1024.0] with 12-bit frac
+    # scaled = phase * (1024 << 12) / 0x40000000 = phase >> 8
+    scaled = phases >> 8  # 22-bit value: 10-bit index + 12-bit frac
 
     indices = (scaled >> 12).astype(np.int32)
     fracs = (scaled & 0xFFF).astype(np.int32)
 
-    # Clamp indices
+    # Clamp indices to valid range
     indices = np.clip(indices, 0, _QW_SIZE - 1)
 
-    # Linear interpolation: y = y0 + (y1 - y0) * frac / 4096
+    # Linear interpolation for sine: y = y0 + (y1 - y0) * frac / 4096
     y0 = table[indices]
-    y1 = table[indices + 1]
+    y1 = table[np.minimum(indices + 1, _QW_SIZE)]
     sin_vals = y0 + ((y1 - y0) * fracs >> 12)
 
-    # Cosine = sin(90° - phase) = table[1024 - idx] (approximately)
-    # For first quadrant: cos(θ) = sin(π/2 - θ)
+    # Cosine = sin(90° - θ) = table[1024 - index] with reversed interpolation
+    # At index=0: cos = table[1024] = peak
+    # At index=1024: cos = table[0] = 0
     cos_indices = _QW_SIZE - indices
-    cos_indices = np.clip(cos_indices, 0, _QW_SIZE - 1)
-    # Flip fraction for cosine
-    cos_fracs = 4096 - fracs
+    cos_indices = np.clip(cos_indices, 1, _QW_SIZE)  # 1 to 1024
+
+    # For descending lookup, we interpolate from higher to lower index
+    # As frac increases, cosine should DECREASE (move toward lower table index)
     cy0 = table[cos_indices]
-    cy1 = table[np.clip(cos_indices + 1, 0, _QW_SIZE)]
-    # For descending side, we interpolate backwards
-    cos_vals = cy0 - ((cy0 - table[np.clip(cos_indices - 1, 0, _QW_SIZE)]) * fracs >> 12)
+    cy1 = table[cos_indices - 1]
+    cos_vals = cy0 - ((cy0 - cy1) * fracs >> 12)
 
     return cos_vals, sin_vals
+
+
+# =============================================================================
+# WET PATH OLA (Block Boundary Smoothing for IDWPT)
+# =============================================================================
+# OLA is applied to the wet (IDWPT) path ONLY, not the carrier.
+# The carrier is phase-continuous across blocks and needs no OLA.
+# Applying OLA to a continuous signal corrupts it by crossfading non-matching samples.
+
+WET_OLA_SIZE = 8  # Overlap samples (must match state.py)
+
+# Precomputed Hann window for OLA (fade-out and fade-in)
+_WET_OLA_FADE_OUT = np.array([
+    (np.cos(np.pi * i / WET_OLA_SIZE) + 1) * 16384  # Q15 Hann fade-out
+    for i in range(WET_OLA_SIZE)
+], dtype=np.int32)
+
+_WET_OLA_FADE_IN = np.array([
+    (1 - np.cos(np.pi * i / WET_OLA_SIZE)) * 16384  # Q15 Hann fade-in
+    for i in range(WET_OLA_SIZE)
+], dtype=np.int32)
+
+
+def apply_wet_ola(state: VMState, wet_buf: np.ndarray) -> np.ndarray:
+    """
+    Apply OLA to wet path output to smooth IDWPT block boundaries.
+
+    Uses Hann window crossfade at block start.
+
+    Args:
+        state: VMState containing wet_ola_tail from previous block
+        wet_buf: Current block's wet (IDWPT) output (int16 array)
+
+    Returns:
+        Smoothed wet output (modifies wet_buf in place and returns it)
+    """
+    if not state.wet_ola_initialized:
+        # First block - save tail and return unchanged
+        state.wet_ola_tail[:] = wet_buf[-WET_OLA_SIZE:]
+        state.wet_ola_initialized = True
+        return wet_buf
+
+    # Crossfade at block start: prev_tail fades out, new_head fades in
+    for i in range(WET_OLA_SIZE):
+        prev_sample = int(state.wet_ola_tail[i])
+        curr_sample = int(wet_buf[i])
+        # Hann crossfade: prev * fade_out + curr * fade_in
+        blended = (prev_sample * _WET_OLA_FADE_OUT[i] + curr_sample * _WET_OLA_FADE_IN[i]) >> 15
+        # Clamp to int16
+        wet_buf[i] = max(-32768, min(32767, blended))
+
+    # Save tail for next block
+    state.wet_ola_tail[:] = wet_buf[-WET_OLA_SIZE:]
+
+    return wet_buf
 
 
 # =============================================================================
@@ -167,67 +227,6 @@ def _sincos_batch_q15(phases: np.ndarray) -> tuple:
 _CARRIER_SAMPLES = np.zeros(BLOCK_SAMPLES, dtype=np.int32)
 _CARRIER_PHASES = np.zeros(BLOCK_SAMPLES, dtype=np.int64)
 _CARRIER_OUTPUT = np.zeros(BLOCK_SAMPLES, dtype=np.int16)
-
-
-def _parabola_sine_inplace(phase_norm: np.ndarray, out: np.ndarray) -> None:
-    """
-    In-place parabola sine approximation.
-
-    sin(x) ≈ 4x(1-x) for x in [0,1], scaled to Q15.
-    Writes directly to out array to avoid allocation.
-    """
-    # Use vectorized operations but write to existing buffer
-    # Phase is 16-bit: 0-65535 maps to 0-2π
-    # Quarter 1: 0-16383 (rising positive)
-    # Quarter 2: 16384-32767 (falling positive)
-    # Quarter 3: 32768-49151 (rising negative)
-    # Quarter 4: 49152-65535 (falling negative)
-
-    for i in range(len(phase_norm)):
-        p = phase_norm[i]
-        if p < 16384:
-            # Q1: rising
-            out[i] = (4 * p * (16384 - p)) >> 14
-        elif p < 32768:
-            # Q2: falling
-            x = 32768 - p
-            out[i] = (4 * x * (16384 - x)) >> 14
-        elif p < 49152:
-            # Q3: negative rising
-            x = p - 32768
-            out[i] = -((4 * x * (16384 - x)) >> 14)
-        else:
-            # Q4: negative falling
-            x = 65536 - p
-            out[i] = -((4 * x * (16384 - x)) >> 14)
-
-
-def _parabola_sine_vectorized(phase_norm: np.ndarray) -> np.ndarray:
-    """
-    Vectorized parabola sine approximation.
-
-    sin(x) ≈ 4x(1-x) for x in [0,1], scaled to Q15.
-    Input: phase_norm in [0, 65535] (16-bit phase)
-    Output: sine values in Q15 [-32767, 32767]
-
-    Uses half-wave symmetry: sin(x + π) = -sin(x)
-    So we only need to compute the first half (0-32767) and negate for second half.
-    """
-    # Use half-wave symmetry
-    is_negative = phase_norm >= 32768
-    # Fold to first half: [0, 32767]
-    p = np.where(is_negative, phase_norm - 32768, phase_norm)
-
-    # Now compute for first half only (quarter symmetry within)
-    is_falling = p >= 16384
-    # Fold to first quarter: [0, 16383]
-    x = np.where(is_falling, 32768 - p, p)
-
-    # Parabola: 4x(16384-x) >> 14
-    result = (4 * x * (16384 - x)) >> 14
-
-    # Apply sign for second half
-    return np.where(is_negative, -result, result).astype(np.int32)
 
 
 def lane_carrier_render(state: VMState, cfg: DecodedPlan) -> np.ndarray:
@@ -253,9 +252,14 @@ def lane_carrier_render(state: VMState, cfg: DecodedPlan) -> np.ndarray:
     # Get carrier parameters
     target_phase_inc = cfg.carrier_params.phase_inc
     harmonic_amps = cfg.carrier_params.harmonic_amps_q15
+    note = cfg.carrier_params.note
+    cents = cfg.carrier_params.cents
 
-    # Update pitch slew target
-    if state.target_phase_inc != target_phase_inc:
+    # Update pitch slew target - use note/cents comparison for determinism
+    # (Avoids floating-point noise causing constant triggering)
+    if state.last_note != note or state.last_cents != cents:
+        state.last_note = note
+        state.last_cents = cents
         state.target_phase_inc = target_phase_inc
         diff = target_phase_inc - state.phase_inc
         state.pitch_slew_rate = diff // (BLOCK_SAMPLES * 8)
@@ -265,6 +269,11 @@ def lane_carrier_render(state: VMState, cfg: DecodedPlan) -> np.ndarray:
     current_inc = state.phase_inc
 
     if slew_rate == 0:
+        # If slew rounded to 0 but we have a target mismatch, snap to target immediately
+        # This prevents phase discontinuity from using wrong frequency
+        if current_inc != target_phase_inc:
+            current_inc = target_phase_inc
+            state.phase_inc = target_phase_inc
         # Vectorized phase generation
         sample_indices = np.arange(BLOCK_SAMPLES, dtype=np.int64)
         base_phases = (state.phase + sample_indices * current_inc) & 0xFFFFFFFF
@@ -289,6 +298,12 @@ def lane_carrier_render(state: VMState, cfg: DecodedPlan) -> np.ndarray:
     # Clear samples buffer
     _CARRIER_SAMPLES.fill(0)
 
+    # Compute normalization factor: sum of all harmonic amplitudes
+    # This prevents clipping when harmonics add in phase
+    total_amp = sum(harmonic_amps)
+    if total_amp == 0:
+        total_amp = Q15_ONE
+
     # Vectorized harmonic synthesis
     for h in range(len(harmonic_amps)):
         amp = harmonic_amps[h]
@@ -299,27 +314,25 @@ def lane_carrier_render(state: VMState, cfg: DecodedPlan) -> np.ndarray:
         h_phases = (base_phases * (h + 1)) & 0xFFFFFFFF
         # Extract 16-bit phase for lookup
         phase_norm = ((h_phases >> 16) & 0xFFFF).astype(np.int32)
-        # Compute sine values
-        sin_vals = _parabola_sine_vectorized(phase_norm)
-        # Accumulate
+        # Compute sine values using canonical 64K LUT from sine_core
+        sin_vals = _sine_vectorized(phase_norm)
+        # Accumulate (normalized by Q15)
         _CARRIER_SAMPLES += (sin_vals * amp) >> 15
 
-    # DC blocking (1-pole highpass) - sequential IIR
-    dc_coeff = 32604  # ~0.995 in Q15
-    dc_x1 = state.dc_block_x1
-    dc_y1 = state.dc_block_y1
+    # Normalize output by total amplitude and add headroom for DC filter
+    # The DC blocking filter has gain > 1 at high frequencies (~5.8% overshoot)
+    # Scale down to prevent clipping: headroom = 30983/32767 ≈ 0.9456
+    DC_HEADROOM = 30983  # Q15 scale factor to prevent DC filter clipping
+    # Always use Q15 scaling for consistency - normalize by max(total_amp, Q15_ONE)
+    divisor = max(total_amp, Q15_ONE)
+    _CARRIER_SAMPLES = (_CARRIER_SAMPLES * DC_HEADROOM) // divisor
 
-    for i in range(BLOCK_SAMPLES):
-        x = int(_CARRIER_SAMPLES[i])
-        y = x - dc_x1 + ((dc_y1 * dc_coeff) >> 15)
-        dc_x1 = x
-        dc_y1 = y
-        _CARRIER_SAMPLES[i] = y
+    # No DC filter needed in all-digital implementation:
+    # - Sine LUT is symmetric around zero (no inherent DC)
+    # - No ADC offset or analog component drift
+    # - Headroom scaling preserves symmetry
 
-    state.dc_block_x1 = dc_x1
-    state.dc_block_y1 = dc_y1
-
-    # Clamp to output buffer
+    # Clamp to int16 range (should rarely trigger with headroom applied)
     np.clip(_CARRIER_SAMPLES, -32768, 32767, out=_CARRIER_SAMPLES)
     _CARRIER_OUTPUT[:] = _CARRIER_SAMPLES.astype(np.int16)
 
@@ -856,8 +869,14 @@ def _tail_emergency_simplify(state: VMState, mask: int) -> None:
 # LANE 8: IDWPT RENDER
 # =============================================================================
 
-# Import fused lifting for real-time IDWPT (faster than separate FWPT+IDWPT)
-from ..wavelet.fast_lifting import effect_mode_fused
+# Import JIT-accelerated lifting for real-time IDWPT (fastest)
+from ..wavelet.fast_lifting import effect_mode_jit, NUMBA_AVAILABLE
+
+
+# Pre-allocated buffers for IDWPT lane (avoid per-block allocations)
+_IDWPT_OUTPUT = np.zeros(BLOCK_SAMPLES, dtype=np.int16)
+_IDWPT_LEAF_ENERGIES = np.zeros(64, dtype=np.int32)
+_IDWPT_NODE_MASK_TEMPLATE = np.zeros(32, dtype=np.int32)
 
 
 def lane_idwpt_render(
@@ -868,11 +887,7 @@ def lane_idwpt_render(
     """
     Render IDWPT texture from coefficient state using fast_lifting.
 
-    Uses the Carrier + Lift architecture:
-    1. Convert carrier to list
-    2. Build mask from coeff_state (256 -> 64 leaves) using NumPy
-    3. Apply effect_mode_fast: carrier -> FWPT -> mask -> IDWPT
-    4. Return wet audio
+    Optimized version: numpy for vectorized ops, minimal allocations.
 
     Args:
         state: VM state (contains coeff_state as mask source)
@@ -882,30 +897,47 @@ def lane_idwpt_render(
     Returns:
         texture_buf: int16 array of BLOCK_SAMPLES
     """
-    if not cfg.idwpt_enable:
-        return np.zeros(BLOCK_SAMPLES, dtype=np.int16)
+    global _IDWPT_OUTPUT, _IDWPT_LEAF_ENERGIES, _IDWPT_NODE_MASK_TEMPLATE
 
-    # Convert carrier to list (tolist() is faster than astype().tolist())
+    if not cfg.idwpt_enable:
+        _IDWPT_OUTPUT.fill(0)
+        return _IDWPT_OUTPUT
+
+    # Convert carrier to list (tolist() is fast for small arrays)
     carrier_list = carrier_buf.tolist()
 
-    # Build 64-element mask using NumPy (fast vectorized operations)
+    # Build 64-element mask using vectorized numpy
     # Reshape coeff_state into 64 groups of 4 and sum absolute values
     coeff_view = state.coeff_state[:COEFF_LEN].reshape(64, COEFF_LEN // 64)
-    leaf_energies = np.abs(coeff_view).sum(axis=1).astype(np.int32)
+    np.abs(coeff_view).sum(axis=1, out=_IDWPT_LEAF_ENERGIES)
 
-    # Apply mask_u32 (32 nodes -> 64 leaves)
-    # Node i controls leaves 2*i and 2*i+1
-    node_mask = np.array([(cfg.mask_u32 >> i) & 1 for i in range(32)], dtype=np.int32)
-    leaf_mask = np.repeat(node_mask, 2)  # Expand to 64 leaves
+    # Check if coeff_state has any energy - if not, use None for true passthrough
+    total_energy = _IDWPT_LEAF_ENERGIES.sum()
+    if total_energy == 0:
+        # No coefficient energy - use None for perfect passthrough (no mask applied)
+        mask_q15 = None
+    else:
+        # Apply mask_u32: expand 32 nodes to 64 leaves
+        # Use bit manipulation to extract mask bits
+        mask_u32 = cfg.mask_u32
+        for i in range(32):
+            _IDWPT_NODE_MASK_TEMPLATE[i] = (mask_u32 >> i) & 1
+        leaf_mask = np.repeat(_IDWPT_NODE_MASK_TEMPLATE, 2)
 
-    # Apply node mask and clamp to Q15
-    mask_q15 = np.minimum(leaf_energies * leaf_mask, Q15_ONE).tolist()
+        # Apply node mask and clamp to Q15, convert to list
+        mask_q15 = np.minimum(_IDWPT_LEAF_ENERGIES * leaf_mask, Q15_ONE).tolist()
 
-    # Apply fused effect mode: carrier -> FWPT -> mask -> IDWPT -> wet
-    wet_list = effect_mode_fused(carrier_list, mask_q15)
+    # Apply JIT effect mode: carrier -> FWPT -> mask -> IDWPT -> wet
+    wet_list = effect_mode_jit(carrier_list, mask_q15)
 
-    # Convert back to numpy int16
-    return np.array(wet_list, dtype=np.int16)
+    # Copy to output buffer
+    _IDWPT_OUTPUT[:] = wet_list
+
+    # Apply OLA to smooth IDWPT block boundaries
+    # This is applied to wet path ONLY (carrier is phase-continuous, no OLA needed)
+    apply_wet_ola(state, _IDWPT_OUTPUT)
+
+    return _IDWPT_OUTPUT
 
 
 # =============================================================================
@@ -950,6 +982,13 @@ def lane_mix_gain(
     carrier_i32 = carrier_buf.astype(np.int32)
     texture_i32 = texture_buf.astype(np.int32)
     mixed = (carrier_i32 * dry_weights + texture_i32 * wet_weights) >> 15
+
+    # Apply headroom to prevent clipping from equal-power crossfade.
+    # When carrier ≈ wet (e.g., passthrough IDWPT), equal-power crossfade
+    # causes coherent addition: cos(θ)*a + sin(θ)*a = a*√2 at θ=45°.
+    # Scale by 1/√2 ≈ 23170/32767 to prevent clipping.
+    MIX_HEADROOM = 23170  # Q15 for 1/√2
+    mixed = (mixed * MIX_HEADROOM) >> 15
 
     # Vectorized gain interpolation
     gain_delta = cfg.gain_curr_q15 - cfg.gain_prev_q15

@@ -1,0 +1,27 @@
+============================================================
+GOLDEN TRACE STRESS REGENERATION REPORT
+============================================================
+
+Timestamp:    2026-01-01T22:31:43.222481
+Git Commit:   d2d77ce1f623
+Trace Name:   stress_riser_hit_resolve
+Trace Ver:    v0
+
+--- VERSION INFO ---
+  golden_trace_stress: v0
+  vm_std: WSE-STD-VM-HYBRID v0
+  voiceframe_std: WSE-STD-020 v1
+  sine_core_lut: 1024-Q15-12bit-interp
+  table_size: 1024
+  q_bits: 15
+  frac_bits: 12
+  intent: noise PRNG gating, permutes, K ladder, tail ladder, event lanes, ramps
+
+--- HASH COMPARISON ---
+Old Hash: 1713fd639b6e11416b2f110093461374809fb78506a9bdfc54d5d5a165f176e5
+New Hash: 9e98610b9e547295dd115951853233bd3eb3de17224ebdfa21e98cae4724bbf0
+Status:   CHANGED
+
+Block Count: 64
+
+============================================================
