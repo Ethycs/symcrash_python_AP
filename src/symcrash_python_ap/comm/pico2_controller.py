@@ -36,21 +36,18 @@ from dataclasses import dataclass
 from .pico2_receiver import Pico2Receiver, find_pico2_port
 from .pico2_synth_bridge import (
     Pico2SynthBridge,
-    ADSRState,
-    FilterState,
-    OscillatorState,
-    MACRO_ATTACK,
-    MACRO_DECAY,
-    MACRO_SUSTAIN,
-    MACRO_RELEASE,
-    MACRO_CUTOFF,
-    MACRO_RESO,
-    MACRO_HARMONICS,
-    MACRO_ETA,
-    MACRO_DETUNE,
-    MACRO_GAIN,
+    POT_TIMBRE,
+    POT_TEXTURE,
+    POT_DYNAMICS,
+    POT_MORPH,
+    POT_CHAOS,
+    POT_DETUNE,
+    POT_MASTER_GAIN,
+    POT_ATTACK,
+    POT_DECAY,
+    POT_SUSTAIN,
 )
-from ..voice.voice_engine import VoiceEngine
+from ..cockpit_engine import CockpitEngine
 from ..macro_runtime import MacroRuntime
 
 
@@ -75,40 +72,36 @@ class Pico2Controller:
     Unified Pico2 → Python control routing.
 
     Routes hardware pot values to both:
-    - VoiceEngine (ADSR/Filter parameters via Pico2SynthBridge)
+    - CockpitEngine (control parameters via Pico2SynthBridge)
     - MacroRuntime (Preset macros: BRIGHT, BODY, IMPACT)
     """
 
     def __init__(
         self,
-        voice_engine: VoiceEngine,
+        cockpit: CockpitEngine,
         macro_runtime: MacroRuntime,
         port: Optional[str] = None,
-        program_id: int = 1001,
     ):
         """
         Initialize the unified controller.
 
         Args:
-            voice_engine: VoiceEngine instance for ADSR/Filter control
+            cockpit: CockpitEngine instance for control parameters
             macro_runtime: MacroRuntime instance for preset macro control
             port: Serial port (auto-detect if None)
-            program_id: Default instrument program ID
         """
-        self.voice_engine = voice_engine
+        self.cockpit = cockpit
         self.macro_runtime = macro_runtime
         self.port = port or find_pico2_port()
-        self.program_id = program_id
 
         # Create receiver
         self.receiver = Pico2Receiver(port=self.port)
 
-        # Create synth bridge (handles VoiceEngine path)
+        # Create synth bridge (handles CockpitEngine path)
         # Note: We share the same receiver but intercept at controller level
         self.synth_bridge = Pico2SynthBridge(
-            voice_engine,
+            cockpit,
             port=self.port,
-            program_id=program_id,
         )
         # Remove the bridge's callback - we'll handle routing ourselves
         self.synth_bridge.receiver.remove_macro_callback(
@@ -223,17 +216,9 @@ class Pico2Controller:
     # STATUS
     # =========================================================================
 
-    def get_adsr_state(self) -> ADSRState:
-        """Get current ADSR parameter state."""
-        return self.synth_bridge.adsr
-
-    def get_filter_state(self) -> FilterState:
-        """Get current filter parameter state."""
-        return self.synth_bridge.filter
-
-    def get_osc_state(self) -> OscillatorState:
-        """Get current oscillator parameter state."""
-        return self.synth_bridge.osc
+    def get_control_display(self) -> Dict[str, str]:
+        """Get control values formatted for display."""
+        return self.synth_bridge.get_control_display()
 
     def get_preset_macro(self, preset_macro: str) -> int:
         """
@@ -251,15 +236,8 @@ class Pico2Controller:
         """Print current parameter status."""
         print("[Pico2Controller] Status:")
 
-        # ADSR/Filter from synth bridge
-        adsr = self.synth_bridge.get_adsr_display()
-        filter_ = self.synth_bridge.get_filter_display()
-        osc = self.synth_bridge.get_osc_display()
-        print(f"  ADSR: ATK={adsr['ATK']} DCY={adsr['DCY']} "
-              f"SUS={adsr['SUS']} REL={adsr['REL']}")
-        print(f"  Filter: CUT={filter_['CUT']} RES={filter_['RES']}")
-        print(f"  OSC: HARM={osc['HARM']} ETA={osc['ETA']} "
-              f"DET={osc['DET']} GAIN={osc['GAIN']}")
+        # Controls from CockpitEngine
+        self.synth_bridge.print_status()
 
         # Preset macros from macro runtime
         bright = self.macro_runtime.get_preset_macro("BRIGHT")
@@ -273,7 +251,7 @@ class Pico2Controller:
 # =============================================================================
 
 def create_controller(
-    voice_engine: VoiceEngine,
+    cockpit: CockpitEngine,
     macro_runtime: MacroRuntime,
     port: Optional[str] = None
 ) -> Pico2Controller:
@@ -281,14 +259,14 @@ def create_controller(
     Create a Pico2Controller with auto-detection.
 
     Args:
-        voice_engine: VoiceEngine to control
+        cockpit: CockpitEngine to control
         macro_runtime: MacroRuntime to control
         port: Serial port (auto-detect if None)
 
     Returns:
         Configured Pico2Controller
     """
-    return Pico2Controller(voice_engine, macro_runtime, port=port)
+    return Pico2Controller(cockpit, macro_runtime, port=port)
 
 
 # =============================================================================
@@ -300,32 +278,26 @@ if __name__ == "__main__":
     import time
 
     # Create test instances
-    engine = VoiceEngine(max_voices=4)
+    cockpit = CockpitEngine()
     macro_runtime = MacroRuntime()
 
     # Get port from command line or auto-detect
     port = sys.argv[1] if len(sys.argv) > 1 else None
 
     # Create controller
-    controller = Pico2Controller(engine, macro_runtime, port=port)
+    controller = Pico2Controller(cockpit, macro_runtime, port=port)
 
     if not controller.start():
         print("Failed to start controller")
         sys.exit(1)
-
-    # Allocate a test voice
-    from ..voice.voice_engine import GestureBasis
-    vid = engine.allocate_voice(program_id=1001)
-    gesture = GestureBasis(gate=True, pressure_q15=16384)
-    engine.note_on(vid, gesture=gesture)
-    print(f"Allocated test voice {vid}")
 
     print("Listening for pot changes (Ctrl+C to exit)...")
     print("-" * 50)
 
     try:
         while True:
-            # Tick macro runtime slew filters
+            # Tick cockpit and macro runtime slew filters
+            cockpit.tick()
             macro_runtime.tick()
 
             controller.print_status()

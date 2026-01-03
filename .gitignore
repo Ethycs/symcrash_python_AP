@@ -48,3 +48,6 @@ _deps
 *.pch
 core
 vgcore.*
+
+# Audio files
+*.wav

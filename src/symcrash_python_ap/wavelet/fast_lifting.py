@@ -33,7 +33,12 @@ except ImportError:
             return func
         return decorator
 
-__all__ = ['FastCDF53', 'fwpt_balanced', 'idwpt_balanced', 'effect_mode_fast', 'FusedWPT', 'effect_mode_jit', 'NUMBA_AVAILABLE']
+__all__ = [
+    'FastCDF53', 'fwpt_balanced', 'idwpt_balanced', 'effect_mode_fast',
+    'FusedWPT', 'effect_mode_jit', 'NUMBA_AVAILABLE',
+    # Separated FWPT/IDWPT (CCS architecture)
+    'fwpt_jit', 'idwpt_jit',
+]
 
 
 def _sat16(x: int) -> int:
@@ -670,3 +675,312 @@ def effect_mode_jit(
         return _get_jit_processor().effect_mode(carrier, mask_q15, headroom_bits)
     else:
         return effect_mode_fused(carrier, mask_q15, headroom_bits)
+
+
+# =============================================================================
+# SEPARATED FWPT / IDWPT (CCS Architecture)
+# =============================================================================
+# These functions separate the forward and inverse transforms for the CCS path.
+# FWPT is now only used for analysis (not critical path).
+# IDWPT is used by CoeffOsc to convert coefficients directly to audio.
+
+@njit(cache=True, fastmath=True)
+def _fwpt_jit_core(
+    input_buf: np.ndarray,
+    headroom_bits: int,
+    output_coeffs: np.ndarray,
+    fwd_levels: np.ndarray,
+    temp_s: np.ndarray,
+    temp_d: np.ndarray,
+) -> None:
+    """
+    JIT-compiled forward wavelet packet transform only.
+
+    Args:
+        input_buf: int32 input samples (64 samples)
+        headroom_bits: bits to shift down for headroom
+        output_coeffs: int32 output coefficients (64 leaves)
+        fwd_levels: working buffer for levels (7 x 64)
+        temp_s: temp buffer for approx coeffs
+        temp_d: temp buffer for detail coeffs
+    """
+    block_size = 64
+    depth = 6
+
+    # Scale down input and copy to level 0
+    for i in range(block_size):
+        fwd_levels[0, i] = input_buf[i] >> headroom_bits
+
+    # Forward transform
+    for level in range(depth):
+        num_nodes = 1 << level
+        node_size = block_size >> level
+
+        for node in range(num_nodes):
+            start = node * node_size
+            half = node_size >> 1
+            if half == 0:
+                fwd_levels[level + 1, node] = fwd_levels[level, start]
+                continue
+
+            # Predict: d[i] = odd[i] - (even[i] + even[i+1]) / 2
+            for i in range(half):
+                idx = start + 2 * i
+                even_left = fwd_levels[level, idx]
+                if idx + 2 < start + node_size:
+                    even_right = fwd_levels[level, idx + 2]
+                else:
+                    even_right = even_left
+                odd = fwd_levels[level, idx + 1]
+                avg = (even_left + even_right + 1) >> 1
+                temp_d[i] = odd - avg
+
+            # Update: s[i] = even[i] + (d[i-1] + d[i]) / 4
+            for i in range(half):
+                if i > 0:
+                    d_left = temp_d[i - 1]
+                else:
+                    d_left = temp_d[0]
+                d_right = temp_d[i]
+                update = (d_left + d_right + 2) >> 2
+                temp_s[i] = fwd_levels[level, start + 2 * i] + update
+
+            # Write to next level with saturation
+            approx_start = node * 2 * half
+            detail_start = approx_start + half
+            for i in range(half):
+                v = temp_s[i]
+                if v < -32768:
+                    v = -32768
+                elif v > 32767:
+                    v = 32767
+                fwd_levels[level + 1, approx_start + i] = v
+
+                v = temp_d[i]
+                if v < -32768:
+                    v = -32768
+                elif v > 32767:
+                    v = 32767
+                fwd_levels[level + 1, detail_start + i] = v
+
+    # Copy leaf coefficients to output
+    for i in range(block_size):
+        output_coeffs[i] = fwd_levels[depth, i]
+
+
+@njit(cache=True, fastmath=True)
+def _idwpt_jit_core(
+    input_coeffs: np.ndarray,
+    headroom_bits: int,
+    output_buf: np.ndarray,
+    inv_levels: np.ndarray,
+    temp_s: np.ndarray,
+    temp_d: np.ndarray,
+) -> None:
+    """
+    JIT-compiled inverse wavelet packet transform only.
+
+    Args:
+        input_coeffs: int32 leaf coefficients (64 values)
+        headroom_bits: bits to shift up after transform
+        output_buf: int32 output samples (64 samples)
+        inv_levels: working buffer for levels (7 x 64)
+        temp_s: temp buffer for approx coeffs
+        temp_d: temp buffer for detail coeffs
+    """
+    block_size = 64
+    depth = 6
+
+    # Copy input coefficients to leaf level
+    for i in range(block_size):
+        inv_levels[depth, i] = input_coeffs[i]
+
+    # Inverse transform
+    for level in range(depth - 1, -1, -1):
+        num_nodes = 1 << level
+        node_size = block_size >> level
+
+        for node in range(num_nodes):
+            out_start = node * node_size
+            half = node_size >> 1
+            if half == 0:
+                inv_levels[level, out_start] = inv_levels[level + 1, node]
+                continue
+
+            approx_start = node * 2 * half
+            detail_start = approx_start + half
+
+            # Undo update (MUST match forward rounding for perfect reconstruction)
+            for i in range(half):
+                s_val = inv_levels[level + 1, approx_start + i]
+                if i > 0:
+                    d_left = inv_levels[level + 1, detail_start + i - 1]
+                else:
+                    d_left = inv_levels[level + 1, detail_start]
+                d_right = inv_levels[level + 1, detail_start + i]
+                update = (d_left + d_right + 2) >> 2
+                temp_s[i] = s_val - update
+
+            # Undo predict (MUST match forward rounding for perfect reconstruction)
+            for i in range(half):
+                even_left = temp_s[i]
+                if i + 1 < half:
+                    even_right = temp_s[i + 1]
+                else:
+                    even_right = temp_s[i]
+                avg = (even_left + even_right + 1) >> 1
+                temp_d[i] = inv_levels[level + 1, detail_start + i] + avg
+
+            # Interleave to output with saturation
+            for i in range(half):
+                v = temp_s[i]
+                if v < -32768:
+                    v = -32768
+                elif v > 32767:
+                    v = 32767
+                inv_levels[level, out_start + 2 * i] = v
+
+                v = temp_d[i]
+                if v < -32768:
+                    v = -32768
+                elif v > 32767:
+                    v = 32767
+                inv_levels[level, out_start + 2 * i + 1] = v
+
+    # Scale back up
+    for i in range(block_size):
+        v = inv_levels[0, i] << headroom_bits
+        if v < -32768:
+            v = -32768
+        elif v > 32767:
+            v = 32767
+        output_buf[i] = v
+
+
+class SeparatedWaveletProcessor:
+    """
+    Separated FWPT/IDWPT processor for CCS architecture.
+
+    Unlike the fused effect_mode, this allows:
+    - FWPT for analysis only (not in critical path)
+    - IDWPT from CoeffOsc coefficients (direct synthesis)
+    """
+
+    def __init__(self, block_size: int = 64, depth: int = 6):
+        self.block_size = block_size
+        self.depth = depth
+
+        # Pre-allocate numpy arrays
+        self.fwd_levels = np.zeros((depth + 1, block_size), dtype=np.int32)
+        self.inv_levels = np.zeros((depth + 1, block_size), dtype=np.int32)
+        self.temp_s = np.zeros(block_size, dtype=np.int32)
+        self.temp_d = np.zeros(block_size, dtype=np.int32)
+        self.output = np.zeros(block_size, dtype=np.int32)
+        self._input_buf = np.zeros(block_size, dtype=np.int32)
+        self._coeff_buf = np.zeros(block_size, dtype=np.int32)
+
+    def fwpt(self, samples: List[int], headroom_bits: int = 1) -> List[int]:
+        """
+        Forward wavelet packet transform only.
+
+        Args:
+            samples: 64 int16 audio samples
+            headroom_bits: bits to shift down for numerical headroom
+
+        Returns:
+            64 leaf coefficients (int16 range)
+        """
+        for i in range(min(len(samples), self.block_size)):
+            self._input_buf[i] = samples[i]
+
+        _fwpt_jit_core(
+            self._input_buf,
+            headroom_bits,
+            self._coeff_buf,
+            self.fwd_levels,
+            self.temp_s,
+            self.temp_d,
+        )
+
+        return [int(self._coeff_buf[i]) for i in range(self.block_size)]
+
+    def idwpt(self, coeffs: List[int], headroom_bits: int = 1) -> List[int]:
+        """
+        Inverse wavelet packet transform only.
+
+        Args:
+            coeffs: 64 leaf coefficients (int16 range)
+            headroom_bits: bits to shift up after transform
+
+        Returns:
+            64 audio samples (int16 range)
+        """
+        for i in range(min(len(coeffs), self.block_size)):
+            self._coeff_buf[i] = coeffs[i]
+
+        _idwpt_jit_core(
+            self._coeff_buf,
+            headroom_bits,
+            self.output,
+            self.inv_levels,
+            self.temp_s,
+            self.temp_d,
+        )
+
+        return [int(self.output[i]) for i in range(self.block_size)]
+
+
+# Global separated processor instance
+_separated_processor: Optional[SeparatedWaveletProcessor] = None
+
+
+def _get_separated_processor() -> SeparatedWaveletProcessor:
+    """Get or create the global separated processor instance."""
+    global _separated_processor
+    if _separated_processor is None:
+        _separated_processor = SeparatedWaveletProcessor(64, 6)
+    return _separated_processor
+
+
+def fwpt_jit(samples: List[int], headroom_bits: int = 1) -> List[int]:
+    """
+    JIT-accelerated forward wavelet packet transform.
+
+    This is the analysis-only path, used for coefficient extraction.
+    Not in the critical audio rendering path for CCS architecture.
+
+    Args:
+        samples: 64 int16 audio samples
+        headroom_bits: bits to shift down for numerical headroom
+
+    Returns:
+        64 leaf coefficients (int16 range)
+    """
+    if NUMBA_AVAILABLE:
+        return _get_separated_processor().fwpt(samples, headroom_bits)
+    else:
+        # Fallback to fwpt_balanced
+        leaves = fwpt_balanced(samples, depth=6)
+        return [leaf[0] if leaf else 0 for leaf in leaves]
+
+
+def idwpt_jit(coeffs: List[int], headroom_bits: int = 1) -> List[int]:
+    """
+    JIT-accelerated inverse wavelet packet transform.
+
+    This is the synthesis path used by CCS architecture.
+    Converts CoeffOsc coefficients directly to audio samples.
+
+    Args:
+        coeffs: 64 leaf coefficients (int16 range)
+        headroom_bits: bits to shift up after transform
+
+    Returns:
+        64 audio samples (int16 range)
+    """
+    if NUMBA_AVAILABLE:
+        return _get_separated_processor().idwpt(coeffs, headroom_bits)
+    else:
+        # Fallback to idwpt_balanced
+        leaves = [[c] for c in coeffs]
+        return idwpt_balanced(leaves, depth=6)

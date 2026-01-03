@@ -873,7 +873,14 @@ def _tail_emergency_simplify(state: VMState, mask: int) -> None:
 # =============================================================================
 
 # Import JIT-accelerated lifting for real-time IDWPT (fastest)
-from ..wavelet.fast_lifting import effect_mode_jit, idwpt_balanced, NUMBA_AVAILABLE
+from ..wavelet.fast_lifting import (
+    effect_mode_jit,
+    idwpt_balanced,
+    NUMBA_AVAILABLE,
+    # Separated transforms for CCS architecture
+    fwpt_jit,
+    idwpt_jit,
+)
 
 # Import CoeffOsc for CCS path
 from .coeff_osc import (
@@ -1162,4 +1169,7 @@ __all__ = [
     'lane_idwpt_render',
     'lane_ccs_render',
     'lane_mix_gain',
+    # Separated transforms (re-exported from fast_lifting)
+    'fwpt_jit',
+    'idwpt_jit',
 ]

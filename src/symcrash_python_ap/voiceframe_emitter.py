@@ -2,30 +2,35 @@
 VoiceFrame Emitter
 ==================
 
-Emits VoiceFrames from compiled preset + note events.
+Emits VoiceFrames from compiled preset + ControlFrame.
 
-The emitter is the bridge between the preset (static configuration) and
-the VM (which consumes VoiceFrames). It handles:
+The emitter is the bridge between the preset (static configuration),
+ControlFrame (control intent), and the VM (which consumes VoiceFrames).
+
+It handles:
+- Consuming ControlFrames from CockpitEngine
 - Envelope scheduling (block-rate ADSR)
 - Beta (dry/wet) ramping
 - Note-on/note-off transitions
 - MIDI note to Hz conversion
+- Applying control modifiers (family scales, pitch offset, gain, etc.)
 
 Usage:
     from preset_compiler import PresetCompiler
     from voiceframe_emitter import VoiceFrameEmitter
+    from cockpit_engine import CockpitEngine
 
     compiler = PresetCompiler()
     preset = compiler.compile_file("brass_stab_v0.yaml")
 
+    cockpit = CockpitEngine()
     emitter = VoiceFrameEmitter(preset)
-    emitter.note_on(note=60, velocity_q15=32767)
 
-    for block in range(total_blocks):
-        if block == note_off_block:
-            emitter.note_off()
-        frame = emitter.emit_frame()
-        # Pass frame to VM
+    # Each block:
+    control_frame = cockpit.tick()
+    emitter.consume_control_frame(control_frame)
+    frame = emitter.emit_frame()
+    # Pass frame to VM
 """
 
 from dataclasses import dataclass, field
@@ -35,6 +40,8 @@ import math
 from .preset_compiler import CompiledPreset, Q15_ONE
 from .envelope_scheduler import EnvelopeScheduler, ADSRSpec
 from .frames import VoiceFrame
+from .control_frame import ControlFrame, EventType
+from .control_registry import ControlID
 
 
 # =============================================================================
@@ -67,14 +74,13 @@ def midi_to_hz(note: int, cents: int = 0) -> float:
 @dataclass
 class VoiceFrameEmitter:
     """
-    Emits VoiceFrames from compiled preset + note events.
+    Emits VoiceFrames from compiled preset + ControlFrame.
 
     Manages per-voice state including:
     - Envelope (ADSR)
     - Beta ramp (dry/wet blend)
     - Note state (pitch, velocity)
-    - Eta override (manual dry/wet control)
-    - Detune (pitch offset in cents)
+    - Control modifiers (pitch offset, gain scale, family scales, etc.)
     """
     preset: CompiledPreset
 
@@ -96,9 +102,18 @@ class VoiceFrameEmitter:
     # Note state
     _is_note_on: bool = False
 
-    # Controller overrides (set via set_eta() and set_detune())
-    _eta_override_q15: Optional[int] = None  # None = use preset ramp, 0-32767 = override
-    _detune_cents: int = 0  # Additional detune from controller (-2400 to +2400 typical)
+    # Control modifiers (from ControlFrame)
+    _pitch_offset_cents: int = 0       # DETUNE + PITCH_BEND
+    _gain_scale_q15: int = Q15_ONE     # DYNAMICS control
+    _tree_blend_q15: int = 0           # MORPH control
+    _family_scale_q15: List[int] = field(default_factory=lambda: [Q15_ONE] * 8)  # 8 families
+    _master_gain_q15: int = Q15_ONE    # Global master gain
+
+    # ADSR overrides (from ControlFrame)
+    _attack_blocks: Optional[int] = None
+    _decay_blocks: Optional[int] = None
+    _sustain_level_q15: Optional[int] = None
+    _release_blocks: Optional[int] = None
 
     def __post_init__(self):
         """Initialize envelope from preset."""
@@ -140,39 +155,60 @@ class VoiceFrameEmitter:
         if self._envelope:
             self._envelope.release_note()
 
-    def set_eta(self, eta_q15: Optional[int]) -> None:
+    def consume_control_frame(self, frame: ControlFrame) -> None:
         """
-        Set dry/wet blend override.
+        Consume a ControlFrame and update emitter state.
+
+        Extracts control modifiers and events for this voice.
 
         Args:
-            eta_q15: Blend value (0=dry, 32767=wet), or None to use preset ramp
+            frame: ControlFrame from CockpitEngine
         """
-        if eta_q15 is None:
-            self._eta_override_q15 = None
-        else:
-            self._eta_override_q15 = max(0, min(Q15_ONE, eta_q15))
+        # Process events
+        for event in frame.events:
+            if event.type == EventType.NOTE_ON and (event.voice_id == 0xFFFF or event.voice_id == self.voice_id):
+                note = event.a & 0x7F
+                velocity_q15 = (event.a >> 8) & 0xFFFF
+                self.note_on(note, velocity_q15)
+            elif event.type == EventType.NOTE_OFF and (event.voice_id == 0xFFFF or event.voice_id == self.voice_id):
+                note = event.a & 0x7F
+                if note == self.note:
+                    self.note_off()
 
-    def set_detune(self, cents: int) -> None:
-        """
-        Set additional detune offset.
+        # Process voice patches
+        for patch in frame.voice_patches:
+            if patch.voice_id != 0 and patch.voice_id != self.voice_id:
+                continue  # Not for this voice
 
-        This is added to the note's cents value for frequency calculation.
-        Typical range: -2400 to +2400 (±2 octaves).
+            for item in patch.items:
+                # Apply control modifiers
+                if item.control_id == ControlID.DYNAMICS:
+                    self._gain_scale_q15 = item.value
+                elif item.control_id == ControlID.MORPH:
+                    self._tree_blend_q15 = item.value
+                elif item.control_id == ControlID.DETUNE:
+                    self._pitch_offset_cents = item.value
+                elif item.control_id == ControlID.PITCH_BEND:
+                    self._pitch_offset_cents += item.value  # Cumulative
+                elif item.control_id == ControlID.TIMBRE:
+                    self._family_scale_q15[0] = item.value  # FamilyID.COLOR
+                elif item.control_id == ControlID.TEXTURE:
+                    self._family_scale_q15[1] = item.value  # FamilyID.LOCAL
+                elif item.control_id == ControlID.CHAOS:
+                    self._family_scale_q15[5] = item.value  # FamilyID.CATASTROPHE
+                # ADSR overrides
+                elif item.control_id == ControlID.ATK_BLOCKS:
+                    self._attack_blocks = item.value
+                elif item.control_id == ControlID.DCY_BLOCKS:
+                    self._decay_blocks = item.value
+                elif item.control_id == ControlID.SUS_Q15:
+                    self._sustain_level_q15 = item.value
+                elif item.control_id == ControlID.REL_BLOCKS:
+                    self._release_blocks = item.value
 
-        Args:
-            cents: Detune in cents (100 cents = 1 semitone)
-        """
-        self._detune_cents = cents
-
-    def get_eta(self) -> int:
-        """Get current eta (dry/wet) value in Q15."""
-        if self._eta_override_q15 is not None:
-            return self._eta_override_q15
-        return self._beta_current_q15
-
-    def get_detune(self) -> int:
-        """Get current detune in cents."""
-        return self._detune_cents
+        # Update global controls
+        if frame.globals.master_gain_q15 is not None:
+            self._master_gain_q15 = frame.globals.master_gain_q15
 
     def emit_frame(self) -> VoiceFrame:
         """
@@ -181,8 +217,24 @@ class VoiceFrameEmitter:
         Call this once per block to get the VoiceFrame.
 
         Returns:
-            VoiceFrame with all fields populated from preset + state
+            VoiceFrame with all fields populated from preset + control modifiers
         """
+        # Update envelope ADSR if overridden by controls
+        if self._envelope and any([
+            self._attack_blocks is not None,
+            self._decay_blocks is not None,
+            self._sustain_level_q15 is not None,
+            self._release_blocks is not None,
+        ]):
+            # Create new ADSR spec with overrides
+            adsr = ADSRSpec(
+                attack_blocks=self._attack_blocks or self._envelope.spec.attack_blocks,
+                decay_blocks=self._decay_blocks or self._envelope.spec.decay_blocks,
+                sustain_level_q15=self._sustain_level_q15 or self._envelope.spec.sustain_level_q15,
+                release_blocks=self._release_blocks or self._envelope.spec.release_blocks,
+            )
+            self._envelope.spec = adsr
+
         # Get envelope gain
         if self._envelope:
             gain_q15 = self._envelope.tick()
@@ -191,6 +243,12 @@ class VoiceFrameEmitter:
 
         # Apply velocity scaling
         gain_q15 = (gain_q15 * self.velocity_q15) >> 15
+
+        # Apply DYNAMICS control (gain_scale_q15)
+        gain_q15 = (gain_q15 * self._gain_scale_q15) >> 15
+
+        # Apply master gain
+        gain_q15 = (gain_q15 * self._master_gain_q15) >> 15
 
         # Compute beta ramp (preset-driven)
         beta_target = self.preset.material.beta_target_q15
@@ -204,27 +262,36 @@ class VoiceFrameEmitter:
         else:
             self._beta_current_q15 = beta_target
 
-        # Determine effective eta: override takes precedence over preset ramp
-        effective_eta_q15 = self._eta_override_q15 if self._eta_override_q15 is not None else self._beta_current_q15
-
-        # Compute f0_hz from MIDI note + cents + detune
-        total_cents = self.cents + self._detune_cents
+        # Compute f0_hz from MIDI note + cents + pitch offset
+        total_cents = self.cents + self._pitch_offset_cents
         f0_hz = midi_to_hz(self.note, total_cents)
+
+        # Apply family scales to preset families
+        scaled_families = []
+        for i, family_weight in enumerate(self.preset.backbone_families()):
+            if i < len(self._family_scale_q15):
+                scaled_weight = (family_weight * self._family_scale_q15[i]) >> 15
+                scaled_families.append(scaled_weight)
+            else:
+                scaled_families.append(family_weight)
+
+        # Use control-driven tree_blend_q15 if available
+        tree_blend = self._tree_blend_q15 if self._tree_blend_q15 != 0 else self.preset.latch.tree_blend_q15
 
         # Build VoiceFrame
         frame = VoiceFrame(
             voice_id=self.voice_id,
             f0_hz=f0_hz,
             note=self.note,
-            cents=total_cents,  # Include detune in frame
+            cents=total_cents,
             gain_q15=gain_q15,
-            beta_target_q15=effective_eta_q15,
+            beta_target_q15=self._beta_current_q15,
             partial_amps_q15=list(self.preset.harmonic_amps_q15),
             ops_enable=self.preset.backbone_ops(),
-            families=self.preset.backbone_families(),
+            families=scaled_families,
             tree_a_id=self.preset.latch.tree_a_id,
             tree_b_id=self.preset.latch.tree_b_id,
-            tree_blend_q15=self.preset.latch.tree_blend_q15,
+            tree_blend_q15=tree_blend,
             is_starting=(self.block_index == 0),
             is_active=self.is_active,
         )
@@ -253,8 +320,15 @@ class VoiceFrameEmitter:
         self.block_index = 0
         self._is_note_on = False
         self._beta_current_q15 = self.preset.material.beta_start_q15
-        self._eta_override_q15 = None
-        self._detune_cents = 0
+        self._pitch_offset_cents = 0
+        self._gain_scale_q15 = Q15_ONE
+        self._tree_blend_q15 = 0
+        self._family_scale_q15 = [Q15_ONE] * 8
+        self._master_gain_q15 = Q15_ONE
+        self._attack_blocks = None
+        self._decay_blocks = None
+        self._sustain_level_q15 = None
+        self._release_blocks = None
         if self._envelope:
             self._envelope.reset()
 
@@ -269,14 +343,17 @@ class MultiVoiceEmitter:
     Manages multiple VoiceFrameEmitters for polyphonic playback.
 
     Usage:
-        multi = MultiVoiceEmitter(preset, max_voices=8)
-        multi.note_on(note=60, velocity_q15=32767)
-        multi.note_on(note=64, velocity_q15=32767)  # Different voice
+        from cockpit_engine import CockpitEngine
 
-        for block in range(total_blocks):
-            frames = multi.emit_frames()
-            for frame in frames:
-                # Process with VM
+        cockpit = CockpitEngine()
+        multi = MultiVoiceEmitter(preset, max_voices=8)
+
+        # Each block:
+        control_frame = cockpit.tick()
+        multi.consume_control_frame(control_frame)
+        frames = multi.emit_frames()
+        for frame in frames:
+            # Process with VM
     """
     preset: CompiledPreset
     max_voices: int = 8
@@ -291,6 +368,16 @@ class MultiVoiceEmitter:
         for i in range(self.max_voices):
             emitter = VoiceFrameEmitter(preset=self.preset, voice_id=i)
             self._voices.append(emitter)
+
+    def consume_control_frame(self, frame: ControlFrame) -> None:
+        """
+        Consume a ControlFrame and update all voices.
+
+        Args:
+            frame: ControlFrame from CockpitEngine
+        """
+        for voice in self._voices:
+            voice.consume_control_frame(frame)
 
     def note_on(self, note: int, velocity_q15: int = Q15_ONE, cents: int = 0) -> int:
         """

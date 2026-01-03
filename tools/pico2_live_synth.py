@@ -3,22 +3,25 @@
 Pico2 Live Synthesis Controller
 ===============================
 
-Complete live control: Pico2 Hardware -> VoiceEngine -> UnifiedOutputStage -> Audio
+Complete live control: Pico2 Hardware -> CockpitEngine -> VoiceFrameEmitter -> UnifiedOutputStage -> Audio
 
 This script connects all the pieces for real-time hardware control of synthesis:
-- Pico2 pots control ADSR + Filter parameters
-- VoiceEngine manages voice allocation and envelopes
+- Pico2 pots control all synthesis parameters via CockpitEngine
+- CockpitEngine emits ControlFrames (block-rate control snapshots)
+- VoiceFrameEmitter consumes ControlFrames and emits VoiceFrames
 - UnifiedOutputStage renders actual audio (Carrier + Wavelet Lift)
 - sounddevice streams audio in real-time
 
 Controls:
-- Pots 0-3: ADSR envelope (Attack, Decay, Sustain, Release)
-- Pots 4-5: Filter (Cutoff, Resonance)
-- Keyboard: SPACE=toggle note, s=status, q=quit
+- Pots 0-4: Timbral controls (TIMBRE, TEXTURE, DYNAMICS, MORPH, CHAOS)
+- Pots 5-6: Pitch and master (DETUNE, MASTER_GAIN)
+- Pots 7-9: ADSR envelope (Attack, Decay, Sustain)
+- Keyboard: SPACE=toggle note, UP/DOWN=change note, s=status, q=quit
 
 Usage:
     python pico2_live_synth.py [PORT]
     python pico2_live_synth.py COM3
+    python pico2_live_synth.py --no-hardware  # Virtual mode (no Pico2)
 """
 
 import sys
@@ -105,7 +108,9 @@ except ImportError:
     AUDIO_AVAILABLE = False
     print("Warning: sounddevice not available, audio output disabled")
 
-from symcrash_python_ap.voice import VoiceEngine, GestureBasis
+from symcrash_python_ap.cockpit_engine import CockpitEngine
+from symcrash_python_ap.preset_compiler import PresetCompiler
+from symcrash_python_ap.voiceframe_emitter import VoiceFrameEmitter
 from symcrash_python_ap.safety.unified_renderer import UnifiedOutputStage
 from symcrash_python_ap.frames import VoiceFrame
 from symcrash_python_ap.comm.pico2_synth_bridge import Pico2SynthBridge, create_bridge
@@ -137,22 +142,42 @@ class Pico2LiveSynth:
     """
     Complete live synthesis controller.
 
-    Connects Pico2 Hardware -> VoiceEngine -> UnifiedOutputStage -> Audio
-    Or in virtual mode: ImGui Controls -> VoiceEngine -> UnifiedOutputStage -> Audio
+    Connects Pico2 Hardware -> CockpitEngine -> VoiceFrameEmitter -> UnifiedOutputStage -> Audio
+    Or in virtual mode: ImGui Controls -> CockpitEngine -> VoiceFrameEmitter -> UnifiedOutputStage -> Audio
     """
 
-    def __init__(self, port: Optional[str] = None, virtual_mode: bool = False):
+    def __init__(self, port: Optional[str] = None, virtual_mode: bool = False, preset_path: Optional[str] = None):
         """
         Initialize the live synth.
 
         Args:
             port: Serial port (auto-detect if None, ignored in virtual_mode)
             virtual_mode: If True, run without hardware (controls via ImGui)
+            preset_path: Path to preset file (use default if None)
         """
         self.virtual_mode = virtual_mode
 
-        # Voice engine for ADSR and voice management
-        self.engine = VoiceEngine(max_voices=NUM_VOICES)
+        # Cockpit engine for block-rate control
+        self.cockpit = CockpitEngine()
+
+        # Load preset for voice frame emission
+        if preset_path:
+            compiler = PresetCompiler()
+            preset = compiler.compile_file(preset_path)
+        else:
+            # Use a simple default preset (create in-memory)
+            from symcrash_python_ap.preset_compiler import CompiledPreset, PresetMeta, PresetMaterial, PresetLatch
+            from symcrash_python_ap.envelope_scheduler import ADSRSpec
+            preset = CompiledPreset(
+                meta=PresetMeta(name="Default", author="System", version="1.0"),
+                material=PresetMaterial(beta_start_q15=0, beta_target_q15=24576, beta_ramp_blocks=16),
+                latch=PresetLatch(tree_a_id=0, tree_b_id=0, tree_blend_q15=0),
+                harmonic_amps_q15=[32767, 16384, 10923, 8192, 6554, 5461, 4681, 4096],
+                amp_env=ADSRSpec(attack_blocks=8, decay_blocks=32, sustain_level_q15=24576, release_blocks=64),
+            )
+
+        # Voice frame emitter
+        self.emitter = VoiceFrameEmitter(preset, voice_id=0)
 
         # Synthesis pipeline for audio rendering
         self.stage = UnifiedOutputStage(
@@ -160,7 +185,7 @@ class Pico2LiveSynth:
         )
 
         # Hardware bridge (or virtual mode bridge)
-        self.bridge = create_bridge(self.engine, port=port, virtual_mode=virtual_mode)
+        self.bridge = create_bridge(self.cockpit, port=port, virtual_mode=virtual_mode)
 
         # Audio streaming
         self.stream: Optional[sd.OutputStream] = None
@@ -294,19 +319,35 @@ class Pico2LiveSynth:
 
     def _render_block(self):
         """Render one audio block."""
-        # Step the voice engine to get voice frames
-        voice_frames = self.engine.step_all()
+        # Tick cockpit to get ControlFrame
+        control_frame = self.cockpit.tick()
 
-        # Create VoiceFrame for the synthesis stage
-        # Use first active voice, or silent if none
-        frame = self._create_voice_frame(voice_frames)
+        # Consume control frame in emitter
+        self.emitter.consume_control_frame(control_frame)
+
+        # Emit VoiceFrame
+        if self.emitter.is_active:
+            frame = self.emitter.emit_frame()
+        else:
+            # Create silent frame when voice is inactive
+            frame = VoiceFrame(
+                voice_id=0,
+                note=self.current_note,
+                cents=0,
+                gain_q15=0,
+                pan_q15=0,
+                tree_a_id=0,
+                tree_b_id=0,
+                tree_blend_q15=0,
+                is_active=False,
+            )
 
         # Debug: log occasionally (every ~4 seconds to reduce overhead)
         if self.blocks_rendered % 3000 == 0:
-            active_count = len([vf for vf in voice_frames if vf.is_active])
-            print(f"[DEBUG] Block {self.blocks_rendered}: active={active_count} "
+            print(f"[DEBUG] Block {self.blocks_rendered}: "
+                  f"active={self.emitter.is_active} "
                   f"note={frame.note} gain={frame.gain_q15} "
-                  f"eta={frame.beta_target_q15} harm={frame.partial_amps_q15[1] if frame.partial_amps_q15 else 0}")
+                  f"beta={frame.beta_target_q15}")
 
         # Render through the synthesis pipeline
         left, right = self.stage.render_block(frame)
@@ -318,81 +359,6 @@ class Pico2LiveSynth:
         except queue.Full:
             pass  # Drop block if buffer is full
 
-    def _create_voice_frame(self, voice_frames) -> VoiceFrame:
-        """
-        Convert VoiceEngine output to synthesis VoiceFrame.
-
-        Args:
-            voice_frames: List of VoiceFrameABI from engine.step_all()
-
-        Returns:
-            VoiceFrame for UnifiedOutputStage
-        """
-        # Find first active voice
-        active_frame = None
-        for vf in voice_frames:
-            if vf.is_active and vf.gain_q15 > 0:
-                active_frame = vf
-                break
-
-        if active_frame is None:
-            # No active voice - return silent frame
-            return VoiceFrame(
-                voice_id=0,
-                note=60,
-                cents=0,
-                gain_q15=0,
-                pan_q15=0,
-                tree_a_id=0,
-                tree_b_id=0,
-                tree_blend_q15=0,
-                is_active=False,
-            )
-
-        # Get VoiceState to read control parameters (eta, harmonics, gain)
-        voice_state = self.engine.voices.get(active_frame.voice_id)
-
-        # Use the current_note since VoiceEngine doesn't track note numbers
-        # (It's gesture-based, not MIDI-centric)
-        note = self.current_note
-
-        # Read control values from VoiceState (set by Pico2SynthBridge)
-        eta_q15 = voice_state.eta_q15 if voice_state else 24576
-        master_gain_q15 = voice_state.master_gain_q15 if voice_state else 24576
-        harmonics_q15 = voice_state.harmonics_q15 if voice_state else 0  # 0 = pure sine
-        detune_cents = voice_state.detune_cents if voice_state else 0
-
-        # Use detune_cents directly (no floating-point f0_hz calculation)
-        cents = detune_cents
-
-        # Scale gain by master_gain control
-        scaled_gain = (active_frame.gain_q15 * master_gain_q15) >> 15
-
-        # Compute partial amplitudes from harmonics control
-        # harmonics_q15 controls higher harmonic mix (0=fundamental only, 32767=full)
-        base_amps = [32767, 16384, 10923, 8192, 6554, 5461, 4681, 4096]
-        partial_amps = [base_amps[0]]  # Fundamental always at full
-        for amp in base_amps[1:]:
-            partial_amps.append((amp * harmonics_q15) >> 15)
-
-        return VoiceFrame(
-            voice_id=active_frame.voice_id,
-            note=note,
-            cents=cents,
-            # f0_hz removed - unified_renderer uses note/cents directly (fixed-point)
-            gain_q15=scaled_gain,
-            pan_q15=active_frame.pan_q15,
-            tree_a_id=active_frame.tree_a_id,
-            tree_b_id=active_frame.tree_b_id,
-            tree_blend_q15=active_frame.tree_blend_q15,
-            tilt_env_q15=active_frame.tilt_env_q15,
-            density_env_q15=active_frame.density_env_q15,
-            is_starting=active_frame.is_starting,
-            is_stopping=active_frame.is_stopping,
-            is_active=active_frame.is_active,
-            beta_target_q15=eta_q15,
-            partial_amps_q15=partial_amps,
-        )
 
     # =========================================================================
     # NOTE CONTROL
@@ -402,47 +368,28 @@ class Pico2LiveSynth:
         """Trigger a note."""
         self.current_note = note
 
-        # Allocate voice
-        self.current_voice_id = self.engine.allocate_voice(program_id=1001)
+        # Send note-on via cockpit (will be in next ControlFrame)
+        self.cockpit.midi_note_on(note, velocity)
 
-        if self.current_voice_id is not None:
-            # Apply current pot values to newly allocated voice
-            # (newly allocated voices get defaults, not current pot values)
-            vid = self.current_voice_id
-            if vid in self.engine.voices:
-                vs = self.engine.voices[vid]
-                vs.eta_q15 = self.bridge.osc.eta_q15
-                vs.harmonics_q15 = self.bridge.osc.harmonics_q15
-                vs.master_gain_q15 = self.bridge.osc.gain_q15
-                # Convert detune_q15 to cents
-                centered = self.bridge.osc.detune_q15 - 16384
-                vs.detune_cents = (centered * 2400) // 16384
+        # Tell the synthesis stage about the voice
+        freq = 440.0 * (2 ** ((note - 69) / 12))
+        self.stage.voice_on(0, note)  # Single voice (voice_id=0)
 
-            # Create gesture
-            pressure = (velocity * Q15_ONE) // 127
-            gesture = GestureBasis(
-                gate=True,
-                pressure_q15=pressure,
-            )
-            self.engine.note_on(self.current_voice_id, gesture=gesture)
-
-            # Tell the synthesis stage about the voice
-            freq = 440.0 * (2 ** ((note - 69) / 12))
-            self.stage.voice_on(self.current_voice_id, note)
-
-            print(f"Note ON: {note} (voice {self.current_voice_id}, {freq:.1f}Hz)")
+        print(f"Note ON: {note} ({freq:.1f}Hz, velocity={velocity})")
 
     def note_off(self):
         """Release the current note."""
-        if self.current_voice_id is not None:
-            self.engine.note_off(self.current_voice_id)
-            self.stage.voice_off(self.current_voice_id)
-            print(f"Note OFF: voice {self.current_voice_id}")
-            self.current_voice_id = None
+        # Send note-off via cockpit
+        self.cockpit.midi_note_off(self.current_note)
+
+        # Tell the synthesis stage
+        self.stage.voice_off(0)  # Single voice (voice_id=0)
+
+        print(f"Note OFF: {self.current_note}")
 
     def toggle_note(self):
         """Toggle note on/off."""
-        if self.current_voice_id is not None:
+        if self.emitter.is_active:
             self.note_off()
         else:
             self.note_on(self.current_note)

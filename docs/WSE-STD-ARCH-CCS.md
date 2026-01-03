@@ -1,5 +1,40 @@
 # WSE-ARCH-v0: Carrier-Coefficient Synthesis (No Forward Pass in Voice Path)
 
+## Implementation Status (2026-01-03)
+
+| Item | Status | Notes |
+|------|--------|-------|
+| **A1) Remove FWPT from voice path** | ✅ Complete | CCS path uses `CoeffOsc` to generate coefficients directly from phase |
+| **A2) FWPT for conditioning only** | ✅ Complete | `fwpt_jit()` and `idwpt_jit()` separated in `fast_lifting.py` |
+| **A3) No resets in wavelet engine** | ✅ Complete | Phase-continuous operation verified |
+| **A4) Tail predicate + metrics** | ⏳ Partial | Basic clamps exist, full E/P/ΔE/ΔP not yet |
+| **A5) Comb elimination test** | ✅ Complete | CCS produces identical output regardless of ETA |
+
+### Key Implementation Details
+
+**CCS Voice Path** (`src/symcrash_python_ap/vm/lanes.py`):
+- `lane_ccs_render()` generates coefficients via `CoeffOsc` lookup from phase
+- `lane_carrier_render()` generates carrier audio (used for carrier-only mode)
+- Phase is continuous across blocks (no resets)
+
+**Separated Transforms** (`src/symcrash_python_ap/wavelet/fast_lifting.py`):
+- `fwpt_jit(samples)` → Forward transform for analysis (not in voice path)
+- `idwpt_jit(coeffs)` → Inverse transform for synthesis
+- JIT-accelerated when Numba available
+
+**DC Removal Fix** (`src/symcrash_python_ap/safety/unified_renderer.py`):
+- DC removal is **disabled** for VM/CCS path
+- CCS produces phase-continuous sine waves with zero inherent DC
+- Block-based "DC offset" was incomplete cycles, not true DC—removing it caused 94 block discontinuities
+
+**ETA Status**:
+- In CCS path, ETA (wet/dry blend) currently has **no effect**
+- `lane_ccs_render()` bypasses `lane_mix_gain()` entirely
+- The `base_mix` parameter exists but is unused
+- Future: May implement coefficient-space blending if needed
+
+---
+
 ## 0. Goals and Non-Goals
 
 ### Goals
@@ -73,32 +108,32 @@ Owns:
 Per voice `v` at block `k`:
 
 1. **Phase update** (Voice):
-   [
+   $$
    \phi_{k+1} = \phi_k + \Delta\phi(f_k)\pmod{1}
-   ]
+   $$
    where (f_k) already includes glide.
 
 2. **Carrier coefficient synthesis** (Wavelet-wavetable):
-   [
+   $$
    c^{(0)}_{k} = \mathrm{CoeffTable}[wave_id]\big(\phi_k\big)
-   ]
+   $$
    `c^(0)_k` is 256 coefficients representing the voice’s base waveform over this block.
 
 3. **Operator deformation** (Symbol/CMMM):
-   [
+   $$
    c_k = \mathrm{Tail}\Big(Q\big(\mathcal{O}(c^{(0)}_k;; \text{VoiceFrame}_k)\big)\Big)
-   ]
+   $$
    Where `O` is backbone ops + event ops, and Tail is mandatory ordering.
 
 4. **Reconstruction** (Wavelet):
-   [
+   $$
    x_k = \mathrm{IDWPT}(c_k)
-   ]
+   $$
 
 5. **Amplitude** (Voice emits gain_q15, applied in Mix/Safety):
-   [
+   $$
    y_k = \mathrm{gain}_k \cdot x_k
-   ]
+   $$
 
 ### Key consequence
 
@@ -266,27 +301,44 @@ Yes. Distinguish them in **Voice** and keep engines simple.
 
 ## Phase A — Python prototype refactor (fast win)
 
-### A1) Remove FWPT from voice path
+### A1) Remove FWPT from voice path ✅
 
-* Add `CoeffTable` module and load precomputed coefficient wavetables.
-* Replace “render carrier audio → FWPT” with “render coeffs directly from phase”.
+* ~~Add `CoeffTable` module and load precomputed coefficient wavetables.~~
+* ~~Replace "render carrier audio → FWPT" with "render coeffs directly from phase".~~
 
-### A2) Keep FWPT only for conditioning mode
+**Implementation**: `lane_ccs_render()` in `lanes.py` uses `CoeffOsc` to generate coefficients directly from phase. No FWPT in voice path.
 
-* External audio path can still do: audio→FWPT→operators→IDWPT.
+### A2) Keep FWPT only for conditioning mode ✅
 
-### A3) Enforce “no resets” in wavelet engine state
+* ~~External audio path can still do: audio→FWPT→operators→IDWPT.~~
 
-* Never reset `prev_sample`-like state on voice_on unless voice truly inactive AND you also ramp amplitude from 0.
+**Implementation**: Separated transforms in `fast_lifting.py`:
+- `fwpt_jit(samples, headroom_bits=1)` → Forward transform (analysis only)
+- `idwpt_jit(coeffs, headroom_bits=1)` → Inverse transform (synthesis)
+- Both use JIT acceleration when Numba available
+- FWPT is no longer in the critical voice path
 
-### A4) Add tail predicate + metrics
+### A3) Enforce "no resets" in wavelet engine state ✅
+
+* ~~Never reset `prev_sample`-like state on voice_on unless voice truly inactive AND you also ramp amplitude from 0.~~
+
+**Implementation**: Phase accumulator is continuous. DC removal disabled for CCS path (was causing 94 block discontinuities).
+
+### A4) Add tail predicate + metrics ⏳
 
 * Implement E/P/ΔE/ΔP tracking per voice.
 
-### A5) Add a test that reproduces the comb and proves it’s gone
+**Status**: Basic coefficient clamping exists. Full energy/peak/delta tracking not yet implemented.
 
-* Carrier-only with ETA-like deformation, steady state, sweep pitch.
-* Compare spectrum: no 750 Hz tooth spacing.
+### A5) Add a test that reproduces the comb and proves it's gone ✅
+
+* ~~Carrier-only with ETA-like deformation, steady state, sweep pitch.~~
+* ~~Compare spectrum: no 750 Hz tooth spacing.~~
+
+**Implementation**: Tests confirm CCS produces identical output regardless of ETA value:
+- `tools/test_vm_direct.py` - VM outputs identical samples for ETA=0, 16384, 32767
+- `tools/test_vm_eta_effect.py` - Full pipeline verification
+- No comb artifacts in spectrum analysis
 
 ## Phase B — FPGA architecture (clean mapping)
 

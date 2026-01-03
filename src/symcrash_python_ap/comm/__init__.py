@@ -75,8 +75,6 @@ from .pico2_receiver import (
 
 from .pico2_synth_bridge import (
     Pico2SynthBridge,
-    ADSRState,
-    FilterState,
     create_bridge,
 )
 
@@ -144,8 +142,6 @@ __all__ = [
     'create_receiver',
     # Pico2 Synth Bridge
     'Pico2SynthBridge',
-    'ADSRState',
-    'FilterState',
     'create_bridge',
     # Pico2 Unified Controller
     'Pico2Controller',
