@@ -12,6 +12,8 @@ from typing import List, Optional
 import numpy as np
 
 from .tables import COEFF_LEN, BLOCK_SAMPLES
+from ..fixed import midi_to_phase_inc_fixed
+from .coeff_osc import CoeffOscState
 
 
 # =============================================================================
@@ -107,13 +109,33 @@ class VMState:
     gain_prev_q15: int = 0        # Previous block's gain
 
     # -------------------------------------------------------------------------
-    # Wet path OLA state (for IDWPT block boundary smoothing)
+    # Wet path phase-coherent state (no windowing)
     # -------------------------------------------------------------------------
-    # OLA is applied to wet path ONLY, not carrier (carrier is phase-continuous)
+    # Mask smoothing state: interpolate mask values across blocks
+    mask_state_q15: np.ndarray = field(
+        default_factory=lambda: np.zeros(64, dtype=np.int16)
+    )
+    mask_state_initialized: bool = False
+
+    # C⁰ seam stitching: track previous block's end sample for continuity
+    wet_prev_end: int = 0
+    wet_seam_initialized: bool = False
+
+    # Legacy OLA state (kept for backward compatibility, may be removed)
     wet_ola_tail: np.ndarray = field(
         default_factory=lambda: np.zeros(8, dtype=np.int16)
     )
     wet_ola_initialized: bool = False
+
+    # -------------------------------------------------------------------------
+    # Coefficient Oscillator state (WSE-STD-ARCH-CCS v0)
+    # -------------------------------------------------------------------------
+    # CoeffOsc generates coefficients directly, bypassing FWPT in voice path.
+    # This eliminates phase-variant combing artifacts.
+    coeff_osc: CoeffOscState = field(default_factory=CoeffOscState)
+
+    # Flag to enable CCS path (coefficient synthesis vs carrier→FWPT)
+    use_coeff_osc: bool = True  # Default to new CCS path
 
     @classmethod
     def create(cls, voice_id: int = 0, prng_seed: Optional[int] = None) -> 'VMState':
@@ -137,29 +159,49 @@ class VMState:
 
     def reset_for_note_on(
         self,
-        f0_hz: float,
-        sample_rate: int = 48000,
+        note: int = 60,
+        cents: int = 0,
         attack_samples: int = 480,
         decay_samples: int = 960,
         sustain_level_q15: int = 24576,
         release_samples: int = 4800,
+        *,
+        f0_hz: Optional[float] = None,
+        sample_rate: int = 48000,  # Unused, kept for backward compat
     ) -> None:
         """
         Reset state for a new note.
 
         Args:
-            f0_hz: Fundamental frequency
-            sample_rate: Audio sample rate
+            note: MIDI note number (0-127) - preferred
+            cents: Fine tuning in cents
             attack_samples: Attack time in samples
             decay_samples: Decay time in samples
             sustain_level_q15: Sustain level (0-32767)
             release_samples: Release time in samples
+            f0_hz: DEPRECATED - Fundamental frequency (use note/cents instead)
+            sample_rate: Unused, kept for backward compatibility
         """
-        # Calculate phase increment for carrier
-        phase_inc = int((f0_hz / sample_rate) * (2**32))
+        _ = sample_rate  # Suppress unused warning
+        # Calculate phase increment
+        if f0_hz is not None:
+            # DEPRECATED: Convert f0_hz to note/cents for backward compatibility
+            # This uses floating-point, but only for legacy callers
+            import math
+            note = int(round(69 + 12 * math.log2(f0_hz / 440.0)))
+            cents = 0  # Can't easily recover cents from f0_hz
+            phase_inc = midi_to_phase_inc_fixed(note, cents)
+        else:
+            # Preferred: Use fixed-point LUT (WSE-STD-001 compliant)
+            phase_inc = midi_to_phase_inc_fixed(note, cents)
+
         self.phase_inc = phase_inc
         self.target_phase_inc = phase_inc
         self.pitch_slew_rate = 0
+
+        # Track initial note/cents for comparison
+        self.last_note = note
+        self.last_cents = cents
 
         # Reset phase (or keep for legato)
         # self.phase = 0
@@ -186,9 +228,18 @@ class VMState:
         self.eta_prev_q15 = 0
         self.gain_prev_q15 = 0
 
-        # Reset wet OLA state
+        # Reset wet path phase-coherent state
+        self.mask_state_q15.fill(0)
+        self.mask_state_initialized = False
+        self.wet_prev_end = 0
+        self.wet_seam_initialized = False
+
+        # Reset legacy wet OLA state
         self.wet_ola_tail.fill(0)
         self.wet_ola_initialized = False
+
+        # Reset CoeffOsc state
+        self.coeff_osc.reset(phase_inc=phase_inc, table_id=0)
 
     def trigger_release(self) -> None:
         """Trigger note release (enter release phase)."""
@@ -227,9 +278,22 @@ class VMState:
             'wet_ready': self.wet_ready,
             'eta_prev_q15': self.eta_prev_q15,
             'gain_prev_q15': self.gain_prev_q15,
-            # Wet path OLA state
+            # Wet path phase-coherent state
+            'mask_state_q15': self.mask_state_q15.tolist(),
+            'mask_state_initialized': self.mask_state_initialized,
+            'wet_prev_end': self.wet_prev_end,
+            'wet_seam_initialized': self.wet_seam_initialized,
+            # Legacy wet path OLA state
             'wet_ola_tail': self.wet_ola_tail.tolist(),
             'wet_ola_initialized': self.wet_ola_initialized,
+            # CoeffOsc state
+            'coeff_osc_node_phases': self.coeff_osc.node_phases.tolist(),
+            'coeff_osc_sub_phases': self.coeff_osc.sub_phases.tolist(),
+            'coeff_osc_table_id': self.coeff_osc.table_id,
+            'coeff_osc_base_phase_inc': self.coeff_osc.base_phase_inc,
+            'coeff_osc_target_phase_inc': self.coeff_osc.target_phase_inc,
+            'coeff_osc_phase_slew_rate': self.coeff_osc.phase_slew_rate,
+            'use_coeff_osc': self.use_coeff_osc,
         }
 
     @classmethod
@@ -262,10 +326,25 @@ class VMState:
         state.wet_ready = snapshot['wet_ready']
         state.eta_prev_q15 = snapshot['eta_prev_q15']
         state.gain_prev_q15 = snapshot['gain_prev_q15']
-        # Restore wet OLA state
+        # Restore wet path phase-coherent state
+        if 'mask_state_q15' in snapshot:
+            state.mask_state_q15 = np.array(snapshot['mask_state_q15'], dtype=np.int16)
+            state.mask_state_initialized = snapshot.get('mask_state_initialized', False)
+            state.wet_prev_end = snapshot.get('wet_prev_end', 0)
+            state.wet_seam_initialized = snapshot.get('wet_seam_initialized', False)
+        # Restore legacy wet OLA state
         if 'wet_ola_tail' in snapshot:
             state.wet_ola_tail = np.array(snapshot['wet_ola_tail'], dtype=np.int16)
             state.wet_ola_initialized = snapshot.get('wet_ola_initialized', False)
+        # Restore CoeffOsc state
+        if 'coeff_osc_node_phases' in snapshot:
+            state.coeff_osc.node_phases = np.array(snapshot['coeff_osc_node_phases'], dtype=np.uint32)
+            state.coeff_osc.sub_phases = np.array(snapshot['coeff_osc_sub_phases'], dtype=np.uint32)
+            state.coeff_osc.table_id = snapshot.get('coeff_osc_table_id', 0)
+            state.coeff_osc.base_phase_inc = snapshot.get('coeff_osc_base_phase_inc', 0)
+            state.coeff_osc.target_phase_inc = snapshot.get('coeff_osc_target_phase_inc', 0)
+            state.coeff_osc.phase_slew_rate = snapshot.get('coeff_osc_phase_slew_rate', 0)
+        state.use_coeff_osc = snapshot.get('use_coeff_osc', True)
         return state
 
 

@@ -326,6 +326,51 @@ class AntiClickOperator:
         # when both signals are in-phase and at full scale
         return np.clip(mixed, -1.0, 1.0).astype(np.float32)
 
+    def _mix2_ramped(
+        self, A: np.ndarray, B: np.ndarray, beta_start: float, beta_end: float
+    ) -> np.ndarray:
+        """
+        Mix two blocks with per-sample beta interpolation.
+
+        This eliminates discontinuities at block boundaries during beta ramps
+        by smoothly transitioning beta across the block.
+
+        Args:
+            A: Dry signal (carrier)
+            B: Wet signal (IDWPT)
+            beta_start: Beta at start of block
+            beta_end: Beta at end of block
+
+        Returns:
+            Mixed signal with ramped beta (clipped to [-1, 1])
+        """
+        N = len(A)
+        beta_start = clamp(beta_start, 0.0, 1.0)
+        beta_end = clamp(beta_end, 0.0, 1.0)
+
+        # Generate per-sample beta values via linear interpolation
+        if beta_start == beta_end:
+            # No ramp - use constant beta
+            return self._mix2(A, B, beta_start)
+
+        # Linear interpolation of beta across block
+        alpha = np.linspace(0.0, 1.0, N, dtype=np.float32)
+        betas = beta_start + alpha * (beta_end - beta_start)
+
+        if self.cfg.equal_power:
+            # Equal power crossfade per sample (vectorized)
+            # wet = sin(pi/2 * beta), dry = cos(pi/2 * beta)
+            theta = betas * (np.pi / 2.0)
+            a_weights = np.cos(theta).astype(np.float32)
+            b_weights = np.sin(theta).astype(np.float32)
+        else:
+            # Linear crossfade per sample
+            a_weights = 1.0 - betas
+            b_weights = betas
+
+        mixed = a_weights * A + b_weights * B
+        return np.clip(mixed, -1.0, 1.0).astype(np.float32)
+
     def _ola(self, st: AntiClickState, x: np.ndarray) -> np.ndarray:
         """
         Apply OLA seam smoothing.
@@ -409,11 +454,17 @@ class AntiClickOperator:
         if wet_now is not None:
             st.wet_ready = True
 
+        # Capture beta at START of this block (for smooth interpolation)
+        beta_start = st.beta
+
         # Advance beta toward target (slew limiting)
         if st.beta < st.beta_target:
             st.beta = min(st.beta_target, st.beta + st.beta_step)
         elif st.beta > st.beta_target:
             st.beta = max(st.beta_target, st.beta - st.beta_step)
+
+        # Beta at END of this block
+        beta_end = st.beta
 
         # Determine mixing mode:
         # - Pure dry (beta=0): use carrier_now directly
@@ -425,12 +476,12 @@ class AntiClickOperator:
         # to maintain phase coherence.
         #
         # The FIFO is still maintained for potential future use with latent paths.
-        use_wet = st.beta > 0.0 and wet_now is not None and st.wet_ready
+        use_wet = (beta_start > 0.0 or beta_end > 0.0) and wet_now is not None and st.wet_ready
 
         if use_wet:
-            # Mix carrier_now with wet_now (both derived from same phase)
-            # Effect mode has no latency, so no FIFO delay needed
-            y = self._mix2(carrier_now, wet_now, st.beta)
+            # Mix carrier_now with wet_now using per-sample beta interpolation
+            # This eliminates discontinuities at block boundaries during ramp
+            y = self._mix2_ramped(carrier_now, wet_now, beta_start, beta_end)
             # OLA smooths any small differences between carrier and wet paths
             y = self._ola(st, y)
         else:

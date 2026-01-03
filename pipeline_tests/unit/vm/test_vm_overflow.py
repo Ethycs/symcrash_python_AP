@@ -141,11 +141,12 @@ class TestClampSymmetry:
 
         output = lane_mix_gain(cfg, carrier, texture)
 
-        # Output should be approximately the input (scaled by gain, cos, and headroom)
-        # At eta=0, cos_q15(0) = 32767 (approx 1.0)
-        # MIX_HEADROOM = 23170/32767 ≈ 0.707 (1/√2) to prevent clipping on coherent mix
-        # So output ≈ carrier * 32767/32768 * 23170/32768 * 32767/32768 ≈ 11583
-        expected = (16384 * 32767 // 32768) * 23170 // 32768
+        # Output should be approximately the input (scaled by gain and headroom)
+        # Using orthogonal residual projection: output = carrier + eta * (texture - carrier)
+        # At eta=0, output = carrier
+        # RESIDUAL_HEADROOM = 28378/32767 ≈ 0.866 for better SNR with residual blend
+        # So output ≈ carrier * 28378/32768 * 32767/32768 ≈ 14188
+        expected = (16384 * 28378 // 32768) * 32767 // 32768
         assert np.all(np.abs(output - expected) < 10), f"Output {output[0]} not close to expected {expected}"
 
 

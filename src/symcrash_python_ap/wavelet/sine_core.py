@@ -33,6 +33,8 @@ import math
 from dataclasses import dataclass
 from typing import Tuple, Optional
 
+from ..fixed import RSHIFT_RNE
+
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
@@ -229,14 +231,14 @@ def sine_q15(phase: int) -> int:
             y1 = lut[min(mirror_index + 1, TABLE_SIZE)]
 
             delta = y1 - y0
-            y = y0 + ((delta * mirror_frac) >> FRAC_BITS)
+            y = y0 + RSHIFT_RNE(delta * mirror_frac, FRAC_BITS)
     else:
         # Normal ascending lookup
         y0 = lut[index]
         y1 = lut[min(index + 1, TABLE_SIZE)]
 
         delta = y1 - y0
-        y = y0 + ((delta * frac) >> FRAC_BITS)
+        y = y0 + RSHIFT_RNE(delta * frac, FRAC_BITS)
 
     # Apply sign for quadrants 2 and 3 (negative half of sine wave)
     if quadrant >= 2:

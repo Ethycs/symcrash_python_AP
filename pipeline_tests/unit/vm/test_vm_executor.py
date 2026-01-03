@@ -158,9 +158,15 @@ class TestVMExecutor:
 
         frame = MockVoiceFrame(f0_hz=440.0)
 
+        def get_phase(s):
+            # Use CoeffOsc phase when using CCS path, legacy phase otherwise
+            if s.use_coeff_osc:
+                return int(s.coeff_osc.node_phases[0])
+            return s.phase
+
         phases = []
         for _ in range(10):
-            phases.append(state.phase)
+            phases.append(get_phase(state))
             state, _ = vm_step_block(state, frame)
 
         # Phase should increase monotonically (modulo wrap)

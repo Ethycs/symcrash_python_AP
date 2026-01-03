@@ -5,8 +5,6 @@ This bypasses sounddevice to test if synthesis is working.
 """
 
 import sys
-import wave
-import struct
 import subprocess
 
 sys.path.insert(0, str(__file__).rsplit('tools', 1)[0] + 'src')
@@ -15,12 +13,12 @@ import numpy as np
 from symcrash_python_ap.voice import VoiceEngine, GestureBasis
 from symcrash_python_ap.safety.unified_renderer import UnifiedOutputStage
 from symcrash_python_ap.frames import VoiceFrame
+from symcrash_python_ap.audio_io import write_audio
 
 SAMPLE_RATE = 48000
 BLOCK_SIZE = 64
 Q15_ONE = 32767
 DURATION_SEC = 2.0
-OUTPUT_FILE = "test_synth_output.wav"
 
 print("Creating VoiceEngine and UnifiedOutputStage...")
 engine = VoiceEngine(max_voices=4)
@@ -40,7 +38,8 @@ stage.voice_on(voice_id, note)
 total_blocks = int(DURATION_SEC * SAMPLE_RATE / BLOCK_SIZE)
 print(f"Pre-rendering {total_blocks} blocks...")
 
-all_samples = []
+all_left = []
+all_right = []
 
 for i in range(total_blocks):
     voice_frames = engine.step_all()
@@ -62,41 +61,28 @@ for i in range(total_blocks):
         )
 
         left, right = stage.render_block(frame)
-
-        # Interleave stereo samples
-        for l, r in zip(left, right):
-            all_samples.append(int(l))
-            all_samples.append(int(r))
+        all_left.extend(left)
+        all_right.extend(right)
     else:
         # Silence
-        for _ in range(BLOCK_SIZE):
-            all_samples.append(0)
-            all_samples.append(0)
+        all_left.extend([0] * BLOCK_SIZE)
+        all_right.extend([0] * BLOCK_SIZE)
 
-print(f"Rendered {len(all_samples) // 2} stereo samples")
+print(f"Rendered {len(all_left)} stereo samples")
 
-# Save to WAV (16-bit signed)
-print(f"Saving to {OUTPUT_FILE}...")
-with wave.open(OUTPUT_FILE, 'w') as wav:
-    wav.setnchannels(2)
-    wav.setsampwidth(2)  # 16-bit
-    wav.setframerate(SAMPLE_RATE)
+# Convert to numpy arrays
+L = np.array(all_left, dtype=np.int16)
+R = np.array(all_right, dtype=np.int16)
 
-    # Clamp to 16-bit range
-    for i, s in enumerate(all_samples):
-        all_samples[i] = max(-32768, min(32767, s))
-
-    wav.writeframes(struct.pack(f'<{len(all_samples)}h', *all_samples))
-
-print(f"Saved! File size: {len(all_samples) * 2} bytes")
+# Save using centralized audio_io
+meta = write_audio("test_synth_output", L, R, timestamp=False, subdirectory="tools")
 
 # Check audio content
-samples_arr = np.array(all_samples)
-print(f"Audio range: {samples_arr.min()} to {samples_arr.max()}")
-print(f"Non-zero samples: {np.count_nonzero(samples_arr)}")
+print(f"Audio range: {L.min()} to {L.max()}")
+print(f"Non-zero samples: {np.count_nonzero(L)}")
 
 # Play with Windows media player
-print(f"\nPlaying {OUTPUT_FILE} with system player...")
-subprocess.run(['cmd', '/c', 'start', '', OUTPUT_FILE], shell=True)
+print(f"\nPlaying {meta.filepath} with system player...")
+subprocess.run(['cmd', '/c', 'start', '', meta.filepath], shell=True)
 
 print("Done! Check if you hear the audio.")

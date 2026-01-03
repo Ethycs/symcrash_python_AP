@@ -481,3 +481,96 @@ def midi_to_phase_inc_fixed(note: int, cents: int = 0) -> int:
     return base_inc + delta
 
 
+# =============================================================================
+# FREQUENCY TABLE (for harmonic coefficient generation)
+# =============================================================================
+
+# Precomputed frequencies for MIDI notes 0-127 in millihertz (mHz)
+# freq_mhz = int(round(440.0 * (2 ** ((note - 69) / 12.0)) * 1000))
+# Using millihertz (integer) avoids floating-point noise while providing
+# sufficient precision for wavelet coefficient mapping.
+
+def _build_freq_table_mhz() -> List[int]:
+    """Build MIDI note to frequency table in millihertz (computed once at load)."""
+    table = []
+    for note in range(128):
+        freq = 440.0 * (2.0 ** ((note - 69) / 12.0))
+        freq_mhz = int(round(freq * 1000))
+        table.append(freq_mhz)
+    return table
+
+
+_FREQ_TABLE_MHZ = _build_freq_table_mhz()
+
+# Ratio for 1 cent frequency shift: (2^(1/1200) - 1) * 2^20 ≈ 607
+# Used for linear interpolation of cents
+_CENT_FREQ_RATIO_Q20 = 607
+
+
+def midi_to_freq_mhz(note: int, cents: int = 0) -> int:
+    """
+    Convert MIDI note + cents to frequency in millihertz using integer LUT.
+
+    This is the bit-exact version that avoids floating-point noise.
+    Returns frequency in millihertz (e.g., A4=440Hz returns 440000).
+
+    Args:
+        note: MIDI note number (0-127)
+        cents: Fine tuning in cents (-9999 to +9999)
+
+    Returns:
+        Frequency in millihertz (integer)
+    """
+    # Clamp note to valid range
+    note = max(0, min(127, note))
+    base_freq = _FREQ_TABLE_MHZ[note]
+
+    if cents == 0:
+        return base_freq
+
+    # For larger cent ranges, use semitone stepping
+    if abs(cents) >= 100:
+        semitones = cents // 100
+        remaining_cents = cents % 100
+
+        # Handle negative cents properly
+        if cents < 0 and remaining_cents != 0:
+            semitones -= 1
+            remaining_cents += 100
+
+        target_note = note + semitones
+        if target_note < 0 or target_note > 127:
+            target_note = max(0, min(127, target_note))
+            remaining_cents = 0
+
+        base_freq = _FREQ_TABLE_MHZ[target_note]
+        cents = remaining_cents
+
+    if cents == 0:
+        return base_freq
+
+    # Linear interpolation for remaining cents (0-99)
+    # delta = base_freq * cents * (2^(1/1200) - 1)
+    product = base_freq * cents * _CENT_FREQ_RATIO_Q20
+    delta = RSHIFT_RNE(product, 20)
+
+    return base_freq + delta
+
+
+def midi_to_freq_hz(note: int, cents: int = 0) -> float:
+    """
+    Convert MIDI note + cents to frequency in Hz.
+
+    IMPORTANT: This returns a float derived from integer lookup for display/logging.
+    For audio processing, use midi_to_freq_mhz() directly to maintain bit-exactness.
+
+    Args:
+        note: MIDI note number (0-127)
+        cents: Fine tuning in cents (-9999 to +9999)
+
+    Returns:
+        Frequency in Hz (float, for display only)
+    """
+    return midi_to_freq_mhz(note, cents) / 1000.0
+
+

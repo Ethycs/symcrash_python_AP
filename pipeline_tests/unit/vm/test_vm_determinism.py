@@ -26,7 +26,9 @@ from symcrash_python_ap.vm.tables import DEFAULT_TABLES, BLOCK_SAMPLES
 class MockVoiceFrame:
     """Mock VoiceFrame for testing."""
     voice_id: int = 0
-    f0_hz: float = 440.0
+    note: int = 69        # A4 (440 Hz)
+    cents: int = 0
+    f0_hz: float = 440.0  # Deprecated, kept for legacy
     gain_q15: int = 32767
     beta_target_q15: int = 16384  # 50% wet
     pattern_id: int = 0
@@ -244,17 +246,23 @@ class TestBitExactDeterminism:
 class TestPhaseConsistency:
     """Tests for phase continuity."""
 
+    def _get_phase(self, state: VMState) -> int:
+        """Get the active phase accumulator (CCS or legacy)."""
+        if state.use_coeff_osc:
+            return int(state.coeff_osc.node_phases[0])
+        return state.phase
+
     def test_phase_increases_monotonically(self):
         """Phase should increase monotonically (modulo wrap)."""
         state = VMState.create(voice_id=0)
         state.reset_for_note_on(f0_hz=440.0)
 
         frame = MockVoiceFrame(f0_hz=440.0)
-        phases = [state.phase]
+        phases = [self._get_phase(state)]
 
         for _ in range(10):
             state, _ = vm_step_block(state, frame, DEFAULT_TABLES)
-            phases.append(state.phase)
+            phases.append(self._get_phase(state))
 
         # Phase should advance (or wrap)
         for i in range(1, len(phases)):
@@ -274,7 +282,8 @@ class TestPhaseConsistency:
             state, _ = vm_step_block(state, frame, DEFAULT_TABLES)
 
         # Phase should not be 0 (unless very unlikely coincidence)
-        assert state.phase != 0, "Phase reset to 0"
+        phase = self._get_phase(state)
+        assert phase != 0, "Phase reset to 0"
 
 
 if __name__ == "__main__":

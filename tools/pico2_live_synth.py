@@ -137,16 +137,20 @@ class Pico2LiveSynth:
     """
     Complete live synthesis controller.
 
-    Connects Pico2 hardware -> VoiceEngine -> UnifiedOutputStage -> Audio
+    Connects Pico2 Hardware -> VoiceEngine -> UnifiedOutputStage -> Audio
+    Or in virtual mode: ImGui Controls -> VoiceEngine -> UnifiedOutputStage -> Audio
     """
 
-    def __init__(self, port: Optional[str] = None):
+    def __init__(self, port: Optional[str] = None, virtual_mode: bool = False):
         """
         Initialize the live synth.
 
         Args:
-            port: Serial port (auto-detect if None)
+            port: Serial port (auto-detect if None, ignored in virtual_mode)
+            virtual_mode: If True, run without hardware (controls via ImGui)
         """
+        self.virtual_mode = virtual_mode
+
         # Voice engine for ADSR and voice management
         self.engine = VoiceEngine(max_voices=NUM_VOICES)
 
@@ -155,8 +159,8 @@ class Pico2LiveSynth:
             block_size=BLOCK_SIZE,
         )
 
-        # Hardware bridge
-        self.bridge = create_bridge(self.engine, port=port)
+        # Hardware bridge (or virtual mode bridge)
+        self.bridge = create_bridge(self.engine, port=port, virtual_mode=virtual_mode)
 
         # Audio streaming
         self.stream: Optional[sd.OutputStream] = None
@@ -358,9 +362,8 @@ class Pico2LiveSynth:
         harmonics_q15 = voice_state.harmonics_q15 if voice_state else 0  # 0 = pure sine
         detune_cents = voice_state.detune_cents if voice_state else 0
 
-        # Calculate f0_hz from note + detune
+        # Use detune_cents directly (no floating-point f0_hz calculation)
         cents = detune_cents
-        f0_hz = 440.0 * (2.0 ** ((note - 69 + cents / 100.0) / 12.0))
 
         # Scale gain by master_gain control
         scaled_gain = (active_frame.gain_q15 * master_gain_q15) >> 15
@@ -376,7 +379,7 @@ class Pico2LiveSynth:
             voice_id=active_frame.voice_id,
             note=note,
             cents=cents,
-            f0_hz=f0_hz,
+            # f0_hz removed - unified_renderer uses note/cents directly (fixed-point)
             gain_q15=scaled_gain,
             pan_q15=active_frame.pan_q15,
             tree_a_id=active_frame.tree_a_id,
@@ -474,34 +477,82 @@ def main():
     parser = argparse.ArgumentParser(description="Pico2 Live Synthesis Controller")
     parser.add_argument("port", nargs="?", help="Serial port (auto-detect if omitted)")
     parser.add_argument("--note", type=int, default=60, help="Starting MIDI note (default: 60)")
+    parser.add_argument("--no-hardware", action="store_true",
+                        help="Run in virtual mode without hardware (use --imgui for controls)")
+    parser.add_argument("--imgui", action="store_true",
+                        help="Show ImGui control window for knobs/sliders")
     args = parser.parse_args()
 
+    # Determine virtual mode
+    virtual_mode = args.no_hardware
+
     # Find port (Pico2 has dual CDC - control and data channels)
-    if args.port:
-        port = args.port
-        print(f"Using specified port: {port}")
+    port = None
+    if not virtual_mode:
+        if args.port:
+            port = args.port
+            print(f"Using specified port: {port}")
+        else:
+            control_port, data_port = find_pico2_ports()
+            if not control_port:
+                print("No Pico2 detected. Please specify port manually or use --no-hardware.")
+                print(f"Usage: {sys.argv[0]} <PORT>")
+                print(f"       {sys.argv[0]} --no-hardware --imgui")
+                sys.exit(1)
+            port = control_port
+            print(f"Auto-detected control port: {control_port}")
+            if data_port:
+                print(f"Auto-detected data port: {data_port}")
     else:
-        control_port, data_port = find_pico2_ports()
-        if not control_port:
-            print("No Pico2 detected. Please specify port manually.")
-            print(f"Usage: {sys.argv[0]} <PORT>")
-            sys.exit(1)
-        port = control_port
-        print(f"Auto-detected control port: {control_port}")
-        if data_port:
-            print(f"Auto-detected data port: {data_port}")
+        print("Running in virtual mode (no hardware)")
 
     # Create live synth
-    synth = Pico2LiveSynth(port=port)
+    synth = Pico2LiveSynth(port=port, virtual_mode=virtual_mode)
 
     if not synth.start():
         sys.exit(1)
 
-    print("\nPico2 Live Synthesis Controller")
+    # Setup ImGui controls window if requested
+    imgui_thread = None
+    if args.imgui:
+        try:
+            from imgui_bundle import hello_imgui
+            from symcrash_imgui_controls.synth_bridge import ImGuiSynthBridge
+            from symcrash_imgui_controls.app import SymcrashImGuiApp
+
+            # Create ImGui bridge connected to our synth's bridge
+            imgui_bridge = ImGuiSynthBridge(synth.bridge)
+
+            # Start ImGui app in background thread
+            def run_imgui():
+                app = SymcrashImGuiApp()
+                app.bridge = imgui_bridge
+
+                # Configure runner
+                runner_params = hello_imgui.RunnerParams()
+                runner_params.app_window_params.window_title = "Symcrash Controls (Live Synth)"
+                runner_params.app_window_params.window_geometry.size = (800, 500)
+                runner_params.callbacks.show_gui = app.render
+
+                # Run
+                hello_imgui.run(runner_params)
+
+            imgui_thread = threading.Thread(target=run_imgui, daemon=True)
+            imgui_thread.start()
+            print("[ImGui] Control window started")
+        except ImportError as e:
+            print(f"[ImGui] Could not start ImGui controls: {e}")
+            print("[ImGui] Install imgui-bundle: pip install imgui-bundle")
+
+    mode_str = "Virtual Mode" if virtual_mode else "Hardware Mode"
+    print(f"\nPico2 Live Synthesis Controller ({mode_str})")
     print("=" * 60)
-    print("Hardware Controls:")
-    print("  Pots 0-3: ADSR (Attack, Decay, Sustain, Release)")
-    print("  Pots 4-5: Filter (Cutoff, Resonance)")
+    if not virtual_mode:
+        print("Hardware Controls:")
+        print("  Pots 0-3: ADSR (Attack, Decay, Sustain, Release)")
+        print("  Pots 4-5: Filter (Cutoff, Resonance)")
+    if args.imgui:
+        print("ImGui Controls: Window with knobs for all parameters")
     print("\nKeyboard Commands:")
     print("  SPACE: Toggle note on/off")
     print("  UP/DOWN: Change note (+/- 1 semitone)")

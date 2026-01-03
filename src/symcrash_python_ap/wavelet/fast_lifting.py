@@ -533,7 +533,9 @@ def _effect_mode_jit_core(
             approx_start = node * 2 * half
             detail_start = approx_start + half
 
-            # Undo update (no rounding bias in inverse for perfect reconstruction)
+            # Undo update (MUST match forward rounding for perfect reconstruction)
+            # Forward used: update = (d_left + d_right + 2) >> 2
+            # Inverse must use SAME rounding to avoid cumulative error
             for i in range(half):
                 s_val = inv_levels[level + 1, approx_start + i]
                 if i > 0:
@@ -541,17 +543,19 @@ def _effect_mode_jit_core(
                 else:
                     d_left = inv_levels[level + 1, detail_start]
                 d_right = inv_levels[level + 1, detail_start + i]
-                update = (d_left + d_right) >> 2  # No +2: inverse cancels forward bias
+                update = (d_left + d_right + 2) >> 2  # +2 matches forward transform
                 temp_s[i] = s_val - update
 
-            # Undo predict (no rounding bias in inverse for perfect reconstruction)
+            # Undo predict (MUST match forward rounding for perfect reconstruction)
+            # Forward used: avg = (even_left + even_right + 1) >> 1
+            # Inverse must use SAME rounding to avoid cumulative error
             for i in range(half):
                 even_left = temp_s[i]
                 if i + 1 < half:
                     even_right = temp_s[i + 1]
                 else:
                     even_right = temp_s[i]
-                avg = (even_left + even_right) >> 1  # No +1: inverse cancels forward bias
+                avg = (even_left + even_right + 1) >> 1  # +1 matches forward transform
                 temp_d[i] = inv_levels[level + 1, detail_start + i] + avg
 
             # Interleave to output with saturation

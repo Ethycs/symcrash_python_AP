@@ -18,8 +18,10 @@ from .lanes import (
     dispatch_coeff_op,
     lane_tail,
     lane_idwpt_render,
+    lane_ccs_render,
     lane_mix_gain,
 )
+from ..fixed import RSHIFT_RNE
 
 if TYPE_CHECKING:
     from ..frames import VoiceFrame
@@ -82,42 +84,74 @@ def vm_step_block(
     state.tree_a_id = cfg.tree_a
     state.tree_b_id = cfg.tree_b
 
-    # -------------------------------------------------------------------------
-    # Step 1: LANE_CARRIER_RENDER
-    # -------------------------------------------------------------------------
-    if cfg.carrier_role != CarrierRole.OFF:
-        carrier_buf = lane_carrier_render(state, cfg)
+    # =========================================================================
+    # CCS PATH (Coefficient Synthesis) - Eliminates combing artifacts
+    # =========================================================================
+    # When use_coeff_osc is True, we use the new CCS path:
+    #   CoeffOsc → CMMM blend → IDWPT → audio
+    #
+    # This bypasses FWPT entirely, eliminating phase-variant combing.
+    # The old carrier→FWPT→mask→IDWPT path is kept for backward compatibility.
+
+    if cfg.use_coeff_osc and state.use_coeff_osc:
+        # -----------------------------------------------------------------
+        # CCS PATH: New architecture (no combing)
+        # -----------------------------------------------------------------
+
+        # Step 2: LANE_INJECT (events modify coeff_state)
+        lane_inject(state, cfg)
+
+        # Steps 3-6: Backbone lanes (CMMM operators on coeff_state)
+        for instr in cfg.backbone_instrs:
+            dispatch_coeff_op(state, instr, cfg.mask_u32)
+
+        # Step 7: LANE_TAIL (safety constraints on coeff_state)
+        lane_tail(state, cfg)
+
+        # Step 8b: LANE_CCS_RENDER
+        # CoeffOsc generates coefficients, blends with coeff_state, then IDWPT
+        output = lane_ccs_render(state, cfg)
+
+        # Apply gain with proper rounding (WSE-STD-001 compliant)
+        gain_curr = cfg.gain_curr_q15
+        gain_prev = cfg.gain_prev_q15
+        if gain_curr != 32767 or gain_prev != 32767:
+            # Interpolate gain across block using round-to-nearest
+            for i in range(BLOCK_SAMPLES):
+                # Round-to-nearest for alpha: (i * 32767 + 32) / 64
+                alpha = (i * 32767 + (BLOCK_SAMPLES >> 1)) // BLOCK_SAMPLES
+                gain = gain_prev + RSHIFT_RNE((gain_curr - gain_prev) * alpha, 15)
+                output[i] = RSHIFT_RNE(int(output[i]) * gain, 15)
+
     else:
-        carrier_buf = np.zeros(BLOCK_SAMPLES, dtype=np.int16)
+        # -----------------------------------------------------------------
+        # LEGACY PATH: Old architecture (has combing when wet enabled)
+        # -----------------------------------------------------------------
 
-    # -------------------------------------------------------------------------
-    # Step 2: LANE_INJECT (events)
-    # -------------------------------------------------------------------------
-    lane_inject(state, cfg)
+        # Step 1: LANE_CARRIER_RENDER
+        if cfg.carrier_role != CarrierRole.OFF:
+            carrier_buf = lane_carrier_render(state, cfg)
+        else:
+            carrier_buf = np.zeros(BLOCK_SAMPLES, dtype=np.int16)
 
-    # -------------------------------------------------------------------------
-    # Steps 3-6: Backbone lanes (in order)
-    # -------------------------------------------------------------------------
-    for instr in cfg.backbone_instrs:
-        dispatch_coeff_op(state, instr, cfg.mask_u32)
+        # Step 2: LANE_INJECT (events)
+        lane_inject(state, cfg)
 
-    # -------------------------------------------------------------------------
-    # Step 7: LANE_TAIL
-    # -------------------------------------------------------------------------
-    lane_tail(state, cfg)
+        # Steps 3-6: Backbone lanes (in order)
+        for instr in cfg.backbone_instrs:
+            dispatch_coeff_op(state, instr, cfg.mask_u32)
 
-    # -------------------------------------------------------------------------
-    # Step 8: LANE_IDWPT_RENDER
-    # -------------------------------------------------------------------------
-    if cfg.idwpt_enable:
-        texture_buf = lane_idwpt_render(state, cfg, carrier_buf)
-    else:
-        texture_buf = np.zeros(BLOCK_SAMPLES, dtype=np.int16)
+        # Step 7: LANE_TAIL
+        lane_tail(state, cfg)
 
-    # -------------------------------------------------------------------------
-    # Step 9: LANE_MIX_GAIN
-    # -------------------------------------------------------------------------
-    output = lane_mix_gain(cfg, carrier_buf, texture_buf)
+        # Step 8: LANE_IDWPT_RENDER
+        if cfg.idwpt_enable:
+            texture_buf = lane_idwpt_render(state, cfg, carrier_buf)
+        else:
+            texture_buf = np.zeros(BLOCK_SAMPLES, dtype=np.int16)
+
+        # Step 9: LANE_MIX_GAIN
+        output = lane_mix_gain(cfg, carrier_buf, texture_buf)
 
     # -------------------------------------------------------------------------
     # Update state for next block
@@ -149,30 +183,45 @@ def vm_step_block_raw(
     if state.blocks_since_start >= IDWPT_LATENCY_BLOCKS:
         state.wet_ready = True
 
-    # Lane 1: Carrier
-    if cfg.carrier_role != CarrierRole.OFF:
-        carrier_buf = lane_carrier_render(state, cfg)
+    if cfg.use_coeff_osc and state.use_coeff_osc:
+        # CCS PATH: New architecture (no combing)
+        lane_inject(state, cfg)
+
+        for instr in cfg.backbone_instrs:
+            dispatch_coeff_op(state, instr, cfg.mask_u32)
+
+        lane_tail(state, cfg)
+
+        output = lane_ccs_render(state, cfg)
+
+        # Apply gain with proper rounding (WSE-STD-001 compliant)
+        gain_curr = cfg.gain_curr_q15
+        gain_prev = cfg.gain_prev_q15
+        if gain_curr != 32767 or gain_prev != 32767:
+            for i in range(BLOCK_SAMPLES):
+                alpha = (i * 32767 + (BLOCK_SAMPLES >> 1)) // BLOCK_SAMPLES
+                gain = gain_prev + RSHIFT_RNE((gain_curr - gain_prev) * alpha, 15)
+                output[i] = RSHIFT_RNE(int(output[i]) * gain, 15)
     else:
-        carrier_buf = np.zeros(BLOCK_SAMPLES, dtype=np.int16)
+        # LEGACY PATH
+        if cfg.carrier_role != CarrierRole.OFF:
+            carrier_buf = lane_carrier_render(state, cfg)
+        else:
+            carrier_buf = np.zeros(BLOCK_SAMPLES, dtype=np.int16)
 
-    # Lane 2: Inject
-    lane_inject(state, cfg)
+        lane_inject(state, cfg)
 
-    # Lanes 3-6: Backbone
-    for instr in cfg.backbone_instrs:
-        dispatch_coeff_op(state, instr, cfg.mask_u32)
+        for instr in cfg.backbone_instrs:
+            dispatch_coeff_op(state, instr, cfg.mask_u32)
 
-    # Lane 7: Tail
-    lane_tail(state, cfg)
+        lane_tail(state, cfg)
 
-    # Lane 8: IDWPT
-    if cfg.idwpt_enable and state.wet_ready:
-        texture_buf = lane_idwpt_render(state, cfg, carrier_buf)
-    else:
-        texture_buf = np.zeros(BLOCK_SAMPLES, dtype=np.int16)
+        if cfg.idwpt_enable and state.wet_ready:
+            texture_buf = lane_idwpt_render(state, cfg, carrier_buf)
+        else:
+            texture_buf = np.zeros(BLOCK_SAMPLES, dtype=np.int16)
 
-    # Lane 9: Mix + Gain
-    output = lane_mix_gain(cfg, carrier_buf, texture_buf)
+        output = lane_mix_gain(cfg, carrier_buf, texture_buf)
 
     # Update state
     state.eta_prev_q15 = cfg.eta_curr_q15

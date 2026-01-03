@@ -17,16 +17,21 @@ platforms = ["win-64"]
 symcrash_python_ap = { path = ".", editable = true }
 
 [tool.pixi.tasks]
-# Virtual synth with multiprocessing (zero GIL contention)
-virtual-synth-mp = "python tools/virtual_synth_mp.py"
-# Virtual synth with ImGui controls (threaded, may have latency)
-virtual-synth = "python tools/pico2_live_synth.py --imgui --no-hardware"
-# ImGui control interface (standalone - connects to hardware via UART)
-imgui-controls = "python -m symcrash_imgui_controls"
-# Live synth with ImGui control window (hardware + virtual)
-live-synth-imgui = "python tools/pico2_live_synth.py --imgui"
-# Live synth console-only (no GUI)
+# === Live Synth Tasks ===
+# Hardware control via Pico2 potentiometers (console only)
 live-synth = "python tools/pico2_live_synth.py"
+# Hardware control + ImGui window for visual feedback
+live-synth-imgui = "python tools/pico2_live_synth.py --imgui"
+
+# === Virtual Synth Tasks (no hardware needed) ===
+# Virtual synth with ImGui knobs for control
+virtual-synth = "python tools/pico2_live_synth.py --no-hardware --imgui"
+# Virtual synth with multiprocessing (lower latency, no ImGui)
+virtual-synth-mp = "python tools/virtual_synth_mp.py"
+
+# === Standalone Tools ===
+# ImGui control panel (standalone, sends UART to hardware)
+imgui-controls = "python -m symcrash_imgui_controls"
 
 [tool.pixi.dependencies]
 python = ">=3.14.2,<3.15"
@@ -34,3 +39,4 @@ numpy = ">=2.3.5,<3"
 pytest = ">=9.0.2,<10"
 pyserial = ">=3.5,<4"
 numba = ">=0.60.0,<1"
+scipy = ">=1.16.3,<2"

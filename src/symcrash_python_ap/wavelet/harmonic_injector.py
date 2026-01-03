@@ -603,6 +603,99 @@ def create_harmonic_coeffs(frequency: float = 220.0,
     return coeffs
 
 
+def create_harmonic_coeffs_fixed(
+    note: int = 60,
+    cents: int = 0,
+    amplitude: int = 0x5000,
+    wave_type: WaveType = WaveType.SAW,
+    partials_n: int = 12,
+    brightness_q15: int = Q15_ONE,
+    spread_to_neighbors: bool = False
+) -> List[int]:
+    """
+    Create harmonic coefficient pattern using fixed-point note/cents.
+
+    This is the bit-exact version that avoids floating-point noise.
+    Uses integer millihertz frequency lookup for deterministic coefficient mapping.
+
+    Args:
+        note: MIDI note number (0-127, 60 = middle C)
+        cents: Fine tuning in cents (-9999 to +9999)
+        amplitude: Base amplitude (Q15)
+        wave_type: Wave type enum
+        partials_n: Number of partials to generate
+        brightness_q15: Brightness control (affects high partial rolloff)
+        spread_to_neighbors: If True, spread energy to adjacent coefficients
+
+    Returns:
+        256-coefficient vector with harmonic energy placed in appropriate leaves
+    """
+    from ..fixed import midi_to_freq_mhz
+
+    coeffs = [0] * COEFF_LEN
+    nyquist_mhz = SAMPLE_RATE * 500  # Nyquist in millihertz (24000 * 1000)
+
+    # Get fundamental frequency in millihertz (integer)
+    f0_mhz = midi_to_freq_mhz(note, cents)
+
+    for k in range(1, partials_n + 1):
+        # Partial frequency in millihertz (integer math)
+        f_k_mhz = f0_mhz * k
+
+        # Skip if above Nyquist (with 5% margin)
+        if f_k_mhz >= (nyquist_mhz * 95) // 100:
+            break
+
+        # Get amplitude for this partial
+        base_amp = get_partial_amplitude(wave_type, k, brightness_q15)
+        amp_k = mul_q15_sat(base_amp, amplitude)
+
+        if amp_k < 10:
+            continue
+
+        # Map frequency to leaf (convert mHz to Hz for lookup)
+        f_k_hz = f_k_mhz // 1000
+        leaf_idx = freq_to_leaf(f_k_hz)
+
+        # Calculate position within leaf using integer math
+        # leaf_edges are in Hz, f_k is in mHz for precision
+        leaf_low_mhz = int(LEAF_EDGES_HZ[leaf_idx] * 1000)
+        leaf_high_mhz = int(LEAF_EDGES_HZ[leaf_idx + 1] * 1000)
+        leaf_span_mhz = leaf_high_mhz - leaf_low_mhz
+
+        if leaf_span_mhz > 0:
+            # pos_in_band as integer 0-1000 (milliunits)
+            pos_milli = ((f_k_mhz - leaf_low_mhz) * 1000) // leaf_span_mhz
+            pos_milli = max(0, min(999, pos_milli))
+        else:
+            pos_milli = 500  # 0.5
+
+        # Map to coefficient index (0 to NODE_SIZE-1)
+        coeff_idx = (pos_milli * NODE_SIZE) // 1000
+        coeff_idx = max(0, min(NODE_SIZE - 1, coeff_idx))
+
+        node_start = leaf_idx * NODE_SIZE
+
+        # Place energy at target coefficient
+        coeffs[node_start + coeff_idx] = sat16(
+            coeffs[node_start + coeff_idx] + amp_k
+        )
+
+        # Optionally spread to neighbors for richer sound
+        if spread_to_neighbors:
+            spread_amp = amp_k // 4
+            if coeff_idx > 0:
+                coeffs[node_start + coeff_idx - 1] = sat16(
+                    coeffs[node_start + coeff_idx - 1] + spread_amp
+                )
+            if coeff_idx < NODE_SIZE - 1:
+                coeffs[node_start + coeff_idx + 1] = sat16(
+                    coeffs[node_start + coeff_idx + 1] + spread_amp
+                )
+
+    return coeffs
+
+
 def synthesize_harmonic_audio(frequency: float = 220.0,
                               amplitude: int = 0x5000,
                               wave_type: WaveType = WaveType.SAW,

@@ -223,9 +223,8 @@ class UnifiedOutputStage:
 
         # Initialize VM state (WSE-STD-VM-HYBRID v0)
         if USE_VM_EXECUTOR:
-            f0_hz = 440.0 * (2.0 ** ((note - 69 + cents / 100.0) / 12.0))
             vm_state = VMState.create(voice_id)
-            vm_state.reset_for_note_on(f0_hz=f0_hz)
+            vm_state.reset_for_note_on(note=note, cents=cents)
             self.vm_states[voice_id] = vm_state
 
     def voice_off(self, voice_id: int) -> None:
@@ -276,9 +275,8 @@ class UnifiedOutputStage:
         if USE_VM_EXECUTOR:
             # Get or create VM state
             if voice_id not in self.vm_states:
-                f0_hz = frame.f0_hz if frame.f0_hz > 0 else 440.0 * (2.0 ** ((frame.note - 69 + frame.cents / 100.0) / 12.0))
                 vm_state = VMState.create(voice_id)
-                vm_state.reset_for_note_on(f0_hz=f0_hz)
+                vm_state.reset_for_note_on(note=frame.note, cents=frame.cents)
                 self.vm_states[voice_id] = vm_state
 
             # Execute one block through VM
@@ -325,9 +323,8 @@ class UnifiedOutputStage:
         # === Step 2: Generate wet path (FWPT -> mask -> IDWPT) ===
         x_wet = None
         if frame.beta_target_q15 > 0:
-            f0_hz = frame.f0_hz if frame.f0_hz > 0 else 440.0 * (2.0 ** ((frame.note - 69 + frame.cents / 100.0) / 12.0))
-
-            from ..wavelet.harmonic_injector import create_harmonic_coeffs, WaveType
+            # Use fixed-point coefficient generation to avoid floating-point noise
+            from ..wavelet.harmonic_injector import create_harmonic_coeffs_fixed, WaveType
 
             partial_amps = frame.partial_amps_q15 if frame.partial_amps_q15 else state.partial_amps_q15
 
@@ -336,8 +333,10 @@ class UnifiedOutputStage:
             else:
                 wave_type = WaveType.SAW
 
-            coeffs_256 = create_harmonic_coeffs(
-                frequency=f0_hz,
+            # Use note/cents directly (fixed-point) instead of f0_hz (floating-point)
+            coeffs_256 = create_harmonic_coeffs_fixed(
+                note=frame.note,
+                cents=frame.cents,
                 amplitude=Q15_HALF,
                 wave_type=wave_type,
                 partials_n=8,
@@ -395,17 +394,37 @@ class UnifiedOutputStage:
             )
 
         # === Step 3: AntiClick operator does ALL mixing + click prevention ===
-        # Normalize to [-1, 1] - anticlick handles clipping internally
-        carrier_np = np.array(x_carrier, dtype=np.float32) / 32768.0
-        wet_np = None
-        if x_wet is not None:
-            wet_np = np.array(x_wet, dtype=np.float32) / 32768.0
+        # Set BYPASS_ANTICLICK=True to test with safety off
+        BYPASS_ANTICLICK = True  # TESTING ONLY
 
-        output_np = self.anticlick.step(ac_state, carrier_np, wet_np)
+        if BYPASS_ANTICLICK:
+            # Direct Q15 mixing without anticlick (for testing)
+            # Use beta directly from frame without ramping
+            beta_q15 = frame.beta_target_q15
 
-        # Convert back to Q15
-        output = (output_np * 32768.0).astype(np.int32)
-        output = np.clip(output, -32768, 32767).tolist()
+            if x_wet is None or beta_q15 == 0:
+                output = x_carrier
+            elif beta_q15 >= 32767:
+                output = x_wet
+            else:
+                # Linear mix in Q15
+                inv_beta = 32767 - beta_q15
+                output = [
+                    ((c * inv_beta) + (w * beta_q15)) >> 15
+                    for c, w in zip(x_carrier, x_wet)
+                ]
+        else:
+            # Normal path: anticlick handles clipping internally
+            carrier_np = np.array(x_carrier, dtype=np.float32) / 32768.0
+            wet_np = None
+            if x_wet is not None:
+                wet_np = np.array(x_wet, dtype=np.float32) / 32768.0
+
+            output_np = self.anticlick.step(ac_state, carrier_np, wet_np)
+
+            # Convert back to Q15
+            output = (output_np * 32768.0).astype(np.int32)
+            output = np.clip(output, -32768, 32767).tolist()
 
         # === Step 4: Apply voice gain ===
         output = [(s * frame.gain_q15) >> 15 for s in output]
@@ -434,11 +453,13 @@ class UnifiedOutputStage:
         # Convert to stereo using sine_core for bit-exact pan law
         # pan_q15 range: -32768 (full left) to +32767 (full right)
         # Map to phase [0, pi/2] for equal-power panning
-        # pan_norm in [0, 1] -> phase in [0, 0x40000000]
+        # All integer math to avoid floating-point jitter
         pan_q15 = frame.pan_q15
-        pan_norm = (pan_q15 + Q15_SCALE) / (2 * Q15_SCALE)  # [0, 1]
-        # Phase for pi/2 is 0x40000000, so multiply pan_norm by that
-        pan_phase = int(pan_norm * 0x40000000) & PHASE_MASK
+        # Map pan_q15 from [-32768, 32767] to [0, 65535] (Q16 unsigned)
+        pan_u16 = pan_q15 + 32768
+        # Scale to phase [0, 0x40000000]: phase = pan_u16 * 0x40000000 / 65536
+        # = (pan_u16 << 14) since 0x40000000 / 65536 = 0x4000 = 16384 = 2^14
+        pan_phase = (pan_u16 << 14) & PHASE_MASK
         # left = cos(phase), right = sin(phase) for equal-power pan
         left_q15 = cosine_q15(pan_phase)
         right_q15 = sine_q15(pan_phase)
@@ -451,11 +472,21 @@ class UnifiedOutputStage:
         # NOTE: OLA is now applied in lane_idwpt_render to the wet path ONLY.
         # The carrier is phase-continuous and applying OLA to it corrupts the signal.
         # Master OLA is disabled here since wet path OLA is handled at the correct layer.
+        #
+        # DC removal is DISABLED for VM path (USE_VM_EXECUTOR=True):
+        # - CCS path produces phase-continuous sine waves with zero inherent DC
+        # - Block-based "DC offset" is just incomplete cycles, not true DC
+        # - Removing it causes block boundary discontinuities
+        #
+        # DC removal is ENABLED for legacy path (USE_VM_EXECUTOR=False):
+        # - Legacy path may have true DC offset from wavelet processing
         is_carrier_only = frame.beta_target_q15 == 0
+        # Disable DC removal for VM path (CCS) - it's phase-continuous with zero DC
+        apply_dc = (not USE_VM_EXECUTOR) and (not is_carrier_only)
         L, R = self.safety.step_block(
             L, R, self.params,
             apply_master_ola=False,  # OLA handled in VM lane_idwpt_render
-            apply_dc_removal=not is_carrier_only
+            apply_dc_removal=apply_dc
         )
 
         return L, R

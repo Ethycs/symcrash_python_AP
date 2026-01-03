@@ -152,30 +152,23 @@ print(f"Audio duration: {len(audio_left) / SAMPLE_RATE:.2f}s")
 print(f"Audio range: {audio_stereo.min():.3f} to {audio_stereo.max():.3f}")
 
 # Save to WAV and play with system player (more reliable than sounddevice on Windows)
-import wave
-import struct
 import subprocess
-import os
-
-OUTPUT_FILE = os.path.join(os.path.dirname(__file__), "synth_output.wav")
+from symcrash_python_ap.audio_io import write_audio
 
 print("\n" + "="*60)
-print(f"Saving to {OUTPUT_FILE}...")
+print("Saving audio using audio_io...")
 print("="*60)
 
 # Convert to 16-bit integer samples
-audio_int16 = (audio_stereo * 32767).astype(np.int16)
+L_int16 = (audio_left * 32767).astype(np.int16)
+R_int16 = (audio_right * 32767).astype(np.int16)
 
-with wave.open(OUTPUT_FILE, 'w') as wav:
-    wav.setnchannels(2)
-    wav.setsampwidth(2)  # 16-bit
-    wav.setframerate(SAMPLE_RATE)
-    wav.writeframes(audio_int16.tobytes())
+meta = write_audio("synth_output", L_int16, R_int16, timestamp=False, subdirectory="tools")
 
 print(f"Saved! Playing with system player...")
 
 # Play with Windows default player
-subprocess.Popen(['cmd', '/c', 'start', '', OUTPUT_FILE], shell=True)
+subprocess.Popen(['cmd', '/c', 'start', '', meta.filepath], shell=True)
 
 print("Done!")
 

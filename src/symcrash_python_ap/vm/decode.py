@@ -72,6 +72,21 @@ class CarrierParams:
     model_id: int = 0        # Oscillator model (0 = additive sine)
 
 
+@dataclass
+class CoeffOscParams:
+    """
+    Coefficient Oscillator parameters for CCS (WSE-STD-ARCH-CCS v0).
+
+    These parameters control coefficient synthesis, which replaces
+    the carrier→FWPT→mask→IDWPT path to eliminate combing artifacts.
+    """
+    table_id: int = 0         # Which coefficient table (0=sine, 1=saw, etc.)
+    base_mix_q15: int = 32767  # Blend factor: 0=pure CMMM state, 32767=pure osc
+    phase_inc: int = 0        # Base phase increment (from MIDI note)
+    note: int = 60            # MIDI note number
+    cents: int = 0            # Fine tuning in cents
+
+
 # =============================================================================
 # DECODED PLAN
 # =============================================================================
@@ -96,9 +111,13 @@ class DecodedPlan:
     tree_b: int = 0
     tree_blend_q15: int = 0
 
-    # Carrier parameters
+    # Carrier parameters (legacy, used when use_coeff_osc=False)
     carrier_params: CarrierParams = field(default_factory=CarrierParams)
     carrier_role: CarrierRole = CarrierRole.AUDIBLE
+
+    # CoeffOsc parameters (CCS path, used when use_coeff_osc=True)
+    coeff_osc_params: CoeffOscParams = field(default_factory=CoeffOscParams)
+    use_coeff_osc: bool = True  # Enable CCS path by default
 
     # Dry/wet blend (eta) - for intra-block ramping
     eta_prev_q15: int = 0
@@ -233,6 +252,32 @@ def decode_frame(
         harmonic_amps_q15=harmonic_amps,
         model_id=0,
     )
+
+    # -------------------------------------------------------------------------
+    # CoeffOsc parameters (CCS path)
+    # -------------------------------------------------------------------------
+    # Get table ID from frame (default 0 = sine)
+    coeff_table_id = getattr(frame, 'coeff_table_id', 0) or 0
+
+    # base_mix controls how much oscillator vs CMMM state
+    # Default to using eta (beta_target) as base_mix for smooth transition
+    base_mix = getattr(frame, 'base_mix_q15', None)
+    if base_mix is None:
+        # Use beta_target as base_mix for backward compatibility
+        base_mix = getattr(frame, 'beta_target_q15', None)
+        if base_mix is None:
+            base_mix = 32767  # Full oscillator by default
+
+    plan.coeff_osc_params = CoeffOscParams(
+        table_id=coeff_table_id,
+        base_mix_q15=base_mix,
+        phase_inc=phase_inc,
+        note=note,
+        cents=cents,
+    )
+
+    # Check if we should use CCS path
+    plan.use_coeff_osc = getattr(frame, 'use_coeff_osc', True)
 
     # Carrier role
     # NOTE: Don't use `or 24576` here - 0 is a valid value (pure carrier)
@@ -370,6 +415,7 @@ __all__ = [
     'BackboneEntry',
     'EventEntry',
     'CarrierParams',
+    'CoeffOscParams',
     'DecodedPlan',
     'decode_frame',
 ]

@@ -12,6 +12,7 @@ from typing import Optional
 from .state import VMState, EnvelopePhase, prng_step
 from .decode import DecodedPlan, BackboneEntry, CarrierRole
 from .tables import Lane, get_operator_lane, BLOCK_SAMPLES, COEFF_LEN, NODE_LEN, L_TOTAL_NODES
+from ..fixed import RSHIFT_RNE
 
 # Use canonical sine_core for bit-exact trig lookups
 from ..wavelet.sine_core import (
@@ -208,8 +209,10 @@ def apply_wet_ola(state: VMState, wet_buf: np.ndarray) -> np.ndarray:
     for i in range(WET_OLA_SIZE):
         prev_sample = int(state.wet_ola_tail[i])
         curr_sample = int(wet_buf[i])
-        # Hann crossfade: prev * fade_out + curr * fade_in
-        blended = (prev_sample * _WET_OLA_FADE_OUT[i] + curr_sample * _WET_OLA_FADE_IN[i]) >> 15
+        # Hann crossfade with proper rounding: prev * fade_out + curr * fade_in
+        blended = RSHIFT_RNE(
+            prev_sample * _WET_OLA_FADE_OUT[i] + curr_sample * _WET_OLA_FADE_IN[i], 15
+        )
         # Clamp to int16
         wet_buf[i] = max(-32768, min(32767, blended))
 
@@ -870,7 +873,15 @@ def _tail_emergency_simplify(state: VMState, mask: int) -> None:
 # =============================================================================
 
 # Import JIT-accelerated lifting for real-time IDWPT (fastest)
-from ..wavelet.fast_lifting import effect_mode_jit, NUMBA_AVAILABLE
+from ..wavelet.fast_lifting import effect_mode_jit, idwpt_balanced, NUMBA_AVAILABLE
+
+# Import CoeffOsc for CCS path
+from .coeff_osc import (
+    CoeffOscState,
+    get_coeff_table,
+    coeff_osc_render,
+    coeff_osc_render_with_mix,
+)
 
 
 # Pre-allocated buffers for IDWPT lane (avoid per-block allocations)
@@ -887,7 +898,9 @@ def lane_idwpt_render(
     """
     Render IDWPT texture from coefficient state using fast_lifting.
 
-    Optimized version: numpy for vectorized ops, minimal allocations.
+    Uses phase/time coherent approach (no windowing):
+    1. Mask smoothing: interpolate mask values across blocks
+    2. C⁰ seam stitching: linear ramp correction for block continuity
 
     Args:
         state: VM state (contains coeff_state as mask source)
@@ -906,38 +919,166 @@ def lane_idwpt_render(
     # Convert carrier to list (tolist() is fast for small arrays)
     carrier_list = carrier_buf.tolist()
 
-    # Build 64-element mask using vectorized numpy
-    # Reshape coeff_state into 64 groups of 4 and sum absolute values
+    # Build target mask from coeff_state (existing logic)
     coeff_view = state.coeff_state[:COEFF_LEN].reshape(64, COEFF_LEN // 64)
     np.abs(coeff_view).sum(axis=1, out=_IDWPT_LEAF_ENERGIES)
 
-    # Check if coeff_state has any energy - if not, use None for true passthrough
+    # Check if coeff_state has any energy
     total_energy = _IDWPT_LEAF_ENERGIES.sum()
     if total_energy == 0:
-        # No coefficient energy - use None for perfect passthrough (no mask applied)
-        mask_q15 = None
+        # No coefficient energy - use None for true passthrough
+        mask_target = None
     else:
         # Apply mask_u32: expand 32 nodes to 64 leaves
-        # Use bit manipulation to extract mask bits
         mask_u32 = cfg.mask_u32
         for i in range(32):
             _IDWPT_NODE_MASK_TEMPLATE[i] = (mask_u32 >> i) & 1
         leaf_mask = np.repeat(_IDWPT_NODE_MASK_TEMPLATE, 2)
 
-        # Apply node mask and clamp to Q15, convert to list
-        mask_q15 = np.minimum(_IDWPT_LEAF_ENERGIES * leaf_mask, Q15_ONE).tolist()
+        # Compute target mask (before smoothing)
+        mask_target = np.minimum(_IDWPT_LEAF_ENERGIES * leaf_mask, Q15_ONE)
+
+    # =========================================================================
+    # MASK SMOOTHING (Control Continuity)
+    # =========================================================================
+    # Interpolate mask values across blocks to prevent sudden operator changes.
+    # This removes the "block phase lands differently → mask produces different
+    # waveform" shock by making the operator time-smooth.
+    MASK_ALPHA = 16384  # Q15 0.5 - blend 50% per block (~10ms for full change)
+
+    if mask_target is not None:
+        if state.mask_state_initialized:
+            # Interpolate: smoothed = prev * (1-α) + target * α
+            mask_smoothed = (
+                (state.mask_state_q15.astype(np.int32) * (Q15_ONE - MASK_ALPHA) +
+                 mask_target.astype(np.int32) * MASK_ALPHA) >> 15
+            ).astype(np.int16)
+        else:
+            # First block with mask - initialize state
+            mask_smoothed = mask_target.astype(np.int16)
+            state.mask_state_initialized = True
+
+        # Update state for next block
+        state.mask_state_q15[:] = mask_smoothed
+        mask_q15 = mask_smoothed.tolist()
+    else:
+        # Identity mask - decay mask state toward zero
+        if state.mask_state_initialized:
+            # Decay by half each block
+            state.mask_state_q15[:] = (state.mask_state_q15.astype(np.int32) * MASK_ALPHA) >> 15
+            # If energy drops below threshold, stop using smoothed mask
+            if np.sum(np.abs(state.mask_state_q15)) < 64:
+                mask_q15 = None
+            else:
+                mask_q15 = state.mask_state_q15.tolist()
+        else:
+            mask_q15 = None
 
     # Apply JIT effect mode: carrier -> FWPT -> mask -> IDWPT -> wet
     wet_list = effect_mode_jit(carrier_list, mask_q15)
+    wet_arr = np.array(wet_list, dtype=np.int32)
 
-    # Copy to output buffer
-    _IDWPT_OUTPUT[:] = wet_list
+    # =========================================================================
+    # C⁰ SEAM STITCHING (Boundary Constraint)
+    # =========================================================================
+    # After IDWPT, correct wet output to match previous block's end value.
+    # This is NOT windowing - it's a minimal linear ramp correction.
+    # delta = prev_end - curr_start
+    # wet[i] += delta * (1 - i/63) → forces wet[0] = prev_end, smooth ramp
+    if state.wet_seam_initialized:
+        delta = state.wet_prev_end - int(wet_arr[0])
+        # Linear ramp correction: delta at i=0, 0 at i=63
+        for i in range(BLOCK_SAMPLES):
+            wet_arr[i] += (delta * (BLOCK_SAMPLES - 1 - i)) // (BLOCK_SAMPLES - 1)
 
-    # Apply OLA to smooth IDWPT block boundaries
-    # This is applied to wet path ONLY (carrier is phase-continuous, no OLA needed)
-    apply_wet_ola(state, _IDWPT_OUTPUT)
+    # Store end sample for next block
+    state.wet_prev_end = int(wet_arr[BLOCK_SAMPLES - 1])
+    if not state.wet_seam_initialized:
+        state.wet_seam_initialized = True
+
+    # Clamp and copy to output buffer
+    _IDWPT_OUTPUT[:] = np.clip(wet_arr, -32768, 32767).astype(np.int16)
 
     return _IDWPT_OUTPUT
+
+
+# =============================================================================
+# LANE 8b: CCS RENDER (Coefficient-Synthesis path)
+# =============================================================================
+# This replaces the carrier→FWPT→mask→IDWPT path with:
+# CoeffOsc → blend(coeff_state) → IDWPT → audio
+#
+# Eliminates phase-variant combing by generating coefficients directly
+# from oscillator phases + tables, bypassing FWPT entirely.
+
+# Pre-allocated buffer for CCS output
+_CCS_OUTPUT = np.zeros(BLOCK_SAMPLES, dtype=np.int16)
+_CCS_COEFFS = np.zeros(64, dtype=np.int16)
+
+
+def lane_ccs_render(
+    state: VMState,
+    cfg: DecodedPlan,
+) -> np.ndarray:
+    """
+    Render audio using Coefficient Synthesis (CCS) path.
+
+    This is the new render path that eliminates combing artifacts by
+    generating audio directly from phase-continuous oscillators,
+    instead of running carrier audio through FWPT→mask→IDWPT.
+
+    The key insight is that FWPT's phase-dependent coefficient
+    distribution causes combing when combined with masking. By
+    generating audio directly (without FWPT), we eliminate this.
+
+    Flow:
+        1. CoeffOsc generates audio samples directly (additive synthesis)
+        2. No FWPT, no mask, no IDWPT roundtrip
+        3. Phase-continuous output (no block discontinuities)
+
+    Args:
+        state: VM state (modified in place)
+        cfg: Decoded plan with CoeffOsc parameters
+
+    Returns:
+        audio_buf: int16 array of BLOCK_SAMPLES
+    """
+    global _CCS_OUTPUT
+
+    # Get CoeffOsc parameters
+    params = cfg.coeff_osc_params
+    table = get_coeff_table(params.table_id)
+
+    # Update oscillator pitch if changed
+    note = params.note
+    cents = params.cents
+    if state.coeff_osc.base_phase_inc != params.phase_inc:
+        # Pitch changed - set new target with slew
+        if state.last_note != note or state.last_cents != cents:
+            state.coeff_osc.set_pitch(params.phase_inc, slew_blocks=8)
+            state.last_note = note
+            state.last_cents = cents
+        else:
+            # Same note/cents but different phase_inc shouldn't happen,
+            # but just snap immediately if it does
+            state.coeff_osc.base_phase_inc = params.phase_inc
+            state.coeff_osc.target_phase_inc = params.phase_inc
+
+    # Render audio directly (bypasses FWPT entirely)
+    # base_mix controls oscillator contribution
+    base_mix = params.base_mix_q15
+
+    # Generate audio samples
+    audio_samples = coeff_osc_render(
+        state.coeff_osc,
+        table,
+        num_samples=BLOCK_SAMPLES,
+    )
+
+    # Copy to output buffer
+    _CCS_OUTPUT[:] = audio_samples
+
+    return _CCS_OUTPUT
 
 
 # =============================================================================
@@ -956,7 +1097,13 @@ def lane_mix_gain(
     """
     Apply eta blend and gain ramp to produce final output (vectorized).
 
-    Uses equal-power crossfade for eta and linear ramp for gain.
+    Uses orthogonal residual projection for eta blend:
+        output = carrier + eta * (texture - carrier)
+
+    This approach reduces block discontinuity artifacts by blending the
+    *difference* rather than the full signals. The residual is typically
+    smaller than the wet signal, so discontinuities are quieter.
+
     All math is integer-only for bit-exact determinism.
 
     Args:
@@ -971,24 +1118,25 @@ def lane_mix_gain(
     eta_delta = cfg.eta_curr_q15 - cfg.eta_prev_q15
     eta_vals = cfg.eta_prev_q15 + ((_ALPHA_Q15 * eta_delta) >> 15)
 
-    # Vectorized equal-power crossfade weights
-    # Map eta (0 to 32767) to phase (0 to 0x40000000 for 0° to 90°)
-    phases = ((eta_vals.astype(np.int64) * 0x40000000) >> 15).astype(np.uint32)
-
-    # Batch sine/cosine lookup - no Python loops
-    dry_weights, wet_weights = _sincos_batch_q15(phases)
-
-    # Mix carrier and texture (int32 to avoid overflow)
+    # Orthogonal residual projection: output = carrier + eta * (texture - carrier)
+    # This is algebraically equivalent to linear blend (1-eta)*carrier + eta*texture
+    # but computed as carrier + eta*residual for better discontinuity handling.
     carrier_i32 = carrier_buf.astype(np.int32)
     texture_i32 = texture_buf.astype(np.int32)
-    mixed = (carrier_i32 * dry_weights + texture_i32 * wet_weights) >> 15
 
-    # Apply headroom to prevent clipping from equal-power crossfade.
-    # When carrier ≈ wet (e.g., passthrough IDWPT), equal-power crossfade
-    # causes coherent addition: cos(θ)*a + sin(θ)*a = a*√2 at θ=45°.
-    # Scale by 1/√2 ≈ 23170/32767 to prevent clipping.
-    MIX_HEADROOM = 23170  # Q15 for 1/√2
-    mixed = (mixed * MIX_HEADROOM) >> 15
+    # Compute residual (what the wavelet processing added/changed)
+    residual = texture_i32 - carrier_i32
+
+    # Blend: carrier stays, add scaled residual
+    # At eta=0: output = carrier (pure carrier)
+    # At eta=32767: output = carrier + residual = texture (pure wet)
+    mixed = carrier_i32 + ((residual * eta_vals) >> 15)
+
+    # Apply headroom to prevent clipping.
+    # Residual peaks are typically smaller than wet peaks, so we can use
+    # a higher factor (~0.866) compared to equal-power crossfade (~0.707).
+    RESIDUAL_HEADROOM = 28378  # Q15 for ~0.866
+    mixed = (mixed * RESIDUAL_HEADROOM) >> 15
 
     # Vectorized gain interpolation
     gain_delta = cfg.gain_curr_q15 - cfg.gain_prev_q15
@@ -1012,5 +1160,6 @@ __all__ = [
     'lane_proj',
     'lane_tail',
     'lane_idwpt_render',
+    'lane_ccs_render',
     'lane_mix_gain',
 ]
