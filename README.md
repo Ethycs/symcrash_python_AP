@@ -145,18 +145,18 @@ python tools/pico2_live_synth.py --no-hardware --imgui --note 48
 
 When connected to Pico2 hardware:
 
-| Pot | Parameter | Range |
-|-----|-----------|-------|
-| 0 | Attack | 0-330ms |
-| 1 | Decay | 0-665ms |
-| 2 | Sustain | 0-100% |
-| 3 | Release | 0-1000ms |
-| 4 | Cutoff | 0-100% |
-| 5 | Resonance | 0-100% |
-| 6 | Harmonics | 0-100% (brightness) |
-| 7 | Eta | 0-100% (dry/wet mix) |
-| 8 | Detune | -2400 to +2400 cents |
-| 9 | Gain | 0-100% (master) |
+| Pot | Parameter | Range | Control |
+|-----|-----------|-------|---------|
+| 0 | Attack | 0-665ms | ATK_BLOCKS |
+| 1 | Decay | 0-1333ms | DCY_BLOCKS |
+| 2 | Sustain | 0-100% | SUS_Q15 |
+| 3 | Release | 0-2000ms | REL_BLOCKS |
+| 4 | Cutoff | 0-100% | CHAOS |
+| 5 | Resonance | 0-100% | TEXTURE |
+| 6 | Harmonics | 0-100% | RESERVED_7 |
+| 7 | Eta | 0-100% (dry/wet) | MORPH |
+| 8 | Detune | ±2 octaves | DETUNE |
+| 9 | Gain | 0-100% | MASTER_GAIN |
 
 ### Keyboard Controls (Console)
 

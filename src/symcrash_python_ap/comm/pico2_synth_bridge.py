@@ -5,16 +5,16 @@ Pico2 Synth Bridge
 Bridges the Pico2 hardware controller to the CockpitEngine for control input.
 
 Maps the 10 hardware potentiometers to controls via CockpitEngine:
-- P0: TIMBRE
-- P1: TEXTURE
-- P2: DYNAMICS
-- P3: MORPH
-- P4: CHAOS
-- P5: DETUNE
-- P6: MASTER_GAIN
-- P7: ATK_BLOCKS (Attack)
-- P8: DCY_BLOCKS (Decay)
-- P9: SUS_Q15 (Sustain)
+- P0: ATK_BLOCKS (Attack, 0-500 blocks = 0-665ms)
+- P1: DCY_BLOCKS (Decay, 0-1000 blocks = 0-1333ms)
+- P2: SUS_Q15 (Sustain level, 0-100%)
+- P3: REL_BLOCKS (Release, 0-1500 blocks = 0-2000ms)
+- P4: CHAOS (Cutoff equivalent, 0-100%)
+- P5: TEXTURE (Resonance equivalent, 0-100%)
+- P6: RESERVED_7 (Harmonics - future expansion)
+- P7: MORPH (Eta/dry-wet blend, 0-100%)
+- P8: DETUNE (Pitch offset, -2400 to +2400 cents = ±2 octaves)
+- P9: MASTER_GAIN (Master volume, 0-100%)
 
 Usage:
     from symcrash_python_ap.comm.pico2_synth_bridge import Pico2SynthBridge
@@ -39,21 +39,17 @@ from ..control_registry import ControlID
 # =============================================================================
 
 # Pot ID -> Control mapping (via CockpitEngine.set_pot())
-# ADC0: Timbral controls (pots 0-4)
-POT_TIMBRE = 0
-POT_TEXTURE = 1
-POT_DYNAMICS = 2
-POT_MORPH = 3
-POT_CHAOS = 4
-
-# ADC0: Pitch and master (pots 5-6)
-POT_DETUNE = 5
-POT_MASTER_GAIN = 6
-
-# ADC1: ADSR controls (pots 7-9)
-POT_ATTACK = 7
-POT_DECAY = 8
-POT_SUSTAIN = 9
+# Matches original Pico2 hardware layout
+POT_ATTACK = 0      # ATK_BLOCKS
+POT_DECAY = 1       # DCY_BLOCKS
+POT_SUSTAIN = 2     # SUS_Q15
+POT_RELEASE = 3     # REL_BLOCKS
+POT_CUTOFF = 4      # CHAOS (filter cutoff)
+POT_RESO = 5        # TEXTURE (filter resonance)
+POT_HARMONICS = 6   # RESERVED_7 (future)
+POT_ETA = 7         # MORPH (dry/wet blend)
+POT_DETUNE = 8      # DETUNE (pitch offset)
+POT_GAIN = 9        # MASTER_GAIN
 
 # Q15 maximum value
 Q15_MAX = 32767
@@ -155,29 +151,27 @@ class Pico2SynthBridge:
         block_to_ms = lambda b: b * 1.33
 
         return {
-            "TIMBRE": f"{100 * self.cockpit.get_control_current(ControlID.TIMBRE) / Q15_MAX:.0f}%",
-            "TEXTURE": f"{100 * self.cockpit.get_control_current(ControlID.TEXTURE) / Q15_MAX:.0f}%",
-            "DYNAMICS": f"{100 * self.cockpit.get_control_current(ControlID.DYNAMICS) / Q15_MAX:.0f}%",
-            "MORPH": f"{100 * self.cockpit.get_control_current(ControlID.MORPH) / Q15_MAX:.0f}%",
-            "CHAOS": f"{100 * self.cockpit.get_control_current(ControlID.CHAOS) / Q15_MAX:.0f}%",
-            "DETUNE": f"{self.cockpit.get_control_current(ControlID.DETUNE)} cents",
-            "MASTER": f"{100 * self.cockpit.get_control_current(ControlID.MASTER_GAIN) / Q15_MAX:.0f}%",
             "ATK": f"{block_to_ms(adsr['attack_blocks']):.0f}ms",
             "DCY": f"{block_to_ms(adsr['decay_blocks']):.0f}ms",
             "SUS": f"{100 * adsr['sustain_level_q15'] / Q15_MAX:.0f}%",
             "REL": f"{block_to_ms(adsr['release_blocks']):.0f}ms",
+            "CUTOFF": f"{100 * self.cockpit.get_control_current(ControlID.CHAOS) / Q15_MAX:.0f}%",
+            "RESO": f"{100 * self.cockpit.get_control_current(ControlID.TEXTURE) / Q15_MAX:.0f}%",
+            "HARM": f"{100 * self.cockpit.get_control_current(ControlID.RESERVED_7) / Q15_MAX:.0f}%",
+            "ETA": f"{100 * self.cockpit.get_control_current(ControlID.MORPH) / Q15_MAX:.0f}%",
+            "DETUNE": f"{self.cockpit.get_control_current(ControlID.DETUNE)} cents",
+            "GAIN": f"{100 * self.cockpit.get_control_current(ControlID.MASTER_GAIN) / Q15_MAX:.0f}%",
         }
 
     def print_status(self):
         """Print current parameter status."""
         print("[Pico2SynthBridge] Status:")
         values = self.get_control_display()
-        print(f"  Timbral: TIMBRE={values['TIMBRE']} TEXTURE={values['TEXTURE']} "
-              f"DYNAMICS={values['DYNAMICS']}")
-        print(f"  Morph: MORPH={values['MORPH']} CHAOS={values['CHAOS']}")
-        print(f"  Pitch: DETUNE={values['DETUNE']} MASTER={values['MASTER']}")
         print(f"  ADSR: ATK={values['ATK']} DCY={values['DCY']} "
               f"SUS={values['SUS']} REL={values['REL']}")
+        print(f"  Filter: CUTOFF={values['CUTOFF']} RESO={values['RESO']}")
+        print(f"  Osc: HARM={values['HARM']} ETA={values['ETA']} "
+              f"DETUNE={values['DETUNE']} GAIN={values['GAIN']}")
 
 
 # =============================================================================

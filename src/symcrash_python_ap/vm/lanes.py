@@ -774,7 +774,10 @@ def lane_tail(state: VMState, cfg: DecodedPlan) -> None:
         if op_id == 2:  # FineClamp
             _tail_fine_clamp(state, cfg.mask_u32)
         elif op_id == 11:  # NormalizeScale
-            _tail_normalize_scale(state, cfg.mask_u32)
+            # Skip NormalizeScale in CCS mode - oscillating coefficients
+            # have naturally varying energy and shouldn't be normalized
+            if not cfg.use_coeff_osc:
+                _tail_normalize_scale(state, cfg.mask_u32)
         elif op_id == 23:  # SheafProject
             _tail_sheaf_project(state, cfg.mask_u32)
         elif op_id == 19:  # EmergencySimplify
@@ -1018,9 +1021,52 @@ def lane_idwpt_render(
 # Eliminates phase-variant combing by generating coefficients directly
 # from oscillator phases + tables, bypassing FWPT entirely.
 
+# =============================================================================
+# COEFFICIENT MAPPING HELPERS (256 ↔ 64)
+# =============================================================================
+
+def inject_64_to_256(coeffs_64: np.ndarray, coeff_state: np.ndarray) -> None:
+    """
+    Inject 64 carrier coefficients into 256-element state.
+
+    Replicates each leaf across 4 positions for operator compatibility.
+    This allows the 64-leaf carrier to be modified by operators that
+    work on the 256-element coefficient structure (32 nodes × 8 coeffs).
+
+    Args:
+        coeffs_64: 64 leaf coefficients (int16)
+        coeff_state: 256-element coefficient state (int16, modified in place)
+    """
+    for i in range(64):
+        val = coeffs_64[i]
+        for j in range(4):
+            coeff_state[i * 4 + j] = val
+
+
+def extract_64_leaves(coeff_state: np.ndarray) -> List[int]:
+    """
+    Extract 64 leaf coefficients from 256-element state.
+
+    Uses energy-preserving summation: each group of 4 coefficients
+    is averaged to produce one leaf value. This matches the existing
+    pattern in lane_idwpt_render() for coefficient extraction.
+
+    Args:
+        coeff_state: 256-element coefficient state (int16)
+
+    Returns:
+        List of 64 leaf coefficients (int16)
+    """
+    # Reshape to (64, 4) and sum along axis 1
+    coeff_view = coeff_state[:256].reshape(64, 4)
+    # Sum with int32 to avoid overflow, then average (>> 2)
+    leaves_64 = (coeff_view.astype(np.int32).sum(axis=1) >> 2).astype(np.int16)
+    return leaves_64.tolist()
+
+
 # Pre-allocated buffer for CCS output
 _CCS_OUTPUT = np.zeros(BLOCK_SAMPLES, dtype=np.int16)
-_CCS_COEFFS = np.zeros(64, dtype=np.int16)
+_CCS_COEFFS_64 = np.zeros(64, dtype=np.int16)
 
 
 def lane_ccs_render(
@@ -1028,62 +1074,35 @@ def lane_ccs_render(
     cfg: DecodedPlan,
 ) -> np.ndarray:
     """
-    Render audio using Coefficient Synthesis (CCS) path.
+    Render audio from operator-modified coefficient state (CCS final step).
 
-    This is the new render path that eliminates combing artifacts by
-    generating audio directly from phase-continuous oscillators,
-    instead of running carrier audio through FWPT→mask→IDWPT.
-
-    The key insight is that FWPT's phase-dependent coefficient
-    distribution causes combing when combined with masking. By
-    generating audio directly (without FWPT), we eliminate this.
-
-    Flow:
-        1. CoeffOsc generates audio samples directly (additive synthesis)
-        2. No FWPT, no mask, no IDWPT roundtrip
-        3. Phase-continuous output (no block discontinuities)
+    ARCHITECTURE (CORRECT FLOW per executor.py):
+        1. Carrier injected into coeff_state (executor.py, before operators)
+        2. Events modify coeff_state (lane_inject)
+        3. Operators modify coeff_state (backbone)
+        4. Tail constrains coeff_state (lane_tail)
+        5. THIS FUNCTION: Extract + IDWPT
 
     Args:
-        state: VM state (modified in place)
-        cfg: Decoded plan with CoeffOsc parameters
+        state: VM state (coeff_state contains final operator-modified coefficients)
+        cfg: Decoded plan
 
     Returns:
         audio_buf: int16 array of BLOCK_SAMPLES
     """
     global _CCS_OUTPUT
 
-    # Get CoeffOsc parameters
-    params = cfg.coeff_osc_params
-    table = get_coeff_table(params.table_id)
+    # Extract 64 leaf coefficients from 256-element time-series state
+    # (Average 4 time samples per leaf to get single value)
+    coeffs_64 = extract_64_leaves(state.coeff_state)
 
-    # Update oscillator pitch if changed
-    note = params.note
-    cents = params.cents
-    if state.coeff_osc.base_phase_inc != params.phase_inc:
-        # Pitch changed - set new target with slew
-        if state.last_note != note or state.last_cents != cents:
-            state.coeff_osc.set_pitch(params.phase_inc, slew_blocks=8)
-            state.last_note = note
-            state.last_cents = cents
-        else:
-            # Same note/cents but different phase_inc shouldn't happen,
-            # but just snap immediately if it does
-            state.coeff_osc.base_phase_inc = params.phase_inc
-            state.coeff_osc.target_phase_inc = params.phase_inc
-
-    # Render audio directly (bypasses FWPT entirely)
-    # base_mix controls oscillator contribution
-    base_mix = params.base_mix_q15
-
-    # Generate audio samples
-    audio_samples = coeff_osc_render(
-        state.coeff_osc,
-        table,
-        num_samples=BLOCK_SAMPLES,
-    )
+    # IDWPT reconstruction: coefficients → audio
+    # TODO: Implement true streaming polyphase IDWPT per WSE-STD-120
+    # For now, use standard IDWPT with averaged coefficients
+    audio_list = idwpt_jit(coeffs_64, headroom_bits=1)
 
     # Copy to output buffer
-    _CCS_OUTPUT[:] = audio_samples
+    _CCS_OUTPUT[:] = np.array(audio_list, dtype=np.int16)
 
     return _CCS_OUTPUT
 

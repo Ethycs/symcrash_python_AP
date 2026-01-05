@@ -36,16 +36,16 @@ from dataclasses import dataclass
 from .pico2_receiver import Pico2Receiver, find_pico2_port
 from .pico2_synth_bridge import (
     Pico2SynthBridge,
-    POT_TIMBRE,
-    POT_TEXTURE,
-    POT_DYNAMICS,
-    POT_MORPH,
-    POT_CHAOS,
-    POT_DETUNE,
-    POT_MASTER_GAIN,
     POT_ATTACK,
     POT_DECAY,
     POT_SUSTAIN,
+    POT_RELEASE,
+    POT_CUTOFF,
+    POT_RESO,
+    POT_HARMONICS,
+    POT_ETA,
+    POT_DETUNE,
+    POT_GAIN,
 )
 from ..cockpit_engine import CockpitEngine
 from ..macro_runtime import MacroRuntime

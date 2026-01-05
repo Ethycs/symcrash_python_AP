@@ -276,7 +276,7 @@ def decode_frame(
         cents=cents,
     )
 
-    # Check if we should use CCS path
+    # Check if we should use CCS path (using fast on-demand table generation)
     plan.use_coeff_osc = getattr(frame, 'use_coeff_osc', True)
 
     # Carrier role

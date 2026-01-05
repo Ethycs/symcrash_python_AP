@@ -85,31 +85,75 @@ def vm_step_block(
     state.tree_b_id = cfg.tree_b
 
     # =========================================================================
-    # CCS PATH (Coefficient Synthesis) - Eliminates combing artifacts
+    # CCS PATH (Coefficient Synthesis) - WSE-STD-ARCH-CCS COMPLIANT
     # =========================================================================
-    # When use_coeff_osc is True, we use the new CCS path:
-    #   CoeffOsc → CMMM blend → IDWPT → audio
+    # When use_coeff_osc is True, we use the TRUE CCS path per spec section 2.1:
+    #   Phase → CoeffTable → Coefficients → Operators → IDWPT → Audio
     #
-    # This bypasses FWPT entirely, eliminating phase-variant combing.
-    # The old carrier→FWPT→mask→IDWPT path is kept for backward compatibility.
+    # This eliminates FWPT from the voice path and ensures operators modify
+    # the carrier coefficients before IDWPT reconstruction.
 
     if cfg.use_coeff_osc and state.use_coeff_osc:
         # -----------------------------------------------------------------
-        # CCS PATH: New architecture (no combing)
+        # CCS PATH: Coefficient-domain architecture (CORRECT FLOW)
         # -----------------------------------------------------------------
 
-        # Step 2: LANE_INJECT (events modify coeff_state)
+        # Step 0: Generate carrier coefficients and seed coeff_state FIRST
+        from .lanes import inject_64_to_256
+        from .coeff_osc import coeff_osc_generate_coeffs
+        from .coeff_tables_fast import get_fast_coeff_table
+
+        carrier_64 = np.zeros(64, dtype=np.int16)
+        table_2d = get_fast_coeff_table()
+
+        # Update pitch if needed
+        params = cfg.coeff_osc_params
+        if state.last_note != params.note or state.last_cents != params.cents:
+            state.coeff_osc.table_id = params.note
+            state.last_note = params.note
+            state.last_cents = params.cents
+
+        if state.coeff_osc.base_phase_inc != params.phase_inc:
+            state.coeff_osc.set_pitch(params.phase_inc, slew_blocks=8)
+
+        # Generate carrier coefficients (evolve via phase each block)
+        coeff_osc_generate_coeffs(state.coeff_osc, table_2d, carrier_64)
+
+        # PERSISTENT EVOLUTION per WSE-STD-120 section 4.1:
+        # Coefficients persist and evolve, carrier provides stabilization
+
+        base_mix = params.base_mix_q15
+
+        # ALWAYS inject carrier with base_mix blending
+        # This maintains oscillation while allowing operator modification
+        # The key: base_mix controls how much carrier vs. evolved state
+
+        for i in range(64):
+            carrier_val = int(carrier_64[i])
+            for j in range(4):
+                idx = i * 4 + j
+                old_val = int(state.coeff_state[idx])
+
+                # Blend: new = old * (1 - base_mix) + carrier * base_mix
+                # base_mix = 32767 → pure carrier (full oscillation)
+                # base_mix = 16384 → 50/50 blend
+                # base_mix = 0 → pure persistence
+                inv_mix = 32767 - base_mix
+                blended = RSHIFT_RNE(old_val * inv_mix + carrier_val * base_mix, 15)
+
+                state.coeff_state[idx] = np.clip(blended, -32768, 32767)
+
+        # Step 1: LANE_INJECT (events modify carrier-seeded coeff_state)
         lane_inject(state, cfg)
 
-        # Steps 3-6: Backbone lanes (CMMM operators on coeff_state)
+        # Steps 2-5: Backbone lanes (operators modify carrier)
         for instr in cfg.backbone_instrs:
             dispatch_coeff_op(state, instr, cfg.mask_u32)
 
-        # Step 7: LANE_TAIL (safety constraints on coeff_state)
+        # Step 6: LANE_TAIL (safety constraints)
         lane_tail(state, cfg)
 
-        # Step 8b: LANE_CCS_RENDER
-        # CoeffOsc generates coefficients, blends with coeff_state, then IDWPT
+        # Step 7: LANE_CCS_RENDER (now just extracts and calls IDWPT)
         output = lane_ccs_render(state, cfg)
 
         # Apply gain with proper rounding (WSE-STD-001 compliant)

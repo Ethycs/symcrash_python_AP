@@ -141,17 +141,17 @@ class CockpitEngine:
         """
         Set pot value (async input).
 
-        Pots map to controls via fixed mapping:
-        - Pot 0: TIMBRE
-        - Pot 1: TEXTURE
-        - Pot 2: DYNAMICS
-        - Pot 3: MORPH
-        - Pot 4: CHAOS
-        - Pot 5: DETUNE (mapped from 0-32767 to -2400..+2400 cents)
-        - Pot 6: MASTER_GAIN
-        - Pot 7: ATK_BLOCKS (mapped from 0-32767 to 1..500 blocks)
-        - Pot 8: DCY_BLOCKS (mapped from 0-32767 to 1..1000 blocks)
-        - Pot 9: SUS_Q15
+        Pots map to controls via fixed mapping (matches original Pico2 layout):
+        - Pot 0: ATK_BLOCKS (Attack, mapped from 0-32767 to 1..500 blocks)
+        - Pot 1: DCY_BLOCKS (Decay, mapped from 0-32767 to 1..1000 blocks)
+        - Pot 2: SUS_Q15 (Sustain level)
+        - Pot 3: REL_BLOCKS (Release, mapped from 0-32767 to 1..1500 blocks)
+        - Pot 4: CHAOS (Cutoff equivalent)
+        - Pot 5: TEXTURE (Resonance equivalent)
+        - Pot 6: RESERVED_7 (Harmonics - future)
+        - Pot 7: MORPH (Eta/dry-wet blend)
+        - Pot 8: DETUNE (mapped from 0-32767 to -2400..+2400 cents)
+        - Pot 9: MASTER_GAIN
 
         Args:
             pot_id: Pot index (0-9)
@@ -161,31 +161,39 @@ class CockpitEngine:
         value_q15 = max(0, min(32767, value_q15))
 
         if pot_id == 0:
-            self.set_control(ControlID.TIMBRE, value_q15)
-        elif pot_id == 1:
-            self.set_control(ControlID.TEXTURE, value_q15)
-        elif pot_id == 2:
-            self.set_control(ControlID.DYNAMICS, value_q15)
-        elif pot_id == 3:
-            self.set_control(ControlID.MORPH, value_q15)
-        elif pot_id == 4:
-            self.set_control(ControlID.CHAOS, value_q15)
-        elif pot_id == 5:
-            # Map 0-32767 to -2400..+2400 cents
-            cents = ((value_q15 - 16384) * 2400) // 16384
-            self.set_control(ControlID.DETUNE, cents)
-        elif pot_id == 6:
-            self.set_control(ControlID.MASTER_GAIN, value_q15)
-        elif pot_id == 7:
-            # Map 0-32767 to 1..500 blocks
+            # Attack: map 0-32767 to 1..500 blocks
             blocks = max(1, (value_q15 * 500) // 32767)
             self.set_control(ControlID.ATK_BLOCKS, blocks)
-        elif pot_id == 8:
-            # Map 0-32767 to 1..1000 blocks
+        elif pot_id == 1:
+            # Decay: map 0-32767 to 1..1000 blocks
             blocks = max(1, (value_q15 * 1000) // 32767)
             self.set_control(ControlID.DCY_BLOCKS, blocks)
-        elif pot_id == 9:
+        elif pot_id == 2:
+            # Sustain: direct Q15
             self.set_control(ControlID.SUS_Q15, value_q15)
+        elif pot_id == 3:
+            # Release: map 0-32767 to 1..1500 blocks
+            blocks = max(1, (value_q15 * 1500) // 32767)
+            self.set_control(ControlID.REL_BLOCKS, blocks)
+        elif pot_id == 4:
+            # Cutoff -> CHAOS
+            self.set_control(ControlID.CHAOS, value_q15)
+        elif pot_id == 5:
+            # Resonance -> TEXTURE
+            self.set_control(ControlID.TEXTURE, value_q15)
+        elif pot_id == 6:
+            # Harmonics -> RESERVED_7 (not yet implemented in standard)
+            self.set_control(ControlID.RESERVED_7, value_q15)
+        elif pot_id == 7:
+            # Eta (dry/wet) -> MORPH
+            self.set_control(ControlID.MORPH, value_q15)
+        elif pot_id == 8:
+            # Detune: map 0-32767 to -2400..+2400 cents
+            cents = ((value_q15 - 16384) * 2400) // 16384
+            self.set_control(ControlID.DETUNE, cents)
+        elif pot_id == 9:
+            # Master gain
+            self.set_control(ControlID.MASTER_GAIN, value_q15)
 
     def midi_note_on(self, note: int, velocity: int = 127, channel: int = 0) -> None:
         """

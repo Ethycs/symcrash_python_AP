@@ -31,8 +31,12 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 import numpy as np
 
-from ..wavelet.sine_core import sine_q15 as _sine_q15
+from ..wavelet.sine_core import sine_q15 as _sine_q15, cosine_q15 as _cosine_q15
 from ..fixed import RSHIFT_RNE
+
+# Import 2D coefficient tables for true coefficient-domain carrier
+# Use the FAST tables (FWPT-based, lazy generation) instead of slow iterative solver
+from .coeff_tables_fast import FastCoeffTable2D as CoeffTable2D, get_fast_coeff_table as get_coeff_table_2d
 
 # Q15 constants
 Q15_ONE = 32767
@@ -219,7 +223,96 @@ class CoeffOscState:
 
 
 # =============================================================================
-# COEFFICIENT OSCILLATOR RENDER
+# COEFFICIENT GENERATION (NEW - WSE-STD-ARCH-CCS Compliant)
+# =============================================================================
+
+# Pre-allocated buffers
+_COEFF_GEN_BUFFER = np.zeros(64, dtype=np.int16)
+
+
+def coeff_osc_generate_coeffs(
+    state: CoeffOscState,
+    table: CoeffTable2D,
+    output_coeffs: np.ndarray,
+) -> None:
+    """
+    Generate 64 leaf coefficients from phase accumulator (TRUE CCS PATH).
+
+    This is the correct implementation per WSE-STD-ARCH-CCS.md section 2.1:
+        Phase → CoeffTable → Coefficients (not audio!)
+
+    The output coefficients will be passed to operators, then IDWPT for
+    final audio reconstruction.
+
+    Args:
+        state: CoeffOscState (modified in place for phase advance)
+        table: CoeffTable2D with sin/cos basis coefficients
+        output_coeffs: np.ndarray[64] int16 output buffer (modified in place)
+
+    Returns:
+        None (output written to output_coeffs)
+    """
+    # Extract current phase (32-bit accumulator)
+    phase = int(state.node_phases[0])
+
+    # Apply pitch slew if needed
+    phase_inc = state.base_phase_inc
+    slew_rate = state.phase_slew_rate
+    target = state.target_phase_inc
+
+    if slew_rate != 0:
+        # Update phase increment with slew
+        new_inc = phase_inc + slew_rate * 64  # 64 samples per block
+        if slew_rate > 0 and new_inc >= target:
+            new_inc = target
+            state.phase_slew_rate = 0
+        elif slew_rate < 0 and new_inc <= target:
+            new_inc = target
+            state.phase_slew_rate = 0
+        state.base_phase_inc = new_inc
+        phase_inc = new_inc
+
+    # Extract phase index (top 6 bits → 64 steps)
+    # 32-bit phase, shift right 26 bits to get top 6 bits
+    phase_idx = (phase >> 26) & 0x3F  # 0..63
+
+    # Get MIDI note from table_id
+    # For now, table_id encodes the MIDI note directly
+    # TODO: Separate table_id (waveform) from note (pitch)
+    note = min(127, max(0, state.table_id))
+
+    # Look up sin/cos basis coefficients from table
+    # Shape: sin_tables[128 notes, 64 phases, 64 coeffs]
+    c_sin = table.sin_tables[note, phase_idx, :]  # [64] int16
+    c_cos = table.cos_tables[note, phase_idx, :]  # [64] int16
+
+    # Direct table lookup approach (no interpolation)
+    #
+    # The table stores coefficients for 64 phase steps per cycle.
+    # c_sin[phase_idx] = FWPT(sin(ω*t + θ)) where θ = phase_idx * 2π/64
+    #
+    # When we pass c_sin through IDWPT, we get sin(ω*t + θ) - audio at the
+    # correct frequency starting at phase θ.
+    #
+    # The phase accumulator advances by phase_inc per sample, so over 64 samples
+    # it advances by phase_inc * 64. We need to pick the coefficient set that
+    # corresponds to the STARTING phase of this block.
+    #
+    # Simply use c_sin directly - it already encodes the correct phase offset.
+    # No interpolation needed for now (64 phase steps gives good resolution).
+
+    # Copy c_sin coefficients directly to output
+    for i in range(64):
+        output_coeffs[i] = c_sin[i]
+
+    # Advance phase for next block
+    # Phase increment represents frequency
+    phase_advance = phase_inc * 64  # 64 samples per block
+    state.node_phases[0] = (phase + phase_advance) & 0xFFFFFFFF
+
+
+# =============================================================================
+# LEGACY ADDITIVE SYNTHESIS (TO BE REMOVED)
 # =============================================================================
 
 # Pre-allocated buffers

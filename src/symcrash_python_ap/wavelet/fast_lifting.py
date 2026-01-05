@@ -984,3 +984,51 @@ def idwpt_jit(coeffs: List[int], headroom_bits: int = 1) -> List[int]:
         # Fallback to idwpt_balanced
         leaves = [[c] for c in coeffs]
         return idwpt_balanced(leaves, depth=6)
+
+
+def idwpt_polyphase_streaming(
+    coeff_state: np.ndarray,
+    headroom_bits: int = 1
+) -> np.ndarray:
+    """
+    Streaming polyphase IDWPT per WSE-STD-120 section 4.1.
+
+    Treats coeff_state as persistent time-series data:
+        coeff_state[leaf][k] where k represents time samples
+
+    Structure options:
+    - [64 leaves][4 time_samples] = 256 coefficients
+    - [32 nodes][8 time_samples] = 256 coefficients
+
+    This function processes the coefficient time-series to generate
+    audio continuously without block-boundary artifacts.
+
+    Args:
+        coeff_state: np.ndarray[256] int16, viewed as [64, 4] or [32, 8]
+        headroom_bits: bits to shift up after transform
+
+    Returns:
+        np.ndarray[64] int16 audio samples
+    """
+    # Interpret as [64 leaves][4 time_samples]
+    coeff_2d = coeff_state[:256].reshape(64, 4)
+
+    # Process each of the 4 time samples
+    # Each produces 16 audio samples (64 / 4 = 16 samples per time step)
+    output = np.zeros(64, dtype=np.int16)
+
+    for t in range(4):
+        # Extract one time sample from each leaf
+        coeffs_t = coeff_2d[:, t].tolist()  # [64] coefficients at time t
+
+        # Run standard IDWPT
+        audio_chunk = idwpt_jit(coeffs_t, headroom_bits=headroom_bits)
+
+        # Place in output (16 samples per chunk)
+        # Interleave: time samples are distributed across the block
+        for i, sample in enumerate(audio_chunk):
+            out_idx = t + i * 4  # Interleave pattern
+            if out_idx < 64:
+                output[out_idx] = sample
+
+    return output

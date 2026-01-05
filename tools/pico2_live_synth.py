@@ -13,9 +13,12 @@ This script connects all the pieces for real-time hardware control of synthesis:
 - sounddevice streams audio in real-time
 
 Controls:
-- Pots 0-4: Timbral controls (TIMBRE, TEXTURE, DYNAMICS, MORPH, CHAOS)
-- Pots 5-6: Pitch and master (DETUNE, MASTER_GAIN)
-- Pots 7-9: ADSR envelope (Attack, Decay, Sustain)
+- Pots 0-3: ADSR envelope (Attack, Decay, Sustain, Release)
+- Pots 4-5: Filter (Cutoff=CHAOS, Resonance=TEXTURE)
+- Pot 6: Harmonics (RESERVED_7 - future expansion)
+- Pot 7: Eta (dry/wet blend = MORPH)
+- Pot 8: Detune (pitch offset)
+- Pot 9: Master Gain
 - Keyboard: SPACE=toggle note, UP/DOWN=change note, s=status, q=quit
 
 Usage:
@@ -166,15 +169,50 @@ class Pico2LiveSynth:
             preset = compiler.compile_file(preset_path)
         else:
             # Use a simple default preset (create in-memory)
-            from symcrash_python_ap.preset_compiler import CompiledPreset, PresetMeta, PresetMaterial, PresetLatch
+            from symcrash_python_ap.preset_compiler import MaterialConfig, LatchDefaults
             from symcrash_python_ap.envelope_scheduler import ADSRSpec
-            preset = CompiledPreset(
-                meta=PresetMeta(name="Default", author="System", version="1.0"),
-                material=PresetMaterial(beta_start_q15=0, beta_target_q15=24576, beta_ramp_blocks=16),
-                latch=PresetLatch(tree_a_id=0, tree_b_id=0, tree_blend_q15=0),
-                harmonic_amps_q15=[32767, 16384, 10923, 8192, 6554, 5461, 4681, 4096],
-                amp_env=ADSRSpec(attack_blocks=8, decay_blocks=32, sustain_level_q15=24576, release_blocks=64),
-            )
+            from dataclasses import dataclass, field as dc_field
+
+            @dataclass
+            class _MinimalPreset:
+                """Minimal preset for live synth."""
+                preset_id: str = "default"
+                preset_version: str = "1.0"
+                author: str = "System"
+                description: str = "Default live preset"
+                voiceframe_std: str = "WSE-STD-020-v1"
+                vm_std: str = "WSE-STD-VM-HYBRID-v1"
+                operator_lib_id: str = "WSE-STD-030-v2"
+                latch: LatchDefaults = dc_field(default_factory=lambda: LatchDefaults(
+                    tree_a_id=0, tree_b_id=0, tree_blend_q15=0
+                ))
+                amp_env: ADSRSpec = dc_field(default_factory=lambda: ADSRSpec(
+                    attack_ms=10.0, decay_ms=42.0, sustain=0.75, release_ms=85.0
+                ))
+                material: MaterialConfig = dc_field(default_factory=lambda: MaterialConfig(
+                    beta_start_q15=0, beta_target_q15=24576, beta_ramp_blocks=16
+                ))
+                backbone: list = dc_field(default_factory=list)
+                harmonic_amps_q15: list = dc_field(default_factory=lambda: [32767, 16384, 10923, 8192, 6554, 5461, 4681, 4096])
+
+                def backbone_ops(self):
+                    return []
+
+                def backbone_families(self):
+                    # Return default family weights (Q15) for basic sound
+                    # These will be scaled by control modifiers (TIMBRE, TEXTURE, CHAOS, etc.)
+                    return [
+                        32767,  # FamilyID.COLOR (TIMBRE)
+                        32767,  # FamilyID.LOCAL (TEXTURE)
+                        0,      # FamilyID.TRANSPORT
+                        0,      # FamilyID.GLUE
+                        0,      # FamilyID.TOPOLOGY
+                        0,      # FamilyID.CATASTROPHE (CHAOS)
+                        0,      # FamilyID.INJECT
+                        0,      # FamilyID.TAIL
+                    ]
+
+            preset = _MinimalPreset()
 
         # Voice frame emitter
         self.emitter = VoiceFrameEmitter(preset, voice_id=0)
@@ -315,6 +353,8 @@ class Pico2LiveSynth:
                     time.sleep(0.0001)
             except Exception as e:
                 print(f"Render error: {e}")
+                import traceback
+                traceback.print_exc()
                 time.sleep(0.001)
 
     def _render_block(self):
@@ -325,22 +365,9 @@ class Pico2LiveSynth:
         # Consume control frame in emitter
         self.emitter.consume_control_frame(control_frame)
 
-        # Emit VoiceFrame
-        if self.emitter.is_active:
-            frame = self.emitter.emit_frame()
-        else:
-            # Create silent frame when voice is inactive
-            frame = VoiceFrame(
-                voice_id=0,
-                note=self.current_note,
-                cents=0,
-                gain_q15=0,
-                pan_q15=0,
-                tree_a_id=0,
-                tree_b_id=0,
-                tree_blend_q15=0,
-                is_active=False,
-            )
+        # Always emit VoiceFrame (emitter handles inactive state with gain=0)
+        # This ensures all required fields (ops_enable, families, partial_amps_q15) are populated
+        frame = self.emitter.emit_frame()
 
         # Debug: log occasionally (every ~4 seconds to reduce overhead)
         if self.blocks_rendered % 3000 == 0:
@@ -411,9 +438,8 @@ class Pico2LiveSynth:
               f"queue={self.audio_queue.qsize()}")
 
         # Voice status
-        active = self.engine.active_voices()
-        print(f"  Voices: active={len(active)} "
-              f"current={self.current_voice_id}")
+        print(f"  Voice: active={self.emitter.is_active} "
+              f"note={self.current_note}")
 
 
 # =============================================================================
