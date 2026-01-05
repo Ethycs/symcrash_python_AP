@@ -779,7 +779,11 @@ def lane_tail(state: VMState, cfg: DecodedPlan) -> None:
             if not cfg.use_coeff_osc:
                 _tail_normalize_scale(state, cfg.mask_u32)
         elif op_id == 23:  # SheafProject
-            _tail_sheaf_project(state, cfg.mask_u32)
+            # Skip SheafProject in CCS mode - polyphase coefficients have
+            # specific meaning at each (leaf, k) position and should not be
+            # averaged across leaf boundaries
+            if not cfg.use_coeff_osc:
+                _tail_sheaf_project(state, cfg.mask_u32)
         elif op_id == 19:  # EmergencySimplify
             _tail_emergency_simplify(state, cfg.mask_u32)
 
@@ -1111,18 +1115,22 @@ def lane_ccs_render(
         audio_k = idwpt_jit(coeffs_k, headroom_bits=1)
         idwpt_outputs.append(audio_k)
 
-    # Interleave: output sample n uses IDWPT result from k = n % VM_K
-    # This creates smooth evolution through the K phase positions
+    # CORRECT INTERLEAVE for shifted-block LUTs:
     #
-    # For VM_K=8 and BLOCK_SAMPLES=64:
-    # - Samples 0,8,16,24,32,40,48,56 come from k=0
-    # - Samples 1,9,17,25,33,41,49,57 come from k=1
-    # - etc.
-    # Each k contributes 64/8 = 8 samples to the output
+    # With shifted-block FWPT: coeff[:, k, p] = FWPT(x[start+k : start+k+64])
+    # Therefore: y_k[0] ≈ x[start+k], y_k[1] ≈ x[start+k+1], ...
+    #
+    # To reconstruct x[start : start+64], we need:
+    #   out[k::K] = y_k[0::K]
+    #
+    # This picks samples at positions 0, K, 2K, ... from each y_k
+    # and places them at positions k, k+K, k+2K, ... in output.
 
-    for n in range(BLOCK_SAMPLES):
-        k = n % VM_K  # Which time slot
-        _CCS_OUTPUT[n] = idwpt_outputs[k][n]
+    for k in range(VM_K):
+        y_k = idwpt_outputs[k]
+        # out[k::K] = y_k[0::K]
+        for m in range(BLOCK_SAMPLES // VM_K):
+            _CCS_OUTPUT[k + m * VM_K] = y_k[m * VM_K]
 
     return _CCS_OUTPUT
 

@@ -95,12 +95,20 @@ def idwpt_polyphase_block(
     K = int(coeff_2d.shape[1])
     out = np.zeros(64, dtype=np.int16)
 
-    # For each slot k, reconstruct a full 64-sample block and keep only the
-    # samples aligned to that slot: indices k, k+K, k+2K, ...
+    # CORRECT INTERLEAVE for shifted-block LUTs:
+    #
+    # With shifted-block FWPT: coeff[:, k, p] = FWPT(x[start+k : start+k+64])
+    # Therefore: y_k[0] ≈ x[start+k], y_k[1] ≈ x[start+k+1], ...
+    #
+    # To reconstruct x[start : start+64], we need:
+    #   out[k::K] = y_k[0::K]
+    #
+    # This picks samples at positions 0, K, 2K, ... from each y_k
+    # and places them at positions k, k+K, k+2K, ... in output.
     for k in range(K):
         coeffs_k = coeff_2d[:, k].astype(np.int16).tolist()
         audio_k = np.array(idwpt_jit(coeffs_k, headroom_bits=headroom_bits), dtype=np.int16)
-        out[k::K] = audio_k[k::K]
+        out[k::K] = audio_k[0::K]  # y_k[0::K], NOT y_k[k::K]
 
     return out
 

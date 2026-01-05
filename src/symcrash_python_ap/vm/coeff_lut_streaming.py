@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 BLOCK_SIZE = 64         # B = 64 audio samples per block
 NUM_LEAVES = 64         # L = 64 leaves (full WPT at depth 6)
 DEFAULT_K = 8           # K = 8 time samples per subband per block
-DEFAULT_P = 64          # P = 64 phase steps per cycle
+DEFAULT_P = 1024        # P = 1024 phase steps per cycle (higher = fewer spurs)
 CYCLE_LENGTH = 8192     # C = 8192 samples for one complete waveform cycle
 Q15_ONE = 32767
 TARGET_RMS_Q15 = 16384  # Target RMS (-6 dBFS)
@@ -103,20 +103,49 @@ class StreamingCoeffLUT:
             phase_32: 32-bit phase accumulator value
             output: np.ndarray[num_leaves, K] int16 (modified in place)
         """
-        # P is 64 by default; top 6 bits select phase index.
-        phase_idx = (phase_32 >> 26) & 0x3F
-        phase_idx_next = (phase_idx + 1) & 0x3F
+        # Compute phase index based on actual P of this LUT
+        # For P=256: shift by 24, mask with 0xFF
+        # For P=64:  shift by 26, mask with 0x3F
+        # General: shift by (32 - log2(P)), mask with (P-1)
+        P = self.P
+        if P == 256:
+            shift = 24
+            mask = 0xFF
+        elif P == 64:
+            shift = 26
+            mask = 0x3F
+        elif P == 512:
+            shift = 23
+            mask = 0x1FF
+        elif P == 1024:
+            shift = 22
+            mask = 0x3FF
+        else:
+            # Fallback for arbitrary P (slower)
+            import math
+            shift = 32 - int(math.log2(P))
+            mask = P - 1
 
-        # 26-bit fraction for interpolation in [0, 2^26).
-        frac = phase_32 & 0x3FFFFFF
+        phase_idx = (phase_32 >> shift) & mask
+        phase_idx_next = (phase_idx + 1) & mask
+
+        # Fractional bits for interpolation
+        frac_bits = shift
+        frac = phase_32 & ((1 << frac_bits) - 1)
 
         # Fixed-point lerp:
-        #   val = v0 + (v1 - v0) * frac / 2^26
+        #   val = v0 + (v1 - v0) * frac / 2^frac_bits
         # with rounding to nearest.
-        v0 = self.data[:, :, phase_idx].astype(np.int32)
-        v1 = self.data[:, :, phase_idx_next].astype(np.int32)
+        #
+        # IMPORTANT: Use int64 for multiplication to avoid overflow.
+        # diff can be up to ~350, frac can be up to 2^24-1 = 16777215
+        # Product can be up to 350 * 16777215 = 5.8 billion > int32 max
+        v0 = self.data[:, :, phase_idx].astype(np.int64)
+        v1 = self.data[:, :, phase_idx_next].astype(np.int64)
         diff = v1 - v0
-        val = v0 + ((diff * frac + (1 << 25)) >> 26)
+        half = np.int64(1) << (frac_bits - 1)
+        frac_64 = np.int64(frac)
+        val = v0 + ((diff * frac_64 + half) >> frac_bits)
 
         np.clip(val, -32768, 32767, out=val)
         output[:, :] = val.astype(np.int16)
@@ -134,23 +163,19 @@ class StreamingCoeffLUT:
     ) -> 'StreamingCoeffLUT':
         """Generate StreamingCoeffLUT for a specific frequency.
 
-        CORRECT SHIFTED-BLOCK APPROACH:
-        ================================
-        For polyphase-interleaved IDWPT to reconstruct the target waveform,
-        we need coefficients where K represents polyphase sample offset within
-        the block, NOT extra phase interpolation.
+        Q32 PHASE-ALIGNED LUT GENERATION:
+        ==================================
+        Uses the SAME phase model as runtime to eliminate phase mismatch.
 
-        For each phase step p and polyphase slot k:
-            c[:, k, p] = FWPT( x[start(p) + k : start(p) + k + 64] )
+        For each phase bin p and polyphase slot k:
+            phase_p = p * 2^32 / P  (exact phase for bin p)
+            block[n] = waveform(phase_p + (k + n) * phase_inc)
+            coeff[:, k, p] = FWPT(block)
 
-        This ensures that when we do:
-            y_k = IDWPT(c[:, k, p])
-            output[n] = y_{n % K}[n]
-        we get back the intended time-domain waveform.
+        This ensures perfect alignment with runtime's Q32 phase accumulator
+        and coefficient-space interpolation between bins.
 
-        Note: Normalization is done on the INPUT waveform before FWPT,
-        not on coefficients after. Coefficient-space normalization would
-        break the FWPT/IDWPT inverse relationship.
+        No cycle_len or round() - phase is continuous and matches runtime exactly.
         """
         logger.info(
             f"Generating StreamingCoeffLUT for {name} at {target_freq_hz:.2f} Hz (K={K}, P={P})"
@@ -158,48 +183,46 @@ class StreamingCoeffLUT:
 
         L = NUM_LEAVES
 
-        # Phase increment for target frequency (samples at SAMPLE_RATE)
+        # Phase increment per sample - SAME as runtime uses
         phase_inc = int((target_freq_hz / SAMPLE_RATE) * (1 << 32))
 
-        # Generate exactly one oscillator cycle
-        # cycle_len = samples per period at this frequency
-        cycle_len = int(round(SAMPLE_RATE / target_freq_hz))
-        # Ensure cycle_len is at least BLOCK_SIZE + K for proper wraparound
-        cycle_len = max(cycle_len, BLOCK_SIZE + K)
+        logger.debug(f"  phase_inc={phase_inc} (Q32)")
 
-        logger.debug(f"  cycle_len={cycle_len} samples ({target_freq_hz:.2f} Hz)")
-
-        # Generate waveform samples for one cycle
-        # Normalize input amplitude BEFORE FWPT (not coefficients after)
-        waveform = np.zeros(cycle_len, dtype=np.int16)
-        phase = 0
-        for n in range(cycle_len):
-            sample = generate_sample_fn(phase)
-            # Scale input to target RMS level
-            if normalize:
-                # Scale to ~0.5 of full range to leave headroom
-                sample = (sample * TARGET_RMS_Q15) // Q15_ONE
-            waveform[n] = np.clip(sample, -32768, 32767)
-            phase = (phase + phase_inc) & 0xFFFFFFFF
-
-        # Build LUT with SHIFTED-BLOCK FWPT
-        # For each (p, k): run FWPT on block starting at (start + k) with wraparound
+        # Build LUT using Q32 phase model
+        # No cycle_len, no round() - uses exact same phase math as runtime
         data = np.zeros((L, K, P), dtype=np.int16)
 
+        # Compute shift for this P (must be power of 2)
+        # P=64  -> shift=26, P=256 -> shift=24, P=512 -> shift=23, P=1024 -> shift=22
+        import math
+        shift = 32 - int(math.log2(P))
+
         for p in range(P):
-            # Phase p maps to sample position in the cycle
-            start = int(round(p * cycle_len / P))
+            # Exact Q32 phase for bin p - matches runtime's phase_idx extraction
+            # Runtime: phase_idx = (phase_32 >> shift) & (P-1)
+            # So bin p corresponds to phase_32 in [p << shift, (p+1) << shift)
+            #
+            # BUILD AT BIN EDGES (not centers):
+            # When runtime phase=0, it queries bin 0 with frac=0
+            # LUT[0] should contain coefficients for phase=0
+            # When runtime phase approaches bin 1, frac approaches 1
+            # Linear interpolation between LUT[0] and LUT[1] gives smooth transition
+            phase_p = p << shift  # Edge of phase bin p
 
             for k in range(K):
-                # Build 64-sample block starting at (start + k) with wraparound
+                # Generate 64-sample block starting at phase_p + k*phase_inc
                 block = np.empty(BLOCK_SIZE, dtype=np.int16)
+                phase = (phase_p + k * phase_inc) & 0xFFFFFFFF
+
                 for n in range(BLOCK_SIZE):
-                    block[n] = waveform[(start + k + n) % cycle_len]
+                    sample = generate_sample_fn(phase)
+                    if normalize:
+                        sample = (sample * TARGET_RMS_Q15) // Q15_ONE
+                    block[n] = np.clip(sample, -32768, 32767)
+                    phase = (phase + phase_inc) & 0xFFFFFFFF
 
-                # Run FWPT to get coefficients for this (p, k) position
+                # Run FWPT to get coefficients
                 coeffs = fwpt_jit(block.tolist(), headroom_bits=1)
-
-                # Store directly - no coefficient-space normalization
                 data[:, k, p] = np.array(coeffs, dtype=np.int16)
 
         return StreamingCoeffLUT(

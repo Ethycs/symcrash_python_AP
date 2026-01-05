@@ -1011,24 +1011,23 @@ def idwpt_polyphase_streaming(
         np.ndarray[64] int16 audio samples
     """
     # Interpret as [64 leaves][4 time_samples]
-    coeff_2d = coeff_state[:256].reshape(64, 4)
+    K = 4
+    coeff_2d = coeff_state[:256].reshape(64, K)
 
-    # Process each of the 4 time samples
-    # Each produces 16 audio samples (64 / 4 = 16 samples per time step)
     output = np.zeros(64, dtype=np.int16)
 
-    for t in range(4):
-        # Extract one time sample from each leaf
-        coeffs_t = coeff_2d[:, t].tolist()  # [64] coefficients at time t
-
-        # Run standard IDWPT
-        audio_chunk = idwpt_jit(coeffs_t, headroom_bits=headroom_bits)
-
-        # Place in output (16 samples per chunk)
-        # Interleave: time samples are distributed across the block
-        for i, sample in enumerate(audio_chunk):
-            out_idx = t + i * 4  # Interleave pattern
-            if out_idx < 64:
-                output[out_idx] = sample
+    # CORRECT INTERLEAVE for shifted-block LUTs:
+    #
+    # With shifted-block FWPT: coeff[:, k, p] = FWPT(x[start+k : start+k+64])
+    # Therefore: y_k[0] ≈ x[start+k], y_k[1] ≈ x[start+k+1], ...
+    #
+    # To reconstruct x[start : start+64], we need:
+    #   out[k::K] = y_k[0::K]
+    for k in range(K):
+        coeffs_k = coeff_2d[:, k].tolist()
+        audio_k = idwpt_jit(coeffs_k, headroom_bits=headroom_bits)
+        # out[k::K] = y_k[0::K]
+        for m in range(64 // K):
+            output[k + m * K] = audio_k[m * K]
 
     return output
