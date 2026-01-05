@@ -7,7 +7,7 @@ Each lane is a deterministic function on VM state.
 """
 
 import numpy as np
-from typing import Optional
+from typing import List, Optional
 
 from .state import VMState, EnvelopePhase, prng_step
 from .decode import DecodedPlan, BackboneEntry, CarrierRole
@@ -885,12 +885,11 @@ from ..wavelet.fast_lifting import (
     idwpt_jit,
 )
 
-# Import CoeffOsc for CCS path
-from .coeff_osc import (
-    CoeffOscState,
-    get_coeff_table,
-    coeff_osc_render,
-    coeff_osc_render_with_mix,
+# Import CCS functions for coefficient-domain synthesis (WSE-STD-121)
+from .coeff_lut_streaming import (
+    CCSState,
+    ccs_generate_coeffs,
+    get_lut_for_note,
 )
 
 

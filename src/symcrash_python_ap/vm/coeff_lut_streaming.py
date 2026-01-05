@@ -472,13 +472,172 @@ def get_streaming_lut(wave_id: int) -> StreamingCoeffLUT:
     return _STREAMING_LUT_LIBRARY.get(wave_id, _STREAMING_LUT_LIBRARY[0])
 
 
+# =============================================================================
+# Per-Note LUT Cache (for frequency-specific tables)
+# =============================================================================
+
+_NOTE_LUT_CACHE: Dict[Tuple[int, int], StreamingCoeffLUT] = {}
+
+
+def get_lut_for_note(wave_id: int, midi_note: int) -> StreamingCoeffLUT:
+    """
+    Get StreamingCoeffLUT for a specific MIDI note.
+
+    Tables are generated and cached on first access. Each note gets its own
+    table because the frequency is baked into the FWPT coefficients.
+
+    Args:
+        wave_id: Waveform ID (0=sine, 1=saw, 2=square)
+        midi_note: MIDI note number (0-127)
+
+    Returns:
+        StreamingCoeffLUT for this note/waveform combination
+    """
+    cache_key = (wave_id, midi_note)
+    if cache_key not in _NOTE_LUT_CACHE:
+        freq_hz = midi_to_hz(midi_note)
+        logger.debug(f"Generating LUT for wave={wave_id}, note={midi_note} ({freq_hz:.1f} Hz)")
+
+        # Get waveform generator
+        if wave_id == 0:
+            gen_fn = sine_q15
+            name = "sine"
+        elif wave_id == 1:
+            def gen_fn(phase):
+                val = 0
+                for h in range(1, 17):
+                    h_phase = (phase * h) & 0xFFFFFFFF
+                    val += sine_q15(h_phase) // h
+                return int(np.clip(val // 2, -32768, 32767))
+            name = "saw"
+        elif wave_id == 2:
+            def gen_fn(phase):
+                val = 0
+                for h in [1, 3, 5, 7, 9, 11, 13, 15]:
+                    h_phase = (phase * h) & 0xFFFFFFFF
+                    val += sine_q15(h_phase) // h
+                return int(np.clip(val, -32768, 32767))
+            name = "square"
+        else:
+            gen_fn = sine_q15
+            name = "sine"
+
+        _NOTE_LUT_CACHE[cache_key] = StreamingCoeffLUT.generate_for_frequency(
+            wave_id=wave_id,
+            name=f"{name}_{midi_note}",
+            target_freq_hz=freq_hz,
+            generate_sample_fn=gen_fn,
+        )
+
+    return _NOTE_LUT_CACHE[cache_key]
+
+
+# =============================================================================
+# VM-Compatible Oscillator State
+# =============================================================================
+
+@dataclass
+class CCSState:
+    """
+    VM-compatible coefficient oscillator state.
+
+    This replaces the old CoeffOscState with the new streaming architecture.
+    Simpler: just phase accumulator + target for slew.
+    """
+    # Phase accumulator (32-bit)
+    phase: int = 0
+
+    # Current phase increment (from MIDI note)
+    phase_inc: int = 0
+
+    # Target phase increment (for pitch slew)
+    target_phase_inc: int = 0
+
+    # Phase slew rate per sample
+    phase_slew_rate: int = 0
+
+    # Current MIDI note (for LUT cache lookup)
+    note: int = 60
+
+    # Current waveform ID
+    wave_id: int = 0
+
+    def reset(self, note: int = 60, phase_inc: int = 0, wave_id: int = 0) -> None:
+        """Reset oscillator state for new note."""
+        self.phase = 0
+        self.note = note
+        self.wave_id = wave_id
+        self.phase_inc = phase_inc
+        self.target_phase_inc = phase_inc
+        self.phase_slew_rate = 0
+
+    def set_pitch(self, phase_inc: int, slew_blocks: int = 8) -> None:
+        """Set target pitch with optional slew."""
+        if slew_blocks <= 0:
+            self.phase_inc = phase_inc
+            self.target_phase_inc = phase_inc
+            self.phase_slew_rate = 0
+        else:
+            self.target_phase_inc = phase_inc
+            diff = phase_inc - self.phase_inc
+            self.phase_slew_rate = diff // (slew_blocks * BLOCK_SIZE)
+
+    def advance_block(self) -> None:
+        """Advance phase by one block, applying slew if active."""
+        # Apply slew
+        if self.phase_slew_rate != 0:
+            if self.phase_slew_rate > 0:
+                self.phase_inc = min(self.target_phase_inc,
+                                     self.phase_inc + self.phase_slew_rate * BLOCK_SIZE)
+            else:
+                self.phase_inc = max(self.target_phase_inc,
+                                     self.phase_inc + self.phase_slew_rate * BLOCK_SIZE)
+            if self.phase_inc == self.target_phase_inc:
+                self.phase_slew_rate = 0
+
+        # Advance phase
+        self.phase = (self.phase + self.phase_inc * BLOCK_SIZE) & 0xFFFFFFFF
+
+
+def ccs_generate_coeffs(
+    ccs_state: CCSState,
+    output_coeffs: np.ndarray,
+    base_mix_q15: int = Q15_ONE,
+) -> None:
+    """
+    Generate 64 leaf coefficients from CCS state.
+
+    This is the main interface for the VM to get carrier coefficients.
+    Uses per-note LUT cache for correct frequency.
+
+    Args:
+        ccs_state: CCS oscillator state
+        output_coeffs: np.ndarray[64] int16 output buffer (modified in place)
+        base_mix_q15: Blend factor (not used here, handled by caller)
+    """
+    # Get LUT for this note
+    lut = get_lut_for_note(ccs_state.wave_id, ccs_state.note)
+
+    # Get subband samples for current phase (just k=0 for stepping stone)
+    subband_output = np.zeros((NUM_LEAVES, lut.K), dtype=np.int16)
+    lut.get_subband_samples(ccs_state.phase, subband_output)
+
+    # Extract k=0 samples as the 64 coefficients
+    for l in range(NUM_LEAVES):
+        output_coeffs[l] = subband_output[l, 0]
+
+
 __all__ = [
     'StreamingCoeffLUT',
     'SubbandState',
+    'CCSState',
     'get_streaming_lut',
+    'get_lut_for_note',
     'streaming_idwpt_block',
+    'ccs_generate_coeffs',
     'DEFAULT_K',
     'DEFAULT_P',
     'BLOCK_SIZE',
     'NUM_LEAVES',
+    'midi_to_hz',
 ]

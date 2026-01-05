@@ -13,7 +13,7 @@ import numpy as np
 
 from .tables import COEFF_LEN, BLOCK_SAMPLES
 from ..fixed import midi_to_phase_inc_fixed
-from .coeff_osc import CoeffOscState
+from .coeff_lut_streaming import CCSState, midi_to_hz, SAMPLE_RATE
 
 
 # =============================================================================
@@ -128,11 +128,11 @@ class VMState:
     wet_ola_initialized: bool = False
 
     # -------------------------------------------------------------------------
-    # Coefficient Oscillator state (WSE-STD-ARCH-CCS v0)
+    # CCS State (WSE-STD-121 Streaming Coefficients)
     # -------------------------------------------------------------------------
-    # CoeffOsc generates coefficients directly, bypassing FWPT in voice path.
-    # This eliminates phase-variant combing artifacts.
-    coeff_osc: CoeffOscState = field(default_factory=CoeffOscState)
+    # CCS generates coefficients directly from phase-indexed tables,
+    # bypassing FWPT in voice path. This eliminates phase-variant combing.
+    ccs_state: CCSState = field(default_factory=CCSState)
 
     # Flag to enable CCS path (coefficient synthesis vs carrier→FWPT)
     use_coeff_osc: bool = True  # Default to new CCS path
@@ -238,8 +238,8 @@ class VMState:
         self.wet_ola_tail.fill(0)
         self.wet_ola_initialized = False
 
-        # Reset CoeffOsc state
-        self.coeff_osc.reset(phase_inc=phase_inc, table_id=0)
+        # Reset CCS state (WSE-STD-121)
+        self.ccs_state.reset(note=note, phase_inc=phase_inc, wave_id=0)
 
     def trigger_release(self) -> None:
         """Trigger note release (enter release phase)."""
@@ -286,13 +286,13 @@ class VMState:
             # Legacy wet path OLA state
             'wet_ola_tail': self.wet_ola_tail.tolist(),
             'wet_ola_initialized': self.wet_ola_initialized,
-            # CoeffOsc state
-            'coeff_osc_node_phases': self.coeff_osc.node_phases.tolist(),
-            'coeff_osc_sub_phases': self.coeff_osc.sub_phases.tolist(),
-            'coeff_osc_table_id': self.coeff_osc.table_id,
-            'coeff_osc_base_phase_inc': self.coeff_osc.base_phase_inc,
-            'coeff_osc_target_phase_inc': self.coeff_osc.target_phase_inc,
-            'coeff_osc_phase_slew_rate': self.coeff_osc.phase_slew_rate,
+            # CCS state (WSE-STD-121)
+            'ccs_phase': self.ccs_state.phase,
+            'ccs_phase_inc': self.ccs_state.phase_inc,
+            'ccs_target_phase_inc': self.ccs_state.target_phase_inc,
+            'ccs_phase_slew_rate': self.ccs_state.phase_slew_rate,
+            'ccs_note': self.ccs_state.note,
+            'ccs_wave_id': self.ccs_state.wave_id,
             'use_coeff_osc': self.use_coeff_osc,
         }
 
@@ -336,14 +336,14 @@ class VMState:
         if 'wet_ola_tail' in snapshot:
             state.wet_ola_tail = np.array(snapshot['wet_ola_tail'], dtype=np.int16)
             state.wet_ola_initialized = snapshot.get('wet_ola_initialized', False)
-        # Restore CoeffOsc state
-        if 'coeff_osc_node_phases' in snapshot:
-            state.coeff_osc.node_phases = np.array(snapshot['coeff_osc_node_phases'], dtype=np.uint32)
-            state.coeff_osc.sub_phases = np.array(snapshot['coeff_osc_sub_phases'], dtype=np.uint32)
-            state.coeff_osc.table_id = snapshot.get('coeff_osc_table_id', 0)
-            state.coeff_osc.base_phase_inc = snapshot.get('coeff_osc_base_phase_inc', 0)
-            state.coeff_osc.target_phase_inc = snapshot.get('coeff_osc_target_phase_inc', 0)
-            state.coeff_osc.phase_slew_rate = snapshot.get('coeff_osc_phase_slew_rate', 0)
+        # Restore CCS state (WSE-STD-121)
+        if 'ccs_phase' in snapshot:
+            state.ccs_state.phase = snapshot['ccs_phase']
+            state.ccs_state.phase_inc = snapshot['ccs_phase_inc']
+            state.ccs_state.target_phase_inc = snapshot['ccs_target_phase_inc']
+            state.ccs_state.phase_slew_rate = snapshot['ccs_phase_slew_rate']
+            state.ccs_state.note = snapshot['ccs_note']
+            state.ccs_state.wave_id = snapshot['ccs_wave_id']
         state.use_coeff_osc = snapshot.get('use_coeff_osc', True)
         return state
 

@@ -95,29 +95,30 @@ def vm_step_block(
 
     if cfg.use_coeff_osc and state.use_coeff_osc:
         # -----------------------------------------------------------------
-        # CCS PATH: Coefficient-domain architecture (CORRECT FLOW)
+        # CCS PATH: Coefficient-domain architecture (WSE-STD-121 COMPLIANT)
         # -----------------------------------------------------------------
+        # Uses StreamingCoeffLUT with per-note tables that have frequency
+        # baked into the FWPT coefficients. No FWPT in runtime voice path.
 
         # Step 0: Generate carrier coefficients and seed coeff_state FIRST
         from .lanes import inject_64_to_256
-        from .coeff_osc import coeff_osc_generate_coeffs
-        from .coeff_tables_fast import get_fast_coeff_table
+        from .coeff_lut_streaming import ccs_generate_coeffs
 
         carrier_64 = np.zeros(64, dtype=np.int16)
-        table_2d = get_fast_coeff_table()
 
-        # Update pitch if needed
+        # Update CCS state if pitch changed
         params = cfg.coeff_osc_params
         if state.last_note != params.note or state.last_cents != params.cents:
-            state.coeff_osc.table_id = params.note
+            state.ccs_state.note = params.note
+            state.ccs_state.wave_id = 0  # Default to sine for now
             state.last_note = params.note
             state.last_cents = params.cents
 
-        if state.coeff_osc.base_phase_inc != params.phase_inc:
-            state.coeff_osc.set_pitch(params.phase_inc, slew_blocks=8)
+        if state.ccs_state.phase_inc != params.phase_inc:
+            state.ccs_state.set_pitch(params.phase_inc, slew_blocks=8)
 
-        # Generate carrier coefficients (evolve via phase each block)
-        coeff_osc_generate_coeffs(state.coeff_osc, table_2d, carrier_64)
+        # Generate carrier coefficients from streaming LUT (phase-indexed)
+        ccs_generate_coeffs(state.ccs_state, carrier_64)
 
         # PERSISTENT EVOLUTION per WSE-STD-120 section 4.1:
         # Coefficients persist and evolve, carrier provides stabilization
@@ -166,6 +167,9 @@ def vm_step_block(
                 alpha = (i * 32767 + (BLOCK_SAMPLES >> 1)) // BLOCK_SAMPLES
                 gain = gain_prev + RSHIFT_RNE((gain_curr - gain_prev) * alpha, 15)
                 output[i] = RSHIFT_RNE(int(output[i]) * gain, 15)
+
+        # Advance CCS phase for next block
+        state.ccs_state.advance_block()
 
     else:
         # -----------------------------------------------------------------
@@ -228,7 +232,26 @@ def vm_step_block_raw(
         state.wet_ready = True
 
     if cfg.use_coeff_osc and state.use_coeff_osc:
-        # CCS PATH: New architecture (no combing)
+        # CCS PATH: WSE-STD-121 compliant (no combing)
+        from .coeff_lut_streaming import ccs_generate_coeffs
+
+        # Generate carrier coefficients
+        carrier_64 = np.zeros(64, dtype=np.int16)
+        ccs_generate_coeffs(state.ccs_state, carrier_64)
+
+        # Inject into coeff_state with base_mix blending
+        params = cfg.coeff_osc_params
+        base_mix = params.base_mix_q15
+
+        for i in range(64):
+            carrier_val = int(carrier_64[i])
+            for j in range(4):
+                idx = i * 4 + j
+                old_val = int(state.coeff_state[idx])
+                inv_mix = 32767 - base_mix
+                blended = RSHIFT_RNE(old_val * inv_mix + carrier_val * base_mix, 15)
+                state.coeff_state[idx] = np.clip(blended, -32768, 32767)
+
         lane_inject(state, cfg)
 
         for instr in cfg.backbone_instrs:
@@ -246,6 +269,9 @@ def vm_step_block_raw(
                 alpha = (i * 32767 + (BLOCK_SAMPLES >> 1)) // BLOCK_SAMPLES
                 gain = gain_prev + RSHIFT_RNE((gain_curr - gain_prev) * alpha, 15)
                 output[i] = RSHIFT_RNE(int(output[i]) * gain, 15)
+
+        # Advance CCS phase for next block
+        state.ccs_state.advance_block()
     else:
         # LEGACY PATH
         if cfg.carrier_role != CarrierRole.OFF:
