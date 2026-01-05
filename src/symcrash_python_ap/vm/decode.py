@@ -259,14 +259,12 @@ def decode_frame(
     # Get table ID from frame (default 0 = sine)
     coeff_table_id = getattr(frame, 'coeff_table_id', 0) or 0
 
-    # base_mix controls how much oscillator vs CMMM state
-    # Default to using eta (beta_target) as base_mix for smooth transition
+    # base_mix controls how much oscillator vs CMMM evolved state
+    # For CCS path: base_mix should default to full carrier (32767) for normal synthesis
+    # beta_target_q15 (eta) controls wet/dry mixing, NOT carrier injection
     base_mix = getattr(frame, 'base_mix_q15', None)
     if base_mix is None:
-        # Use beta_target as base_mix for backward compatibility
-        base_mix = getattr(frame, 'beta_target_q15', None)
-        if base_mix is None:
-            base_mix = 32767  # Full oscillator by default
+        base_mix = 32767  # Full oscillator by default for CCS path
 
     plan.coeff_osc_params = CoeffOscParams(
         table_id=coeff_table_id,

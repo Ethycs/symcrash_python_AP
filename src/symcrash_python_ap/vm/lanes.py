@@ -890,6 +890,7 @@ from .coeff_lut_streaming import (
     CCSState,
     ccs_generate_coeffs,
     get_lut_for_note,
+    VM_K,
 )
 
 
@@ -1024,42 +1025,41 @@ def lane_idwpt_render(
 # COEFFICIENT MAPPING HELPERS (256 ↔ 64)
 # =============================================================================
 
-def inject_64_to_256(coeffs_64: np.ndarray, coeff_state: np.ndarray) -> None:
+def inject_64_to_512(coeffs_64: np.ndarray, coeff_state: np.ndarray) -> None:
     """
-    Inject 64 carrier coefficients into 256-element state.
+    Inject 64 carrier coefficients into 512-element state.
 
-    Replicates each leaf across 4 positions for operator compatibility.
+    Replicates each leaf across K=8 positions for polyphase compatibility.
     This allows the 64-leaf carrier to be modified by operators that
-    work on the 256-element coefficient structure (32 nodes × 8 coeffs).
+    work on the coefficient structure.
 
     Args:
         coeffs_64: 64 leaf coefficients (int16)
-        coeff_state: 256-element coefficient state (int16, modified in place)
+        coeff_state: 512-element coefficient state (int16, modified in place)
     """
     for i in range(64):
         val = coeffs_64[i]
-        for j in range(4):
-            coeff_state[i * 4 + j] = val
+        for j in range(VM_K):  # K=8
+            coeff_state[i * VM_K + j] = val
 
 
 def extract_64_leaves(coeff_state: np.ndarray) -> List[int]:
     """
-    Extract 64 leaf coefficients from 256-element state.
+    Extract 64 leaf coefficients from 512-element state.
 
-    Uses energy-preserving summation: each group of 4 coefficients
-    is averaged to produce one leaf value. This matches the existing
-    pattern in lane_idwpt_render() for coefficient extraction.
+    Uses energy-preserving summation: each group of K=8 coefficients
+    is averaged to produce one leaf value.
 
     Args:
-        coeff_state: 256-element coefficient state (int16)
+        coeff_state: 512-element coefficient state (int16)
 
     Returns:
         List of 64 leaf coefficients (int16)
     """
-    # Reshape to (64, 4) and sum along axis 1
-    coeff_view = coeff_state[:256].reshape(64, 4)
-    # Sum with int32 to avoid overflow, then average (>> 2)
-    leaves_64 = (coeff_view.astype(np.int32).sum(axis=1) >> 2).astype(np.int16)
+    # Reshape to (64, K) and sum along axis 1
+    coeff_view = coeff_state[:COEFF_LEN].reshape(64, VM_K)
+    # Sum with int32 to avoid overflow, then average (>> 3 for K=8)
+    leaves_64 = (coeff_view.astype(np.int32).sum(axis=1) >> 3).astype(np.int16)
     return leaves_64.tolist()
 
 
@@ -1082,6 +1082,11 @@ def lane_ccs_render(
         4. Tail constrains coeff_state (lane_tail)
         5. THIS FUNCTION: Extract + IDWPT
 
+    TRUE POLYPHASE IDWPT (WSE-STD-120 section 3.1):
+        The VM's coeff_state is [64 leaves × K time samples] = 512 values (K=8).
+        Each k-slot has a different sub-phase position (polyphase injection).
+        We run IDWPT K times and interleave results for smooth audio.
+
     Args:
         state: VM state (coeff_state contains final operator-modified coefficients)
         cfg: Decoded plan
@@ -1091,17 +1096,33 @@ def lane_ccs_render(
     """
     global _CCS_OUTPUT
 
-    # Extract 64 leaf coefficients from 256-element time-series state
-    # (Average 4 time samples per leaf to get single value)
-    coeffs_64 = extract_64_leaves(state.coeff_state)
+    # TRUE POLYPHASE IDWPT with K=8 time slots
+    # coeff_state layout: [leaf0_k0..k7, leaf1_k0..k7, ..., leaf63_k0..k7]
+    # VM_K = 8, COEFF_LEN = 512 = 64 × 8
+    coeff_2d = state.coeff_state[:COEFF_LEN].reshape(64, VM_K)
 
-    # IDWPT reconstruction: coefficients → audio
-    # TODO: Implement true streaming polyphase IDWPT per WSE-STD-120
-    # For now, use standard IDWPT with averaged coefficients
-    audio_list = idwpt_jit(coeffs_64, headroom_bits=1)
+    # Run IDWPT for each of the K time slots
+    idwpt_outputs = []
+    for k in range(VM_K):
+        # Extract 64 coefficients for this time slot
+        coeffs_k = coeff_2d[:, k].tolist()
 
-    # Copy to output buffer
-    _CCS_OUTPUT[:] = np.array(audio_list, dtype=np.int16)
+        # Run IDWPT for this phase position
+        audio_k = idwpt_jit(coeffs_k, headroom_bits=1)
+        idwpt_outputs.append(audio_k)
+
+    # Interleave: output sample n uses IDWPT result from k = n % VM_K
+    # This creates smooth evolution through the K phase positions
+    #
+    # For VM_K=8 and BLOCK_SAMPLES=64:
+    # - Samples 0,8,16,24,32,40,48,56 come from k=0
+    # - Samples 1,9,17,25,33,41,49,57 come from k=1
+    # - etc.
+    # Each k contributes 64/8 = 8 samples to the output
+
+    for n in range(BLOCK_SAMPLES):
+        k = n % VM_K  # Which time slot
+        _CCS_OUTPUT[n] = idwpt_outputs[k][n]
 
     return _CCS_OUTPUT
 

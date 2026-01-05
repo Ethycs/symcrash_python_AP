@@ -14,9 +14,9 @@ from typing import Dict, List, Tuple, Optional
 # CONSTANTS
 # =============================================================================
 
-COEFF_LEN = 256  # Number of coefficients (can be 64 or 256)
-NODE_LEN = 8     # Coefficients per node
-L_TOTAL_NODES = 32  # Total nodes (always 32)
+COEFF_LEN = 512  # Number of coefficients: 64 leaves × 8 polyphase slots
+NODE_LEN = 8     # Coefficients per node (for operator compatibility)
+L_TOTAL_NODES = 32  # Total nodes for operator system (legacy view)
 BLOCK_SAMPLES = 64  # Samples per block
 
 TABLE_VERSION = "0.1.0"

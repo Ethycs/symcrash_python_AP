@@ -88,38 +88,38 @@ class StreamingCoeffLUT:
     # Target frequency this table is generated for
     target_freq_hz: float = 261.63  # Default to C4
 
+
     def get_subband_samples(
         self,
         phase_32: int,
         output: np.ndarray,
     ) -> None:
-        """
-        Get K time samples per leaf for a given 32-bit phase.
+        """Fill `output` with per-leaf subband samples for the given phase.
 
-        Uses linear interpolation between phase steps.
+        This runs in the real-time path. It MUST be deterministic and fixed-point
+        only, so the phase interpolation is done with integer math.
 
         Args:
             phase_32: 32-bit phase accumulator value
-            output: np.ndarray[L, K] int16 output buffer (modified in place)
+            output: np.ndarray[num_leaves, K] int16 (modified in place)
         """
-        # Convert 32-bit phase to phase index + fraction
-        # Top 6 bits give phase index (0-63)
-        # Remaining bits give interpolation fraction
-        phase_idx = (phase_32 >> 26) & 0x3F  # 0..63
+        # P is 64 by default; top 6 bits select phase index.
+        phase_idx = (phase_32 >> 26) & 0x3F
         phase_idx_next = (phase_idx + 1) & 0x3F
 
-        # Interpolation fraction from lower bits
-        # 26-bit fraction scaled to [0, 1)
-        frac_26bit = phase_32 & 0x3FFFFFF
-        alpha = frac_26bit / float(1 << 26)  # [0.0, 1.0)
+        # 26-bit fraction for interpolation in [0, 2^26).
+        frac = phase_32 & 0x3FFFFFF
 
-        # Linear interpolation for each leaf and time sample
-        for l in range(self.num_leaves):
-            for k in range(self.K):
-                v0 = float(self.data[l, k, phase_idx])
-                v1 = float(self.data[l, k, phase_idx_next])
-                val = v0 * (1.0 - alpha) + v1 * alpha
-                output[l, k] = int(np.clip(val, -32768, 32767))
+        # Fixed-point lerp:
+        #   val = v0 + (v1 - v0) * frac / 2^26
+        # with rounding to nearest.
+        v0 = self.data[:, :, phase_idx].astype(np.int32)
+        v1 = self.data[:, :, phase_idx_next].astype(np.int32)
+        diff = v1 - v0
+        val = v0 + ((diff * frac + (1 << 25)) >> 26)
+
+        np.clip(val, -32768, 32767, out=val)
+        output[:, :] = val.astype(np.int16)
 
     @staticmethod
     def generate_for_frequency(
@@ -130,128 +130,82 @@ class StreamingCoeffLUT:
         K: int = DEFAULT_K,
         P: int = DEFAULT_P,
         normalize: bool = True,
-        S: int = 8,  # Oversampling factor for smooth subband extraction
+        S: int = 8,  # Unused, kept for API compatibility
     ) -> 'StreamingCoeffLUT':
+        """Generate StreamingCoeffLUT for a specific frequency.
+
+        CORRECT SHIFTED-BLOCK APPROACH:
+        ================================
+        For polyphase-interleaved IDWPT to reconstruct the target waveform,
+        we need coefficients where K represents polyphase sample offset within
+        the block, NOT extra phase interpolation.
+
+        For each phase step p and polyphase slot k:
+            c[:, k, p] = FWPT( x[start(p) + k : start(p) + k + 64] )
+
+        This ensures that when we do:
+            y_k = IDWPT(c[:, k, p])
+            output[n] = y_{n % K}[n]
+        we get back the intended time-domain waveform.
+
+        Note: Normalization is done on the INPUT waveform before FWPT,
+        not on coefficients after. Coefficient-space normalization would
+        break the FWPT/IDWPT inverse relationship.
         """
-        Generate StreamingCoeffLUT for a SPECIFIC FREQUENCY.
-
-        Correct implementation per WSE-STD-121:
-        1. Generate high-resolution periodic waveform (M = P * K * S samples)
-        2. Run streaming analysis filterbank to get subband time-series
-        3. Map (p, k) -> n(p,k) to extract table entries
-
-        The key insight: K is polyphase time slots within the block.
-        Each k produces N = 64/K output samples when fed to streaming IDWPT.
-
-        Args:
-            wave_id: Waveform ID
-            name: Waveform name
-            target_freq_hz: Target frequency in Hz (e.g., 261.63 for C4)
-            generate_sample_fn: Function(phase_32) -> sample (Q15)
-            K: Polyphase time slots per block (default 8)
-            P: Phase steps per cycle (default 64)
-            normalize: Apply normalization
-            S: Oversampling factor (default 8)
-
-        Returns:
-            StreamingCoeffLUT with populated data
-        """
-        logger.info(f"Generating StreamingCoeffLUT for {name} at {target_freq_hz:.2f} Hz (K={K}, P={P})")
+        logger.info(
+            f"Generating StreamingCoeffLUT for {name} at {target_freq_hz:.2f} Hz (K={K}, P={P})"
+        )
 
         L = NUM_LEAVES
 
-        # The table encodes subband time-series for a periodic oscillator.
-        # P phase steps represent ONE complete oscillator cycle.
-        # K polyphase slots represent time within a block.
-        #
-        # KEY INSIGHT: Generate exactly ONE oscillator cycle of audio,
-        # analyze it with FWPT, then map P*K table entries uniformly
-        # across the resulting subband stream.
-
-        # Phase increment for target frequency (samples at 48kHz)
+        # Phase increment for target frequency (samples at SAMPLE_RATE)
         phase_inc = int((target_freq_hz / SAMPLE_RATE) * (1 << 32))
 
-        # Step 0: Calculate how many samples make one oscillator cycle
-        # Round up to nearest multiple of BLOCK_SIZE for clean FWPT blocking
-        samples_per_osc_cycle = SAMPLE_RATE / target_freq_hz
-        num_blocks_per_cycle = max(1, int(np.ceil(samples_per_osc_cycle / BLOCK_SIZE)))
-        M = num_blocks_per_cycle * BLOCK_SIZE  # Actual samples to generate
+        # Generate exactly one oscillator cycle
+        # cycle_len = samples per period at this frequency
+        cycle_len = int(round(SAMPLE_RATE / target_freq_hz))
+        # Ensure cycle_len is at least BLOCK_SIZE + K for proper wraparound
+        cycle_len = max(cycle_len, BLOCK_SIZE + K)
 
-        logger.debug(f"  samples_per_osc_cycle={samples_per_osc_cycle:.1f}")
-        logger.debug(f"  num_blocks_per_cycle={num_blocks_per_cycle}, M={M}")
+        logger.debug(f"  cycle_len={cycle_len} samples ({target_freq_hz:.2f} Hz)")
 
-        # Generate exactly enough samples to cover one oscillator cycle
-        # (might be slightly more than one cycle due to rounding up)
-        waveform = np.zeros(M, dtype=np.float32)
+        # Generate waveform samples for one cycle
+        # Normalize input amplitude BEFORE FWPT (not coefficients after)
+        waveform = np.zeros(cycle_len, dtype=np.int16)
         phase = 0
-        for n in range(M):
-            waveform[n] = generate_sample_fn(phase)
+        for n in range(cycle_len):
+            sample = generate_sample_fn(phase)
+            # Scale input to target RMS level
+            if normalize:
+                # Scale to ~0.5 of full range to leave headroom
+                sample = (sample * TARGET_RMS_Q15) // Q15_ONE
+            waveform[n] = np.clip(sample, -32768, 32767)
             phase = (phase + phase_inc) & 0xFFFFFFFF
 
-        # Step 1: Run streaming analysis filterbank over the waveform
-        # Process M/BLOCK_SIZE blocks, get L coefficients each
-        num_analysis_blocks = M // BLOCK_SIZE
-        subband_streams = np.zeros((L, num_analysis_blocks), dtype=np.float32)
-
-        for block_idx in range(num_analysis_blocks):
-            start = block_idx * BLOCK_SIZE
-            audio_block = waveform[start:start + BLOCK_SIZE].astype(np.int16).tolist()
-            coeffs = fwpt_jit(audio_block, headroom_bits=1)
-            for l in range(L):
-                subband_streams[l, block_idx] = coeffs[l]
-
-        logger.debug(f"  num_analysis_blocks={num_analysis_blocks}")
-
-        # Step 2: Map (p, k) -> subband sample index
-        # P phase steps should span the entire subband stream (one cycle)
-        # K polyphase slots subdivide each phase step
-
-        data = np.zeros((L, K, P), dtype=np.float32)
+        # Build LUT with SHIFTED-BLOCK FWPT
+        # For each (p, k): run FWPT on block starting at (start + k) with wraparound
+        data = np.zeros((L, K, P), dtype=np.int16)
 
         for p in range(P):
+            # Phase p maps to sample position in the cycle
+            start = int(round(p * cycle_len / P))
+
             for k in range(K):
-                # (p, k) maps to a fraction of the cycle
-                # frac = (p*K + k) / (P*K) spans [0, 1)
-                frac_in_cycle = (p * K + k) / (P * K)
+                # Build 64-sample block starting at (start + k) with wraparound
+                block = np.empty(BLOCK_SIZE, dtype=np.int16)
+                for n in range(BLOCK_SIZE):
+                    block[n] = waveform[(start + k + n) % cycle_len]
 
-                # Map uniformly across all analysis blocks
-                block_idx_float = frac_in_cycle * num_analysis_blocks
+                # Run FWPT to get coefficients for this (p, k) position
+                coeffs = fwpt_jit(block.tolist(), headroom_bits=1)
 
-                # Linear interpolation between adjacent subband samples
-                idx0 = int(block_idx_float) % num_analysis_blocks
-                idx1 = (idx0 + 1) % num_analysis_blocks
-                alpha = block_idx_float - int(block_idx_float)
-
-                for l in range(L):
-                    v0 = subband_streams[l, idx0]
-                    v1 = subband_streams[l, idx1]
-                    data[l, k, p] = v0 * (1.0 - alpha) + v1 * alpha
-
-        # Normalize if requested
-        if normalize:
-            # DC removal across all phases
-            dc = data.mean()
-            data -= dc
-
-            # RMS normalization to target level
-            rms = np.sqrt(np.mean(data ** 2))
-            if rms > 1e-6:
-                scale = TARGET_RMS_Q15 / rms
-                data *= scale
-
-            # Peak safety clamp
-            peak = np.abs(data).max()
-            max_allowed = 0.95 * Q15_ONE
-            if peak > max_allowed:
-                data *= max_allowed / peak
-
-        # Quantize to int16
-        data_int = np.clip(data, -32768, 32767).astype(np.int16)
+                # Store directly - no coefficient-space normalization
+                data[:, k, p] = np.array(coeffs, dtype=np.int16)
 
         return StreamingCoeffLUT(
             wave_id=wave_id,
             name=name,
-            data=data_int,
+            data=data,
             num_leaves=L,
             K=K,
             P=P,
@@ -267,15 +221,11 @@ class StreamingCoeffLUT:
         P: int = DEFAULT_P,
         normalize: bool = True,
     ) -> 'StreamingCoeffLUT':
-        """
-        Generate StreamingCoeffLUT at default frequency (C4 = 261.63 Hz).
-
-        For per-note tables, use generate_for_frequency() instead.
-        """
+        """Generate StreamingCoeffLUT at default frequency (C4)."""
         return StreamingCoeffLUT.generate_for_frequency(
             wave_id=wave_id,
             name=name,
-            target_freq_hz=261.63,  # C4
+            target_freq_hz=261.63,
             generate_sample_fn=generate_sample_fn,
             K=K,
             P=P,
@@ -284,10 +234,10 @@ class StreamingCoeffLUT:
 
     @staticmethod
     def generate_sine(K: int = DEFAULT_K, P: int = DEFAULT_P) -> 'StreamingCoeffLUT':
-        """Generate sine wave StreamingCoeffLUT."""
+        """Generate a sine StreamingCoeffLUT."""
         return StreamingCoeffLUT.generate_from_waveform(
             wave_id=0,
-            name="sine",
+            name='sine',
             generate_sample_fn=sine_q15,
             K=K,
             P=P,
@@ -295,9 +245,8 @@ class StreamingCoeffLUT:
 
     @staticmethod
     def generate_saw(K: int = DEFAULT_K, P: int = DEFAULT_P) -> 'StreamingCoeffLUT':
-        """Generate bandlimited sawtooth wave."""
+        """Generate a bandlimited saw StreamingCoeffLUT."""
         def saw_sample(phase: int) -> int:
-            # Bandlimited sawtooth using first 16 harmonics
             val = 0
             for h in range(1, 17):
                 h_phase = (phase * h) & 0xFFFFFFFF
@@ -306,7 +255,7 @@ class StreamingCoeffLUT:
 
         return StreamingCoeffLUT.generate_from_waveform(
             wave_id=1,
-            name="saw",
+            name='saw',
             generate_sample_fn=saw_sample,
             K=K,
             P=P,
@@ -314,9 +263,8 @@ class StreamingCoeffLUT:
 
     @staticmethod
     def generate_square(K: int = DEFAULT_K, P: int = DEFAULT_P) -> 'StreamingCoeffLUT':
-        """Generate bandlimited square wave."""
+        """Generate a bandlimited square StreamingCoeffLUT."""
         def square_sample(phase: int) -> int:
-            # Square wave: odd harmonics only
             val = 0
             for h in [1, 3, 5, 7, 9, 11, 13, 15]:
                 h_phase = (phase * h) & 0xFFFFFFFF
@@ -325,7 +273,7 @@ class StreamingCoeffLUT:
 
         return StreamingCoeffLUT.generate_from_waveform(
             wave_id=2,
-            name="square",
+            name='square',
             generate_sample_fn=square_sample,
             K=K,
             P=P,
@@ -402,7 +350,7 @@ class SubbandState:
 
 
 # =============================================================================
-# Streaming IDWPT (Polyphase Synthesis)
+# Streaming IDWPT (Coefficient-Domain Synthesis)
 # =============================================================================
 
 def streaming_idwpt_block(
@@ -411,40 +359,56 @@ def streaming_idwpt_block(
     headroom_bits: int = 1,
 ) -> None:
     """
-    Streaming IDWPT synthesis from subband state.
+    TRUE POLYPHASE IDWPT synthesis from subband state.
 
-    STEPPING STONE IMPLEMENTATION:
-    This is NOT the full polyphase streaming IDWPT. Instead:
-    1. Average the K time samples per leaf to get 64 coefficients
-    2. Run standard block IDWPT
-    3. This provides correct structure while we build the real polyphase core
+    Per WSE-STD-120 section 3.1: The wavelet engine is a tree-structured
+    polyphase synthesis filterbank.
 
-    True polyphase implementation (future) would:
-    - Maintain filter state across blocks
-    - Process K samples per leaf in a specific interleaved pattern
-    - Produce 64 audio samples from the polyphase combination
+    The K dimension represents K phase positions within the oscillator cycle.
+    To produce smooth audio that evolves through these positions:
+
+    1. Run IDWPT K times, once per k-slot
+    2. Each IDWPT produces 64 samples at that phase position
+    3. Interleave results: output[n] comes from IDWPT run (n % K)
+
+    This creates a smooth transition through the K phase positions,
+    eliminating block-boundary discontinuities.
 
     Args:
-        state: SubbandState with current subband time-series
+        state: SubbandState with current subband time-series [64, K]
         output: np.ndarray[BLOCK_SIZE] int16 output buffer
         headroom_bits: Headroom scaling
     """
     K = state.state.shape[1]
 
-    # STEPPING STONE: Use first time sample (k=0) from each leaf
-    # The K dimension represents time samples within the block, not independent measurements
-    # For a sinusoidal subband, the K samples form a time series that would average to ~0
-    # So we pick one representative sample per leaf instead of averaging
+    # TRUE POLYPHASE: Run IDWPT K times, interleave results
+    # This produces smooth audio that transitions through the K phase positions
+
+    # Storage for K IDWPT outputs
+    idwpt_outputs = []
+
+    for k in range(K):
+        # Extract coefficients for this k-slot
+        coeffs_k = [int(state.state[l, k]) for l in range(NUM_LEAVES)]
+
+        # Run IDWPT for this phase position
+        audio_k = idwpt_jit(coeffs_k, headroom_bits=headroom_bits)
+        idwpt_outputs.append(audio_k)
+
+    # Interleave: output sample n uses IDWPT result from k = n % K
+    # This creates smooth evolution through the K phase positions
     #
-    # True polyphase would process all K samples with proper filter state
-    coeffs_list = [int(state.state[l, 0]) for l in range(NUM_LEAVES)]
+    # For K=8 and BLOCK_SIZE=64:
+    # - Samples 0,8,16,24,32,40,48,56 come from k=0
+    # - Samples 1,9,17,25,33,41,49,57 come from k=1
+    # - etc.
+    #
+    # Each k contributes 64/K = 8 samples to the output
 
-    # Run standard block IDWPT
-    audio = idwpt_jit(coeffs_list, headroom_bits=headroom_bits)
-
-    # Copy to output
-    for i in range(min(BLOCK_SIZE, len(audio))):
-        output[i] = audio[i]
+    for n in range(BLOCK_SIZE):
+        k = n % K  # Which k-slot
+        sample_idx = n  # Which sample from that IDWPT output
+        output[n] = idwpt_outputs[k][sample_idx]
 
 
 # =============================================================================
@@ -627,6 +591,43 @@ def ccs_generate_coeffs(
         output_coeffs[l] = subband_output[l, 0]
 
 
+# VM-side K dimension - MUST match LUT DEFAULT_K for correct polyphase synthesis
+# coeff_state has 64 leaves × K time slots = 64×8 = 512 elements
+VM_K = DEFAULT_K  # K=8
+
+
+def ccs_generate_coeffs_polyphase(
+    ccs_state: CCSState,
+    output_coeffs: np.ndarray,
+) -> None:
+    """
+    Generate polyphase coefficients: 64 leaves × K time slots = 512 values.
+
+    TRUE POLYPHASE INJECTION per WSE-STD-120:
+    - Each k-slot represents a polyphase sample offset within the block
+    - coeff_state[leaf * K + k] = LUT[wave][leaf][k][phase_idx]
+
+    VM_K equals LUT K - direct 1:1 mapping, no downsampling.
+
+    Args:
+        ccs_state: CCS oscillator state
+        output_coeffs: np.ndarray[512] int16 output buffer (modified in place)
+                       Layout: [leaf0_k0..k7, leaf1_k0..k7, ..., leaf63_k0..k7]
+    """
+    # Get LUT for this note
+    lut = get_lut_for_note(ccs_state.wave_id, ccs_state.note)
+
+    # Get all K subband samples for current phase
+    subband_output = np.zeros((NUM_LEAVES, lut.K), dtype=np.int16)
+    lut.get_subband_samples(ccs_state.phase, subband_output)
+
+    # Direct 1:1 mapping - VM_K == LUT K == 8
+    # Inject into 512-element state: [64 leaves × 8 k-slots]
+    for l in range(NUM_LEAVES):
+        for k in range(VM_K):
+            output_coeffs[l * VM_K + k] = subband_output[l, k]
+
+
 __all__ = [
     'StreamingCoeffLUT',
     'SubbandState',
@@ -635,6 +636,8 @@ __all__ = [
     'get_lut_for_note',
     'streaming_idwpt_block',
     'ccs_generate_coeffs',
+    'ccs_generate_coeffs_polyphase',
+    'VM_K',
     'DEFAULT_K',
     'DEFAULT_P',
     'BLOCK_SIZE',

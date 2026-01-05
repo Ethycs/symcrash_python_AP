@@ -100,11 +100,8 @@ def vm_step_block(
         # Uses StreamingCoeffLUT with per-note tables that have frequency
         # baked into the FWPT coefficients. No FWPT in runtime voice path.
 
-        # Step 0: Generate carrier coefficients and seed coeff_state FIRST
-        from .lanes import inject_64_to_256
-        from .coeff_lut_streaming import ccs_generate_coeffs
-
-        carrier_64 = np.zeros(64, dtype=np.int16)
+        # Step 0: Generate carrier coefficients with TRUE POLYPHASE INJECTION
+        from .coeff_lut_streaming import ccs_generate_coeffs_polyphase, VM_K
 
         # Update CCS state if pitch changed
         params = cfg.coeff_osc_params
@@ -117,32 +114,31 @@ def vm_step_block(
         if state.ccs_state.phase_inc != params.phase_inc:
             state.ccs_state.set_pitch(params.phase_inc, slew_blocks=8)
 
-        # Generate carrier coefficients from streaming LUT (phase-indexed)
-        ccs_generate_coeffs(state.ccs_state, carrier_64)
+        # Generate polyphase carrier: 64 leaves × K k-slots = 512 values (K=8)
+        # Each k-slot gets a different sub-phase position from the LUT
+        from .tables import COEFF_LEN
+        carrier_512 = np.zeros(COEFF_LEN, dtype=np.int16)
+        ccs_generate_coeffs_polyphase(state.ccs_state, carrier_512)
 
         # PERSISTENT EVOLUTION per WSE-STD-120 section 4.1:
         # Coefficients persist and evolve, carrier provides stabilization
 
         base_mix = params.base_mix_q15
 
-        # ALWAYS inject carrier with base_mix blending
-        # This maintains oscillation while allowing operator modification
-        # The key: base_mix controls how much carrier vs. evolved state
+        # POLYPHASE INJECTION: Each k-slot gets its own carrier value
+        # This is the key to eliminating block-boundary discontinuities
+        for idx in range(COEFF_LEN):
+            carrier_val = int(carrier_512[idx])
+            old_val = int(state.coeff_state[idx])
 
-        for i in range(64):
-            carrier_val = int(carrier_64[i])
-            for j in range(4):
-                idx = i * 4 + j
-                old_val = int(state.coeff_state[idx])
+            # Blend: new = old * (1 - base_mix) + carrier * base_mix
+            # base_mix = 32767 → pure carrier (full oscillation)
+            # base_mix = 16384 → 50/50 blend
+            # base_mix = 0 → pure persistence
+            inv_mix = 32767 - base_mix
+            blended = RSHIFT_RNE(old_val * inv_mix + carrier_val * base_mix, 15)
 
-                # Blend: new = old * (1 - base_mix) + carrier * base_mix
-                # base_mix = 32767 → pure carrier (full oscillation)
-                # base_mix = 16384 → 50/50 blend
-                # base_mix = 0 → pure persistence
-                inv_mix = 32767 - base_mix
-                blended = RSHIFT_RNE(old_val * inv_mix + carrier_val * base_mix, 15)
-
-                state.coeff_state[idx] = np.clip(blended, -32768, 32767)
+            state.coeff_state[idx] = np.clip(blended, -32768, 32767)
 
         # Step 1: LANE_INJECT (events modify carrier-seeded coeff_state)
         lane_inject(state, cfg)
@@ -232,25 +228,24 @@ def vm_step_block_raw(
         state.wet_ready = True
 
     if cfg.use_coeff_osc and state.use_coeff_osc:
-        # CCS PATH: WSE-STD-121 compliant (no combing)
-        from .coeff_lut_streaming import ccs_generate_coeffs
+        # CCS PATH: WSE-STD-121 compliant with TRUE POLYPHASE INJECTION
+        from .coeff_lut_streaming import ccs_generate_coeffs_polyphase
+        from .tables import COEFF_LEN
 
-        # Generate carrier coefficients
-        carrier_64 = np.zeros(64, dtype=np.int16)
-        ccs_generate_coeffs(state.ccs_state, carrier_64)
+        # Generate polyphase carrier: 64 leaves × K k-slots = 512 values (K=8)
+        carrier_512 = np.zeros(COEFF_LEN, dtype=np.int16)
+        ccs_generate_coeffs_polyphase(state.ccs_state, carrier_512)
 
-        # Inject into coeff_state with base_mix blending
+        # Inject with base_mix blending (polyphase: each k-slot has own value)
         params = cfg.coeff_osc_params
         base_mix = params.base_mix_q15
 
-        for i in range(64):
-            carrier_val = int(carrier_64[i])
-            for j in range(4):
-                idx = i * 4 + j
-                old_val = int(state.coeff_state[idx])
-                inv_mix = 32767 - base_mix
-                blended = RSHIFT_RNE(old_val * inv_mix + carrier_val * base_mix, 15)
-                state.coeff_state[idx] = np.clip(blended, -32768, 32767)
+        for idx in range(COEFF_LEN):
+            carrier_val = int(carrier_512[idx])
+            old_val = int(state.coeff_state[idx])
+            inv_mix = 32767 - base_mix
+            blended = RSHIFT_RNE(old_val * inv_mix + carrier_val * base_mix, 15)
+            state.coeff_state[idx] = np.clip(blended, -32768, 32767)
 
         lane_inject(state, cfg)
 
