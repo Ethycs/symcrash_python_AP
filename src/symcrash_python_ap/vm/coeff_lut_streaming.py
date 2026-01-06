@@ -54,6 +54,21 @@ Q15_ONE = 32767
 TARGET_RMS_Q15 = 16384  # Target RMS (-6 dBFS)
 SAMPLE_RATE = 48000
 
+# =============================================================================
+# WAVEFORM IDs
+# =============================================================================
+# Each waveform is band-limited via additive synthesis to avoid aliasing.
+# Waveforms are generated at Q15 amplitude and normalized for consistent levels.
+
+WAVE_SINE = 0       # Pure sine wave (fundamental only)
+WAVE_SAW = 1        # Sawtooth - all harmonics: 1/h amplitude series
+WAVE_SQUARE = 2     # Square wave - odd harmonics only: 1/h amplitude series
+WAVE_TRIANGLE = 3   # Triangle wave - odd harmonics only: 1/h² amplitude series
+WAVE_PULSE = 4      # Pulse wave - all harmonics with alternating signs
+
+# Maximum harmonics to include (prevents aliasing at high notes)
+MAX_HARMONICS = 32
+
 
 def midi_to_hz(note: int, cents: int = 0) -> float:
     """Convert MIDI note to Hz."""
@@ -460,6 +475,120 @@ def get_streaming_lut(wave_id: int) -> StreamingCoeffLUT:
 
 
 # =============================================================================
+# Band-Limited Waveform Generators (Q15)
+# =============================================================================
+# These functions generate band-limited waveforms using additive synthesis.
+# Each takes a 32-bit phase (0 = 0°, 2^32 = 360°) and returns Q15 sample.
+# Normalization ensures consistent output levels across waveforms.
+
+
+def _saw_q15(phase: int, max_harmonics: int = MAX_HARMONICS) -> int:
+    """
+    Band-limited sawtooth wave via additive synthesis.
+
+    Fourier series: saw(t) = (2/π) * Σ(n=1 to ∞) [(-1)^(n+1) * sin(2πnt) / n]
+
+    Uses all harmonics with 1/h amplitude falloff.
+    """
+    val = 0
+    for h in range(1, max_harmonics + 1):
+        h_phase = (phase * h) & 0xFFFFFFFF
+        sign = 1 if (h % 2 == 1) else -1  # Alternating sign for proper saw shape
+        val += sign * sine_q15(h_phase) // h
+    # Normalize: theoretical peak is ~1.28 of sine, scale to ~0.8 for headroom
+    return int(np.clip(val * 2 // 3, -32768, 32767))
+
+
+def _square_q15(phase: int, max_harmonics: int = MAX_HARMONICS) -> int:
+    """
+    Band-limited square wave via additive synthesis.
+
+    Fourier series: square(t) = (4/π) * Σ(n=1,3,5,...) [sin(2πnt) / n]
+
+    Uses odd harmonics only with 1/h amplitude falloff.
+    """
+    val = 0
+    for h in range(1, max_harmonics + 1, 2):  # Odd harmonics: 1, 3, 5, 7...
+        h_phase = (phase * h) & 0xFFFFFFFF
+        val += sine_q15(h_phase) // h
+    # Normalize: theoretical peak is ~1.27 of sine, scale appropriately
+    return int(np.clip(val * 3 // 4, -32768, 32767))
+
+
+def _triangle_q15(phase: int, max_harmonics: int = MAX_HARMONICS) -> int:
+    """
+    Band-limited triangle wave via additive synthesis.
+
+    Fourier series: tri(t) = (8/π²) * Σ(n=1,3,5,...) [(-1)^((n-1)/2) * sin(2πnt) / n²]
+
+    Uses odd harmonics with 1/h² amplitude falloff and alternating signs.
+    Triangle has faster harmonic rolloff, so it's smoother than square.
+    """
+    # Accumulate in higher precision to avoid truncation errors
+    val = 0
+    sign = 1
+    for h in range(1, max_harmonics + 1, 2):  # Odd harmonics: 1, 3, 5, 7...
+        h_phase = (phase * h) & 0xFFFFFFFF
+        # Scale each harmonic: sine_q15 / h² but keep precision
+        val += sign * sine_q15(h_phase) // (h * h)
+        sign = -sign  # Alternate sign for proper triangle shape
+
+    # Raw peak is ~39918 (all odd harmonics add at 90 degrees)
+    # Scale down by 32767/39918 ≈ 0.821 ≈ 13/16 = 0.8125
+    return int(np.clip(val * 13 // 16, -32767, 32767))
+
+
+def _pulse_q15(phase: int, max_harmonics: int = MAX_HARMONICS, duty: float = 0.25) -> int:
+    """
+    Band-limited pulse wave via additive synthesis.
+
+    A pulse wave is like a square wave but with variable duty cycle.
+    Duty=0.5 is a square wave, duty=0.25 is a 25% pulse (common in subtractive synths).
+
+    Fourier series: pulse(t) = d + (2/π) * Σ(n=1 to ∞) [sin(πnd)/n * cos(2πnt - πnd)]
+
+    This implementation uses a simpler approach: sum of harmonics with amplitude
+    modulated by sin(π*n*duty) / n.
+    """
+    val = 0
+    duty_factor = duty * np.pi
+    for h in range(1, max_harmonics + 1):
+        # Amplitude modulated by sin(π*n*duty) - this gives the pulse spectrum
+        amp_mod = np.sin(h * duty_factor)
+        if abs(amp_mod) > 0.01:  # Skip near-zero harmonics
+            h_phase = (phase * h) & 0xFFFFFFFF
+            val += int(amp_mod * sine_q15(h_phase) / h)
+    # Normalize similar to saw
+    return int(np.clip(val * 2 // 3, -32768, 32767))
+
+
+def get_waveform_generator(wave_id: int):
+    """
+    Get the appropriate waveform generator function for a wave ID.
+
+    Args:
+        wave_id: Waveform ID (WAVE_SINE, WAVE_SAW, etc.)
+
+    Returns:
+        Tuple of (generator_function, name_string)
+    """
+    if wave_id == WAVE_SINE:
+        return sine_q15, "sine"
+    elif wave_id == WAVE_SAW:
+        return _saw_q15, "saw"
+    elif wave_id == WAVE_SQUARE:
+        return _square_q15, "square"
+    elif wave_id == WAVE_TRIANGLE:
+        return _triangle_q15, "triangle"
+    elif wave_id == WAVE_PULSE:
+        return _pulse_q15, "pulse"
+    else:
+        # Default to sine for unknown wave IDs
+        logger.warning(f"Unknown wave_id {wave_id}, defaulting to sine")
+        return sine_q15, "sine"
+
+
+# =============================================================================
 # Per-Note LUT Cache (for frequency-specific tables)
 # =============================================================================
 
@@ -474,7 +603,7 @@ def get_lut_for_note(wave_id: int, midi_note: int) -> StreamingCoeffLUT:
     table because the frequency is baked into the FWPT coefficients.
 
     Args:
-        wave_id: Waveform ID (0=sine, 1=saw, 2=square)
+        wave_id: Waveform ID (WAVE_SINE=0, WAVE_SAW=1, WAVE_SQUARE=2, WAVE_TRIANGLE=3, WAVE_PULSE=4)
         midi_note: MIDI note number (0-127)
 
     Returns:
@@ -485,29 +614,8 @@ def get_lut_for_note(wave_id: int, midi_note: int) -> StreamingCoeffLUT:
         freq_hz = midi_to_hz(midi_note)
         logger.debug(f"Generating LUT for wave={wave_id}, note={midi_note} ({freq_hz:.1f} Hz)")
 
-        # Get waveform generator
-        if wave_id == 0:
-            gen_fn = sine_q15
-            name = "sine"
-        elif wave_id == 1:
-            def gen_fn(phase):
-                val = 0
-                for h in range(1, 17):
-                    h_phase = (phase * h) & 0xFFFFFFFF
-                    val += sine_q15(h_phase) // h
-                return int(np.clip(val // 2, -32768, 32767))
-            name = "saw"
-        elif wave_id == 2:
-            def gen_fn(phase):
-                val = 0
-                for h in [1, 3, 5, 7, 9, 11, 13, 15]:
-                    h_phase = (phase * h) & 0xFFFFFFFF
-                    val += sine_q15(h_phase) // h
-                return int(np.clip(val, -32768, 32767))
-            name = "square"
-        else:
-            gen_fn = sine_q15
-            name = "sine"
+        # Get waveform generator from centralized function
+        gen_fn, name = get_waveform_generator(wave_id)
 
         _NOTE_LUT_CACHE[cache_key] = StreamingCoeffLUT.generate_for_frequency(
             wave_id=wave_id,
@@ -652,14 +760,26 @@ def ccs_generate_coeffs_polyphase(
 
 
 __all__ = [
+    # Core classes
     'StreamingCoeffLUT',
     'SubbandState',
     'CCSState',
+    # Waveform constants
+    'WAVE_SINE',
+    'WAVE_SAW',
+    'WAVE_SQUARE',
+    'WAVE_TRIANGLE',
+    'WAVE_PULSE',
+    'MAX_HARMONICS',
+    # LUT access
     'get_streaming_lut',
     'get_lut_for_note',
+    'get_waveform_generator',
+    # Synthesis functions
     'streaming_idwpt_block',
     'ccs_generate_coeffs',
     'ccs_generate_coeffs_polyphase',
+    # Constants
     'VM_K',
     'DEFAULT_K',
     'DEFAULT_P',

@@ -14,7 +14,7 @@ Usage:
 
 import pytest
 
-from pipeline_tests.artifacts.golden_trace_v0 import (
+from tests.artifacts.golden_trace_v0 import (
     VM_VERSION,
     TRACE_NAME,
     TRACE_DURATION_BLOCKS,

@@ -21,7 +21,7 @@ Usage:
 
 import pytest
 
-from pipeline_tests.artifacts.golden_trace_stress_v0 import (
+from tests.artifacts.golden_trace_stress_v0 import (
     GOLDEN_TRACE_STRESS_VERSION,
     TRACE_NAME,
     TRACE_DURATION_BLOCKS,

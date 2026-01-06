@@ -1,0 +1,29 @@
+============================================================
+GOLDEN TRACE REGENERATION REPORT
+============================================================
+
+Timestamp:    2026-01-05T15:36:02.597143
+Git Commit:   0f9aa5ee3cb3
+Trace Name:   brass_stab_440hz
+Trace Ver:    v0
+
+--- VERSION INFO ---
+  golden_trace: v0
+  vm_std: WSE-STD-VM-HYBRID v0
+  voiceframe_std: WSE-STD-020 v1
+  sine_core_lut: 1024-Q15-12bit-interp
+  table_size: 1024
+  q_bits: 15
+  frac_bits: 12
+
+--- HASH COMPARISON ---
+Old Hash: 3ec436a05298dbb99d56895ec276d4894b61f556b170de3f11af2448fb110012
+New Hash: be2aa6755fc127c363a94811db87fc344c9f9e5108e235dc65794cdc4e074412
+Status:   CHANGED
+
+Block Count: 48
+
+--- DIVERGENCE ANALYSIS ---
+(Cannot determine exact block without previous block hashes)
+
+============================================================
