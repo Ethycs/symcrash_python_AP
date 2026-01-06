@@ -204,6 +204,13 @@ def _build_pattern_table():
         )
         pattern_id += 1
 
+    # =========================================================================
+    # EXTENDED PATTERNS (pattern_id 7+)
+    # =========================================================================
+    # These are sound-design patterns, NOT degradation rungs.
+    # apply_degradation() MUST only emit pattern_id 0-6 (the K ladder rungs).
+    # Extended patterns are for artistic control, not budget fitting.
+
     # Band-specific patterns (for brightness control)
     # Bands 0-2 only (low frequency)
     low_freq_mask = 0

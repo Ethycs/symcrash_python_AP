@@ -9,7 +9,7 @@ Executes one block for one voice with fixed lane schedule.
 from typing import Tuple, Optional, TYPE_CHECKING
 import numpy as np
 
-from .state import VMState
+from .state import VMState, OSC_MODE_A, OSC_MODE_B
 from .decode import DecodedPlan, CarrierRole, decode_frame
 from .tables import Tables, DEFAULT_TABLES, BLOCK_SAMPLES
 from .lanes import (
@@ -99,26 +99,66 @@ def vm_step_block(
         # -----------------------------------------------------------------
         # Uses StreamingCoeffLUT with per-note tables that have frequency
         # baked into the FWPT coefficients. No FWPT in runtime voice path.
+        #
+        # WSE-STD-210: Mode A (LUT) vs Mode B (Rotator/Harmonic Bank)
+        # - Mode A: Phase → LUT lookup → Coefficients (existing)
+        # - Mode B: Phase → sin/cos weights × basis frames → Coefficients
 
-        # Step 0: Generate carrier coefficients with TRUE POLYPHASE INJECTION
-        from .coeff_lut_streaming import ccs_generate_coeffs_polyphase, VM_K
+        from .tables import COEFF_LEN
 
-        # Update CCS state if pitch changed
+        # Get oscillator params
         params = cfg.coeff_osc_params
-        if state.last_note != params.note or state.last_cents != params.cents:
+        osc_mode = params.osc_mode
+
+        # Update state if pitch changed
+        pitch_changed = state.last_note != params.note or state.last_cents != params.cents
+        if pitch_changed:
             state.ccs_state.note = params.note
-            state.ccs_state.wave_id = 0  # Default to sine for now
+            state.ccs_state.wave_id = params.table_id
             state.last_note = params.note
             state.last_cents = params.cents
 
+        # Update Mode B state if using rotator (always check for first-time init)
+        if osc_mode == OSC_MODE_B:
+            mb_state = state.mode_b_state
+            if pitch_changed or mb_state.note != params.note:
+                mb_state.reset(note=params.note, phase_inc=params.phase_inc)
+                mb_state.pwm_width_q15 = params.pwm_width_q15
+                mb_state.pwm_enabled = params.pwm_enabled
+                mb_state.H_active = min(params.H_request, mb_state.H_bandlimit)
+
         if state.ccs_state.phase_inc != params.phase_inc:
             state.ccs_state.set_pitch(params.phase_inc, slew_blocks=8)
+            if osc_mode == OSC_MODE_B:
+                state.mode_b_state.phase_inc = params.phase_inc
 
         # Generate polyphase carrier: 64 leaves × K k-slots = 512 values (K=8)
-        # Each k-slot gets a different sub-phase position from the LUT
-        from .tables import COEFF_LEN
         carrier_512 = np.zeros(COEFF_LEN, dtype=np.int16)
-        ccs_generate_coeffs_polyphase(state.ccs_state, carrier_512)
+
+        if osc_mode == OSC_MODE_B:
+            # -----------------------------------------------------------------
+            # MODE B: Rotator/Harmonic Bank (WSE-STD-210 Section 10)
+            # -----------------------------------------------------------------
+            from .harmonic_bank import mode_b_generate_coeffs, get_basis_for_note
+
+            # Get or generate basis frames for this pitch anchor
+            basis = get_basis_for_note(params.note)
+
+            # Update PWM if enabled
+            if params.pwm_enabled:
+                state.mode_b_state.set_pwm_weights(params.pwm_width_q15)
+
+            # Generate coefficients using harmonic bank
+            mode_b_generate_coeffs(state.mode_b_state, basis, carrier_512)
+
+            # Advance Mode B phase for next block
+            state.mode_b_state.advance_block()
+        else:
+            # -----------------------------------------------------------------
+            # MODE A: LUT-based (existing path)
+            # -----------------------------------------------------------------
+            from .coeff_lut_streaming import ccs_generate_coeffs_polyphase
+            ccs_generate_coeffs_polyphase(state.ccs_state, carrier_512)
 
         # PERSISTENT EVOLUTION per WSE-STD-120 section 4.1:
         # Coefficients persist and evolve, carrier provides stabilization
@@ -164,8 +204,9 @@ def vm_step_block(
                 gain = gain_prev + RSHIFT_RNE((gain_curr - gain_prev) * alpha, 15)
                 output[i] = RSHIFT_RNE(int(output[i]) * gain, 15)
 
-        # Advance CCS phase for next block
-        state.ccs_state.advance_block()
+        # Advance CCS phase for next block (Mode A only - Mode B advances in generate)
+        if osc_mode == OSC_MODE_A:
+            state.ccs_state.advance_block()
 
     else:
         # -----------------------------------------------------------------

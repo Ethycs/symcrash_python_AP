@@ -18,15 +18,17 @@ Usage:
 import sys
 import os
 import argparse
-import wave
-import struct
+from pathlib import Path
 
-sys.path.insert(0, 'src')
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "src"
+sys.path.insert(0, str(SRC))
 
 import numpy as np
 from symcrash_python_ap.vm import vm_step_block, VMState
 from symcrash_python_ap.vm.tables import DEFAULT_TABLES
 from symcrash_python_ap.frames import VoiceFrame
+from symcrash_python_ap.audio_io import AudioWriter
 from symcrash_python_ap.vm.coeff_lut_streaming import (
     WAVE_SINE, WAVE_SAW, WAVE_SQUARE, WAVE_TRIANGLE, WAVE_PULSE,
     BLOCK_SIZE, midi_to_hz, _NOTE_LUT_CACHE
@@ -40,7 +42,7 @@ def generate_waveform_wav(
     wave_name: str,
     midi_note: int,
     duration_sec: float,
-    output_dir: str
+    writer: AudioWriter,
 ) -> str:
     """Generate a WAV file for a specific waveform."""
 
@@ -83,24 +85,11 @@ def generate_waveform_wav(
     # Convert to numpy array
     samples = np.array(all_samples, dtype=np.int16)
 
-    # Calculate stats
-    rms = np.sqrt(np.mean(samples.astype(float)**2))
-    peak = np.max(np.abs(samples))
-
-    print(f"  RMS: {rms:.0f}, Peak: {peak}")
-
-    # Write WAV file
-    filename = f"{wave_name}_{midi_note}.wav"
-    filepath = os.path.join(output_dir, filename)
-
-    with wave.open(filepath, 'w') as wav_file:
-        wav_file.setnchannels(1)  # Mono
-        wav_file.setsampwidth(2)  # 16-bit
-        wav_file.setframerate(SAMPLE_RATE)
-        wav_file.writeframes(samples.tobytes())
-
-    print(f"  Written: {filepath}")
-    return filepath
+    filename = f"{wave_name}_{midi_note}"
+    meta = writer.write_audio(filename, samples, timestamp=False, verbose=False)
+    print(f"  RMS: {meta.rms_amplitude:.0f}, Peak: {meta.peak_amplitude:.0f}")
+    print(f"  Written: {meta.filepath}")
+    return meta.filepath
 
 
 def main():
@@ -112,6 +101,7 @@ def main():
 
     # Create output directory
     os.makedirs(args.output, exist_ok=True)
+    writer = AudioWriter(output_dir=args.output, sample_rate=SAMPLE_RATE)
 
     print(f"=== Generating Waveform Samples ===")
     print(f"MIDI Note: {args.note} ({midi_to_hz(args.note):.1f} Hz)")
@@ -134,7 +124,7 @@ def main():
             wave_name=wave_name,
             midi_note=args.note,
             duration_sec=args.duration,
-            output_dir=args.output,
+            writer=writer,
         )
         generated_files.append(filepath)
 

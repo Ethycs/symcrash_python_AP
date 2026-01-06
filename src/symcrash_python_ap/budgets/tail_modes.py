@@ -9,7 +9,7 @@ Tail modes:
     FULL: Maximum quality - [FineClamp, NormalizeScale, SheafProject]
     MID:  Good quality    - [FineClamp, NormalizeScale]
     MIN:  Basic safety    - [FineClamp]
-    EMERGENCY: Fallback   - [EmergencySimplify]
+    EMERGENCY: Fallback   - [FineClamp, EmergencySimplify]
 
 Rules:
     - MAIN voices: Start at FULL, can degrade to MID/MIN
@@ -27,7 +27,7 @@ class TailMode(IntEnum):
     FULL = 0        # Full quality: [2, 11, 23]
     MID = 1         # Good quality: [2, 11]
     MIN = 2         # Basic safety: [2]
-    EMERGENCY = 3   # Fallback: [19]
+    EMERGENCY = 3   # Fallback: [2, 19]
 
 
 # Operator IDs for tail operators
@@ -45,13 +45,15 @@ TAIL_OPS: Dict[TailMode, List[int]] = {
     TailMode.FULL: [OP_FINE_CLAMP, OP_NORMALIZE_SCALE, OP_SHEAF_PROJECT],
     TailMode.MID: [OP_FINE_CLAMP, OP_NORMALIZE_SCALE],
     TailMode.MIN: [OP_FINE_CLAMP],
-    TailMode.EMERGENCY: [OP_EMERGENCY_SIMPLIFY],
+    TailMode.EMERGENCY: [OP_FINE_CLAMP, OP_EMERGENCY_SIMPLIFY],  # v0: FineClamp always present
 }
 
-# Which tail modes contain nonlinear operators
+# Which tail modes require nonlinear budget class (projection-class ops)
+# Note: "nonlinear" here means budget category (expensive math/projection),
+# not necessarily platform float. VM uses integer isqrt for determinism.
 TAIL_USES_NONLINEAR: Dict[TailMode, bool] = {
-    TailMode.FULL: True,   # NormalizeScale uses sqrt
-    TailMode.MID: True,    # NormalizeScale uses sqrt
+    TailMode.FULL: True,   # NormalizeScale (projection-class, extra math budget)
+    TailMode.MID: True,    # NormalizeScale (projection-class, extra math budget)
     TailMode.MIN: False,
     TailMode.EMERGENCY: False,
 }

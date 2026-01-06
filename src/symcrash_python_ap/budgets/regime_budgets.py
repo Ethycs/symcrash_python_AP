@@ -84,10 +84,10 @@ REGIME_BUDGETS: Dict[int, RegimeBudget] = {
     RegimeId.IDLE: RegimeBudget(
         regime_id=RegimeId.IDLE,
         regime_name="IDLE",
-        max_ticks_per_block=500,       # Minimal processing
+        max_ticks_per_block=1300,      # Must fit EMERGENCY tail (1152 ticks)
         max_active_nodes_K=8,          # Only low-frequency nodes
         allow_nonlinear=False,
-        tail_reserved_ticks=200,
+        tail_reserved_ticks=1152,      # EMERGENCY tail: FineClamp + EmergencySimplify
     ),
 
     RegimeId.TRANSIENT: RegimeBudget(
@@ -120,10 +120,10 @@ REGIME_BUDGETS: Dict[int, RegimeBudget] = {
     RegimeId.RECOVERY: RegimeBudget(
         regime_id=RegimeId.RECOVERY,
         regime_name="RECOVERY",
-        max_ticks_per_block=1000,
+        max_ticks_per_block=1500,      # Must fit EMERGENCY tail (1152 ticks)
         max_active_nodes_K=12,
         allow_nonlinear=False,
-        tail_reserved_ticks=300,
+        tail_reserved_ticks=1152,      # EMERGENCY tail: FineClamp + EmergencySimplify
     ),
 
     # -------------------------------------------------------------------------
@@ -133,19 +133,19 @@ REGIME_BUDGETS: Dict[int, RegimeBudget] = {
     RegimeId.RESIDUAL: RegimeBudget(
         regime_id=RegimeId.RESIDUAL,
         regime_name="RESIDUAL",
-        max_ticks_per_block=400,       # Very tight for 128 voices
+        max_ticks_per_block=1300,      # Must fit EMERGENCY tail (1152 ticks)
         max_active_nodes_K=8,          # Limited nodes
         allow_nonlinear=False,
-        tail_reserved_ticks=150,
+        tail_reserved_ticks=1152,      # EMERGENCY tail: FineClamp + EmergencySimplify
     ),
 
     RegimeId.CARRIER_ONLY: RegimeBudget(
         regime_id=RegimeId.CARRIER_ONLY,
         regime_name="CARRIER_ONLY",
-        max_ticks_per_block=100,       # Minimal
+        max_ticks_per_block=1200,      # Must fit EMERGENCY tail [2,19] = 1152 ticks
         max_active_nodes_K=1,          # Single carrier frequency
         allow_nonlinear=False,
-        tail_reserved_ticks=50,
+        tail_reserved_ticks=1152,      # FineClamp + EmergencySimplify
     ),
 }
 

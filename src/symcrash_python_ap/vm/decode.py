@@ -79,12 +79,24 @@ class CoeffOscParams:
 
     These parameters control coefficient synthesis, which replaces
     the carrier→FWPT→mask→IDWPT path to eliminate combing artifacts.
+
+    Extended for WSE-STD-210 Mode B support.
     """
     table_id: int = 0         # Which coefficient table (0=sine, 1=saw, etc.)
     base_mix_q15: int = 32767  # Blend factor: 0=pure CMMM state, 32767=pure osc
     phase_inc: int = 0        # Base phase increment (from MIDI note)
     note: int = 60            # MIDI note number
     cents: int = 0            # Fine tuning in cents
+
+    # WSE-STD-210 Section 10.2 - Mode B parameters
+    osc_mode: int = 0             # 0=Mode A (LUT), 1=Mode B (Rotator)
+    H_request: int = 16           # Requested harmonic count (bandlimited at runtime)
+    pwm_width_q15: int = 16384    # PWM duty cycle (Q15: 0=0%, 32767≈100%)
+    pwm_enabled: bool = False     # Enable PWM modulation
+    sync_enabled: bool = False    # Enable hard sync
+    fm_depth_q15: int = 0         # FM modulation depth (Q15)
+    unison_voices: int = 1        # Number of unison voices (1=mono)
+    unison_spread_cents: int = 0  # Unison detune spread in cents
 
 
 # =============================================================================
@@ -266,12 +278,31 @@ def decode_frame(
     if base_mix is None:
         base_mix = 32767  # Full oscillator by default for CCS path
 
+    # Extract Mode B parameters from VoiceFrame (WSE-STD-210 Section 10.2)
+    osc_mode = getattr(frame, 'coeff_osc_mode', 0) or 0
+    H_request = getattr(frame, 'H_request', 16) or 16
+    pwm_width_q15 = getattr(frame, 'pwm_width_q15', 16384) or 16384
+    pwm_enabled = getattr(frame, 'pwm_enabled', False)
+    sync_enabled = getattr(frame, 'sync_enabled', False)
+    fm_depth_q15 = getattr(frame, 'fm_depth_q15', 0) or 0
+    unison_voices = getattr(frame, 'unison_voices', 1) or 1
+    unison_spread_cents = getattr(frame, 'unison_spread_cents', 0) or 0
+
     plan.coeff_osc_params = CoeffOscParams(
         table_id=coeff_table_id,
         base_mix_q15=base_mix,
         phase_inc=phase_inc,
         note=note,
         cents=cents,
+        # WSE-STD-210 Mode B parameters
+        osc_mode=osc_mode,
+        H_request=H_request,
+        pwm_width_q15=pwm_width_q15,
+        pwm_enabled=pwm_enabled,
+        sync_enabled=sync_enabled,
+        fm_depth_q15=fm_depth_q15,
+        unison_voices=unison_voices,
+        unison_spread_cents=unison_spread_cents,
     )
 
     # Check if we should use CCS path (using fast on-demand table generation)

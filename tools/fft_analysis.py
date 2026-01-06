@@ -1,12 +1,18 @@
 """FFT analysis of generated audio."""
 
-import numpy as np
-from scipy.io import wavfile
-from scipy.fft import rfft, rfftfreq
 import sys
+from pathlib import Path
+import numpy as np
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from tools.lib.fft_utils import rfft_mag
+from tools.lib.wav_utils import read_wav
 
 filepath = sys.argv[1] if len(sys.argv) > 1 else 'audio_out/ccs_sine_440hz-20260105-150929.wav'
-rate, data = wavfile.read(filepath)
+rate, data = read_wav(filepath)
 if len(data.shape) > 1:
     data = data[:, 0]  # Use left channel
 
@@ -18,8 +24,7 @@ print(f'Analyzing {len(data)} samples after skipping latency period')
 print()
 
 # FFT
-fft = rfft(data.astype(np.float64))
-freqs = rfftfreq(len(data), 1/rate)
+fft, freqs = rfft_mag(data, rate)
 
 # Find carrier
 f0 = 440.0

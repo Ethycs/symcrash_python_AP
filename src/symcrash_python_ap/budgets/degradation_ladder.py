@@ -167,7 +167,8 @@ def apply_degradation(
     # Step 0c: Ensure tail is feasible at K=1 (last resort)
     # -------------------------------------------------------------------------
     if not _tail_fits_at_emergency(budget):
-        # Budget is impossibly tight - return minimal emergency
+        # Budget is impossibly tight - return minimal emergency with actual predicted cost
+        emergency_predicted = predict_chain_cost([], [], 1, TailMode.EMERGENCY)
         return DegradationResult(
             backbone_ops=[],
             event_ops=[],
@@ -176,7 +177,7 @@ def apply_degradation(
             tail_mode=TailMode.EMERGENCY,
             pattern_id=get_pattern_for_k(1).pattern_id,
             degradation_steps=1,
-            final_ticks=0,
+            final_ticks=emergency_predicted.total_ticks,  # v0: Real predicted ticks, not 0
             is_emergency=True,
         )
 

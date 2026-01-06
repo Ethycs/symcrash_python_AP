@@ -15,6 +15,13 @@ from .tables import COEFF_LEN, BLOCK_SAMPLES
 from ..fixed import midi_to_phase_inc_fixed
 from .coeff_lut_streaming import CCSState, midi_to_hz, SAMPLE_RATE
 
+# Defer import to avoid circular dependency - ModeBState imported when needed
+# from .harmonic_bank import ModeBState, OSC_MODE_A, OSC_MODE_B
+
+# Oscillator mode constants (WSE-STD-210)
+OSC_MODE_A = 0  # LUT-based (CCSState)
+OSC_MODE_B = 1  # Rotator/Harmonic Bank (ModeBState)
+
 
 # =============================================================================
 # ENVELOPE STATE
@@ -137,6 +144,30 @@ class VMState:
     # Flag to enable CCS path (coefficient synthesis vs carrier→FWPT)
     use_coeff_osc: bool = True  # Default to new CCS path
 
+    # -------------------------------------------------------------------------
+    # Mode B State (WSE-STD-210 Harmonic Bank)
+    # -------------------------------------------------------------------------
+    # Mode B generates coefficients dynamically from harmonic basis frames.
+    # Supports PWM, FM/PM, and other modulation types.
+    # Note: mode_b_state is created lazily to avoid circular import
+    _mode_b_state: Optional['ModeBState'] = None  # type: ignore
+
+    # Oscillator mode selection (WSE-STD-210 Section 10.1)
+    osc_mode: int = OSC_MODE_A  # Default to Mode A (LUT-based)
+
+    @property
+    def mode_b_state(self) -> 'ModeBState':
+        """Get or create Mode B state (lazy init to avoid circular import)."""
+        if self._mode_b_state is None:
+            from .harmonic_bank import ModeBState
+            self._mode_b_state = ModeBState()
+        return self._mode_b_state
+
+    @mode_b_state.setter
+    def mode_b_state(self, value: 'ModeBState') -> None:
+        """Set Mode B state."""
+        self._mode_b_state = value
+
     @classmethod
     def create(cls, voice_id: int = 0, prng_seed: Optional[int] = None) -> 'VMState':
         """
@@ -240,6 +271,10 @@ class VMState:
 
         # Reset CCS state (WSE-STD-121)
         self.ccs_state.reset(note=note, phase_inc=phase_inc, wave_id=0)
+
+        # Reset Mode B state (WSE-STD-210) if initialized
+        if self._mode_b_state is not None:
+            self._mode_b_state.reset(note=note, phase_inc=phase_inc)
 
     def trigger_release(self) -> None:
         """Trigger note release (enter release phase)."""
@@ -391,4 +426,7 @@ __all__ = [
     'VMState',
     'xorshift32',
     'prng_step',
+    # WSE-STD-210 oscillator modes
+    'OSC_MODE_A',
+    'OSC_MODE_B',
 ]

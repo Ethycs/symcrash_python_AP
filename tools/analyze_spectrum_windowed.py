@@ -8,10 +8,14 @@ Using a window function (Hann, Blackman) reduces leakage.
 
 import sys
 from pathlib import Path
-import wave
 import numpy as np
-from scipy.fft import rfft, rfftfreq
-from scipy.signal import windows
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from tools.lib.fft_utils import rfft_mag, rfft_mag_windowed
+from tools.lib.wav_utils import read_wav_mono
 
 
 def analyze_wav(filepath, label=None, use_window=True):
@@ -24,27 +28,17 @@ def analyze_wav(filepath, label=None, use_window=True):
     print("=" * 60)
 
     # Read WAV
-    with wave.open(str(filepath), 'r') as f:
-        nframes = f.getnframes()
-        rate = f.getframerate()
-        data = f.readframes(nframes)
-        samples = np.frombuffer(data, dtype=np.int16)
+    rate, samples = read_wav_mono(filepath)
 
     print("Samples: {}, Rate: {} Hz".format(len(samples), rate))
 
     # Apply window to reduce spectral leakage
     if use_window:
-        window = windows.blackman(len(samples))
-        windowed_samples = samples.astype(np.float64) * window
-        # Normalize by window coherent gain
-        window_gain = np.sum(window) / len(window)
+        spectrum, freqs, _window_gain = rfft_mag_windowed(
+            samples, rate, window_name="blackman"
+        )
     else:
-        windowed_samples = samples.astype(np.float64)
-        window_gain = 1.0
-
-    # FFT
-    spectrum = np.abs(rfft(windowed_samples)) / window_gain
-    freqs = rfftfreq(len(samples), 1/rate)
+        spectrum, freqs = rfft_mag(samples, rate)
 
     # Find fundamental
     start_idx = int(50 * len(freqs) / (rate/2))

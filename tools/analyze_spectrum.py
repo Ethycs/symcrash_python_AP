@@ -5,9 +5,14 @@ Analyze spectrum of WAV files to find combing artifacts.
 
 import sys
 from pathlib import Path
-import wave
 import numpy as np
-from scipy.fft import rfft, rfftfreq
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from tools.lib.fft_utils import rfft_mag
+from tools.lib.wav_utils import read_wav_mono
 
 def analyze_wav(filepath, label=None):
     """Analyze a WAV file and print spectrum info."""
@@ -19,11 +24,7 @@ def analyze_wav(filepath, label=None):
     print("="*60)
 
     # Read WAV
-    with wave.open(str(filepath), 'r') as f:
-        nframes = f.getnframes()
-        rate = f.getframerate()
-        data = f.readframes(nframes)
-        samples = np.frombuffer(data, dtype=np.int16)
+    rate, samples = read_wav_mono(filepath)
 
     print("Samples: {}, Rate: {} Hz, Duration: {:.2f}s".format(
         len(samples), rate, len(samples)/rate))
@@ -33,8 +34,7 @@ def analyze_wav(filepath, label=None):
     print("RMS: {:.1f}, Max: {}".format(rms, np.max(np.abs(samples))))
 
     # FFT
-    spectrum = np.abs(rfft(samples.astype(np.float64)))
-    freqs = rfftfreq(len(samples), 1/rate)
+    spectrum, freqs = rfft_mag(samples, rate)
 
     # Find fundamental
     # Skip DC and very low frequencies

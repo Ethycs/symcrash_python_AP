@@ -280,6 +280,118 @@ def sincos_q15(phase: int) -> Tuple[int, int]:
 
 
 # =============================================================================
+# WSE-STD-210 SECTION 2 - SINECORE API (MANDATORY)
+# =============================================================================
+
+def sin_cos_q15(phase_32: int) -> Tuple[int, int]:
+    """
+    WSE-STD-210 Section 2.1 - Mandatory SineCore API.
+
+    Return (sin_q15, cos_q15) for Q32 phase.
+
+    cos MUST be computed as sin(phase + 0x40000000) modulo 2³² (exact quarter-turn).
+
+    Args:
+        phase_32: 32-bit unsigned phase (0 to 2^32-1 = one full cycle)
+
+    Returns:
+        (sin_q15, cos_q15) tuple, each in range [-32767, +32767]
+    """
+    sin_val = sine_q15(phase_32)
+    cos_val = sine_q15((phase_32 + 0x40000000) & PHASE_MASK)
+    return sin_val, cos_val
+
+
+def sin_cos_inc_q15(phase_inc_32: int) -> Tuple[int, int]:
+    """
+    WSE-STD-210 Section 2.1 - Return (sinΔ, cosΔ) for NCO rotator recurrence.
+
+    Same mapping as sin_cos_q15, used for NCO recurrence.
+
+    Args:
+        phase_inc_32: 32-bit phase increment
+
+    Returns:
+        (sin_delta_q15, cos_delta_q15) tuple
+    """
+    return sin_cos_q15(phase_inc_32)
+
+
+def sin_cos_q15_vectorized(phases_32):
+    """
+    WSE-STD-210 Section 2.1 - Vectorized sin/cos for NumPy arrays.
+
+    Batch sin/cos for array of Q32 phases. Uses 64K LUT for speed.
+
+    Args:
+        phases_32: NumPy array of 32-bit phases (uint32 or int64)
+
+    Returns:
+        (sin_q15_array, cos_q15_array) tuple of NumPy arrays
+    """
+    import numpy as np
+    # Convert Q32 to 16-bit for LUT lookup (use top 16 bits)
+    phases_16 = ((phases_32 >> 16) & 0xFFFF).astype(np.uint16)
+    lut = _get_lut_64k_np()
+    sin_vals = lut[phases_16].astype(np.int32)
+    cos_vals = lut[(phases_16 + 16384) & 0xFFFF].astype(np.int32)
+    return sin_vals, cos_vals
+
+
+# =============================================================================
+# NCO ROTATOR (WSE-STD-210 Section 2.3 - OPTIONAL but RECOMMENDED)
+# =============================================================================
+
+@dataclass
+class NCORotator:
+    """
+    NCO state for efficient harmonic generation via recurrence.
+
+    WSE-STD-210 Section 2.3 - OPTIONAL but RECOMMENDED for FPGA.
+
+    Maintains (sinφ, cosφ) and advances via complex multiply:
+        sin(φ+Δ) = sinφ·cosΔ + cosφ·sinΔ
+        cos(φ+Δ) = cosφ·cosΔ - sinφ·sinΔ
+
+    Using RSHIFT_RNE and SAT16 at each step for bit-exactness.
+    """
+    sin_val: int = 0   # Current sin(φ) in Q15
+    cos_val: int = 0   # Current cos(φ) in Q15
+    sin_inc: int = 0   # sin(Δφ) in Q15
+    cos_inc: int = 0   # cos(Δφ) in Q15
+
+    def reset(self, phase_32: int, phase_inc_32: int) -> None:
+        """Initialize rotator at given phase with given increment."""
+        self.sin_val, self.cos_val = sin_cos_q15(phase_32)
+        self.sin_inc, self.cos_inc = sin_cos_q15(phase_inc_32)
+
+    def advance(self) -> Tuple[int, int]:
+        """
+        Rotate by Δφ using complex multiply: z *= e^(iΔφ)
+
+        Returns:
+            (sin_q15, cos_q15) after rotation
+        """
+        from ..fixed import SAT16
+        # sin(φ+Δ) = sin(φ)cos(Δ) + cos(φ)sin(Δ)
+        # cos(φ+Δ) = cos(φ)cos(Δ) - sin(φ)sin(Δ)
+        new_sin = RSHIFT_RNE(
+            self.sin_val * self.cos_inc + self.cos_val * self.sin_inc, 15
+        )
+        new_cos = RSHIFT_RNE(
+            self.cos_val * self.cos_inc - self.sin_val * self.sin_inc, 15
+        )
+
+        self.sin_val = SAT16(new_sin)
+        self.cos_val = SAT16(new_cos)
+        return self.sin_val, self.cos_val
+
+    def current(self) -> Tuple[int, int]:
+        """Return current (sin, cos) without advancing."""
+        return self.sin_val, self.cos_val
+
+
+# =============================================================================
 # FREQUENCY CONVERSION
 # =============================================================================
 
@@ -563,6 +675,11 @@ __all__ = [
     'sine_q15',
     'cosine_q15',
     'sincos_q15',
+    # WSE-STD-210 Section 2 - Mandatory SineCore API
+    'sin_cos_q15',
+    'sin_cos_inc_q15',
+    'sin_cos_q15_vectorized',
+    'NCORotator',
     # Fast path (64K LUT, 16-bit phase)
     'sine_q15_fast',
     'cosine_q15_fast',

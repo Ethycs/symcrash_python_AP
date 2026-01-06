@@ -1,7 +1,13 @@
 """Compare WAV files for bit-exactness."""
-import numpy as np
-from scipy.io import wavfile
 import sys
+from pathlib import Path
+import numpy as np
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from tools.lib.wav_utils import read_wav
 
 files = [
     'audio_out/ccs_sine_440hz-20260105-131857.wav',  # Before int64 fix
@@ -10,7 +16,7 @@ files = [
 
 data = []
 for f in files:
-    rate, d = wavfile.read(f)
+    rate, d = read_wav(f)
     data.append(d)
     print(f"{f}: shape={d.shape}, dtype={d.dtype}")
 

@@ -309,6 +309,8 @@ def render_melody_with_preset(preset_name: str, bpm: float = 70) -> Tuple[List[i
                         partial_amps_q15=partial_amps,
                         ops_enable=ops_enable,
                         families=families,
+                        coeff_osc_mode=1,  # Mode B: Harmonic Bank/Rotator
+                        H_request=16,
                     )
                     L, R = pipeline.render_block(frame)
                     samples_L.extend(L)
@@ -358,6 +360,7 @@ def render_melody_with_preset(preset_name: str, bpm: float = 70) -> Tuple[List[i
 
                 # Create voice frame with waveform-specific partial amplitudes
                 # Use 85% gain for more headroom (stereo pan at center is 0.707)
+                # Mode B (coeff_osc_mode=1) uses WSE-STD-210 harmonic bank rotator
                 frame = VoiceFrame(
                     voice_id=0,
                     note=midi_note,
@@ -367,6 +370,8 @@ def render_melody_with_preset(preset_name: str, bpm: float = 70) -> Tuple[List[i
                     partial_amps_q15=partial_amps,
                     ops_enable=ops_enable,
                     families=families,
+                    coeff_osc_mode=1,  # Mode B: Harmonic Bank/Rotator (WSE-STD-210)
+                    H_request=16,      # Up to 16 harmonics
                 )
 
                 # Render block
@@ -394,6 +399,8 @@ def render_melody_with_preset(preset_name: str, bpm: float = 70) -> Tuple[List[i
                 partial_amps_q15=partial_amps,
                 ops_enable=ops_enable,
                 families=families,
+                coeff_osc_mode=1,  # Mode B: Harmonic Bank/Rotator
+                H_request=16,
             )
             L, R = pipeline.render_block(frame)
             samples_L.extend(L)

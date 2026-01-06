@@ -110,6 +110,31 @@ class VoiceFrame:
     ops_enable: List[str] = field(default_factory=list)
     families: dict = field(default_factory=dict)
 
+    # =========================================================================
+    # CCS Oscillator Mode B Parameters (WSE-STD-210 Section 10.2)
+    # =========================================================================
+
+    # Oscillator mode: 0 = Mode A (LUT), 1 = Mode B (Rotator/Harmonic Bank)
+    coeff_osc_mode: int = 0
+
+    # Harmonic count request (Mode B bandlimits at runtime based on pitch)
+    H_request: int = 16
+
+    # PWM parameters
+    pwm_width_q15: int = 16384      # Duty cycle (Q15: 0=0%, 32767≈100%, 16384=50%)
+    pwm_enabled: bool = False       # Enable PWM modulation
+
+    # Hard sync parameters
+    sync_enabled: bool = False      # Enable hard sync
+    sync_ratio_q16: int = 0         # Master/slave frequency ratio (Q16)
+
+    # FM/PM parameters
+    fm_depth_q15: int = 0           # FM modulation depth (Q15)
+
+    # Unison parameters
+    unison_voices: int = 1          # Number of unison voices (1=mono)
+    unison_spread_cents: int = 0    # Unison detune spread in cents
+
     # Legacy compatibility: convert float betas to IDs
     @property
     def tree_a(self) -> float:
