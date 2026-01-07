@@ -72,8 +72,19 @@ for _ in range(len(mode_b_samples)):
     ref_phase = (ref_phase + phase_inc) & PHASE_MASK
 ref_samples = np.array(ref_samples, dtype=np.float64)
 
+# Normalize signals to same RMS for fair comparison
+def normalize(samples):
+    rms = np.sqrt(np.mean(samples ** 2))
+    if rms > 0:
+        return samples * (10000.0 / rms)
+    return samples
+
+mode_a_norm = normalize(mode_a_samples)
+mode_b_norm = normalize(mode_b_samples)
+ref_norm = normalize(ref_samples)
+
 # FFT analysis function
-def analyze_spectrum(samples, name, fundamental_hz=440.0):
+def analyze_spectrum(samples, samples_norm, ref_norm, name, fundamental_hz=440.0):
     N = 8192
     chunk = samples[:N]
     window = np.hanning(N)
@@ -96,28 +107,33 @@ def analyze_spectrum(samples, name, fundamental_hz=440.0):
     peaks.sort(key=lambda x: x[1], reverse=True)
     worst_spur = peaks[0][1] if peaks else -100
 
+    # RMS error after normalization
+    rms_err = np.sqrt(np.mean((samples_norm - ref_norm)**2))
+
     print(f"\n{name}:")
-    print(f"  RMS vs reference: {np.sqrt(np.mean((samples - ref_samples)**2)):.1f}")
+    print(f"  RMS: {np.sqrt(np.mean(samples**2)):.0f}")
+    print(f"  RMS error vs ref (normalized): {rms_err:.1f}")
     print(f"  Worst spur: {worst_spur:.1f} dB")
     if peaks:
         print(f"  Top 5 spurs:")
         for i, (freq, db) in enumerate(peaks[:5]):
             print(f"    {freq:.1f} Hz: {db:.1f} dB")
 
-    return worst_spur
+    return worst_spur, rms_err
 
 print("\n" + "=" * 70)
 print("Spectral Analysis")
 print("=" * 70)
 
-spur_b = analyze_spectrum(mode_b_samples, "Mode B")
-spur_a = analyze_spectrum(mode_a_samples, "Mode A")
-spur_ref = analyze_spectrum(ref_samples, "Reference (direct sine)")
+spur_b, err_b = analyze_spectrum(mode_b_samples, mode_b_norm, ref_norm, "Mode B")
+spur_a, err_a = analyze_spectrum(mode_a_samples, mode_a_norm, ref_norm, "Mode A")
+spur_ref, err_ref = analyze_spectrum(ref_samples, ref_norm, ref_norm, "Reference (direct sine)")
 
 print("\n" + "=" * 70)
 print("Summary")
 print("=" * 70)
-print(f"  Mode A worst spur: {spur_a:.1f} dB")
-print(f"  Mode B worst spur: {spur_b:.1f} dB")
-print(f"  Reference worst spur: {spur_ref:.1f} dB")
+print(f"  Mode A: worst spur {spur_a:.1f} dB, RMS error {err_a:.1f}")
+print(f"  Mode B: worst spur {spur_b:.1f} dB, RMS error {err_b:.1f}")
+print(f"  Reference: worst spur {spur_ref:.1f} dB")
 print(f"\n  Note: Spurs < -60 dB are generally inaudible")
+print(f"  Both modes should have similar RMS error vs reference")

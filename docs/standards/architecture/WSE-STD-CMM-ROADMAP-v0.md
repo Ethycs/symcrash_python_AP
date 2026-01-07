@@ -1,7 +1,42 @@
 # WSE-STD-CMMM-ROADMAP v0
 
-**Roadmap + conformance checklists for “CMMMs that can copy extant synthesizer designs”**
+**Roadmap + conformance checklists for "CMMMs that can copy extant synthesizer designs"**
 Status: **v0 (planning standard)** — normative where marked **MUST/SHOULD/MAY**
+
+**Last Updated**: 2026-01-06
+
+---
+
+## Implementation Status
+
+### CMMM Core Implementation ✅ COMPLETE
+
+The CMMM (Control + Mode + Memory Manager) system is fully implemented:
+
+| Component | File | Status |
+|-----------|------|--------|
+| Regime State Machine | `voice_engine.py` | ✅ 7 regimes with hysteresis |
+| Control Surface | `cockpit_engine.py` | ✅ MIDI/pot mapping, slew filtering |
+| VoiceFrame Emitter | `voiceframe_emitter.py` | ✅ 136-byte wire format |
+| Budget System | `regime_budgets.py` | ✅ Per-regime budgets |
+| Tail Modes | `tail_modes.py` | ✅ 4 tail configurations |
+| Degradation Ladder | `degradation_ladder.py` | ✅ 7-rung deterministic ladder |
+| Operator Library | `symbol_engine.py` | ✅ 24 operators (IDs 0-23) |
+
+### Phase Status
+
+| Phase | Status | Notes |
+|-------|--------|-------|
+| Phase 0 — Substrate | ✅ Complete | ABI/VM/budgets locked |
+| Phase 1 — USS/Preset | 🔲 Not started | |
+| Phase 2 — SUBTRACTIVE | 🔲 Not started | |
+| Phase 3 — FM/PM | 🔲 Not started | |
+| Phase 4+ | 🔲 Not started | |
+
+### Related Systems
+
+- **CCS Carrier** (separate from CMMM): Mode A + Mode B oscillators working. See `CCS-STATUS.md`.
+- **VM Executor**: Polyphase IDWPT synthesis operational.
 
 ---
 
@@ -68,15 +103,15 @@ Every synthesis family you add MUST come with:
 
 ## 3. Phase plan overview (what to build, in what order)
 
-### Phase 0 — Substrate freeze (target: already done)
+### Phase 0 — Substrate freeze ✅ COMPLETE
 
 **Goal:** lock ABI/VM/budgets/determinism.
 
 Exit criteria:
 
-* WSE-STD-020 v1 stable
-* WSE-STD-VM-HYBRID v0 stable
-* Golden + stress traces pass and are audited
+* WSE-STD-020 v1 stable ✅
+* WSE-STD-VM-HYBRID v0 stable ✅
+* Golden + stress traces pass and are audited ✅
 
 ---
 

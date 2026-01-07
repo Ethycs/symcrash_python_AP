@@ -186,7 +186,7 @@ class MaterialParams:
     
     def slew_from(self, pf: ParamFrame, rate: int = 256):
         """Slew toward ParamFrame values."""
-        from fixed import slew_q15
+        from .fixed import slew_q15
         self.drive_q15 = slew_q15(self.drive_q15, pf.drive_q15, rate)
         self.tone_q15 = slew_q15(self.tone_q15, pf.tone_q15, rate)
         self.bias_q15 = slew_q15(self.bias_q15, pf.bias_q15, rate)
