@@ -155,6 +155,15 @@ class VMState:
     # Oscillator mode selection (WSE-STD-210 Section 10.1)
     osc_mode: int = OSC_MODE_A  # Default to Mode A (LUT-based)
 
+    # -------------------------------------------------------------------------
+    # FM Feedback Buffer (Phase 3 - WSE-STD-210 Section 8.3)
+    # -------------------------------------------------------------------------
+    # z⁻¹ block-delayed modulator signal for FM synthesis.
+    # Extracted from coeff_state after backbone operators, used next block.
+    prev_fm_mod_buffer: np.ndarray = field(
+        default_factory=lambda: np.zeros(8, dtype=np.int16)
+    )
+
     @property
     def mode_b_state(self) -> 'ModeBState':
         """Get or create Mode B state (lazy init to avoid circular import)."""
@@ -276,6 +285,9 @@ class VMState:
         if self._mode_b_state is not None:
             self._mode_b_state.reset(note=note, phase_inc=phase_inc)
 
+        # Reset FM feedback buffer (Phase 3)
+        self.prev_fm_mod_buffer.fill(0)
+
     def trigger_release(self) -> None:
         """Trigger note release (enter release phase)."""
         if self.envelope.phase in (EnvelopePhase.ATTACK, EnvelopePhase.DECAY, EnvelopePhase.SUSTAIN):
@@ -329,6 +341,8 @@ class VMState:
             'ccs_note': self.ccs_state.note,
             'ccs_wave_id': self.ccs_state.wave_id,
             'use_coeff_osc': self.use_coeff_osc,
+            # FM feedback buffer (Phase 3)
+            'prev_fm_mod_buffer': self.prev_fm_mod_buffer.tolist(),
         }
 
     @classmethod
@@ -380,6 +394,9 @@ class VMState:
             state.ccs_state.note = snapshot['ccs_note']
             state.ccs_state.wave_id = snapshot['ccs_wave_id']
         state.use_coeff_osc = snapshot.get('use_coeff_osc', True)
+        # Restore FM feedback buffer (Phase 3)
+        if 'prev_fm_mod_buffer' in snapshot:
+            state.prev_fm_mod_buffer = np.array(snapshot['prev_fm_mod_buffer'], dtype=np.int16)
         return state
 
 

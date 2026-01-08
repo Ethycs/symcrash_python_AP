@@ -572,6 +572,65 @@ def compute_bandlimit_H(freq_hz: float, sample_rate: int = SAMPLE_RATE) -> int:
 
 
 # =============================================================================
+# FM MODULATOR EXTRACTION (Phase 3)
+# =============================================================================
+
+def extract_modulator_signal(
+    coeff_state: np.ndarray,
+    method: int = 0
+) -> np.ndarray:
+    """
+    Extract lane-rate modulator signal from coefficient state.
+
+    This function downsamples the coefficient state to K=8 modulator samples
+    for use as FM feedback in the next block.
+
+    Per WSE-STD-210 Section 8.3:
+    - z⁻¹ block delay: modulator extracted after operators, used next block
+    - Lane-rate: one modulator sample per k-slot
+
+    Args:
+        coeff_state: [512] Q15 coefficients (64 leaves × 8 k-slots)
+        method: Extraction method:
+            0 = Average first 8 leaves (low-frequency content)
+            1 = DC bin only (leaf 0)
+            2 = Energy proxy (sum of squares)
+
+    Returns:
+        fm_mod_buffer: [8] Q15 modulator samples (one per k-slot)
+    """
+    fm_mod = np.zeros(VM_K, dtype=np.int16)
+
+    if method == 0:
+        # Average first 8 leaves (low-frequency content)
+        # This captures the fundamental and first few harmonics
+        for k in range(VM_K):
+            acc = 0
+            for leaf in range(8):
+                acc += int(coeff_state[leaf * VM_K + k])
+            # Divide by 8 with saturation
+            fm_mod[k] = SAT16(acc >> 3)
+
+    elif method == 1:
+        # DC bin only (leaf 0) — simplest, fastest
+        for k in range(VM_K):
+            fm_mod[k] = coeff_state[k]
+
+    elif method == 2:
+        # Energy proxy (sum of squares, normalized)
+        # Useful for envelope-following modulation
+        for k in range(VM_K):
+            energy = 0
+            for leaf in range(NUM_LEAVES):
+                val = int(coeff_state[leaf * VM_K + k])
+                energy += (val * val) >> 15
+            # Clamp to Q15 range
+            fm_mod[k] = SAT16(min(32767, energy >> 6))
+
+    return fm_mod
+
+
+# =============================================================================
 # EXPORTS
 # =============================================================================
 
@@ -597,4 +656,6 @@ __all__ = [
     'mode_b_advance_phase',
     'compute_pwm_weights',
     'compute_bandlimit_H',
+    # FM modulator extraction (Phase 3)
+    'extract_modulator_signal',
 ]

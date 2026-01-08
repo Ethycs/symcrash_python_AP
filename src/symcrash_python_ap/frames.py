@@ -130,6 +130,7 @@ class VoiceFrame:
 
     # FM/PM parameters
     fm_depth_q15: int = 0           # FM modulation depth (Q15)
+    fm_source: int = 0              # FM modulator source (0=off, 1=feedback, 2=lfo)
 
     # Unison parameters
     unison_voices: int = 1          # Number of unison voices (1=mono)

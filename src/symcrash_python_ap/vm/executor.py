@@ -10,7 +10,7 @@ from typing import Tuple, Optional, TYPE_CHECKING
 import numpy as np
 
 from .state import VMState, OSC_MODE_A, OSC_MODE_B
-from .decode import DecodedPlan, CarrierRole, decode_frame
+from .decode import DecodedPlan, CarrierRole, decode_frame, FM_SOURCE_FEEDBACK
 from .tables import Tables, DEFAULT_TABLES, BLOCK_SAMPLES
 from .lanes import (
     lane_carrier_render,
@@ -121,7 +121,8 @@ def vm_step_block(
         # Update Mode B state if using rotator (always check for first-time init)
         if osc_mode == OSC_MODE_B:
             mb_state = state.mode_b_state
-            if pitch_changed or mb_state.note != params.note:
+            # Reset if pitch changed, note differs, or first-time init (phase_inc=0)
+            if pitch_changed or mb_state.note != params.note or mb_state.phase_inc == 0:
                 mb_state.reset(note=params.note, phase_inc=params.phase_inc)
                 mb_state.pwm_width_q15 = params.pwm_width_q15
                 mb_state.pwm_enabled = params.pwm_enabled
@@ -152,7 +153,15 @@ def vm_step_block(
             if params.pwm_enabled:
                 state.mode_b_state.set_pwm_weights(params.pwm_width_q15)
 
-            # Generate coefficients using harmonic bank
+            # === FM MODULATOR WIRING (Phase 3 - WSE-STD-210 Section 8.3) ===
+            # Wire previous block's modulator feedback to carrier.
+            # z⁻¹ block delay ensures deterministic, bounded-runtime feedback.
+            if params.fm_depth_q15 != 0 and params.fm_source == FM_SOURCE_FEEDBACK:
+                state.mode_b_state.fm_mod_buffer = state.prev_fm_mod_buffer
+            else:
+                state.mode_b_state.fm_mod_buffer = None
+
+            # Generate coefficients using harmonic bank (with FM if active)
             mode_b_generate_coeffs(state.mode_b_state, basis, carrier_512)
 
             # Advance Mode B phase for next block
@@ -190,6 +199,15 @@ def vm_step_block(
         # Steps 2-5: Backbone lanes (operators modify carrier)
         for instr in cfg.backbone_instrs:
             dispatch_coeff_op(state, instr, cfg.mask_u32)
+
+        # === FM MODULATOR EXTRACTION (Phase 3 - WSE-STD-210 Section 8.3) ===
+        # Extract modulator from operator output for NEXT block's FM.
+        # This creates z⁻¹ block-delayed feedback loop.
+        if osc_mode == OSC_MODE_B and params.fm_source == FM_SOURCE_FEEDBACK:
+            from .harmonic_bank import extract_modulator_signal
+            state.prev_fm_mod_buffer = extract_modulator_signal(
+                state.coeff_state, method=0
+            )
 
         # Step 6: LANE_TAIL (safety constraints)
         lane_tail(state, cfg)

@@ -95,8 +95,15 @@ class CoeffOscParams:
     pwm_enabled: bool = False     # Enable PWM modulation
     sync_enabled: bool = False    # Enable hard sync
     fm_depth_q15: int = 0         # FM modulation depth (Q15)
+    fm_source: int = 0            # FM modulator source (0=off, 1=feedback, 2=lfo)
     unison_voices: int = 1        # Number of unison voices (1=mono)
     unison_spread_cents: int = 0  # Unison detune spread in cents
+
+
+# FM modulator source constants (Phase 3)
+FM_SOURCE_OFF = 0       # No FM modulation
+FM_SOURCE_FEEDBACK = 1  # Operator feedback (DX-style)
+FM_SOURCE_LFO = 2       # LFO (future)
 
 
 # =============================================================================
@@ -285,6 +292,7 @@ def decode_frame(
     pwm_enabled = getattr(frame, 'pwm_enabled', False)
     sync_enabled = getattr(frame, 'sync_enabled', False)
     fm_depth_q15 = getattr(frame, 'fm_depth_q15', 0) or 0
+    fm_source = getattr(frame, 'fm_source', 0) or 0
     unison_voices = getattr(frame, 'unison_voices', 1) or 1
     unison_spread_cents = getattr(frame, 'unison_spread_cents', 0) or 0
 
@@ -301,6 +309,7 @@ def decode_frame(
         pwm_enabled=pwm_enabled,
         sync_enabled=sync_enabled,
         fm_depth_q15=fm_depth_q15,
+        fm_source=fm_source,
         unison_voices=unison_voices,
         unison_spread_cents=unison_spread_cents,
     )
@@ -447,4 +456,8 @@ __all__ = [
     'CoeffOscParams',
     'DecodedPlan',
     'decode_frame',
+    # FM modulator source constants (Phase 3)
+    'FM_SOURCE_OFF',
+    'FM_SOURCE_FEEDBACK',
+    'FM_SOURCE_LFO',
 ]
