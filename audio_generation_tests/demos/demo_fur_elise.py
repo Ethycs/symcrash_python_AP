@@ -25,7 +25,7 @@ from test_config import FS, BLOCK_SIZE, BLOCKS_PER_SEC
 from symcrash_python_ap.safety.unified_renderer import CarrierLiftPipeline
 from symcrash_python_ap.frames import VoiceFrame
 from symcrash_python_ap.audio_io import AudioWriter
-from symcrash_python_ap.presets import list_presets, load_preset
+from symcrash_python_ap.library.preset_data import list_presets, load_preset
 from symcrash_python_ap.wavelet.harmonic_injector import WaveType, get_partial_amplitude
 
 # Constants

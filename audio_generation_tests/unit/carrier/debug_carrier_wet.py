@@ -74,7 +74,7 @@ print("\n" + "=" * 60)
 print("BRASS STAB PRESET TEST")
 print("=" * 60)
 
-from symcrash_python_ap.presets import load_preset
+from symcrash_python_ap.library.preset_data import load_preset
 from symcrash_python_ap.wavelet.harmonic_injector import WaveType, get_partial_amplitude
 
 ir = load_preset("brass_stab")

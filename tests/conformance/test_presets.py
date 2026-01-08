@@ -11,7 +11,7 @@ Tests for presets, editor operations, and tower completion.
 import pytest
 pytest.skip("Legacy test - preset module refactored, tower API removed", allow_module_level=True)
 
-from symcrash_python_ap.presets import (
+from symcrash_python_ap.library.preset_model import (
     # Constants
     PRESET_MAGIC,
     SAFE_OPERATOR_SET,

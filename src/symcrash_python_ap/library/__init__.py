@@ -109,6 +109,47 @@ from .preset_library import (
     PresetLibraryV0,
 )
 
+# Preset Compiler (WSE-STD-PRESET v0)
+from .preset_compiler import (
+    Q15_ONE,
+    BackboneOp,
+    CarrierConfig,
+    MaterialConfig,
+    LatchDefaults,
+    CompiledPreset,
+    PresetCompileError,
+    PresetCompiler,
+)
+
+# Preset Bundle
+from .preset_bundle import (
+    ProgramPreset,
+)
+
+# Preset Data (Classic L0 Presets)
+from .preset_data import (
+    list_presets,
+    load_preset,
+    get_all_presets,
+    get_preset_info,
+    PRESET_DIR,
+)
+
+# Preset Model (WSE-STD-070)
+from .preset_model import (
+    TowerLevel,
+    PresetHeader,
+    L0PatchLayer,
+    L1FamilyLayer,
+    L2InstrumentLayer,
+    L3CockpitLayer,
+    L4ForgeLayer,
+    L5LabLayer,
+    PresetBody,
+    EditorOpType,
+    EditorOp,
+)
+
 
 __all__ = [
     # Capsule model
@@ -175,4 +216,37 @@ __all__ = [
     'Query',
     'ResolutionSelector',
     'PresetLibraryV0',
+
+    # Preset Compiler (WSE-STD-PRESET v0)
+    'Q15_ONE',
+    'BackboneOp',
+    'CarrierConfig',
+    'MaterialConfig',
+    'LatchDefaults',
+    'CompiledPreset',
+    'PresetCompileError',
+    'PresetCompiler',
+
+    # Preset Bundle
+    'ProgramPreset',
+
+    # Preset Data (Classic L0 Presets)
+    'list_presets',
+    'load_preset',
+    'get_all_presets',
+    'get_preset_info',
+    'PRESET_DIR',
+
+    # Preset Model (WSE-STD-070)
+    'TowerLevel',
+    'PresetHeader',
+    'L0PatchLayer',
+    'L1FamilyLayer',
+    'L2InstrumentLayer',
+    'L3CockpitLayer',
+    'L4ForgeLayer',
+    'L5LabLayer',
+    'PresetBody',
+    'EditorOpType',
+    'EditorOp',
 ]

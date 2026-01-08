@@ -37,7 +37,7 @@ from dataclasses import dataclass, field
 from typing import Optional, List
 import math
 
-from .preset_compiler import CompiledPreset, Q15_ONE
+from .library.preset_compiler import CompiledPreset, Q15_ONE
 from .envelope_scheduler import EnvelopeScheduler, ADSRSpec
 from .frames import VoiceFrame
 from .control_frame import ControlFrame, EventType

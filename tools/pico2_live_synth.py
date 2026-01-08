@@ -112,7 +112,7 @@ except ImportError:
     print("Warning: sounddevice not available, audio output disabled")
 
 from symcrash_python_ap.cockpit_engine import CockpitEngine
-from symcrash_python_ap.preset_compiler import PresetCompiler
+from symcrash_python_ap.library.preset_compiler import PresetCompiler
 from symcrash_python_ap.voiceframe_emitter import VoiceFrameEmitter
 from symcrash_python_ap.safety.unified_renderer import UnifiedOutputStage
 from symcrash_python_ap.frames import VoiceFrame
@@ -169,7 +169,7 @@ class Pico2LiveSynth:
             preset = compiler.compile_file(preset_path)
         else:
             # Use a simple default preset (create in-memory)
-            from symcrash_python_ap.preset_compiler import MaterialConfig, LatchDefaults
+            from symcrash_python_ap.library.preset_compiler import MaterialConfig, LatchDefaults
             from symcrash_python_ap.envelope_scheduler import ADSRSpec
             from dataclasses import dataclass, field as dc_field
 

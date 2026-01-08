@@ -1,7 +1,7 @@
 """
 Test preset loading and validation.
 """
-from symcrash_python_ap.presets import list_presets, load_preset, get_preset_info
+from symcrash_python_ap.library.preset_data import list_presets, load_preset, get_preset_info
 
 # List all presets
 print('Available presets:')

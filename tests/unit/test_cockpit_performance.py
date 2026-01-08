@@ -15,7 +15,7 @@ from symcrash_python_ap.cockpit_engine import CockpitEngine
 from symcrash_python_ap.control_registry import ControlID
 from symcrash_python_ap.voiceframe_emitter import VoiceFrameEmitter
 from symcrash_python_ap.envelope_scheduler import ADSRSpec
-from symcrash_python_ap.preset_compiler import MaterialConfig, LatchDefaults
+from symcrash_python_ap.library.preset_compiler import MaterialConfig, LatchDefaults
 
 
 @dataclass

@@ -134,11 +134,13 @@ def demo_mode_b_fm():
     state = VMState.create(voice_id=0)
     state.reset_for_note_on(note=60)
 
+    # Use higher FM depth for more audible effect
+    # Full depth (32767) = ~1 radian modulation = rich FM spectrum
     frame = VoiceFrame(
         note=60,
         coeff_osc_mode=1,  # MODE_B
         H_request=8,
-        fm_depth_q15=16384,  # 50% FM depth
+        fm_depth_q15=32767,  # 100% FM depth for maximum effect
         fm_source=1,  # FM_SOURCE_FEEDBACK
     )
 
@@ -148,7 +150,7 @@ def demo_mode_b_fm():
 
     filepath = save_demo("03_mode_b_fm_feedback", samples)
     print(f"  Mode: B + FM Feedback")
-    print(f"  FM Depth: 50%")
+    print(f"  FM Depth: 100% (maximum modulation for audible effect)")
     print(f"  Note: C4 (MIDI 60)")
     print(f"  Duration: {duration_sec}s")
     print(f"  Saved: {filepath}")
@@ -369,21 +371,21 @@ def demo_fm_bell():
     # Start with high FM depth, let it ring
     all_samples = []
 
-    # Attack with high FM
+    # Attack with maximum FM for bright bell strike
     frame_attack = VoiceFrame(
         note=72,
         coeff_osc_mode=1,  # MODE_B
         H_request=6,  # Fewer harmonics for cleaner FM
-        fm_depth_q15=24576,  # 75% FM depth (bright attack)
+        fm_depth_q15=32767,  # 100% FM depth (bright attack)
         fm_source=1,  # FM_SOURCE_FEEDBACK
     )
 
-    # Sustain with moderate FM
+    # Sustain with moderate FM for ringing decay
     frame_sustain = VoiceFrame(
         note=72,
         coeff_osc_mode=1,
         H_request=6,
-        fm_depth_q15=8192,  # 25% FM depth (mellow sustain)
+        fm_depth_q15=16384,  # 50% FM depth (ringing sustain)
         fm_source=1,
     )
 
@@ -402,7 +404,7 @@ def demo_fm_bell():
     all_samples = np.array(all_samples, dtype=np.int16)
     filepath = save_demo("08_fm_bell", all_samples)
     print(f"  Mode: B + FM Feedback")
-    print(f"  FM Depth: 75% attack -> 25% sustain")
+    print(f"  FM Depth: 100% attack -> 50% sustain")
     print(f"  Note: C5 (MIDI 72)")
     print(f"  Duration: 2.1s")
     print(f"  Saved: {filepath}")

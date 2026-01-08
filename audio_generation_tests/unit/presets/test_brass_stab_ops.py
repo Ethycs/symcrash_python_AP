@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
 
-from symcrash_python_ap.presets import load_preset
+from symcrash_python_ap.library.preset_data import load_preset
 from symcrash_python_ap.operator_library import (
     build_operator_library, get_operator_id, OP_NAME_TO_ID
 )

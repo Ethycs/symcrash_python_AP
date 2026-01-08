@@ -7,7 +7,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
 from symcrash_python_ap.safety.unified_renderer import UnifiedOutputStage
 from symcrash_python_ap.frames import VoiceFrame
 from symcrash_python_ap.audio_io import AudioWriter
-from symcrash_python_ap.presets import load_preset
+from symcrash_python_ap.library.preset_data import load_preset
 from symcrash_python_ap.wavelet.harmonic_injector import WaveType, get_partial_amplitude
 import numpy as np
 

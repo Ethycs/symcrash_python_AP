@@ -265,8 +265,14 @@ def read_sample_block(state: SampleOscState, num_samples: int = BLOCK_SIZE) -> n
                 break
 
         if pos_int >= buf_len - 1:
-            # At end of buffer
-            output[i] = state.buffer[min(pos_int, buf_len - 1)]
+            # At or past end of buffer - interpolate toward zero to avoid click
+            if pos_int >= buf_len:
+                output[i] = 0
+            else:
+                # Interpolate last sample toward zero
+                s0 = int(state.buffer[buf_len - 1])
+                interp = s0 - ((s0 * pos_frac) >> 16)
+                output[i] = np.clip(interp, -32768, 32767)
         else:
             # Linear interpolation between samples
             s0 = int(state.buffer[pos_int])

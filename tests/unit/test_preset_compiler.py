@@ -16,7 +16,7 @@ from symcrash_python_ap.envelope_scheduler import (
     EnvelopeScheduler, ADSRSpec, EnvelopePhase, ms_to_blocks,
     BLOCKS_PER_SECOND, Q15_ONE
 )
-from symcrash_python_ap.preset_compiler import (
+from symcrash_python_ap.library.preset_compiler import (
     PresetCompiler, CompiledPreset, BackboneOp, PresetCompileError
 )
 from symcrash_python_ap.voiceframe_emitter import (

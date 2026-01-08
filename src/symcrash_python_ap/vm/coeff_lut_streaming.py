@@ -372,14 +372,15 @@ class SubbandState:
             # Full replacement
             np.copyto(self.state, c_base)
         elif base_mix_q15 > 0:
-            # Blend
+            # Blend using proper Q15 scaling with round-to-nearest
+            from ..fixed import RSHIFT_RNE
             for l in range(NUM_LEAVES):
                 for k in range(lut.K):
                     c_s = int(self.state[l, k])
                     c_b = int(c_base[l, k])
-                    # c_out = c_state + (c_base - c_state) * mix / 32768
+                    # c_out = c_state + (c_base - c_state) * mix >> 15
                     diff = c_b - c_s
-                    blended = c_s + (diff * base_mix_q15) // 32768
+                    blended = c_s + RSHIFT_RNE(diff * base_mix_q15, 15)
                     self.state[l, k] = int(np.clip(blended, -32768, 32767))
 
     def advance_phase(self, samples: int = BLOCK_SIZE) -> None:

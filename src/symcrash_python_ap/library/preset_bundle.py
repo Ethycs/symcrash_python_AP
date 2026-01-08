@@ -25,7 +25,7 @@ from dataclasses import dataclass, field, asdict
 from typing import Dict, Optional, List
 from pathlib import Path
 
-from .voice_engine_registry import Persistence, get_registry
+from ..voice.voice_engine_registry import Persistence, get_registry
 
 
 # =============================================================================
