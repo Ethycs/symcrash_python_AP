@@ -127,6 +127,10 @@ def vm_step_block(
                 mb_state.pwm_enabled = params.pwm_enabled
                 mb_state.H_active = min(params.H_request, mb_state.H_bandlimit)
 
+            # Update FM depth from VoiceFrame (modulator signal comes from fm_mod_buffer)
+            # Phase 3 FM/PM will provide the modulator via operator graph
+            mb_state.fm_depth_q15 = params.fm_depth_q15
+
         if state.ccs_state.phase_inc != params.phase_inc:
             state.ccs_state.set_pitch(params.phase_inc, slew_blocks=8)
             if osc_mode == OSC_MODE_B:

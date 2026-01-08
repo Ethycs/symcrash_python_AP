@@ -9,34 +9,42 @@ Status: **v0 (planning standard)** — normative where marked **MUST/SHOULD/MAY*
 
 ## Implementation Status
 
-### CMMM Core Implementation ✅ COMPLETE
+### Voice Engine (CMMM) ✅ COMPLETE
 
-The CMMM (Control + Mode + Memory Manager) system is fully implemented:
+The CMMM (Controlled Semi-Markov Mealy Machine) voice engine is fully implemented in `voice_engine.py`:
 
-| Component | File | Status |
-|-----------|------|--------|
-| Regime State Machine | `voice_engine.py` | ✅ 7 regimes with hysteresis |
-| Control Surface | `cockpit_engine.py` | ✅ MIDI/pot mapping, slew filtering |
-| VoiceFrame Emitter | `voiceframe_emitter.py` | ✅ 136-byte wire format |
-| Budget System | `regime_budgets.py` | ✅ Per-regime budgets |
-| Tail Modes | `tail_modes.py` | ✅ 4 tail configurations |
-| Degradation Ladder | `degradation_ladder.py` | ✅ 7-rung deterministic ladder |
-| Operator Library | `symbol_engine.py` | ✅ 24 operators (IDs 0-23) |
+- 7 regimes (R0-R6) with hysteresis and dwell rules
+- Deterministic xorshift32 RNG
+- Tower levels (L0-L4) for hierarchical coefficient projection
+- Degradation levels (NONE → LIGHT → HEAVY → EMERGENCY)
+- GestureBasis → IntentVector → FamilyWeights pipeline
+- VoiceFrame ABI output
 
 ### Phase Status
 
 | Phase | Status | Notes |
 |-------|--------|-------|
-| Phase 0 — Substrate | ✅ Complete | ABI/VM/budgets locked |
+| Phase 0 — Substrate | ✅ Complete | ABI/VM/budgets/voice engine locked |
 | Phase 1 — USS/Preset | 🔲 Not started | |
-| Phase 2 — SUBTRACTIVE | 🔲 Not started | |
-| Phase 3 — FM/PM | 🔲 Not started | |
+| Phase 2 — SUBTRACTIVE | 🟡 Partial | Carrier done (CCS Mode A/B), filter/ADSR/mod not started |
+| Phase 3 — FM/PM | 🟡 Partial | Mode B has FM/PM hooks, profiles not started |
 | Phase 4+ | 🔲 Not started | |
+
+### Integration Bindings (per CMMM-addenda)
+
+| Binding | Status | Notes |
+|---------|--------|-------|
+| payload_type 0x30 (NODEMASK_SET) | 🔲 Not wired | Pattern table exists, event lane decode needed |
+| payload_type 0x31 (TAILMODE_SET) | 🔲 Not wired | Tail modes defined, event lane decode needed |
+| Ramp enforcement | 🟡 Partial | Envelope ramps work; tree/mask crossfade needs latch |
 
 ### Related Systems
 
-- **CCS Carrier** (separate from CMMM): Mode A + Mode B oscillators working. See `CCS-STATUS.md`.
-- **VM Executor**: Polyphase IDWPT synthesis operational.
+- **CCS Carrier**: Mode A + Mode B oscillators working. See `CCS-STATUS.md`.
+- **Budgets**: `regime_budgets.py`, `tail_modes.py`, `degradation_ladder.py` ✅
+- **Degradation Ladder**: Full deterministic degradation (events→permutes→lowrank→K→tail→emergency) ✅
+- **VoiceFrame Emitter**: `voiceframe_emitter.py` - Preset→VoiceFrame with envelope/beta ✅
+- **VM Executor**: Polyphase IDWPT synthesis operational ✅
 
 ---
 

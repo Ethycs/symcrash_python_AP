@@ -391,10 +391,15 @@ def mode_b_generate_coeffs(
     Generate coefficient frame using Mode B2 harmonic bank.
 
     Per WSE-STD-210 Section 3.2.1, for each lane k:
-    1. Compute lane phase: φ_k = phase + k*phase_inc
+    1. Compute lane phase: φ_k = phase + k*phase_inc + FM_mod
     2. Compute sin(hφ_k), cos(hφ_k) via SineCore
     3. Modulate basis frames with phase to get time-varying coefficients:
        coeff = a_h * (cos(hφ)*Usin + sin(hφ)*Ucos) + b_h * (cos(hφ)*Ucos - sin(hφ)*Usin)
+
+    FM/PM Support (WSE-STD-210 Section 8.3):
+    - fm_mod_buffer[k] provides audio-rate modulator samples per k-slot
+    - fm_depth_q15 controls modulation index
+    - Phase modulation: φ_mod = fm_depth × modulator_sample
 
     The identity: a*sin(hθ+hφ) = a*(sin(hθ)cos(hφ) + cos(hθ)sin(hφ))
     where θ is basis phase and φ is oscillator phase.
@@ -402,7 +407,7 @@ def mode_b_generate_coeffs(
     Since basis Usin/Ucos reconstruct sin(hθ)/cos(hθ), we modulate with phase φ.
 
     Args:
-        state: ModeBState with phase, weights, etc.
+        state: ModeBState with phase, weights, fm_depth_q15, fm_mod_buffer
         basis: HarmonicBasisFrames for current pitch anchor
         output_coeffs: Output array [512] to fill with coefficients
     """
@@ -412,13 +417,30 @@ def mode_b_generate_coeffs(
     # Convert weights to Python int to avoid overflow
     dc_q15 = int(weights.dc_q15)
 
-    # Use same phase for all k-slots. The time-shift is encoded in the basis
-    # frames via time-domain rolling. Each k-slot's basis Usin_k was generated
-    # as FWPT(roll(sin_block, k)), so IDWPT(Usin_k) gives the rolled signal.
-    # Phase modulation with phi shifts the entire signal by phi.
-    phi = state.phase
+    # Base phase for this block
+    base_phi = state.phase
+
+    # FM/PM modulation: get modulator samples if available
+    fm_active = state.fm_depth_q15 != 0 and state.fm_mod_buffer is not None
 
     for k in range(VM_K):
+        # Compute phase for this k-slot with optional FM modulation
+        # Per WSE-STD-210 Section 8.3: φ_k = phase + FM_mod
+        # Lane-rate update: sample modulator at first output of each lane
+        phi = base_phi
+
+        if fm_active:
+            # Get modulator sample for this k-slot
+            # fm_mod_buffer is [K] samples, one per k-slot (lane-rate)
+            mod_sample = int(state.fm_mod_buffer[k]) if k < len(state.fm_mod_buffer) else 0
+
+            # Phase modulation: scale modulator by depth
+            # fm_depth_q15 = modulation index in Q15 (32767 = ~1 radian)
+            # Phase delta = depth × mod_sample (both Q15)
+            # Convert to Q32 phase: multiply by 2^17 to scale Q15×Q15 → Q32
+            phase_mod = RSHIFT_RNE(state.fm_depth_q15 * mod_sample, 15 - 17)  # → Q32
+            phi = (phi + phase_mod) & PHASE_MASK
+
         # Start with DC contribution
         for leaf in range(NUM_LEAVES):
             idx = leaf * VM_K + k

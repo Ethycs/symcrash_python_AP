@@ -1,13 +1,13 @@
 # CCS Implementation Status
 
-**Last Updated**: 2026-01-06
-**Status**: ✅ FUNCTIONAL (Mode A + Mode B)
+**Last Updated**: 2026-01-07
+**Status**: ✅ FUNCTIONAL (Mode A + Mode B + FM/PM hooks)
 
 ---
 
 ## Current State
 
-### Verified Test Results (2026-01-06)
+### Verified Test Results (2026-01-07)
 
 ```
 Mode A (LUT-based):
@@ -48,6 +48,8 @@ Reference (direct sine):
 | Harmonic weights for waveforms | 3.2.1 | ✅ | Sine, saw, square, triangle, PWM supported |
 | Bandlimit calculation | 7.1 | ✅ | `compute_bandlimit_H()` prevents aliasing |
 | Block-rate spur rejection | - | ✅ | Spurs at -100 dB (noise floor) |
+| FM/PM depth wiring | 8.3 | ✅ | `fm_depth_q15` flows VoiceFrame → executor → Mode B |
+| FM modulator source | 8.3 | 🔲 | Phase 3 - requires operator graph (DX-style FM) |
 
 ---
 

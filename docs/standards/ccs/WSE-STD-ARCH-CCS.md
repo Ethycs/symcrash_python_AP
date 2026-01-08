@@ -1,21 +1,26 @@
 # WSE-ARCH-v0: Carrier-Coefficient Synthesis (No Forward Pass in Voice Path)
 
-## Implementation Status (2026-01-03)
+## Implementation Status (2026-01-07)
 
 | Item | Status | Notes |
 |------|--------|-------|
 | **A1) Remove FWPT from voice path** | ✅ Complete | CCS path uses `CoeffOsc` to generate coefficients directly from phase |
 | **A2) FWPT for conditioning only** | ✅ Complete | `fwpt_jit()` and `idwpt_jit()` separated in `fast_lifting.py` |
 | **A3) No resets in wavelet engine** | ✅ Complete | Phase-continuous operation verified |
-| **A4) Tail predicate + metrics** | ⏳ Partial | Basic clamps exist, full E/P/ΔE/ΔP not yet |
+| **A4) Tail predicate + metrics** | ⏳ Deferred | Basic clamps exist; full E/P/ΔE/ΔP deferred |
 | **A5) Comb elimination test** | ✅ Complete | CCS produces identical output regardless of ETA |
+| **Mode A (LUT-based)** | ✅ Complete | Polyphase IDWPT, -100 dB spurs, correct frequencies |
+| **Mode B (Harmonic Bank)** | ✅ Complete | 25/25 compliance tests, PWM working |
+| **FM/PM depth wiring** | ✅ Complete | `fm_depth_q15` flows VoiceFrame → executor → Mode B state |
+| **FM modulator source** | 🔲 Phase 3 | Requires operator graph (DX-style multi-operator FM) |
 
 ### Key Implementation Details
 
-**CCS Voice Path** (`src/symcrash_python_ap/vm/lanes.py`):
-- `lane_ccs_render()` generates coefficients via `CoeffOsc` lookup from phase
-- `lane_carrier_render()` generates carrier audio (used for carrier-only mode)
-- Phase is continuous across blocks (no resets)
+**CCS Voice Path** (`src/symcrash_python_ap/vm/lanes.py`, `executor.py`):
+- `lane_ccs_render()` generates coefficients via polyphase IDWPT
+- Mode A: `ccs_generate_coeffs_polyphase()` uses pre-computed LUT lookup
+- Mode B: `mode_b_generate_coeffs()` uses harmonic bank with runtime sin/cos
+- Phase is continuous across blocks (no resets, no crossfade needed)
 
 **Separated Transforms** (`src/symcrash_python_ap/wavelet/fast_lifting.py`):
 - `fwpt_jit(samples)` → Forward transform for analysis (not in voice path)
