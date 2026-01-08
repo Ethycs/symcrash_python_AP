@@ -37,7 +37,8 @@ from ..frames import ParamFrame, VoiceFrame
 # Import operator library
 from ..operator_library import (
     build_operator_library, COEFF_LEN, BAND_SLICES, NUM_BANDS,
-    OpType, Operator, from_q15, to_q15
+    OpType, Operator, from_q15, to_q15,
+    EmissionGroup, is_op_allowed,
 )
 
 
@@ -105,6 +106,21 @@ class EventPayload:
     seed: int = 0               # Combined with voice_id for deterministic RNG
     param0_q8: int = 0x80       # Lane-specific param (Q8.8)
     param1_q8: int = 0x80       # Lane-specific param (Q8.8)
+
+
+@dataclass
+class EmissionFlags:
+    """
+    Per-voice emission flags from scheduler.
+
+    Controls which operator groups execute based on scheduler throttling decisions.
+    Per Scheduler Spec v01 Section 7:
+    - TAIL/BASE always run for serviced voices
+    - MID only runs when mid_due=True
+    - TOP only runs when top_due=True
+    """
+    mid_due: bool = True   # MID emission group allowed this block
+    top_due: bool = True   # TOP emission group allowed this block
 
 
 @dataclass
@@ -645,59 +661,80 @@ class SymbolExecutor:
 
     def apply_chain(self, c: List[int], inp: ExecutorInput,
                     program: InstrumentProgram,
-                    enable_mask: int, w_eff: List[int]) -> List[int]:
+                    enable_mask: int, w_eff: List[int],
+                    emission_flags: Optional[EmissionFlags] = None) -> List[int]:
         """
-        Apply canonical operator chain (Stages 0-9).
+        Apply canonical operator chain (Stages 0-9) with emission group filtering.
 
         Fixed operator order for predictable runtime.
+        Emission flags gate MID/TOP groups per Scheduler Spec v01 Section 7.
+
+        Args:
+            c: Coefficient state
+            inp: ExecutorInput with voice params
+            program: InstrumentProgram configuration
+            enable_mask: Family enable bitmask
+            w_eff: Effective family weights
+            emission_flags: Optional EmissionFlags from scheduler (default: all enabled)
+
+        Returns:
+            Updated coefficient state
         """
+        # Default to all groups enabled if not specified
+        if emission_flags is None:
+            emission_flags = EmissionFlags()
+
         # Get regime override
         regime = program.regime_overrides.get(inp.regime_id, RegimeOverride())
 
         # --- Stage 0: Identity (usually skipped) ---
         # No-op
 
-        # --- Stage 1: Color ---
+        # --- Stage 1: Color (BASE group - always runs) ---
         if enable_mask & (1 << F_COLOR) and w_eff[F_COLOR] > 0:
             c = self.ops.apply_operator(c, 1, w_eff[F_COLOR])  # Tilt
             self.stats["ops_executed"] += 1
 
-        # --- Stage 2: Local coherence ---
+        # --- Stage 2: Local coherence (BASE group - always runs) ---
         if enable_mask & (1 << F_LOCAL) and w_eff[F_LOCAL] > 0:
             c = self.ops.apply_operator(c, 3, w_eff[F_LOCAL])  # IntraMix
             self.stats["ops_executed"] += 1
 
-        # --- Stage 3: Transport ---
-        if enable_mask & (1 << F_TRANSPORT) and w_eff[F_TRANSPORT] > 0:
-            c = self.ops.apply_operator(c, 4, w_eff[F_TRANSPORT])   # DiffuseUp
-            c = self.ops.apply_operator(c, 5, w_eff[F_TRANSPORT])   # DiffuseDown
-            c = self.ops.apply_operator(c, 7, w_eff[F_TRANSPORT])   # LowRankMorph
-            self.stats["ops_executed"] += 3
+        # --- Stage 3: Transport (MID group - gated by mid_due) ---
+        if emission_flags.mid_due:
+            if enable_mask & (1 << F_TRANSPORT) and w_eff[F_TRANSPORT] > 0:
+                c = self.ops.apply_operator(c, 4, w_eff[F_TRANSPORT])   # DiffuseUp
+                c = self.ops.apply_operator(c, 5, w_eff[F_TRANSPORT])   # DiffuseDown
+                c = self.ops.apply_operator(c, 7, w_eff[F_TRANSPORT])   # LowRankMorph
+                self.stats["ops_executed"] += 3
 
-        # --- Stage 4: Topology/motion ---
-        if enable_mask & (1 << F_TOPOLOGY) and w_eff[F_TOPOLOGY] > 0:
-            c = self.ops.apply_operator(c, 6, w_eff[F_TOPOLOGY])    # BandShear
-            c = self.ops.apply_operator(c, 10, w_eff[F_TOPOLOGY])   # RotateNodes
-            c = self.ops.apply_operator(c, 17, w_eff[F_TOPOLOGY])   # QuasiRotate
-            self.stats["ops_executed"] += 3
+        # --- Stage 4: Topology/motion (TOP group - gated by top_due) ---
+        if emission_flags.top_due:
+            if enable_mask & (1 << F_TOPOLOGY) and w_eff[F_TOPOLOGY] > 0:
+                c = self.ops.apply_operator(c, 6, w_eff[F_TOPOLOGY])    # BandShear
+                c = self.ops.apply_operator(c, 10, w_eff[F_TOPOLOGY])   # RotateNodes
+                c = self.ops.apply_operator(c, 17, w_eff[F_TOPOLOGY])   # QuasiRotate
+                self.stats["ops_executed"] += 3
 
-            # SwapBands only at degradation 0 and if explicitly allowed
-            if inp.degradation_level == DEGRADE_NONE:
-                # SwapBands disabled by default for safety
-                pass
+                # SwapBands only at degradation 0 and if explicitly allowed
+                if inp.degradation_level == DEGRADE_NONE:
+                    # SwapBands disabled by default for safety
+                    pass
 
-        # --- Stage 5: Catastrophe corridor ---
-        if enable_mask & (1 << F_CATASTROPHE) and w_eff[F_CATASTROPHE] > 0:
-            c = self.ops.apply_operator(c, 15, w_eff[F_CATASTROPHE])  # PressureRamp
-            c = self.ops.apply_operator(c, 20, w_eff[F_CATASTROPHE])  # FoldPressure
-            c = self.ops.apply_operator(c, 16, w_eff[F_CATASTROPHE])  # GateMask
-            c = self.ops.apply_operator(c, 22, w_eff[F_CATASTROPHE])  # SwallowtailMask
-            self.stats["ops_executed"] += 4
+        # --- Stage 5: Catastrophe corridor (TOP group - gated by top_due) ---
+        if emission_flags.top_due:
+            if enable_mask & (1 << F_CATASTROPHE) and w_eff[F_CATASTROPHE] > 0:
+                c = self.ops.apply_operator(c, 15, w_eff[F_CATASTROPHE])  # PressureRamp
+                c = self.ops.apply_operator(c, 20, w_eff[F_CATASTROPHE])  # FoldPressure
+                c = self.ops.apply_operator(c, 16, w_eff[F_CATASTROPHE])  # GateMask
+                c = self.ops.apply_operator(c, 22, w_eff[F_CATASTROPHE])  # SwallowtailMask
+                self.stats["ops_executed"] += 4
 
-        # --- Stage 6: Event injections ---
-        c = self.apply_events(c, inp, program)
+        # --- Stage 6: Event injections (MID group - gated by mid_due) ---
+        if emission_flags.mid_due:
+            c = self.apply_events(c, inp, program)
 
-        # --- Stage 7: Constraints / glue (pre-tail) ---
+        # --- Stage 7: Constraints / glue (pre-tail, TAIL group - always runs) ---
         if enable_mask & (1 << F_GLUE) and w_eff[F_GLUE] > 0:
             # GluePair
             c = self.ops.apply_operator(c, 12, w_eff[F_GLUE],
@@ -708,10 +745,10 @@ class SymbolExecutor:
                                        {"num_sections": regime.sheaf_sections})
             self.stats["ops_executed"] += 2
 
-        # --- Stage 8: Tail constraints (ALWAYS) ---
+        # --- Stage 8: Tail constraints (TAIL group - ALWAYS runs) ---
         c = self.apply_tail(c, program, regime)
 
-        # --- Stage 9: Safety-only intervention ---
+        # --- Stage 9: Safety-only intervention (TAIL group - ALWAYS runs) ---
         if inp.degradation_level >= DEGRADE_EMERGENCY:
             c = self.ops.apply_operator(c, 19, Q15_ONE)  # EmergencySimplify
             self.stats["simplify_triggered"] += 1

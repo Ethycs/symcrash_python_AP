@@ -19,8 +19,9 @@ from .coeff_lut_streaming import CCSState, midi_to_hz, SAMPLE_RATE
 # from .harmonic_bank import ModeBState, OSC_MODE_A, OSC_MODE_B
 
 # Oscillator mode constants (WSE-STD-210)
-OSC_MODE_A = 0  # LUT-based (CCSState)
-OSC_MODE_B = 1  # Rotator/Harmonic Bank (ModeBState)
+OSC_MODE_A = 0       # LUT-based (CCSState)
+OSC_MODE_B = 1       # Rotator/Harmonic Bank (ModeBState)
+OSC_MODE_SAMPLE = 2  # Sample playback via FWPT gateway (Phase 3)
 
 
 # =============================================================================
@@ -163,6 +164,25 @@ class VMState:
     prev_fm_mod_buffer: np.ndarray = field(
         default_factory=lambda: np.zeros(8, dtype=np.int16)
     )
+
+    # -------------------------------------------------------------------------
+    # Sample Playback State (Phase 3 - Audio-Native FWPT Gateway)
+    # -------------------------------------------------------------------------
+    # Lazy-initialized like mode_b_state to avoid import overhead
+    _sample_state: Optional['SampleOscState'] = None  # type: ignore
+
+    @property
+    def sample_state(self) -> 'SampleOscState':
+        """Get or create Sample state (lazy init)."""
+        if self._sample_state is None:
+            from .sample_source import SampleOscState
+            self._sample_state = SampleOscState()
+        return self._sample_state
+
+    @sample_state.setter
+    def sample_state(self, value: 'SampleOscState') -> None:
+        """Set Sample state."""
+        self._sample_state = value
 
     @property
     def mode_b_state(self) -> 'ModeBState':
@@ -446,4 +466,5 @@ __all__ = [
     # WSE-STD-210 oscillator modes
     'OSC_MODE_A',
     'OSC_MODE_B',
+    'OSC_MODE_SAMPLE',
 ]

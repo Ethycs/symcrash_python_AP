@@ -27,7 +27,7 @@ Usage:
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, TYPE_CHECKING
 
 from .control_registry import (
     ControlRegistry,
@@ -43,6 +43,9 @@ from .control_frame import (
     VoiceControlPatch,
     GlobalControls,
 )
+
+if TYPE_CHECKING:
+    from .voice.scheduler import HealthTelemetry
 
 
 # =============================================================================
@@ -100,6 +103,9 @@ class CockpitEngine:
 
         # Global state
         self._master_gain_q15 = 32767
+
+        # Health telemetry from scheduler (for display/logging)
+        self._health_telemetry: Optional['HealthTelemetry'] = None
 
     def _init_controls(self) -> None:
         """Initialize all controls to defaults."""
@@ -391,6 +397,52 @@ class CockpitEngine:
             'decay_blocks': self.get_control_current(ControlID.DCY_BLOCKS),
             'sustain_level_q15': self.get_control_current(ControlID.SUS_Q15),
             'release_blocks': self.get_control_current(ControlID.REL_BLOCKS),
+        }
+
+    # =========================================================================
+    # TELEMETRY API
+    # =========================================================================
+
+    def receive_health_telemetry(self, telemetry: 'HealthTelemetry') -> None:
+        """
+        Receive scheduler health telemetry for display.
+
+        Called by orchestrator/pipeline after each block to provide CPU, memory,
+        stability bars and gear state for UI display.
+
+        Args:
+            telemetry: HealthTelemetry from BlockScheduler
+        """
+        self._health_telemetry = telemetry
+
+    def get_health_telemetry(self) -> Optional['HealthTelemetry']:
+        """
+        Get last received health telemetry.
+
+        Returns:
+            HealthTelemetry if available, None otherwise
+        """
+        return self._health_telemetry
+
+    def get_health_summary(self) -> Dict[str, int]:
+        """
+        Get health telemetry summary for display.
+
+        Returns:
+            Dict with cpu_bar, mem_bar, stab_bar, gear (or zeros if no telemetry)
+        """
+        if self._health_telemetry is None:
+            return {
+                'cpu_bar': 0,
+                'mem_bar': 0,
+                'stab_bar': 32767,  # Full stability as default
+                'gear': 0,
+            }
+        return {
+            'cpu_bar': self._health_telemetry.cpu_bar,
+            'mem_bar': self._health_telemetry.mem_bar,
+            'stab_bar': self._health_telemetry.stab_bar,
+            'gear': self._health_telemetry.gear,
         }
 
 

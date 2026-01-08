@@ -9,7 +9,7 @@ Executes one block for one voice with fixed lane schedule.
 from typing import Tuple, Optional, TYPE_CHECKING
 import numpy as np
 
-from .state import VMState, OSC_MODE_A, OSC_MODE_B
+from .state import VMState, OSC_MODE_A, OSC_MODE_B, OSC_MODE_SAMPLE
 from .decode import DecodedPlan, CarrierRole, decode_frame, FM_SOURCE_FEEDBACK
 from .tables import Tables, DEFAULT_TABLES, BLOCK_SAMPLES
 from .lanes import (
@@ -121,12 +121,27 @@ def vm_step_block(
         # Update Mode B state if using rotator (always check for first-time init)
         if osc_mode == OSC_MODE_B:
             mb_state = state.mode_b_state
-            # Reset if pitch changed, note differs, or first-time init (phase_inc=0)
-            if pitch_changed or mb_state.note != params.note or mb_state.phase_inc == 0:
+            first_time_init = mb_state.phase_inc == 0
+
+            # Decide whether to reset (retrigger) or use legato (smooth pitch change)
+            if first_time_init:
+                # First-time initialization: always do full reset
                 mb_state.reset(note=params.note, phase_inc=params.phase_inc)
                 mb_state.pwm_width_q15 = params.pwm_width_q15
                 mb_state.pwm_enabled = params.pwm_enabled
                 mb_state.H_active = min(params.H_request, mb_state.H_bandlimit)
+            elif pitch_changed or mb_state.note != params.note:
+                # Pitch changed: use legato_mode to decide how to handle
+                if params.legato_mode:
+                    # Legato: preserve phase for smooth transition
+                    mb_state.set_pitch_legato(note=params.note, phase_inc=params.phase_inc)
+                    mb_state.H_active = min(params.H_request, mb_state.H_bandlimit)
+                else:
+                    # Non-legato: full reset (may cause click, but musically intentional)
+                    mb_state.reset(note=params.note, phase_inc=params.phase_inc)
+                    mb_state.pwm_width_q15 = params.pwm_width_q15
+                    mb_state.pwm_enabled = params.pwm_enabled
+                    mb_state.H_active = min(params.H_request, mb_state.H_bandlimit)
 
             # Update FM depth from VoiceFrame (modulator signal comes from fm_mod_buffer)
             # Phase 3 FM/PM will provide the modulator via operator graph
@@ -166,6 +181,15 @@ def vm_step_block(
 
             # Advance Mode B phase for next block
             state.mode_b_state.advance_block()
+        elif osc_mode == OSC_MODE_SAMPLE:
+            # -----------------------------------------------------------------
+            # MODE SAMPLE: Audio-native via FWPT gateway (Phase 3)
+            # -----------------------------------------------------------------
+            from .sample_source import sample_generate_coeffs
+
+            # Generate coefficients from sample playback
+            # Note: Sample buffer must be loaded via Voice Engine before playback
+            sample_generate_coeffs(state.sample_state, carrier_512)
         else:
             # -----------------------------------------------------------------
             # MODE A: LUT-based (existing path)
@@ -176,7 +200,12 @@ def vm_step_block(
         # PERSISTENT EVOLUTION per WSE-STD-120 section 4.1:
         # Coefficients persist and evolve, carrier provides stabilization
 
-        base_mix = params.base_mix_q15
+        # Drone mode: reduce base_mix for slow-evolving textures (Phase 4)
+        # 5% carrier refresh means operators dominate sound evolution
+        if params.drone_mode:
+            base_mix = 1638  # ~5% carrier, 95% persistence
+        else:
+            base_mix = params.base_mix_q15
 
         # POLYPHASE INJECTION: Each k-slot gets its own carrier value
         # This is the key to eliminating block-boundary discontinuities

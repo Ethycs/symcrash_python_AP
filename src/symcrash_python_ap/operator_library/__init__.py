@@ -163,6 +163,15 @@ from .export import (
     export_all_matrices,
 )
 
+from .emission_groups import (
+    EmissionGroup,
+    OP_EMISSION_GROUP,
+    get_emission_group,
+    is_op_allowed,
+    filter_ops_by_emission,
+    get_ops_by_group,
+)
+
 __all__ = [
     # Constants
     'COEFF_LEN', 'Q15_SCALE', 'Q15_ONE',
@@ -187,4 +196,7 @@ __all__ = [
     'apply_inject', 'apply_proj_energy_cap', 'apply_operator', 'compose_word',
     # Export
     'export_as_dense', 'sparse_triplets', 'visualize_matrix', 'export_all_matrices',
+    # Emission groups
+    'EmissionGroup', 'OP_EMISSION_GROUP', 'get_emission_group',
+    'is_op_allowed', 'filter_ops_by_emission', 'get_ops_by_group',
 ]

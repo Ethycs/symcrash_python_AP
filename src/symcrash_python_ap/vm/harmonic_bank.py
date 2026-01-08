@@ -191,7 +191,7 @@ class ModeBState:
     unison_spread_cents: int = 0
 
     def reset(self, note: int, phase_inc: int) -> None:
-        """Reset state for a new note."""
+        """Reset state for a new note (hard reset - zeros phase)."""
         self.note = note
         self.phase_inc = phase_inc
         self.target_phase_inc = phase_inc
@@ -205,6 +205,29 @@ class ModeBState:
 
         # Default to sine wave weights
         self.weights.set_sine()
+
+    def set_pitch_legato(self, note: int, phase_inc: int) -> None:
+        """
+        Change pitch without resetting phase (legato mode).
+
+        This preserves phase continuity for smooth pitch transitions
+        without clicking artifacts. The phase accumulator continues
+        from its current value, only the increment changes.
+
+        Args:
+            note: New MIDI note number
+            phase_inc: New phase increment for the target pitch
+        """
+        self.note = note
+        self.phase_inc = phase_inc
+        self.target_phase_inc = phase_inc
+        # Note: We do NOT reset self.phase - this is the key to legato!
+
+        # Update bandlimit for new pitch
+        freq_hz = 440.0 * (2.0 ** ((note - 69) / 12.0))
+        nyquist = SAMPLE_RATE // 2
+        self.H_bandlimit = max(1, int(0.9 * nyquist / max(1, freq_hz)))
+        # Note: We do NOT reset weights - preserve current waveform
 
     def advance_block(self) -> None:
         """Advance phase by one block."""
@@ -311,11 +334,10 @@ def generate_basis_frames(
 @dataclass
 class BasisFrameAtlas:
     """
-    Cache of Mode B2 basis frames keyed by (wave_type, anchor_id).
+    Cache of Mode B2 basis frames keyed by MIDI note.
 
-    Per WSE-STD-210 Section 5.2:
-    - anchor_id is typically octave or coarse semitone bins
-    - Each anchor provides basis frames for that pitch region
+    Each note gets its own basis frames with frequency baked in.
+    This mirrors Mode A's per-note LUT approach for correctness.
     """
     frames: Dict[int, HarmonicBasisFrames] = field(default_factory=dict)
     H_max: int = DEFAULT_H_MAX
@@ -324,25 +346,26 @@ class BasisFrameAtlas:
         """
         Get basis frames for a given pitch.
 
-        Uses octave-based anchors (A in each octave: notes 9, 21, 33, 45, 57, 69, 81, 93, 105)
+        IMPORTANT: Basis frames must match the exact target pitch.
+        The basis frames encode sin/cos at a specific frequency's phase progression.
+        Using an anchor that differs from the target pitch produces wrong output.
+
+        This mirrors Mode A's per-note LUT approach (get_lut_for_note).
 
         Args:
             midi_note: MIDI note number
 
         Returns:
-            HarmonicBasisFrames for the nearest anchor
+            HarmonicBasisFrames for the exact target pitch
         """
-        # Compute anchor: A in each octave
-        octave = midi_note // 12
-        anchor_note = octave * 12 + 9  # A in this octave (A0=21, A1=33, ...)
-
         # Clamp to valid range
-        anchor_note = max(21, min(105, anchor_note))
+        midi_note = max(21, min(108, midi_note))
 
-        if anchor_note not in self.frames:
-            self.frames[anchor_note] = generate_basis_frames(anchor_note, self.H_max)
+        # Generate per-note (like Mode A's get_lut_for_note)
+        if midi_note not in self.frames:
+            self.frames[midi_note] = generate_basis_frames(midi_note, self.H_max)
 
-        return self.frames[anchor_note]
+        return self.frames[midi_note]
 
 
 # Global atlas (lazy-loaded)
@@ -435,10 +458,20 @@ def mode_b_generate_coeffs(
             mod_sample = int(state.fm_mod_buffer[k]) if k < len(state.fm_mod_buffer) else 0
 
             # Phase modulation: scale modulator by depth
-            # fm_depth_q15 = modulation index in Q15 (32767 = ~1 radian)
-            # Phase delta = depth × mod_sample (both Q15)
-            # Convert to Q32 phase: multiply by 2^17 to scale Q15×Q15 → Q32
-            phase_mod = RSHIFT_RNE(state.fm_depth_q15 * mod_sample, 15 - 17)  # → Q32
+            # fm_depth_q15 = modulation index in Q15 (32767 ≈ 1.0 radian max)
+            # mod_sample = modulator signal (Q15: ±32767 = ±1.0)
+            #
+            # FM synthesis: phase_mod = β × mod, where β is modulation index
+            # In Q32 phase: 1 radian = 2^32 / (2π) ≈ 683,565,275
+            #
+            # Calculation:
+            # depth × mod = Q30 (max ~1.07×10^9)
+            # We want depth=32767, mod=32767 → ~683M (1 radian)
+            # So: Q30 >> 1 ≈ 535M, close enough for moderate FM
+            #
+            # For typical FM synth (DX-style), modulation index 0.5-3 is common.
+            # fm_depth_q15=16384 (50%) → ~0.5 radians = classic FM bell territory
+            phase_mod = RSHIFT_RNE(state.fm_depth_q15 * mod_sample, 1)  # Q30 >> 1 ≈ Q29
             phi = (phi + phase_mod) & PHASE_MASK
 
         # Start with DC contribution

@@ -9,6 +9,7 @@ from .symbol_engine import (
     OperatorEngine,
     VoiceCoeffState,
     EventPayload,
+    EmissionFlags,
     FamilySpec,
     TailSpec,
     RegimeOverride,
@@ -45,6 +46,7 @@ __all__ = [
     # Data structures
     'VoiceCoeffState',
     'EventPayload',
+    'EmissionFlags',
     'FamilySpec',
     'TailSpec',
     'RegimeOverride',

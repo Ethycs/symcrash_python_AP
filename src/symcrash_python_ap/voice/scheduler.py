@@ -16,10 +16,13 @@ Key Components:
 """
 
 from dataclasses import dataclass, field
-from typing import List, Tuple, Optional, Set
+from typing import List, Tuple, Optional, Set, TYPE_CHECKING
 from enum import IntEnum
 
 from ..frames import VoiceFramePacketV0b, VoiceFlags
+
+if TYPE_CHECKING:
+    from ..budgets import RegimeBudget
 
 
 # =============================================================================
@@ -469,6 +472,21 @@ class BlockScheduler:
         """Add costs from executed operations."""
         self.used_compute += compute
         self.used_mem += mem
+
+    def set_regime_budget(self, budget: 'RegimeBudget') -> None:
+        """
+        Update budgets from regime.
+
+        Maps RegimeBudget's max_ticks_per_block to scheduler's b_compute/b_mem.
+
+        Args:
+            budget: RegimeBudget with max_ticks_per_block, etc.
+        """
+        # Map max_ticks_per_block to compute budget
+        self.b_compute = budget.max_ticks_per_block
+
+        # Use same value for memory budget (could be refined later)
+        self.b_mem = budget.max_ticks_per_block
 
     def compute_health_bars(self) -> Tuple[int, int]:
         """

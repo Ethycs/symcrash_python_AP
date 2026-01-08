@@ -136,6 +136,16 @@ class VoiceFrame:
     unison_voices: int = 1          # Number of unison voices (1=mono)
     unison_spread_cents: int = 0    # Unison detune spread in cents
 
+    # Drone/Pad mode (Phase 4 - sustained coefficients)
+    drone_mode: bool = False        # When True, reduces base_mix for slow evolution
+
+    # Legato mode (smooth pitch transitions without coefficient reset)
+    legato_mode: bool = False       # When True, pitch changes don't reset phase/coefficients
+
+    # Sample playback parameters (Phase 3 - coeff_osc_mode=2)
+    # Note: Sample buffer is loaded via Voice Engine, not VoiceFrame
+    sample_rate_q16: int = 65536    # Playback rate (Q16: 65536=1.0x)
+
     # Legacy compatibility: convert float betas to IDs
     @property
     def tree_a(self) -> float:

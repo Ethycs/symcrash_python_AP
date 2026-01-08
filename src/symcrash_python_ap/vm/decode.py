@@ -98,6 +98,8 @@ class CoeffOscParams:
     fm_source: int = 0            # FM modulator source (0=off, 1=feedback, 2=lfo)
     unison_voices: int = 1        # Number of unison voices (1=mono)
     unison_spread_cents: int = 0  # Unison detune spread in cents
+    drone_mode: bool = False      # Drone/Pad mode (reduces base_mix for slow evolution)
+    legato_mode: bool = False     # Legato mode (preserve phase/coefficients on pitch change)
 
 
 # FM modulator source constants (Phase 3)
@@ -295,6 +297,8 @@ def decode_frame(
     fm_source = getattr(frame, 'fm_source', 0) or 0
     unison_voices = getattr(frame, 'unison_voices', 1) or 1
     unison_spread_cents = getattr(frame, 'unison_spread_cents', 0) or 0
+    drone_mode = getattr(frame, 'drone_mode', False)
+    legato_mode = getattr(frame, 'legato_mode', False)
 
     plan.coeff_osc_params = CoeffOscParams(
         table_id=coeff_table_id,
@@ -312,6 +316,8 @@ def decode_frame(
         fm_source=fm_source,
         unison_voices=unison_voices,
         unison_spread_cents=unison_spread_cents,
+        drone_mode=drone_mode,
+        legato_mode=legato_mode,
     )
 
     # Check if we should use CCS path (using fast on-demand table generation)

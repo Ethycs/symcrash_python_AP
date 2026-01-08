@@ -32,7 +32,11 @@ from .scheduler import (
     HealthTelemetry, BLOCK_SIZE
 )
 from ..wavelet import WaveletEngine
-from ..symbol import SymbolEngine
+from ..symbol import SymbolEngine, EmissionFlags
+from ..budgets import (
+    apply_degradation, DegradationResult, RegimeBudget, TailMode,
+    get_regime_budget, RegimeId, popcount32,
+)
 from ..fixed import Q15_ONE, sat16, mul_q15_sat
 
 
@@ -94,6 +98,16 @@ class BlockOrchestrator:
 
     # Voice frames (populated by Symbol Engine or external input)
     voice_frames: List[Optional[VoiceFramePacketV0b]] = field(default_factory=list)
+
+    # Budget for degradation (can be set from regime)
+    current_budget: Optional[RegimeBudget] = None
+
+    # Default backbone operators (for voices without explicit op list)
+    default_backbone_ops: List[int] = field(default_factory=lambda: [1, 3, 4, 5])  # Tilt, IntraMix, DiffuseUp/Down
+
+    # Degradation stats (accumulated per block for telemetry)
+    degradation_steps_total: int = 0
+    emergency_voices: int = 0
 
     def __post_init__(self):
         """Initialize voice slots and frame storage."""
@@ -213,6 +227,56 @@ class BlockOrchestrator:
                 return vid
         return None
 
+    def set_regime_budget(self, budget: RegimeBudget) -> None:
+        """
+        Set the current regime budget for degradation.
+
+        Args:
+            budget: RegimeBudget from regime or capsule
+        """
+        self.current_budget = budget
+
+    def _degrade_for_voice(
+        self,
+        frame: VoiceFramePacketV0b,
+        backbone_ops: Optional[List[int]] = None,
+        event_ops: Optional[List[int]] = None,
+    ) -> DegradationResult:
+        """
+        Apply degradation ladder to fit voice within budget.
+
+        Args:
+            frame: VoiceFramePacket with node_mask, etc.
+            backbone_ops: Override backbone operators (default: default_backbone_ops)
+            event_ops: Event operators pending for this voice
+
+        Returns:
+            DegradationResult with fitted ops, K, tail_mode
+        """
+        # Use defaults if not provided
+        if backbone_ops is None:
+            backbone_ops = self.default_backbone_ops
+        if event_ops is None:
+            event_ops = []
+
+        # Get budget (fall back to STABLE_TONE if not set)
+        budget = self.current_budget
+        if budget is None:
+            budget = get_regime_budget(RegimeId.STABLE_TONE)
+
+        # Get node mask from frame (full mask if not available)
+        node_mask = getattr(frame, 'node_mask', 0xFFFFFFFF)
+        if node_mask == 0:
+            node_mask = 0xFFFFFFFF  # Default to all nodes
+
+        return apply_degradation(
+            backbone_ops=backbone_ops,
+            event_ops=event_ops,
+            node_mask=node_mask,
+            tail_mode=TailMode.FULL,
+            budget=budget,
+        )
+
     # -------------------------------------------------------------------------
     # Frame Management
     # -------------------------------------------------------------------------
@@ -259,6 +323,10 @@ class BlockOrchestrator:
         Returns:
             (L_audio, R_audio, schedule_result)
         """
+        # 0. Reset per-block degradation stats
+        self.degradation_steps_total = 0
+        self.emergency_voices = 0
+
         # 1. Get scheduling decisions
         schedule = self.scheduler.schedule_block(self.voice_frames, tail_stats)
 
@@ -272,15 +340,35 @@ class BlockOrchestrator:
             if frame is None:
                 continue
 
+            # Apply degradation ladder to fit voice within budget
+            degrade_result = self._degrade_for_voice(frame)
+
+            # Track degradation stats for telemetry
+            self.degradation_steps_total += degrade_result.degradation_steps
+            if degrade_result.is_emergency:
+                self.emergency_voices += 1
+
             # Convert to internal VoiceFrame for rendering
             vf = frame.to_voice_frame()
 
             # Apply emission group filtering to Symbol Engine
-            # (TOP/MID determine which operators run)
+            # TOP/MID flags from scheduler gate which operators run
             if self.symbol is not None and params is not None:
-                # TODO: Apply emission group flags to operator selection
-                # For now, run full symbol processing
-                pass
+                emission_flags = EmissionFlags(
+                    mid_due=sched_info.mid_due,
+                    top_due=sched_info.top_due,
+                )
+                # Symbol engine step_voice would use:
+                # - emission_flags to gate MID/TOP operator groups
+                # - degrade_result.K for active node count
+                # - degrade_result.get_full_op_chain() for fitted operator list
+                # - degrade_result.tail_mode for tail configuration
+                #
+                # NOTE: Full wiring requires SymbolEngine.step_voice() to accept
+                # these parameters. For now, store on vf for potential use.
+                vf.emission_flags = emission_flags
+                vf.degrade_K = degrade_result.K
+                vf.degrade_tail_mode = degrade_result.tail_mode
 
             # Render through Wavelet Engine
             audio = self.wavelet.render_voice(vf)
@@ -329,6 +417,18 @@ class BlockOrchestrator:
         for slot in self.voice_slots:
             counts[slot.state.name] += 1
         return counts
+
+    def get_degradation_stats(self) -> Dict[str, int]:
+        """
+        Get degradation statistics from last block.
+
+        Returns:
+            Dict with 'degradation_steps_total' and 'emergency_voices'
+        """
+        return {
+            'degradation_steps_total': self.degradation_steps_total,
+            'emergency_voices': self.emergency_voices,
+        }
 
 
 # =============================================================================

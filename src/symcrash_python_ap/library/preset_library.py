@@ -125,6 +125,8 @@ class LibraryIndex:
         self.version = 0
         self.capsules: Dict[str, CapsuleIndex] = {}
         self.assets: Dict[str, Dict[int, str]] = {}  # asset_id → {revision → path}
+        # program_id → capsule_id (for VoiceFramePacket.program_id resolution)
+        self.program_id_map: Dict[int, str] = {}
 
     def to_dict(self) -> dict:
         """Convert to JSON-serializable dict with sorted keys."""
@@ -153,6 +155,10 @@ class LibraryIndex:
                 aid: {str(rev): path for rev, path in sorted(revs.items())}
                 for aid, revs in sorted(self.assets.items())
             },
+            # program_id → capsule_id mapping (for VoiceFramePacket resolution)
+            "program_id_map": {
+                str(pid): cid for pid, cid in sorted(self.program_id_map.items())
+            },
         }
 
     @classmethod
@@ -179,6 +185,10 @@ class LibraryIndex:
 
         for aid, revs in data.get("assets", {}).items():
             index.assets[aid] = {int(rev): path for rev, path in revs.items()}
+
+        # Load program_id → capsule_id map
+        for pid_str, cid in data.get("program_id_map", {}).items():
+            index.program_id_map[int(pid_str)] = cid
 
         return index
 
@@ -369,6 +379,11 @@ class PresetLibraryV0:
                 kind=capsule.identity.kind.name,
             )
 
+            # Update program_id → capsule_id map (for VoiceFramePacket resolution)
+            program_id = capsule.program.program_id
+            if program_id is not None:
+                self._index.program_id_map[program_id] = capsule_id
+
             # Save index
             self._save_index()
 
@@ -495,6 +510,44 @@ class PresetLibraryV0:
             compatible=entry.compatible,
             imported_at=entry.imported_at,
         )
+
+    def resolve_by_program_id(
+        self,
+        program_id: int,
+        selector: ResolutionSelector = ResolutionSelector.LATEST_COMPATIBLE,
+    ) -> Optional[CapsuleRecord]:
+        """
+        Resolve capsule by program_id (from VoiceFramePacket).
+
+        This is the primary lookup used by the runtime to resolve which
+        capsule a VoiceFramePacket refers to based on its program_id field.
+
+        Args:
+            program_id: Program ID (from VoiceFramePacket.program_id)
+            selector: Resolution strategy (default: LATEST_COMPATIBLE)
+
+        Returns:
+            CapsuleRecord or None if no capsule is registered for this program_id
+        """
+        # Look up capsule_id from program_id map
+        capsule_id = self._index.program_id_map.get(program_id)
+        if capsule_id is None:
+            return None
+
+        # Delegate to standard resolution
+        return self.resolve_capsule(capsule_id, selector)
+
+    def get_program_id_capsule_id(self, program_id: int) -> Optional[str]:
+        """
+        Get capsule_id for a program_id (without loading capsule).
+
+        Args:
+            program_id: Program ID to look up
+
+        Returns:
+            capsule_id if registered, None otherwise
+        """
+        return self._index.program_id_map.get(program_id)
 
     def get_capsule_bundle(self, record: CapsuleRecord) -> bytes:
         """
