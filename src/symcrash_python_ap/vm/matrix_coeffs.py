@@ -27,6 +27,7 @@ from .waveform_matrix import (
     WaveformType, waveform_sample_q15,
     WAVEFORM_PERIOD, PHASE_TO_WAVE_SHIFT
 )
+from .tables import VM_K
 
 # =============================================================================
 # CONSTANTS
@@ -34,7 +35,6 @@ from .waveform_matrix import (
 
 NUM_LEAVES = 64
 BLOCK_SIZE = 64
-VM_K = 8
 
 # Number of phase bins for coefficient LUT
 DEFAULT_COEFF_BINS = 256

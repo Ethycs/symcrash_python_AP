@@ -19,11 +19,10 @@ from typing import Optional
 import numpy as np
 
 from ..wavelet.fast_lifting import fwpt_jit
+from .tables import VM_K, COEFF_LEN
 
 # Constants
-VM_K = 8          # K-slots per block
 NUM_LEAVES = 64   # Leaves in wavelet tree
-COEFF_LEN = 512   # 64 leaves × 8 k-slots
 BLOCK_SIZE = 64   # Audio samples per block
 
 
@@ -70,6 +69,9 @@ class SampleOscState:
     is_playing: bool = False
     is_finished: bool = False
 
+    # Sample metadata for pitch shifting
+    root_note: Optional[int] = None  # MIDI note of original sample (None = no pitch shift)
+
     def reset(self, start_position: int = 0) -> None:
         """Reset playback to start position."""
         self.position_q16 = start_position << 16
@@ -84,7 +86,8 @@ class SampleOscState:
 
     def set_buffer(self, buffer: np.ndarray, loop_start: int = 0,
                    loop_end: int = 0, loop_enabled: bool = False,
-                   precompute_coeffs: bool = False) -> None:
+                   precompute_coeffs: bool = False,
+                   root_note: Optional[int] = None) -> None:
         """
         Load a sample buffer for playback.
 
@@ -94,11 +97,13 @@ class SampleOscState:
             loop_end: Loop end sample index (0 = buffer length)
             loop_enabled: Enable looping
             precompute_coeffs: Pre-transform to coefficients (faster loops, no pitch shift)
+            root_note: MIDI note of original sample (for automatic pitch shifting)
         """
         self.buffer = buffer.astype(np.int16)
         self.loop_start = loop_start
         self.loop_end = loop_end if loop_end > 0 else len(buffer)
         self.loop_enabled = loop_enabled
+        self.root_note = root_note
 
         if precompute_coeffs:
             self._precompute_coefficients()

@@ -1146,16 +1146,12 @@ def lane_ccs_render(
     """
     global _CCS_OUTPUT
 
-    # Reshape to [64 leaves, 8 k-slots]
-    coeff_2d_k8 = state.coeff_state[:COEFF_LEN].reshape(64, VM_K)
+    # Reshape to [64 leaves, 8 k-slots] for K=8 interleaved polyphase
+    coeff_2d = state.coeff_state[:COEFF_LEN].reshape(64, VM_K).astype(np.int16)
 
-    # Extract K=4 slots from K=8 state (every 2nd slot: 0, 2, 4, 6)
-    # This maps the 8-slot state to a 4-slot polyphase configuration
-    coeff_2d_k4 = coeff_2d_k8[:, ::2].astype(np.int16)  # Shape: [64, 4]
-
-    # Run K=4 polyphase IDWPT with interleaving
-    # idwpt_polyphase_block expects [64, K] and returns 64 samples
-    _CCS_OUTPUT[:] = idwpt_polyphase_block(coeff_2d_k4, headroom_bits=1)
+    # Run K=8 polyphase IDWPT with interleaving
+    # Each sample n uses the reconstruction from slot (n % 8)
+    _CCS_OUTPUT[:] = idwpt_polyphase_block(coeff_2d, headroom_bits=1)
 
     return _CCS_OUTPUT
 

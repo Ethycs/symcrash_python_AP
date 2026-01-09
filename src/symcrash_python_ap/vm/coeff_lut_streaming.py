@@ -41,13 +41,14 @@ import logging
 
 from ..wavelet.fast_lifting import fwpt_jit, idwpt_jit
 from ..wavelet.sine_core import sine_q15
+from .tables import VM_K as TABLES_VM_K
 
 logger = logging.getLogger(__name__)
 
 # Constants
 BLOCK_SIZE = 64         # B = 64 audio samples per block
 NUM_LEAVES = 64         # L = 64 leaves (full WPT at depth 6)
-DEFAULT_K = 8           # K = 8 time samples per subband per block
+DEFAULT_K = TABLES_VM_K # K = polyphase slots (4 or 8), from tables.py
 DEFAULT_P = 64          # P = 64 phase steps per cycle (was 1024, reduced for memory)
                         # With cubic interpolation, P=64 gives excellent quality
                         # Table size: 64 leaves × 8 k-slots × 64 phases × 2 bytes = 64 KB/table
@@ -777,9 +778,9 @@ def ccs_generate_coeffs(
         output_coeffs[l] = subband_output[l, 0]
 
 
-# VM-side K dimension - MUST match LUT DEFAULT_K for correct polyphase synthesis
-# coeff_state has 64 leaves × K time slots = 64×8 = 512 elements
-VM_K = DEFAULT_K  # K=8
+# VM-side K dimension - imported from tables.py for consistency
+# coeff_state has 64 leaves × K time slots (256 for K=4, 512 for K=8)
+VM_K = DEFAULT_K  # From tables.py
 
 
 def ccs_generate_coeffs_polyphase(

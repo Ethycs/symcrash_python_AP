@@ -22,37 +22,51 @@ from .safety import SafetyEngine
 
 
 class AudioSink:
-    """Accumulates audio blocks and exports to WAV."""
-    
-    def __init__(self):
+    """Accumulates audio blocks and exports to WAV (mono or stereo)."""
+
+    def __init__(self, mono: bool = True):
+        """
+        Initialize audio sink.
+
+        Args:
+            mono: If True, use mono output (default). If False, stereo.
+        """
+        self.mono = mono
         self.L: List[int] = []
         self.R: List[int] = []
         self.block_count = 0
-    
-    def push_block(self, L: List[int], R: List[int]):
-        """Add a stereo block."""
+
+    def push_block(self, L: List[int], R: List[int] = None):
+        """Add an audio block (mono or stereo)."""
         self.L.extend(L)
-        self.R.extend(R)
+        if not self.mono and R is not None:
+            self.R.extend(R)
         self.block_count += 1
-    
+
     def write_wav(self, path: str, fs: int = 48000):
-        """Export to 16-bit stereo WAV."""
+        """Export to 16-bit WAV (mono or stereo based on init)."""
         n_samples = len(self.L)
-        
+        n_channels = 1 if self.mono else 2
+
         with wave.open(path, 'w') as wav:
-            wav.setnchannels(2)
+            wav.setnchannels(n_channels)
             wav.setsampwidth(2)  # 16-bit
             wav.setframerate(fs)
-            
-            # Interleave L/R
-            data = []
-            for i in range(n_samples):
-                data.append(struct.pack('<h', self.L[i]))
-                data.append(struct.pack('<h', self.R[i]))
-            
+
+            if self.mono:
+                # Mono output
+                data = [struct.pack('<h', s) for s in self.L]
+            else:
+                # Interleave L/R for stereo
+                data = []
+                for i in range(n_samples):
+                    data.append(struct.pack('<h', self.L[i]))
+                    data.append(struct.pack('<h', self.R[i]))
+
             wav.writeframes(b''.join(data))
-        
-        print(f"Wrote {path}: {n_samples} samples, {n_samples/fs:.2f}s")
+
+        ch_str = "mono" if self.mono else "stereo"
+        print(f"Wrote {path}: {n_samples} samples, {n_samples/fs:.2f}s ({ch_str})")
     
     def get_numpy(self) -> Tuple[np.ndarray, np.ndarray]:
         """Get as numpy arrays (float -1..1)."""
@@ -71,22 +85,24 @@ class Pipeline:
     """
     Complete synthesis pipeline.
     """
-    
-    def __init__(self, n_voices: int = 4, coeff_len: int = 256, 
-                 block_size: int = 64, sample_rate: int = 48000):
+
+    def __init__(self, n_voices: int = 4, coeff_len: int = 256,
+                 block_size: int = 64, sample_rate: int = 48000,
+                 mono: bool = True):
         self.n_voices = n_voices
         self.coeff_len = coeff_len
         self.B = block_size
         self.fs = sample_rate
-        
+        self.mono = mono
+
         # Engines
         self.symbol = SymbolEngine(n_voices, coeff_len)
         self.wavelet = WaveletEngine(block_size)
         self.material = MaterialEngine(block_size)
         self.safety = SafetyEngine(block_size)
-        
-        # Output
-        self.sink = AudioSink()
+
+        # Output (mono by default)
+        self.sink = AudioSink(mono=mono)
         
         # Default parameters
         self.params = ParamFrame(
@@ -165,26 +181,29 @@ class Pipeline:
         """Process one block through the full pipeline."""
         # 1) Symbol Engine: update coefficients, emit VoiceFrames
         vframes = self.symbol.step_block(self.params)
-        
+
         # 2) Wavelet Engine: render each voice to audio
         voice_blocks = []
         for vf in vframes:
             audio = self.wavelet.render_voice(vf)
             voice_blocks.append((vf, audio))
-        
-        # 3) Mix voices to stereo
+
+        # 3) Mix voices (mono or stereo)
         L, R = self.wavelet.mix_block(voice_blocks)
-        
+
         # 4) Material Engine: apply saturation/catastrophe/etc
-        Lm, Rm = self.material.step_block(L, R, self.params, 
+        Lm, Rm = self.material.step_block(L, R, self.params,
                                           self.material_id, self.cat_id)
-        
+
         # 5) Safety Engine: limit and protect
         Ls, Rs = self.safety.step_block(Lm, Rm, self.params)
-        
-        # 6) Store output
-        self.sink.push_block(Ls, Rs)
-        
+
+        # 6) Store output (mono uses L only, stereo uses both)
+        if self.mono:
+            self.sink.push_block(Ls)
+        else:
+            self.sink.push_block(Ls, Rs)
+
         return Ls, Rs
     
     def run(self, duration_sec: float = 1.0):

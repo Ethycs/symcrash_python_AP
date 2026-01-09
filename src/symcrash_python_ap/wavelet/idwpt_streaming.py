@@ -80,7 +80,16 @@ def idwpt_polyphase_block(
     *,
     headroom_bits: int = 1,
 ) -> np.ndarray:
-    """Run K IDWPTs and interleave into one 64-sample audio block.
+    """Run K IDWPTs and combine into one 64-sample audio block.
+
+    Interleaved Polyphase Reconstruction:
+    -------------------------------------
+    Each slot k represents a 1-sample phase-shifted version of the signal.
+    Reconstruction interleaves outputs: sample n uses slot (n % K).
+
+        out[k::K] = idwpt(slot_k)[0::K]
+
+    This works for any K (4 or 8) with K_STRIDE=1 basis frames.
 
     Args:
         coeff_2d: np.ndarray shape [64, K], dtype int16 (or int32). leaf-major.
@@ -95,20 +104,11 @@ def idwpt_polyphase_block(
     K = int(coeff_2d.shape[1])
     out = np.zeros(64, dtype=np.int16)
 
-    # CORRECT INTERLEAVE for shifted-block LUTs:
-    #
-    # With shifted-block FWPT: coeff[:, k, p] = FWPT(x[start+k : start+k+64])
-    # Therefore: y_k[0] ≈ x[start+k], y_k[1] ≈ x[start+k+1], ...
-    #
-    # To reconstruct x[start : start+64], we need:
-    #   out[k::K] = y_k[0::K]
-    #
-    # This picks samples at positions 0, K, 2K, ... from each y_k
-    # and places them at positions k, k+K, k+2K, ... in output.
+    # Interleaved reconstruction for any K
     for k in range(K):
         coeffs_k = coeff_2d[:, k].astype(np.int16).tolist()
         audio_k = np.array(idwpt_jit(coeffs_k, headroom_bits=headroom_bits), dtype=np.int16)
-        out[k::K] = audio_k[0::K]  # y_k[0::K], NOT y_k[k::K]
+        out[k::K] = audio_k[0::K]
 
     return out
 

@@ -130,11 +130,15 @@ def vm_step_block(
                 mb_state.pwm_width_q15 = params.pwm_width_q15
                 mb_state.pwm_enabled = params.pwm_enabled
                 mb_state.H_active = min(params.H_request, mb_state.H_bandlimit)
-                # Set waveform type (configures harmonic weights)
-                waveform_type = getattr(params, 'waveform_type', 0)
-                mb_state.weights.set_from_waveform_type(
-                    waveform_type, mb_state.H_active, params.pwm_width_q15
-                )
+                # Set harmonic weights: custom harmonics override waveform_type
+                if params.custom_harmonics:
+                    mb_state.weights.set_custom(params.custom_harmonics)
+                    mb_state.H_active = min(len(params.custom_harmonics), mb_state.H_bandlimit)
+                else:
+                    waveform_type = getattr(params, 'waveform_type', 0)
+                    mb_state.weights.set_from_waveform_type(
+                        waveform_type, mb_state.H_active, params.pwm_width_q15
+                    )
             elif pitch_changed or mb_state.note != params.note:
                 # Pitch changed: use legato_mode to decide how to handle
                 if params.legato_mode:
@@ -147,11 +151,15 @@ def vm_step_block(
                     mb_state.pwm_width_q15 = params.pwm_width_q15
                     mb_state.pwm_enabled = params.pwm_enabled
                     mb_state.H_active = min(params.H_request, mb_state.H_bandlimit)
-                    # Set waveform type (configures harmonic weights)
-                    waveform_type = getattr(params, 'waveform_type', 0)
-                    mb_state.weights.set_from_waveform_type(
-                        waveform_type, mb_state.H_active, params.pwm_width_q15
-                    )
+                    # Set harmonic weights: custom harmonics override waveform_type
+                    if params.custom_harmonics:
+                        mb_state.weights.set_custom(params.custom_harmonics)
+                        mb_state.H_active = min(len(params.custom_harmonics), mb_state.H_bandlimit)
+                    else:
+                        waveform_type = getattr(params, 'waveform_type', 0)
+                        mb_state.weights.set_from_waveform_type(
+                            waveform_type, mb_state.H_active, params.pwm_width_q15
+                        )
 
             # Update FM depth from VoiceFrame (modulator signal comes from fm_mod_buffer)
             # Phase 3 FM/PM will provide the modulator via operator graph
@@ -216,11 +224,26 @@ def vm_step_block(
             # -----------------------------------------------------------------
             # MODE SAMPLE: Audio-native via FWPT gateway (Phase 3)
             # -----------------------------------------------------------------
-            from .sample_source import sample_generate_coeffs
+            from .sample_source import sample_generate_coeffs, compute_playback_rate
+
+            # Update playback rate from VoiceFrame parameters
+            # If sample has a root note, pitch-shift based on played note
+            sample_state = state.sample_state
+            if sample_state.buffer is not None:
+                # Get sample rate from frame (default 1.0x)
+                sample_rate = getattr(frame, 'sample_rate_q16', 65536) or 65536
+
+                # If sample has root note metadata, compute pitch shift
+                root_note = getattr(sample_state, 'root_note', None)
+                if root_note is not None and root_note != params.note:
+                    # Pitch shift to match requested note
+                    sample_rate = compute_playback_rate(root_note, params.note)
+
+                sample_state.rate_q16 = sample_rate
 
             # Generate coefficients from sample playback
             # Note: Sample buffer must be loaded via Voice Engine before playback
-            sample_generate_coeffs(state.sample_state, carrier_512)
+            sample_generate_coeffs(sample_state, carrier_512)
         else:
             # -----------------------------------------------------------------
             # MODE A: LUT-based (existing path)

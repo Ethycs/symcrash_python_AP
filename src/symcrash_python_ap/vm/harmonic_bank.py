@@ -28,13 +28,18 @@ import numpy as np
 
 from ..fixed import RSHIFT_RNE, SAT16, Q15_ONE
 from ..wavelet.sine_core import sin_cos_q15, freq_to_phase_inc, PHASE_MASK
-from .tables import COEFF_LEN
+from .tables import COEFF_LEN, VM_K
 
 # =============================================================================
 # CONSTANTS (WSE-STD-210 Section 1)
 # =============================================================================
 
-VM_K = 8                    # Polyphase lanes / within-block offsets
+# Polyphase configuration imported from tables.py (VM_K = 4 or 8)
+# K_STRIDE: sample offset per slot for basis frame generation
+# Both K=4 and K=8 use 1-sample phase offsets for interleaved reconstruction
+K_STRIDE = 1
+VM_K_RECONSTRUCT = VM_K  # For API compatibility
+
 NUM_LEAVES = 64             # Number of WPT leaves
 BLOCK_SIZE = 64             # Samples per block
 SAMPLE_RATE = 48000
@@ -177,6 +182,33 @@ class HarmonicWeights:
         self.a_h_q15[:len(a_h)] = a_h
         self.b_h_q15[:len(b_h)] = b_h
         self.H_active = min(H, len(self.a_h_q15))
+
+    def set_custom(self, harmonic_amps_q15: list) -> None:
+        """
+        Configure with custom harmonic amplitudes.
+
+        Sets sine-phase harmonics (a_h) directly from provided Q15 amplitudes.
+        This enables arbitrary timbres like violin, brass, woodwinds, etc.
+
+        The harmonics are pure sine-phase (a_h only, b_h=0), which produces
+        a waveform that starts at zero crossing. For most musical sounds
+        this is appropriate since phase relationships don't affect timbre
+        perception significantly.
+
+        Args:
+            harmonic_amps_q15: List of Q15 amplitudes [H1, H2, H3, ...]
+                              Index 0 = fundamental, index 1 = 2nd harmonic, etc.
+        """
+        self.dc_q15 = 0
+        self.a_h_q15.fill(0)
+        self.b_h_q15.fill(0)
+
+        # Copy provided amplitudes to sine weights
+        for i, amp in enumerate(harmonic_amps_q15):
+            if i < len(self.a_h_q15):
+                self.a_h_q15[i] = SAT16(int(amp))
+
+        self.H_active = min(len(harmonic_amps_q15), len(self.a_h_q15))
 
     def set_from_waveform_type(self, wave_type: int, H: int = 32, duty_q15: int = 16384) -> None:
         """
@@ -321,6 +353,7 @@ def generate_basis_frames(
     anchor_note: int,
     H_max: int = DEFAULT_H_MAX,
     sample_rate: int = SAMPLE_RATE,
+    k_stride: int = K_STRIDE,
 ) -> HarmonicBasisFrames:
     """
     Generate Mode B2 basis frames for a pitch anchor.
@@ -329,19 +362,23 @@ def generate_basis_frames(
     - Generate time-domain reference blocks using Q32 phase stepping
     - Produce basis frames via FWPT
 
-    CRITICAL: Match Mode A's LUT generation approach!
-    Mode A generates each k-slot's block starting at phase = k * phase_inc.
-    This means k-slot k reconstructs samples starting at time offset k.
+    K=4 Polyphase Strategy (Consecutive Blocks):
+    --------------------------------------------
+    Each slot k handles samples [k*16 : (k+1)*16] of the output block.
+    The basis for slot k is generated starting at sample position k*16,
+    which corresponds to a phase offset of k * 16 * phase_inc.
 
-    For Mode B to work correctly with the same phase model:
-    - k-slot k's basis must represent the waveform starting at sample k
-    - At runtime, we use the SAME phase for all k-slots (like Mode A)
-    - The k-offset is baked into each k-slot's basis
+    This matches the IDWPT polyphase reconstruction that takes:
+        out[0:16]  = idwpt(slot_0)[0:16]
+        out[16:32] = idwpt(slot_1)[16:32]
+        out[32:48] = idwpt(slot_2)[32:48]
+        out[48:64] = idwpt(slot_3)[48:64]
 
     Args:
         anchor_note: MIDI note for this anchor
         H_max: Maximum harmonic count
         sample_rate: Sample rate in Hz
+        k_stride: Sample offset per slot (16 for K=4 consecutive blocks)
 
     Returns:
         HarmonicBasisFrames with DC_frame, Ucos_h, Usin_h
@@ -356,18 +393,19 @@ def generate_basis_frames(
     Ucos_h = np.zeros((H_max, NUM_LEAVES, VM_K), dtype=np.int16)
     Usin_h = np.zeros((H_max, NUM_LEAVES, VM_K), dtype=np.int16)
 
-    # Generate basis frames for each k-slot (within-block offset)
-    # MATCH MODE A: Each k-slot's block starts at phase = k * phase_inc
+    # Generate basis frames for each k-slot
+    # Slot k handles samples [k*16 : (k+1)*16], so basis starts at sample k*16
     for k in range(VM_K):
         # DC basis: constant signal (same for all k)
         dc_block = [Q15_ONE] * BLOCK_SIZE
         dc_coeffs = fwpt_jit(dc_block)
         DC_frame[:, k] = dc_coeffs
 
-        # Starting phase for this k-slot (matches Mode A)
-        k_phase_offset = (k * phase_inc) & PHASE_MASK
+        # Starting phase for this k-slot
+        # Phase offset = k * k_stride * phase_inc (k_stride=16 for K=4)
+        k_phase_offset = (k * k_stride * phase_inc) & PHASE_MASK
 
-        # Harmonic bases - generate block starting at k_phase_offset
+        # Harmonic bases - generate full 64-sample block starting at k_phase_offset
         for h in range(1, H_max + 1):
             cos_block = [0] * BLOCK_SIZE
             sin_block = [0] * BLOCK_SIZE
@@ -510,6 +548,23 @@ def mode_b_generate_coeffs(
     # Convert weights to Python int to avoid overflow
     dc_q15 = int(weights.dc_q15)
 
+    # Compute total harmonic energy for normalization
+    # This prevents clipping when summing multiple strong harmonics
+    total_weight = 0
+    for h in range(1, H + 1):
+        a_h = abs(int(weights.a_h_q15[h - 1]))
+        b_h = abs(int(weights.b_h_q15[h - 1]))
+        total_weight += max(a_h, b_h)
+
+    # Scale factor to prevent overflow (sum of harmonics shouldn't exceed ~32767)
+    # Use headroom of 2x to be safe
+    if total_weight > 32767:
+        scale_shift = 0
+        while (total_weight >> scale_shift) > 32767:
+            scale_shift += 1
+    else:
+        scale_shift = 0
+
     # Base phase for this block
     base_phi = state.phase
 
@@ -559,8 +614,9 @@ def mode_b_generate_coeffs(
             # Get harmonic weights (convert to Python int to avoid overflow)
             # a_h = sine coefficient (weight on sin(hθ))
             # b_h = cosine coefficient (weight on cos(hθ))
-            a_h = int(weights.a_h_q15[h - 1])
-            b_h = int(weights.b_h_q15[h - 1])
+            # Apply scale_shift to prevent overflow when summing harmonics
+            a_h = int(weights.a_h_q15[h - 1]) >> scale_shift
+            b_h = int(weights.b_h_q15[h - 1]) >> scale_shift
 
             # For a_h * sin(hθ + hφ):
             #   = a_h * (sin(hθ)cos(hφ) + cos(hθ)sin(hφ))
@@ -890,6 +946,8 @@ def extract_modulator_signal(
 __all__ = [
     # Constants
     'VM_K',
+    'VM_K_RECONSTRUCT',
+    'K_STRIDE',
     'NUM_LEAVES',
     'BLOCK_SIZE',
     'SAMPLE_RATE',

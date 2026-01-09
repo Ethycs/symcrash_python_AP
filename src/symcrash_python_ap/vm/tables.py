@@ -14,7 +14,13 @@ from typing import Dict, List, Tuple, Optional
 # CONSTANTS
 # =============================================================================
 
-COEFF_LEN = 512  # Number of coefficients: 64 leaves × 8 polyphase slots
+# Polyphase configuration
+# VM_K = number of polyphase slots (4 or 8)
+# Both use 1-sample phase offsets and interleaved reconstruction:
+#   - K=4: 4 IDWPTs, 256 coefficients, out[k::4] = idwpt(slot_k)[0::4]
+#   - K=8: 8 IDWPTs, 512 coefficients, out[k::8] = idwpt(slot_k)[0::8]
+VM_K = 4  # Change to 8 for higher quality, 4 for lower memory
+COEFF_LEN = 64 * VM_K  # 256 for K=4, 512 for K=8
 NODE_LEN = 8     # Coefficients per node (for operator compatibility)
 L_TOTAL_NODES = 32  # Total nodes for operator system (legacy view)
 BLOCK_SAMPLES = 64  # Samples per block

@@ -101,6 +101,7 @@ class CoeffOscParams:
     unison_spread_cents: int = 0  # Unison detune spread in cents
     drone_mode: bool = False      # Drone/Pad mode (reduces base_mix for slow evolution)
     legato_mode: bool = False     # Legato mode (preserve phase/coefficients on pitch change)
+    custom_harmonics: list = None # Custom harmonic amplitudes (Q15) - overrides waveform_type
 
 
 # FM modulator source constants (Phase 3)
@@ -302,6 +303,12 @@ def decode_frame(
     drone_mode = getattr(frame, 'drone_mode', False)
     legato_mode = getattr(frame, 'legato_mode', False)
 
+    # Custom harmonics for Mode B (overrides waveform_type if provided)
+    custom_harmonics = None
+    if hasattr(frame, 'partial_amps_q15') and frame.partial_amps_q15:
+        # Use custom harmonics from frame
+        custom_harmonics = list(frame.partial_amps_q15)
+
     plan.coeff_osc_params = CoeffOscParams(
         table_id=coeff_table_id,
         base_mix_q15=base_mix,
@@ -321,6 +328,7 @@ def decode_frame(
         unison_spread_cents=unison_spread_cents,
         drone_mode=drone_mode,
         legato_mode=legato_mode,
+        custom_harmonics=custom_harmonics,
     )
 
     # Check if we should use CCS path (using fast on-demand table generation)
