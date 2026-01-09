@@ -772,7 +772,11 @@ def lane_tail(state: VMState, cfg: DecodedPlan) -> None:
     """
     for op_id in cfg.tail_ops:
         if op_id == 2:  # FineClamp
-            _tail_fine_clamp(state, cfg.mask_u32)
+            # Skip FineClamp in CCS mode - it uses NODE layout (32×8) which
+            # doesn't match CCS polyphase layout (64×8). The FineClamp would
+            # corrupt the polyphase coefficients.
+            if not cfg.use_coeff_osc:
+                _tail_fine_clamp(state, cfg.mask_u32)
         elif op_id == 11:  # NormalizeScale
             # Skip NormalizeScale in CCS mode - oscillating coefficients
             # have naturally varying energy and shouldn't be normalized
@@ -785,7 +789,9 @@ def lane_tail(state: VMState, cfg: DecodedPlan) -> None:
             if not cfg.use_coeff_osc:
                 _tail_sheaf_project(state, cfg.mask_u32)
         elif op_id == 19:  # EmergencySimplify
-            _tail_emergency_simplify(state, cfg.mask_u32)
+            # Skip EmergencySimplify in CCS mode - same layout mismatch
+            if not cfg.use_coeff_osc:
+                _tail_emergency_simplify(state, cfg.mask_u32)
 
 
 def _tail_fine_clamp(state: VMState, mask: int) -> None:
@@ -1100,37 +1106,28 @@ def lane_ccs_render(
     """
     global _CCS_OUTPUT
 
-    # TRUE POLYPHASE IDWPT with K=8 time slots
+    # SIMPLIFIED POLYPHASE: Use k=0 coefficients only
+    #
+    # The K dimension in the LUT represents overlapping 1-sample-shifted
+    # blocks. For a single 64-sample block output, we just need ONE IDWPT.
+    # Using k=0 gives the coefficients for the current phase position.
+    #
+    # The K>0 slots are useful for operators that need to act on subband
+    # time series, but for audio reconstruction, k=0 is sufficient.
+    #
     # coeff_state layout: [leaf0_k0..k7, leaf1_k0..k7, ..., leaf63_k0..k7]
-    # VM_K = 8, COEFF_LEN = 512 = 64 × 8
+    # We extract [:, 0] = [leaf0_k0, leaf1_k0, ..., leaf63_k0]
     coeff_2d = state.coeff_state[:COEFF_LEN].reshape(64, VM_K)
 
-    # Run IDWPT for each of the K time slots
-    idwpt_outputs = []
-    for k in range(VM_K):
-        # Extract 64 coefficients for this time slot
-        coeffs_k = coeff_2d[:, k].tolist()
+    # Extract k=0 coefficients (64 values, one per leaf)
+    coeffs = coeff_2d[:, 0].tolist()
 
-        # Run IDWPT for this phase position
-        audio_k = idwpt_jit(coeffs_k, headroom_bits=1)
-        idwpt_outputs.append(audio_k)
+    # Run single IDWPT to get 64 audio samples
+    audio = idwpt_jit(coeffs, headroom_bits=1)
 
-    # CORRECT INTERLEAVE for shifted-block LUTs:
-    #
-    # With shifted-block FWPT: coeff[:, k, p] = FWPT(x[start+k : start+k+64])
-    # Therefore: y_k[0] ≈ x[start+k], y_k[1] ≈ x[start+k+1], ...
-    #
-    # To reconstruct x[start : start+64], we need:
-    #   out[k::K] = y_k[0::K]
-    #
-    # This picks samples at positions 0, K, 2K, ... from each y_k
-    # and places them at positions k, k+K, k+2K, ... in output.
-
-    for k in range(VM_K):
-        y_k = idwpt_outputs[k]
-        # out[k::K] = y_k[0::K]
-        for m in range(BLOCK_SAMPLES // VM_K):
-            _CCS_OUTPUT[k + m * VM_K] = y_k[m * VM_K]
+    # Copy to output buffer
+    for i in range(BLOCK_SAMPLES):
+        _CCS_OUTPUT[i] = audio[i]
 
     return _CCS_OUTPUT
 

@@ -130,6 +130,11 @@ def vm_step_block(
                 mb_state.pwm_width_q15 = params.pwm_width_q15
                 mb_state.pwm_enabled = params.pwm_enabled
                 mb_state.H_active = min(params.H_request, mb_state.H_bandlimit)
+                # Set waveform type (configures harmonic weights)
+                waveform_type = getattr(params, 'waveform_type', 0)
+                mb_state.weights.set_from_waveform_type(
+                    waveform_type, mb_state.H_active, params.pwm_width_q15
+                )
             elif pitch_changed or mb_state.note != params.note:
                 # Pitch changed: use legato_mode to decide how to handle
                 if params.legato_mode:
@@ -142,6 +147,11 @@ def vm_step_block(
                     mb_state.pwm_width_q15 = params.pwm_width_q15
                     mb_state.pwm_enabled = params.pwm_enabled
                     mb_state.H_active = min(params.H_request, mb_state.H_bandlimit)
+                    # Set waveform type (configures harmonic weights)
+                    waveform_type = getattr(params, 'waveform_type', 0)
+                    mb_state.weights.set_from_waveform_type(
+                        waveform_type, mb_state.H_active, params.pwm_width_q15
+                    )
 
             # Update FM depth from VoiceFrame (modulator signal comes from fm_mod_buffer)
             # Phase 3 FM/PM will provide the modulator via operator graph
@@ -157,27 +167,48 @@ def vm_step_block(
 
         if osc_mode == OSC_MODE_B:
             # -----------------------------------------------------------------
-            # MODE B: Rotator/Harmonic Bank (WSE-STD-210 Section 10)
+            # MODE B: Coefficient synthesis
             # -----------------------------------------------------------------
-            from .harmonic_bank import mode_b_generate_coeffs, get_basis_for_note
+            from .harmonic_bank import (
+                mode_b_generate_coeffs, mode_b_generate_coeffs_matrix,
+                get_basis_for_note
+            )
+            from .waveform_matrix import WaveformType
 
-            # Get or generate basis frames for this pitch anchor
-            basis = get_basis_for_note(params.note)
+            # Determine which synthesis method to use:
+            # - Matrix method: PL waveforms (SQUARE, SAW, TRIANGLE) without FM/PWM
+            # - Harmonic bank: SINE, PWM-modulated, FM-modulated signals
+            waveform_type = getattr(params, 'waveform_type', WaveformType.SINE)
+            use_matrix_method = (
+                waveform_type in (WaveformType.SQUARE, WaveformType.SAW,
+                                  WaveformType.SAW_DOWN, WaveformType.TRIANGLE)
+                and not params.pwm_enabled
+                and params.fm_depth_q15 == 0
+            )
 
-            # Update PWM if enabled
-            if params.pwm_enabled:
-                state.mode_b_state.set_pwm_weights(params.pwm_width_q15)
-
-            # === FM MODULATOR WIRING (Phase 3 - WSE-STD-210 Section 8.3) ===
-            # Wire previous block's modulator feedback to carrier.
-            # z⁻¹ block delay ensures deterministic, bounded-runtime feedback.
-            if params.fm_depth_q15 != 0 and params.fm_source == FM_SOURCE_FEEDBACK:
-                state.mode_b_state.fm_mod_buffer = state.prev_fm_mod_buffer
+            if use_matrix_method:
+                # Matrix method: precomputed coefficient LUT (no runtime FWPT)
+                mode_b_generate_coeffs_matrix(
+                    state.mode_b_state, waveform_type, carrier_512
+                )
             else:
-                state.mode_b_state.fm_mod_buffer = None
+                # Harmonic bank: basis frames + runtime sin/cos modulation
+                basis = get_basis_for_note(params.note)
 
-            # Generate coefficients using harmonic bank (with FM if active)
-            mode_b_generate_coeffs(state.mode_b_state, basis, carrier_512)
+                # Update PWM if enabled
+                if params.pwm_enabled:
+                    state.mode_b_state.set_pwm_weights(params.pwm_width_q15)
+
+                # === FM MODULATOR WIRING (Phase 3 - WSE-STD-210 Section 8.3) ===
+                # Wire previous block's modulator feedback to carrier.
+                # z⁻¹ block delay ensures deterministic, bounded-runtime feedback.
+                if params.fm_depth_q15 != 0 and params.fm_source == FM_SOURCE_FEEDBACK:
+                    state.mode_b_state.fm_mod_buffer = state.prev_fm_mod_buffer
+                else:
+                    state.mode_b_state.fm_mod_buffer = None
+
+                # Generate coefficients using harmonic bank (with FM if active)
+                mode_b_generate_coeffs(state.mode_b_state, basis, carrier_512)
 
             # Advance Mode B phase for next block
             state.mode_b_state.advance_block()

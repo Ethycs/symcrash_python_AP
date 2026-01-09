@@ -14,11 +14,18 @@ Versioning Rules (§7):
 - capsule_id identifies "the instrument identity" across versions
 - Same identity = same capsule_id across rebuilds
 - Changed identity = new capsule_id
+
+Natural IR Compilation:
+- InstrumentIR.to_capsule() compiles the IR to CapsuleV0
+- CapsuleCompiler.compile_from_ir(ir) handles full compilation with validation
+- L0 macros map to control_defaults
+- L2 regime graph provides regime_graph_id
+- L3 emit templates provide tree family defaults
 """
 
 import hashlib
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, TYPE_CHECKING
 
 from .capsule import (
     CapsuleV0,
@@ -34,8 +41,11 @@ from .capsule import (
     create_synth_capsule,
 )
 from .lifecycle import LifecycleState, CapsuleRecord, create_compiled_record
-from ..control_registry import ControlRegistry
+from ..control_registry import ControlRegistry, ControlID
 from ..voice.voice_engine_registry import VoiceEngineRegistry, get_registry
+
+if TYPE_CHECKING:
+    from ..instrument_ir import InstrumentIR
 
 
 # =============================================================================
@@ -404,6 +414,283 @@ class CapsuleCompiler:
             errors.append(f"Invalid tree_family_id: {tree_family_id}")
 
         return errors
+
+    # =========================================================================
+    # NATURAL IR COMPILATION
+    # =========================================================================
+
+    def compile_from_ir(
+        self,
+        ir: 'InstrumentIR',
+        program_id: int = None,
+        capsule_id: str = None,
+    ) -> CompileResult:
+        """
+        Compile InstrumentIR directly to CapsuleV0.
+
+        This is the natural compilation path - the IR contains all metadata,
+        control mappings, regime graphs, and emission templates needed.
+
+        Args:
+            ir: Complete InstrumentIR v0
+            program_id: Override program_id (uses hash of instrument_id if None)
+            capsule_id: Override capsule_id (generated from IR if None)
+
+        Returns:
+            CompileResult with capsule in COMPILED state
+
+        Example:
+            compiler = CapsuleCompiler()
+            ir = load_instrument("my_synth.yaml")
+            result = compiler.compile_from_ir(ir)
+            if result.success:
+                capsule = result.capsule
+        """
+        result = CompileResult(success=True)
+
+        # Validate IR structure first
+        valid, error_msg = ir.validate()
+        if not valid:
+            result.errors.append(f"IR validation failed: {error_msg}")
+            result.success = False
+            return result
+
+        # Extract metadata from IR
+        meta = ir.meta
+        name = meta.name or meta.instrument_id or "Unnamed"
+        author = meta.author or ""
+        master_seed = meta.seed_u32 or 0x12345678
+
+        # Generate program_id from instrument_id if not provided
+        if program_id is None:
+            if meta.instrument_id:
+                # Hash instrument_id to get stable program_id
+                hash_val = int(hashlib.sha256(
+                    meta.instrument_id.encode()
+                ).hexdigest()[:8], 16)
+                program_id = hash_val & 0x7FFFFFFF  # Keep positive
+            else:
+                result.errors.append("Either program_id or instrument_id is required")
+                result.success = False
+                return result
+
+        # Extract control defaults from L0 macros
+        control_defaults = self._extract_control_defaults_from_ir(ir)
+        result.warnings.extend(control_defaults.get('_warnings', []))
+        control_defaults.pop('_warnings', None)
+
+        # Extract voice param defaults from compile config
+        voice_param_defaults = self._extract_voice_param_defaults_from_ir(ir)
+
+        # Extract regime graph ID (hash of regime structure)
+        regime_graph_id = self._extract_regime_graph_id(ir)
+
+        # Extract tree family ID from emission templates
+        tree_family_id = self._extract_tree_family_id(ir)
+
+        # Build tags from IR
+        tags = self._extract_tags_from_ir(ir)
+
+        # Build asset references from compile.map_library
+        assets = self._extract_assets_from_ir(ir)
+
+        # Use standard compile_instrument with extracted values
+        return self.compile_instrument(
+            program_id=program_id,
+            name=name,
+            author=author,
+            tags=tags,
+            control_defaults=control_defaults,
+            voice_param_defaults=voice_param_defaults,
+            regime_graph_id=regime_graph_id,
+            tree_family_id=tree_family_id,
+            instrument_ir={'id': meta.instrument_id},
+            master_seed=master_seed,
+            assets=assets,
+            capsule_id=capsule_id,
+        )
+
+    def _extract_control_defaults_from_ir(
+        self,
+        ir: 'InstrumentIR',
+    ) -> Dict[int, int]:
+        """
+        Extract control defaults from IR L0 macros and compile config.
+
+        Maps L0 macro defaults to ControlRegistry control IDs.
+        """
+        defaults: Dict[int, int] = {}
+        warnings: List[str] = []
+
+        # Map L0 macros to control IDs
+        macro_to_control = {
+            'M_BRIGHT': ControlID.TIMBRE,
+            'M_ATTACK': ControlID.ATK_BLOCKS,
+            'M_DECAY': ControlID.DCY_BLOCKS,
+            'M_SUSTAIN': ControlID.SUS_Q15,
+            'M_RELEASE': ControlID.REL_BLOCKS,
+            'M_GLITCH': ControlID.CHAOS,
+            'M_MORPH': ControlID.MORPH,
+            'M_TEXTURE': ControlID.TEXTURE,
+            'M_DETUNE': ControlID.DETUNE,
+        }
+
+        # Extract from L0 macros
+        for macro in ir.layers.L0_graph.macros:
+            macro_id = macro.id.upper()
+            if macro_id in macro_to_control:
+                control_id = macro_to_control[macro_id]
+                # Convert macro default (0.0-1.0) to Q15 (0-32767)
+                default_q15 = int(macro.default * 32767)
+                defaults[control_id] = default_q15
+            else:
+                warnings.append(f"Unknown macro {macro.id} - no control mapping")
+
+        # Extract ADSR from L0 Amp node if present
+        for node in ir.layers.L0_graph.nodes:
+            if node.type == "Amp" and node.params.adsr:
+                adsr = node.params.adsr
+                # Convert ms to blocks (64 samples @ 48kHz = 1.33ms/block)
+                ms_per_block = 64 / 48.0  # ~1.33ms
+                defaults[ControlID.ATK_BLOCKS] = max(1, int(adsr.a_ms / ms_per_block))
+                defaults[ControlID.DCY_BLOCKS] = max(1, int(adsr.d_ms / ms_per_block))
+                defaults[ControlID.SUS_Q15] = int(adsr.s * 32767)
+                defaults[ControlID.REL_BLOCKS] = max(1, int(adsr.r_ms / ms_per_block))
+
+        defaults['_warnings'] = warnings
+        return defaults
+
+    def _extract_voice_param_defaults_from_ir(
+        self,
+        ir: 'InstrumentIR',
+    ) -> Dict[int, int]:
+        """
+        Extract voice param defaults from IR.
+
+        Sources:
+        - compile.frame_emitter_policy for frame emission params
+        - L0 nodes for waveform/carrier params
+        """
+        defaults: Dict[int, int] = {}
+
+        # Extract from L0 Osc nodes
+        for node in ir.layers.L0_graph.nodes:
+            if node.type == "Osc":
+                # Could map waveform, detune, pulse width to voice params
+                if node.params.waveform:
+                    # Map waveform string to ID
+                    wave_map = {'sine': 0, 'saw': 1, 'pulse': 2, 'tri': 3}
+                    wave_id = wave_map.get(node.params.waveform.lower(), 0)
+                    # Would need VoiceParamID.WAVEFORM constant
+                    pass
+
+        return defaults
+
+    def _extract_regime_graph_id(self, ir: 'InstrumentIR') -> Optional[int]:
+        """
+        Generate regime graph ID from L2 regime structure.
+
+        Creates a stable hash of the regime graph for identification.
+        """
+        regimes = ir.layers.L2_regimes
+        if not regimes.regime_nodes:
+            return None
+
+        # Create identity string from regime structure
+        regime_str = ""
+        for node in sorted(regimes.regime_nodes, key=lambda n: n.id):
+            regime_str += f"{node.id}:{node.kind}:{node.emit_template}|"
+        for trans in sorted(regimes.transitions, key=lambda t: (t.from_regime, t.to)):
+            regime_str += f"{trans.from_regime}->{trans.to}:{trans.when}|"
+
+        # Hash to get stable ID
+        hash_val = int(hashlib.sha256(regime_str.encode()).hexdigest()[:8], 16)
+        return hash_val & 0x7FFFFFFF
+
+    def _extract_tree_family_id(self, ir: 'InstrumentIR') -> Optional[int]:
+        """
+        Extract tree family ID from L3 emission templates.
+
+        Looks at tree targets across templates to identify the family.
+        """
+        emit_templates = ir.layers.L3_cmmm.emit_templates
+        if not emit_templates:
+            return None
+
+        # Collect unique tree references
+        tree_refs = set()
+        for template in emit_templates.values():
+            tree_refs.add(template.trees.A)
+            tree_refs.add(template.trees.B)
+
+        if not tree_refs:
+            return None
+
+        # Create stable hash from tree references
+        tree_str = "|".join(sorted(tree_refs))
+        hash_val = int(hashlib.sha256(tree_str.encode()).hexdigest()[:8], 16)
+        return hash_val & 0x7FFFFFFF
+
+    def _extract_tags_from_ir(self, ir: 'InstrumentIR') -> List[str]:
+        """
+        Extract tags from IR structure.
+
+        Infers tags from:
+        - L0 node types (has filter, has noise, etc.)
+        - L2 regime kinds present
+        - Compile config features
+        """
+        tags = []
+
+        # Check L0 nodes
+        node_types = {node.type for node in ir.layers.L0_graph.nodes}
+        if "Filter" in node_types:
+            tags.append("filtered")
+        if "Noise" in node_types:
+            tags.append("noise")
+        if "FXSend" in node_types:
+            tags.append("fx")
+
+        # Check waveforms
+        for node in ir.layers.L0_graph.nodes:
+            if node.type == "Osc" and node.params.waveform:
+                tags.append(node.params.waveform.lower())
+
+        # Check regime kinds
+        regime_kinds = {node.kind for node in ir.layers.L2_regimes.regime_nodes}
+        if "GlitchChatter" in regime_kinds:
+            tags.append("glitch")
+        if "NoiseTexture" in regime_kinds:
+            tags.append("texture")
+
+        return list(set(tags))  # Remove duplicates
+
+    def _extract_assets_from_ir(self, ir: 'InstrumentIR') -> List[AssetRef]:
+        """
+        Extract asset references from IR compile config.
+
+        Maps compile.map_library entries to AssetRef objects.
+        """
+        assets = []
+
+        for asset_id, asset_path in ir.compile.map_library.items():
+            # Infer asset type from path/id
+            if 'wavetable' in asset_id.lower() or asset_path.endswith('.wtbl'):
+                asset_type = AssetType.WAVETABLE
+            elif 'material' in asset_id.lower():
+                asset_type = AssetType.MATERIAL
+            elif 'atlas' in asset_id.lower():
+                asset_type = AssetType.TABLE_ATLAS
+            else:
+                asset_type = AssetType.OTHER
+
+            assets.append(AssetRef(
+                asset_type=asset_type,
+                asset_id=asset_id,
+                asset_path=asset_path,
+            ))
+
+        return assets
 
 
 __all__ = [

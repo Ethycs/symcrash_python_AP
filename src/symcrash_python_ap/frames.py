@@ -120,6 +120,10 @@ class VoiceFrame:
     # Harmonic count request (Mode B bandlimits at runtime based on pitch)
     H_request: int = 16
 
+    # Waveform type: 0=sine, 1=square, 2=pulse, 3=saw, 4=saw_down, 5=triangle
+    # See vm/waveform_matrix.py WaveformType for constants
+    waveform_type: int = 0          # Default sine
+
     # PWM parameters
     pwm_width_q15: int = 16384      # Duty cycle (Q15: 0=0%, 32767≈100%, 16384=50%)
     pwm_enabled: bool = False       # Enable PWM modulation

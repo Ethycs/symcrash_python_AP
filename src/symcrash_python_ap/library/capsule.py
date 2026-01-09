@@ -202,10 +202,25 @@ class CapsuleV0:
 
 
 # =============================================================================
-# FACTORY FUNCTIONS
+# INTERNAL FACTORY FUNCTIONS
+# =============================================================================
+#
+# NOTE: These functions are for internal use by the compiler and library.
+# For human authoring, use InstrumentIR instead:
+#
+#   from symcrash_python_ap.instrument_ir import InstrumentIR
+#
+#   # Quick preset:
+#   ir = InstrumentIR.quick_synth("My Synth", brightness=0.7)
+#   capsule = ir.to_capsule()
+#
+#   # From YAML:
+#   ir = load_instrument("preset.yaml")
+#   capsule = ir.to_capsule()
+#
 # =============================================================================
 
-def create_instrument_capsule(
+def _create_instrument_capsule(
     capsule_id: str,
     name: str,
     program_id: int,
@@ -215,19 +230,9 @@ def create_instrument_capsule(
     voice_param_defaults: Dict[int, int] = None,
 ) -> CapsuleV0:
     """
-    Create a CapsuleInstrument.
+    INTERNAL: Create a CapsuleInstrument.
 
-    Args:
-        capsule_id: Unique identifier
-        name: Human-readable name
-        program_id: Voice engine program ID
-        author: Optional author name
-        tags: Optional list of tags
-        control_defaults: Optional control default overrides
-        voice_param_defaults: Optional voice param default overrides
-
-    Returns:
-        CapsuleV0 with INSTRUMENT kind
+    For human authoring, use InstrumentIR.quick_synth() instead.
     """
     return CapsuleV0(
         identity=CapsuleIdentity(
@@ -245,7 +250,7 @@ def create_instrument_capsule(
     )
 
 
-def create_synth_capsule(
+def _create_synth_capsule(
     capsule_id: str,
     name: str,
     program_id: int,
@@ -255,19 +260,9 @@ def create_synth_capsule(
     voice_param_defaults: Dict[int, int] = None,
 ) -> CapsuleV0:
     """
-    Create a CapsuleSynth.
+    INTERNAL: Create a CapsuleSynth.
 
-    Args:
-        capsule_id: Unique identifier
-        name: Human-readable name
-        program_id: Voice engine program ID
-        author: Optional author name
-        tags: Optional list of tags
-        control_defaults: Optional control default overrides
-        voice_param_defaults: Optional voice param default overrides
-
-    Returns:
-        CapsuleV0 with SYNTH kind
+    For human authoring, use InstrumentIR.quick_synth() instead.
     """
     return CapsuleV0(
         identity=CapsuleIdentity(
@@ -285,7 +280,7 @@ def create_synth_capsule(
     )
 
 
-def create_asset_capsule(
+def _create_asset_capsule(
     capsule_id: str,
     name: str,
     assets: List[AssetRef],
@@ -293,17 +288,9 @@ def create_asset_capsule(
     tags: List[str] = None,
 ) -> CapsuleV0:
     """
-    Create a CapsuleAsset (references only, no control semantics).
+    INTERNAL: Create a CapsuleAsset (references only, no control semantics).
 
-    Args:
-        capsule_id: Unique identifier
-        name: Human-readable name
-        assets: List of asset references
-        author: Optional author name
-        tags: Optional list of tags
-
-    Returns:
-        CapsuleV0 with ASSET kind
+    For human authoring, use InstrumentIR instead.
     """
     return CapsuleV0(
         identity=CapsuleIdentity(
@@ -317,7 +304,14 @@ def create_asset_capsule(
     )
 
 
+# Backwards compatibility aliases (deprecated)
+create_instrument_capsule = _create_instrument_capsule
+create_synth_capsule = _create_synth_capsule
+create_asset_capsule = _create_asset_capsule
+
+
 __all__ = [
+    # Core types (public API)
     'CapsuleKind',
     'AssetType',
     'EngineCompat',
@@ -327,6 +321,7 @@ __all__ = [
     'SeedConfig',
     'CapsuleDefaults',
     'CapsuleV0',
+    # Factory functions (deprecated - use InstrumentIR.quick_synth() instead)
     'create_instrument_capsule',
     'create_synth_capsule',
     'create_asset_capsule',

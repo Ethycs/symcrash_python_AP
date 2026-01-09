@@ -205,6 +205,18 @@ def vmstate_to_bytes(state: VMState) -> bytes:
     # Wet seam
     parts.append(struct.pack('<h', state.wet_prev_end))
 
+    # CCS state (24 bytes)
+    # Format: u32 wave_id, u32 note, i32 phase, i32 phase_inc, i32 target_phase_inc, i32 phase_slew_rate
+    parts.append(struct.pack(
+        '<IIiiii',
+        state.ccs_state.wave_id,
+        state.ccs_state.note,
+        state.ccs_state.phase,
+        state.ccs_state.phase_inc,
+        state.ccs_state.target_phase_inc,
+        state.ccs_state.phase_slew_rate,
+    ))
+
     return b''.join(parts)
 
 
@@ -279,6 +291,20 @@ def vmstate_from_bytes(data: bytes) -> VMState:
     wet_prev_end, = struct.unpack_from('<h', data, offset)
     offset += 2
 
+    # CCS state (24 bytes)
+    ccs_wave_id, ccs_note, ccs_phase, ccs_phase_inc, ccs_target_phase_inc, ccs_phase_slew_rate = struct.unpack_from(
+        '<IIiiii', data, offset
+    )
+    offset += 24
+    ccs_state = CCSState(
+        wave_id=ccs_wave_id,
+        note=ccs_note,
+        phase=ccs_phase,
+        phase_inc=ccs_phase_inc,
+        target_phase_inc=ccs_target_phase_inc,
+        phase_slew_rate=ccs_phase_slew_rate,
+    )
+
     # Construct VMState
     return VMState(
         voice_id=voice_id,
@@ -305,17 +331,16 @@ def vmstate_from_bytes(data: bytes) -> VMState:
         wet_ola_initialized=bool(ola_init),
         use_coeff_osc=bool(use_coeff),
         wet_prev_end=wet_prev_end,
+        ccs_state=ccs_state,
     )
 
 
 def get_vmstate_size() -> int:
     """
-    Get minimum size of serialized VMState.
+    Get size of serialized VMState.
 
-    Note: Actual VMState may have additional fields (CCS state, Mode B state,
-    beta state, etc.) that increase the size. This returns the core fields only.
-
-    TODO: Add CCS/ModeB serialization for complete snapshot support.
+    Includes all core fields plus CCS state.
+    Mode B state is not yet serialized (future work).
     """
     return (
         4 +    # Header
@@ -329,8 +354,9 @@ def get_vmstate_size() -> int:
         6 +    # Latency
         4 +    # Previous values
         4 +    # Flags
-        2      # Wet seam
-    )  # = 620 bytes (minimum, core fields only)
+        2 +    # Wet seam
+        24     # CCS state
+    )  # = 644 bytes
 
 
 __all__ = [

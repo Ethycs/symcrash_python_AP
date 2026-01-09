@@ -14,6 +14,9 @@ import numpy as np
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
+# Add audio_out to path for test_config imports
+sys.path.insert(0, str(Path(__file__).parent.parent / "audio_out"))
+
 # Import common modules
 from symcrash_python_ap.safety.unified_renderer import CarrierLiftPipeline
 from symcrash_python_ap.frames import VoiceFrame

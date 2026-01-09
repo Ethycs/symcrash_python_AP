@@ -91,6 +91,7 @@ class CoeffOscParams:
     # WSE-STD-210 Section 10.2 - Mode B parameters
     osc_mode: int = 0             # 0=Mode A (LUT), 1=Mode B (Rotator)
     H_request: int = 16           # Requested harmonic count (bandlimited at runtime)
+    waveform_type: int = 0        # 0=sine, 1=square, 2=pulse, 3=saw, 4=saw_down, 5=triangle
     pwm_width_q15: int = 16384    # PWM duty cycle (Q15: 0=0%, 32767≈100%)
     pwm_enabled: bool = False     # Enable PWM modulation
     sync_enabled: bool = False    # Enable hard sync
@@ -290,6 +291,7 @@ def decode_frame(
     # Extract Mode B parameters from VoiceFrame (WSE-STD-210 Section 10.2)
     osc_mode = getattr(frame, 'coeff_osc_mode', 0) or 0
     H_request = getattr(frame, 'H_request', 16) or 16
+    waveform_type = getattr(frame, 'waveform_type', 0) or 0
     pwm_width_q15 = getattr(frame, 'pwm_width_q15', 16384) or 16384
     pwm_enabled = getattr(frame, 'pwm_enabled', False)
     sync_enabled = getattr(frame, 'sync_enabled', False)
@@ -309,6 +311,7 @@ def decode_frame(
         # WSE-STD-210 Mode B parameters
         osc_mode=osc_mode,
         H_request=H_request,
+        waveform_type=waveform_type,
         pwm_width_q15=pwm_width_q15,
         pwm_enabled=pwm_enabled,
         sync_enabled=sync_enabled,

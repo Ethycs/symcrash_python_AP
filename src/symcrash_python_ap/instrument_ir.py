@@ -30,6 +30,66 @@ except ImportError:
 
 
 # =============================================================================
+# UNIT CONVERSION HELPERS
+# =============================================================================
+
+def ms_to_blocks(ms: float, block_size: int = 64, sample_rate: int = 48000) -> int:
+    """
+    Convert milliseconds to block count.
+
+    Args:
+        ms: Time in milliseconds
+        block_size: Samples per block (default 64)
+        sample_rate: Sample rate in Hz (default 48000)
+
+    Returns:
+        Number of blocks (minimum 1)
+
+    Example:
+        >>> ms_to_blocks(10)  # 10ms at 48kHz/64 samples
+        8
+    """
+    samples = (ms / 1000.0) * sample_rate
+    return max(1, int(samples / block_size))
+
+
+def pct_to_q15(pct: float) -> int:
+    """
+    Convert 0.0-1.0 percentage to Q15 fixed-point (0-32767).
+
+    Args:
+        pct: Value from 0.0 to 1.0
+
+    Returns:
+        Q15 value (0-32767)
+
+    Example:
+        >>> pct_to_q15(0.5)
+        16383
+        >>> pct_to_q15(1.0)
+        32767
+    """
+    return int(max(0.0, min(1.0, pct)) * 32767)
+
+
+def q15_to_pct(q15: int) -> float:
+    """
+    Convert Q15 fixed-point (0-32767) to 0.0-1.0 percentage.
+
+    Args:
+        q15: Q15 value (0-32767)
+
+    Returns:
+        Float from 0.0 to 1.0
+
+    Example:
+        >>> q15_to_pct(16383)
+        0.4999847...
+    """
+    return q15 / 32767.0
+
+
+# =============================================================================
 # ENUMS
 # =============================================================================
 
@@ -473,6 +533,15 @@ class InstrumentIR:
     InstrumentIR v0 - Complete instrument specification.
 
     A layered IR that compiles down to VoiceFramePacket v0b emissions.
+
+    Natural compilation to CapsuleV0:
+        ir = load_instrument("my_synth.yaml")
+        capsule = ir.to_capsule()  # Returns CapsuleV0
+
+        # Or with explicit compiler for validation:
+        from symcrash_python_ap.library.compiler import CapsuleCompiler
+        compiler = CapsuleCompiler()
+        result = compiler.compile_from_ir(ir)
     """
     meta: InstrumentMeta = field(default_factory=InstrumentMeta)
     io: IOConfig = field(default_factory=IOConfig)
@@ -505,6 +574,260 @@ class InstrumentIR:
                 return False, f"Lane {lane_name} has invalid ID {lane_id} (must be 0-7)"
 
         return True, ""
+
+    def to_capsule(self, program_id: int = None, capsule_id: str = None, auto_complete: bool = True) -> Any:
+        """
+        Compile this IR to a CapsuleV0.
+
+        This is the natural compilation path - the IR contains all metadata,
+        control mappings, regime graphs, and emission templates needed.
+
+        Missing L1/L2/L3 layers are automatically filled with sensible defaults
+        unless auto_complete=False.
+
+        Args:
+            program_id: Override program_id (uses hash of instrument_id if None)
+            capsule_id: Override capsule_id (generated from IR if None)
+            auto_complete: If True (default), fill missing layers with defaults
+
+        Returns:
+            CapsuleV0 ready for library storage or runtime loading
+
+        Raises:
+            ValueError: If IR validation fails or compilation errors occur
+
+        Example:
+            # Minimal IR with auto-completion:
+            ir = InstrumentIR()
+            ir.meta.instrument_id = "my-synth"
+            ir.meta.name = "My Synth"
+            capsule = ir.to_capsule()  # L1/L2/L3 auto-filled!
+
+            # From YAML:
+            ir = load_instrument("brass_stab.yaml")
+            capsule = ir.to_capsule()
+        """
+        from .library.compiler import CapsuleCompiler
+
+        # Auto-complete missing layers if requested
+        if auto_complete:
+            completed_ir = complete_instrument(self)
+        else:
+            completed_ir = self
+
+        compiler = CapsuleCompiler(
+            sample_rate=completed_ir.io.sample_rate_hz,
+            block_size=completed_ir.io.block_size,
+        )
+
+        result = compiler.compile_from_ir(completed_ir, program_id=program_id, capsule_id=capsule_id)
+
+        if not result.success:
+            errors = "; ".join(result.errors)
+            raise ValueError(f"IR compilation failed: {errors}")
+
+        return result.capsule
+
+    def to_compile_result(self, program_id: int = None, capsule_id: str = None, auto_complete: bool = True) -> Any:
+        """
+        Compile this IR to a CompileResult (includes warnings and CapsuleRecord).
+
+        Use this instead of to_capsule() when you need the full compilation
+        result including warnings and the CapsuleRecord in COMPILED state.
+
+        Args:
+            program_id: Override program_id (uses hash of instrument_id if None)
+            capsule_id: Override capsule_id (generated from IR if None)
+            auto_complete: If True (default), fill missing layers with defaults
+
+        Returns:
+            CompileResult with capsule, record, warnings, and errors
+
+        Example:
+            ir = load_instrument("brass_stab.yaml")
+            result = ir.to_compile_result()
+            if result.success:
+                capsule = result.capsule
+                record = result.record  # CapsuleRecord in COMPILED state
+            for warning in result.warnings:
+                print(f"Warning: {warning}")
+        """
+        from .library.compiler import CapsuleCompiler
+
+        # Auto-complete missing layers if requested
+        if auto_complete:
+            completed_ir = complete_instrument(self)
+        else:
+            completed_ir = self
+
+        compiler = CapsuleCompiler(
+            sample_rate=completed_ir.io.sample_rate_hz,
+            block_size=completed_ir.io.block_size,
+        )
+
+        return compiler.compile_from_ir(completed_ir, program_id=program_id, capsule_id=capsule_id)
+
+    # =========================================================================
+    # QUICK-BUILD FACTORY METHODS
+    # =========================================================================
+
+    @classmethod
+    def quick_synth(
+        cls,
+        name: str,
+        waveform: str = "saw",
+        attack_ms: float = 10,
+        decay_ms: float = 100,
+        sustain: float = 0.7,
+        release_ms: float = 200,
+        brightness: float = 0.5,
+        author: str = "",
+    ) -> 'InstrumentIR':
+        """
+        Create a minimal synth preset in one line.
+
+        This is the recommended way to create simple presets programmatically.
+        For complex presets, use YAML files with load_instrument().
+
+        Args:
+            name: Human-readable preset name (also generates instrument_id)
+            waveform: Oscillator waveform ("saw", "sine", "pulse", "tri")
+            attack_ms: Attack time in milliseconds
+            decay_ms: Decay time in milliseconds
+            sustain: Sustain level (0.0-1.0)
+            release_ms: Release time in milliseconds
+            brightness: Timbre brightness (0.0-1.0)
+            author: Optional author name
+
+        Returns:
+            Complete InstrumentIR with L0-L3 auto-filled
+
+        Example:
+            ir = InstrumentIR.quick_synth("Bright Saw", brightness=0.8)
+            capsule = ir.to_capsule()
+
+            # Or chain it:
+            capsule = InstrumentIR.quick_synth("Pad", attack_ms=500).to_capsule()
+        """
+        ir = cls()
+        ir.meta.instrument_id = name.lower().replace(" ", "-").replace("_", "-")
+        ir.meta.name = name
+        ir.meta.author = author
+
+        # L0: Single osc + amp chain
+        ir.layers.L0_graph.nodes = [
+            L0Node(id="osc1", type="Osc", params=NodeParams(waveform=waveform)),
+            L0Node(id="amp1", type="Amp", params=NodeParams(
+                adsr=ADSR(a_ms=attack_ms, d_ms=decay_ms, s=sustain, r_ms=release_ms)
+            )),
+        ]
+        ir.layers.L0_graph.edges = [L0Edge(src="osc1", dst="amp1")]
+
+        # L0: Brightness macro
+        ir.layers.L0_graph.macros = [
+            Macro(id="M_BRIGHT", name="Brightness", default=brightness)
+        ]
+
+        # Auto-complete L1/L2/L3 with defaults
+        return complete_instrument(ir)
+
+    @classmethod
+    def quick_pad(cls, name: str, **kwargs) -> 'InstrumentIR':
+        """
+        Create a pad preset with slow attack/release defaults.
+
+        Args:
+            name: Preset name
+            **kwargs: Override any quick_synth parameter
+
+        Returns:
+            InstrumentIR configured for pad sounds
+
+        Example:
+            ir = InstrumentIR.quick_pad("Warm Pad", brightness=0.3)
+        """
+        defaults = dict(
+            attack_ms=300,
+            decay_ms=200,
+            sustain=0.8,
+            release_ms=800,
+        )
+        defaults.update(kwargs)
+        return cls.quick_synth(name, **defaults)
+
+    @classmethod
+    def quick_pluck(cls, name: str, **kwargs) -> 'InstrumentIR':
+        """
+        Create a pluck preset with fast attack, short decay.
+
+        Args:
+            name: Preset name
+            **kwargs: Override any quick_synth parameter
+
+        Returns:
+            InstrumentIR configured for pluck/percussive sounds
+
+        Example:
+            ir = InstrumentIR.quick_pluck("Sharp Pluck", waveform="pulse")
+        """
+        defaults = dict(
+            attack_ms=2,
+            decay_ms=150,
+            sustain=0.0,
+            release_ms=100,
+        )
+        defaults.update(kwargs)
+        return cls.quick_synth(name, **defaults)
+
+    @classmethod
+    def quick_bass(cls, name: str, **kwargs) -> 'InstrumentIR':
+        """
+        Create a bass preset with punchy attack and medium sustain.
+
+        Args:
+            name: Preset name
+            **kwargs: Override any quick_synth parameter
+
+        Returns:
+            InstrumentIR configured for bass sounds
+
+        Example:
+            ir = InstrumentIR.quick_bass("Sub Bass", waveform="sine")
+        """
+        defaults = dict(
+            attack_ms=5,
+            decay_ms=80,
+            sustain=0.6,
+            release_ms=150,
+            brightness=0.3,
+        )
+        defaults.update(kwargs)
+        return cls.quick_synth(name, **defaults)
+
+    @classmethod
+    def quick_lead(cls, name: str, **kwargs) -> 'InstrumentIR':
+        """
+        Create a lead preset with medium attack and high sustain.
+
+        Args:
+            name: Preset name
+            **kwargs: Override any quick_synth parameter
+
+        Returns:
+            InstrumentIR configured for lead sounds
+
+        Example:
+            ir = InstrumentIR.quick_lead("Screaming Lead", brightness=0.9)
+        """
+        defaults = dict(
+            attack_ms=15,
+            decay_ms=100,
+            sustain=0.85,
+            release_ms=200,
+            brightness=0.7,
+        )
+        defaults.update(kwargs)
+        return cls.quick_synth(name, **defaults)
 
 
 # =============================================================================
@@ -1107,6 +1430,8 @@ def complete_instrument(ir: InstrumentIR) -> InstrumentIR:
 # =============================================================================
 
 __all__ = [
+    # Unit conversion helpers
+    'ms_to_blocks', 'pct_to_q15', 'q15_to_pct',
     # Enums
     'NodeType', 'WaveformType', 'NoiseColor', 'FilterMode',
     'RegimeKind', 'TransitionType', 'OverlayKind', 'EventLane',

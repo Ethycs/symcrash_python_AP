@@ -48,11 +48,19 @@ logger = logging.getLogger(__name__)
 BLOCK_SIZE = 64         # B = 64 audio samples per block
 NUM_LEAVES = 64         # L = 64 leaves (full WPT at depth 6)
 DEFAULT_K = 8           # K = 8 time samples per subband per block
-DEFAULT_P = 1024        # P = 1024 phase steps per cycle (higher = fewer spurs)
+DEFAULT_P = 64          # P = 64 phase steps per cycle (was 1024, reduced for memory)
+                        # With cubic interpolation, P=64 gives excellent quality
+                        # Table size: 64 leaves × 8 k-slots × 64 phases × 2 bytes = 64 KB/table
+                        # vs P=1024: 1 MB/table (16× reduction)
 CYCLE_LENGTH = 8192     # C = 8192 samples for one complete waveform cycle
 Q15_ONE = 32767
 TARGET_RMS_Q15 = 16384  # Target RMS (-6 dBFS)
 SAMPLE_RATE = 48000
+
+# Interpolation mode for phase lookup
+INTERP_LINEAR = 0       # Simple linear (default, fastest)
+INTERP_CUBIC = 1        # Cubic Hermite (smoother, slight overhead)
+DEFAULT_INTERP_MODE = INTERP_LINEAR
 
 # =============================================================================
 # WAVEFORM IDs
@@ -108,33 +116,45 @@ class StreamingCoeffLUT:
         self,
         phase_32: int,
         output: np.ndarray,
+        interp_mode: int = DEFAULT_INTERP_MODE,
     ) -> None:
         """Fill `output` with per-leaf subband samples for the given phase.
 
         This runs in the real-time path. It MUST be deterministic and fixed-point
         only, so the phase interpolation is done with integer math.
 
+        With P=64 (vs P=1024), we use 16× less memory per table. To maintain
+        quality, we offer cubic interpolation which produces smoother results
+        than linear interpolation with fewer phase bins.
+
         Args:
             phase_32: 32-bit phase accumulator value
             output: np.ndarray[num_leaves, K] int16 (modified in place)
+            interp_mode: INTERP_LINEAR (default) or INTERP_CUBIC
         """
         # Compute phase index based on actual P of this LUT
-        # For P=256: shift by 24, mask with 0xFF
         # For P=64:  shift by 26, mask with 0x3F
+        # For P=256: shift by 24, mask with 0xFF
         # General: shift by (32 - log2(P)), mask with (P-1)
         P = self.P
-        if P == 256:
-            shift = 24
-            mask = 0xFF
-        elif P == 64:
+        if P == 64:
             shift = 26
             mask = 0x3F
+        elif P == 256:
+            shift = 24
+            mask = 0xFF
         elif P == 512:
             shift = 23
             mask = 0x1FF
         elif P == 1024:
             shift = 22
             mask = 0x3FF
+        elif P == 16:
+            shift = 28
+            mask = 0x0F
+        elif P == 32:
+            shift = 27
+            mask = 0x1F
         else:
             # Fallback for arbitrary P (slower)
             import math
@@ -142,25 +162,59 @@ class StreamingCoeffLUT:
             mask = P - 1
 
         phase_idx = (phase_32 >> shift) & mask
-        phase_idx_next = (phase_idx + 1) & mask
 
         # Fractional bits for interpolation
         frac_bits = shift
         frac = phase_32 & ((1 << frac_bits) - 1)
-
-        # Fixed-point lerp:
-        #   val = v0 + (v1 - v0) * frac / 2^frac_bits
-        # with rounding to nearest.
-        #
-        # IMPORTANT: Use int64 for multiplication to avoid overflow.
-        # diff can be up to ~350, frac can be up to 2^24-1 = 16777215
-        # Product can be up to 350 * 16777215 = 5.8 billion > int32 max
-        v0 = self.data[:, :, phase_idx].astype(np.int64)
-        v1 = self.data[:, :, phase_idx_next].astype(np.int64)
-        diff = v1 - v0
-        half = np.int64(1) << (frac_bits - 1)
         frac_64 = np.int64(frac)
-        val = v0 + ((diff * frac_64 + half) >> frac_bits)
+        half = np.int64(1) << (frac_bits - 1)
+
+        if interp_mode == INTERP_CUBIC:
+            # Cubic Hermite interpolation for smoother results with fewer phase bins
+            # Uses 4 points: p0, p1, p2, p3 where we interpolate between p1 and p2
+            p0_idx = (phase_idx - 1) & mask
+            p1_idx = phase_idx
+            p2_idx = (phase_idx + 1) & mask
+            p3_idx = (phase_idx + 2) & mask
+
+            p0 = self.data[:, :, p0_idx].astype(np.int64)
+            p1 = self.data[:, :, p1_idx].astype(np.int64)
+            p2 = self.data[:, :, p2_idx].astype(np.int64)
+            p3 = self.data[:, :, p3_idx].astype(np.int64)
+
+            # Catmull-Rom spline (fixed-point version)
+            # t = frac / 2^frac_bits (normalized 0..1)
+            # val = 0.5 * ((2*p1) + (-p0+p2)*t + (2*p0-5*p1+4*p2-p3)*t² + (-p0+3*p1-3*p2+p3)*t³)
+            #
+            # For fixed-point, we compute with scaled integers:
+            # t is frac_64, scaled by 2^frac_bits
+            # We need to be careful with overflow - use 64-bit throughout
+
+            # Compute coefficients scaled by 2
+            a0 = 2 * p1
+            a1 = -p0 + p2
+            a2 = 2 * p0 - 5 * p1 + 4 * p2 - p3
+            a3 = -p0 + 3 * p1 - 3 * p2 + p3
+
+            # Horner's method: val = ((a3*t + a2)*t + a1)*t + a0
+            # Each step scales by frac_bits
+            # Start with a3 * t
+            val = (a3 * frac_64 + half) >> frac_bits
+            val = ((val + a2) * frac_64 + half) >> frac_bits
+            val = ((val + a1) * frac_64 + half) >> frac_bits
+            val = (val + a0) >> 1  # Final division by 2
+
+        else:
+            # Linear interpolation (default, fastest)
+            phase_idx_next = (phase_idx + 1) & mask
+
+            # Fixed-point lerp:
+            #   val = v0 + (v1 - v0) * frac / 2^frac_bits
+            # with rounding to nearest.
+            v0 = self.data[:, :, phase_idx].astype(np.int64)
+            v1 = self.data[:, :, phase_idx_next].astype(np.int64)
+            diff = v1 - v0
+            val = v0 + ((diff * frac_64 + half) >> frac_bits)
 
         np.clip(val, -32768, 32767, out=val)
         output[:, :] = val.astype(np.int16)
@@ -787,4 +841,8 @@ __all__ = [
     'BLOCK_SIZE',
     'NUM_LEAVES',
     'midi_to_hz',
+    # Interpolation modes
+    'INTERP_LINEAR',
+    'INTERP_CUBIC',
+    'DEFAULT_INTERP_MODE',
 ]

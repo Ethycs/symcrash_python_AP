@@ -101,30 +101,42 @@ class HarmonicWeights:
         Configure for sawtooth wave.
 
         Fourier series: x(φ) = -2/π × Σ_h ((-1)^h / h) × sin(hφ)
-        Simplified: a_h = 1/h with alternating sign
+        With proper normalization: a_h = (2/π) × ((-1)^(h+1) / h)
         """
+        import math
         self.dc_q15 = 0
         self.a_h_q15.fill(0)
         self.b_h_q15.fill(0)
         for h in range(1, min(H + 1, len(self.a_h_q15) + 1)):
-            # a_h = (-1)^(h+1) / h, scaled to Q15
-            sign = 1 if (h % 2 == 1) else -1
-            self.a_h_q15[h - 1] = int(sign * Q15_ONE / h)
+            # a_h = (2/π) × (-1)^(h+1) / h
+            # Sign pattern: +, -, +, -, ... for h = 1, 2, 3, 4, ...
+            sign = -1 if (h % 2 == 0) else 1
+            amplitude = (2.0 / math.pi) * (1.0 / h)
+            self.a_h_q15[h - 1] = SAT16(int(sign * amplitude * Q15_ONE))
         self.H_active = min(H, len(self.a_h_q15))
 
-    def set_square(self, H: int = 32) -> None:
+    def set_square(self, H: int = 32, sigma: bool = False) -> None:
         """
-        Configure for square wave (odd harmonics only).
+        Configure for square wave (odd harmonics only, normalized).
 
-        Fourier series: x(φ) = 4/π × Σ_odd (1/h) × sin(hφ)
+        Raw Fourier series: x(φ) = 4/π × Σ_odd (1/h) × sin(hφ)
+        Normalized (a_1=1): a_h = 1/h for odd h
+
+        Args:
+            H: Maximum harmonic count
+            sigma: Apply Lanczos sigma factor sinc(h/H) to reduce Gibbs ringing
         """
+        import math
         self.dc_q15 = 0
         self.a_h_q15.fill(0)
         self.b_h_q15.fill(0)
         for h in range(1, min(H + 1, len(self.a_h_q15) + 1)):
             if h % 2 == 1:  # Odd harmonics only
-                # a_h = 1/h for odd h, scaled to Q15
-                self.a_h_q15[h - 1] = int(Q15_ONE / h)
+                amplitude = 1.0 / h
+                if sigma and h < H:
+                    x = math.pi * h / H
+                    amplitude *= math.sin(x) / x
+                self.a_h_q15[h - 1] = SAT16(int(amplitude * Q15_ONE))
         self.H_active = min(H, len(self.a_h_q15))
 
     def set_triangle(self, H: int = 32) -> None:
@@ -132,17 +144,75 @@ class HarmonicWeights:
         Configure for triangle wave (odd harmonics, 1/h² rolloff).
 
         Fourier series: x(φ) = 8/π² × Σ_odd ((-1)^((h-1)/2) / h²) × sin(hφ)
+        With proper normalization: a_h = (8/π²) × ((-1)^k / h²) for h = 2k+1
         """
+        import math
         self.dc_q15 = 0
         self.a_h_q15.fill(0)
         self.b_h_q15.fill(0)
         for h in range(1, min(H + 1, len(self.a_h_q15) + 1)):
             if h % 2 == 1:  # Odd harmonics only
-                # a_h = ±1/h² with alternating sign
+                # a_h = (8/π²) × (-1)^k / h² where h = 2k+1
                 k = (h - 1) // 2
                 sign = 1 if (k % 2 == 0) else -1
-                self.a_h_q15[h - 1] = int(sign * Q15_ONE / (h * h))
+                amplitude = (8.0 / (math.pi * math.pi)) / (h * h)
+                self.a_h_q15[h - 1] = SAT16(int(sign * amplitude * Q15_ONE))
         self.H_active = min(H, len(self.a_h_q15))
+
+    def set_pwm(self, duty_q15: int = 16384, H: int = 32) -> None:
+        """
+        Configure for PWM/pulse wave with given duty cycle.
+
+        Uses analytical Fourier coefficients for bandlimited PWM:
+        - dc = 2d - 1
+        - a_h = (2/πh) × sin(πhd)
+
+        Args:
+            duty_q15: Duty cycle in Q15 (16384 = 50%, 8192 = 25%)
+            H: Maximum harmonic count
+        """
+        from .waveform_matrix import compute_pwm_harmonics
+        dc, a_h, b_h = compute_pwm_harmonics(duty_q15, H)
+        self.dc_q15 = dc
+        self.a_h_q15[:len(a_h)] = a_h
+        self.b_h_q15[:len(b_h)] = b_h
+        self.H_active = min(H, len(self.a_h_q15))
+
+    def set_from_waveform_type(self, wave_type: int, H: int = 32, duty_q15: int = 16384) -> None:
+        """
+        Configure from WaveformType constant.
+
+        Provides unified interface to all waveforms:
+        - SINE: Pure sine (H=1)
+        - SQUARE: 50% duty square
+        - PULSE: Variable duty pulse
+        - SAW: Sawtooth
+        - TRIANGLE: Triangle
+
+        Args:
+            wave_type: WaveformType constant (from waveform_matrix)
+            H: Maximum harmonic count
+            duty_q15: Duty cycle for PULSE type
+        """
+        from .waveform_matrix import WaveformType, get_theoretical_harmonics
+
+        if wave_type == WaveformType.SINE:
+            self.set_sine()
+        elif wave_type == WaveformType.SQUARE:
+            self.set_square(H)
+        elif wave_type == WaveformType.PULSE:
+            self.set_pwm(duty_q15, H)
+        elif wave_type == WaveformType.SAW or wave_type == WaveformType.SAW_DOWN:
+            self.set_saw(H)
+        elif wave_type == WaveformType.TRIANGLE:
+            self.set_triangle(H)
+        else:
+            # For unknown types, use DFT decomposition of c vector
+            dc, a_h, b_h = get_theoretical_harmonics(wave_type, H, duty_q15)
+            self.dc_q15 = dc
+            self.a_h_q15[:len(a_h)] = a_h
+            self.b_h_q15[:len(b_h)] = b_h
+            self.H_active = min(H, len(self.a_h_q15))
 
 
 # =============================================================================
@@ -516,6 +586,156 @@ def mode_b_generate_coeffs(
                 output_coeffs[idx] = SAT16(int(output_coeffs[idx]) + sin_contrib + cos_contrib)
 
 
+def mode_b_generate_coeffs_matrix(
+    state: ModeBState,
+    waveform_type: int,
+    output_coeffs: np.ndarray,
+) -> None:
+    """
+    Generate coefficient frame using matrix method with precomputed coefficient LUT.
+
+    For piecewise-linear waveforms (SQUARE, SAW, TRIANGLE), this method:
+    1. Uses precomputed coefficient LUT (phase → coefficients)
+    2. No FWPT at runtime - coefficients already in wavelet domain
+    3. Linear interpolation between phase bins for smooth playback
+
+    The LUT stores FWPT(c-vector) for each phase position, computed once at init.
+
+    Args:
+        state: ModeBState with phase information
+        waveform_type: WaveformType constant (from waveform_matrix)
+        output_coeffs: Output array [512] to fill with coefficients
+    """
+    # Get precomputed coefficient LUT for this waveform type
+    coeff_lut = get_waveform_coeff_lut(waveform_type, state.phase_inc)
+
+    # Sample from LUT at current phase (with interpolation)
+    coeffs_64 = coeff_lut.sample_coeffs(state.phase)
+
+    # Replicate across K=8 time slots
+    for k in range(VM_K):
+        for leaf in range(NUM_LEAVES):
+            idx = leaf * VM_K + k
+            output_coeffs[idx] = coeffs_64[leaf]
+
+
+# =============================================================================
+# WAVEFORM COEFFICIENT LUT (Precomputed FWPT of c-vectors)
+# =============================================================================
+
+@dataclass
+class WaveformCoeffLUT:
+    """
+    Precomputed coefficient LUT for a waveform at a specific frequency.
+
+    Stores FWPT(c-vector samples) at P phase positions for zero-runtime-FWPT synthesis.
+
+    Layout: data[P, 64] where P is number of phase bins, 64 is coefficient count.
+    """
+    waveform_type: int
+    phase_inc: int  # Frequency-specific
+    P: int = 256  # Phase resolution (power of 2)
+    data: np.ndarray = field(default_factory=lambda: np.zeros((256, 64), dtype=np.int16))
+
+    def sample_coeffs(self, phase: int) -> np.ndarray:
+        """
+        Sample coefficients at given phase with linear interpolation.
+
+        Args:
+            phase: Q32 phase
+
+        Returns:
+            64-element coefficient array
+        """
+        # Convert Q32 phase to bin index and fraction
+        shift = 32 - int(np.log2(self.P))
+        phase_idx = (phase >> shift) & (self.P - 1)
+        phase_idx_next = (phase_idx + 1) & (self.P - 1)
+
+        # Fractional part for interpolation
+        frac_mask = (1 << shift) - 1
+        frac = (phase & frac_mask) >> (shift - 15)  # Q15 fraction
+
+        # Linear interpolation
+        v0 = self.data[phase_idx].astype(np.int32)
+        v1 = self.data[phase_idx_next].astype(np.int32)
+        diff = v1 - v0
+        result = v0 + ((diff * frac + (1 << 14)) >> 15)
+
+        return np.clip(result, -32768, 32767).astype(np.int16)
+
+    @staticmethod
+    def generate(waveform_type: int, phase_inc: int, P: int = 256) -> 'WaveformCoeffLUT':
+        """
+        Generate coefficient LUT for a waveform at specific frequency.
+
+        Args:
+            waveform_type: WaveformType constant
+            phase_inc: Phase increment per sample (defines frequency)
+            P: Number of phase bins
+
+        Returns:
+            WaveformCoeffLUT with precomputed coefficients
+        """
+        from ..wavelet.fast_lifting import fwpt_jit
+        from .waveform_matrix import waveform_sample_q15
+
+        data = np.zeros((P, NUM_LEAVES), dtype=np.int16)
+
+        for p in range(P):
+            # Phase for this bin
+            phase_p = (p << (32 - int(np.log2(P)))) & PHASE_MASK
+
+            # Generate 64 time-domain samples
+            block = []
+            phase = phase_p
+            for _ in range(BLOCK_SIZE):
+                sample = waveform_sample_q15(phase, waveform_type)
+                block.append(sample)
+                phase = (phase + phase_inc) & PHASE_MASK
+
+            # FWPT to coefficients
+            coeffs = fwpt_jit(block, headroom_bits=1)
+            data[p, :] = coeffs
+
+        lut = WaveformCoeffLUT(
+            waveform_type=waveform_type,
+            phase_inc=phase_inc,
+            P=P,
+            data=data,
+        )
+        return lut
+
+
+# Global cache for waveform coefficient LUTs
+_WAVEFORM_COEFF_LUT_CACHE: Dict[Tuple[int, int], WaveformCoeffLUT] = {}
+
+
+def get_waveform_coeff_lut(waveform_type: int, phase_inc: int) -> WaveformCoeffLUT:
+    """
+    Get or create precomputed coefficient LUT for waveform.
+
+    Args:
+        waveform_type: WaveformType constant
+        phase_inc: Phase increment per sample
+
+    Returns:
+        WaveformCoeffLUT for this waveform/frequency combination
+    """
+    key = (waveform_type, phase_inc)
+    if key not in _WAVEFORM_COEFF_LUT_CACHE:
+        _WAVEFORM_COEFF_LUT_CACHE[key] = WaveformCoeffLUT.generate(
+            waveform_type, phase_inc, P=256
+        )
+    return _WAVEFORM_COEFF_LUT_CACHE[key]
+
+
+def clear_waveform_coeff_lut_cache() -> None:
+    """Clear the waveform coefficient LUT cache."""
+    global _WAVEFORM_COEFF_LUT_CACHE
+    _WAVEFORM_COEFF_LUT_CACHE.clear()
+
+
 def mode_b_advance_phase(state: ModeBState) -> None:
     """
     Advance phase by one block.
@@ -681,14 +901,18 @@ __all__ = [
     'HarmonicWeights',
     'ModeBState',
     'BasisFrameAtlas',
+    'WaveformCoeffLUT',
     # Functions
     'generate_basis_frames',
     'get_basis_atlas',
     'get_basis_for_note',
     'mode_b_generate_coeffs',
+    'mode_b_generate_coeffs_matrix',
     'mode_b_advance_phase',
     'compute_pwm_weights',
     'compute_bandlimit_H',
+    'get_waveform_coeff_lut',
+    'clear_waveform_coeff_lut_cache',
     # FM modulator extraction (Phase 3)
     'extract_modulator_signal',
 ]
