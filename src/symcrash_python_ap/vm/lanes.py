@@ -766,32 +766,61 @@ def lane_tail(state: VMState, cfg: DecodedPlan) -> None:
 
     Tail enforces "legal/pleasant" bounds on coefficients.
 
+    For CCS mode, uses a simple soft energy limiter instead of NODE-based
+    operators (which assume a different layout).
+
     Args:
         state: VM state (modified in place)
         cfg: Decoded plan
     """
+    # CCS mode: use soft energy limiter instead of NODE-based operators
+    if cfg.use_coeff_osc:
+        _tail_ccs_soft_limit(state)
+        return
+
+    # Legacy mode: use NODE-based operators
     for op_id in cfg.tail_ops:
         if op_id == 2:  # FineClamp
-            # Skip FineClamp in CCS mode - it uses NODE layout (32×8) which
-            # doesn't match CCS polyphase layout (64×8). The FineClamp would
-            # corrupt the polyphase coefficients.
-            if not cfg.use_coeff_osc:
-                _tail_fine_clamp(state, cfg.mask_u32)
+            _tail_fine_clamp(state, cfg.mask_u32)
         elif op_id == 11:  # NormalizeScale
-            # Skip NormalizeScale in CCS mode - oscillating coefficients
-            # have naturally varying energy and shouldn't be normalized
-            if not cfg.use_coeff_osc:
-                _tail_normalize_scale(state, cfg.mask_u32)
+            _tail_normalize_scale(state, cfg.mask_u32)
         elif op_id == 23:  # SheafProject
-            # Skip SheafProject in CCS mode - polyphase coefficients have
-            # specific meaning at each (leaf, k) position and should not be
-            # averaged across leaf boundaries
-            if not cfg.use_coeff_osc:
-                _tail_sheaf_project(state, cfg.mask_u32)
+            _tail_sheaf_project(state, cfg.mask_u32)
         elif op_id == 19:  # EmergencySimplify
-            # Skip EmergencySimplify in CCS mode - same layout mismatch
-            if not cfg.use_coeff_osc:
-                _tail_emergency_simplify(state, cfg.mask_u32)
+            _tail_emergency_simplify(state, cfg.mask_u32)
+
+
+# Maximum RMS energy target for CCS coefficients (Q15)
+# Allows ~0.7 peak amplitude before limiting kicks in
+_CCS_MAX_RMS_Q15 = 23170  # sqrt(0.5) * 32767
+
+
+def _tail_ccs_soft_limit(state: VMState) -> None:
+    """
+    CCS-specific soft energy limiter.
+
+    Prevents coefficient runaway by applying gentle gain reduction when
+    total energy exceeds target. Works with polyphase layout (64 leaves × 8 k-slots).
+
+    This replaces the NODE-based tail operators which assume a different layout.
+    """
+    # Compute total RMS energy across all coefficients
+    coeffs = state.coeff_state[:COEFF_LEN].astype(np.int64)
+    energy = np.sum(coeffs * coeffs)
+    rms = int(np.sqrt(energy / COEFF_LEN))
+
+    if rms <= _CCS_MAX_RMS_Q15:
+        return  # Energy within bounds
+
+    # Apply soft gain reduction: gain = target / current
+    # Implemented as: new_coeff = old_coeff * target / rms
+    # Using integer math: (coeff * target + rms//2) // rms
+    gain_num = _CCS_MAX_RMS_Q15
+    gain_den = max(1, rms)
+
+    # Vectorized scaling
+    scaled = (coeffs * gain_num + gain_den // 2) // gain_den
+    state.coeff_state[:COEFF_LEN] = np.clip(scaled, -32768, 32767).astype(np.int16)
 
 
 def _tail_fine_clamp(state: VMState, mask: int) -> None:
@@ -894,6 +923,9 @@ from ..wavelet.fast_lifting import (
     fwpt_jit,
     idwpt_jit,
 )
+
+# Import polyphase IDWPT for CCS K=4 interleaving
+from ..wavelet.idwpt_streaming import idwpt_polyphase_block
 
 # Import CCS functions for coefficient-domain synthesis (WSE-STD-121)
 from .coeff_lut_streaming import (
@@ -1077,6 +1109,9 @@ def extract_64_leaves(coeff_state: np.ndarray) -> List[int]:
 _CCS_OUTPUT = np.zeros(BLOCK_SAMPLES, dtype=np.int16)
 _CCS_COEFFS_64 = np.zeros(64, dtype=np.int16)
 
+# K=4 polyphase IDWPT (sample every 2nd slot from K=8 state)
+_CCS_POLYPHASE_K = 4
+
 
 def lane_ccs_render(
     state: VMState,
@@ -1092,10 +1127,15 @@ def lane_ccs_render(
         4. Tail constrains coeff_state (lane_tail)
         5. THIS FUNCTION: Extract + IDWPT
 
-    TRUE POLYPHASE IDWPT (WSE-STD-120 section 3.1):
-        The VM's coeff_state is [64 leaves × K time samples] = 512 values (K=8).
-        Each k-slot has a different sub-phase position (polyphase injection).
-        We run IDWPT K times and interleave results for smooth audio.
+    K=4 POLYPHASE IDWPT (WSE-STD-120 section 3.1):
+        The VM's coeff_state is [64 leaves × 8 time samples] = 512 values.
+        For K=4 polyphase reconstruction:
+        - Sample k-slots 0, 2, 4, 6 (every 2nd slot from K=8)
+        - Run 4 IDWPTs and interleave results
+        - Produces 64 samples with proper phase continuity
+
+    This provides smoother transitions and better phase coherence than
+    single-slot (k=0 only) reconstruction.
 
     Args:
         state: VM state (coeff_state contains final operator-modified coefficients)
@@ -1106,28 +1146,16 @@ def lane_ccs_render(
     """
     global _CCS_OUTPUT
 
-    # SIMPLIFIED POLYPHASE: Use k=0 coefficients only
-    #
-    # The K dimension in the LUT represents overlapping 1-sample-shifted
-    # blocks. For a single 64-sample block output, we just need ONE IDWPT.
-    # Using k=0 gives the coefficients for the current phase position.
-    #
-    # The K>0 slots are useful for operators that need to act on subband
-    # time series, but for audio reconstruction, k=0 is sufficient.
-    #
-    # coeff_state layout: [leaf0_k0..k7, leaf1_k0..k7, ..., leaf63_k0..k7]
-    # We extract [:, 0] = [leaf0_k0, leaf1_k0, ..., leaf63_k0]
-    coeff_2d = state.coeff_state[:COEFF_LEN].reshape(64, VM_K)
+    # Reshape to [64 leaves, 8 k-slots]
+    coeff_2d_k8 = state.coeff_state[:COEFF_LEN].reshape(64, VM_K)
 
-    # Extract k=0 coefficients (64 values, one per leaf)
-    coeffs = coeff_2d[:, 0].tolist()
+    # Extract K=4 slots from K=8 state (every 2nd slot: 0, 2, 4, 6)
+    # This maps the 8-slot state to a 4-slot polyphase configuration
+    coeff_2d_k4 = coeff_2d_k8[:, ::2].astype(np.int16)  # Shape: [64, 4]
 
-    # Run single IDWPT to get 64 audio samples
-    audio = idwpt_jit(coeffs, headroom_bits=1)
-
-    # Copy to output buffer
-    for i in range(BLOCK_SAMPLES):
-        _CCS_OUTPUT[i] = audio[i]
+    # Run K=4 polyphase IDWPT with interleaving
+    # idwpt_polyphase_block expects [64, K] and returns 64 samples
+    _CCS_OUTPUT[:] = idwpt_polyphase_block(coeff_2d_k4, headroom_bits=1)
 
     return _CCS_OUTPUT
 
