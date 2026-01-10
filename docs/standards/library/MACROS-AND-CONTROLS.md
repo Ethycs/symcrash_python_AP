@@ -1,13 +1,16 @@
-# Macros and Controls Reference
+# Macros and Controls Authoring Guide
 
-Reference for the macro and control systems in the symcrash synthesis engine.
+Authoring guide for the macro and control systems in the symcrash synthesis engine.
+
+**Normative spec:** WSE-STD-MACRO v0, WSE-STD-IPLC v0 (Section 6)
 
 ## Overview
 
-The control system has two layers:
+The control system has three layers:
 
-1. **System Macros** - Internal state variables with slew filtering
-2. **Control Registry** - External control inputs mapped to voice parameters
+1. **System Macros (0-10)** - CMMM semantic control axes (BRIGHTNESS, DENSITY, RISK, etc.)
+2. **Performance Macros (11-12)** - Modulation control (VIBRATO, LEGATO)
+3. **Control Registry** - External control inputs mapped to voice parameters
 
 ---
 
@@ -40,6 +43,88 @@ Preset macros map to system macros:
 | `BRIGHT` | BRIGHTNESS (4) | Harmonic content |
 | `BODY` | DENSITY (5) | Low-mid presence |
 | `IMPACT` | ENERGY_INTENT (1) | Attack character |
+
+### Performance Macros (11-12)
+
+| ID | Name | Purpose | Set By | Default Slew |
+|----|------|---------|--------|--------------|
+| 11 | VIBRATO | Vibrato/tremolo depth | Controller + MacroProgram | ONE_POLE (4096) |
+| 12 | LEGATO | Legato/portamento mode | Controller + MacroProgram | NONE |
+
+---
+
+## CapsuleMacro Authoring
+
+CapsuleMacro presets define reusable performance modulation that can be applied to any instrument.
+
+### YAML Format
+
+```yaml
+preset:
+  preset_id: "VIBRATO_CLASSIC_V0"
+  preset_version: "v0"
+  author: "symcrash"
+  description: "Classic vibrato with delayed onset."
+
+compat:
+  voiceframe_std: "WSE-STD-020 v1"
+  vm_std: "WSE-STD-VM-HYBRID v0"
+
+kind: MACRO
+
+macro:
+  macro_type: VIBRATO           # VIBRATO | LEGATO | TREMOLO | PORTAMENTO
+
+  # LFO parameters (VIBRATO, TREMOLO)
+  rate_hz: 5.5                  # LFO rate in Hz
+  depth_pitch_cents: 25         # Pitch wobble in cents
+  depth_amp_q15: 1966           # Amplitude modulation depth (6%)
+  depth_timbre_q15: 2621        # Timbre modulation depth (8%)
+
+  # Envelope parameters
+  delay_ms: 40.0                # Delay before modulation starts
+  ramp_ms: 30.0                 # Ramp to full depth
+
+  # Glide parameters (LEGATO, PORTAMENTO)
+  glide_time_ms: 100.0          # Pitch glide duration
+  glide_curve: 0                # 0=linear, 1=exp, 2=log
+
+  # Phase behavior (LEGATO)
+  preserve_phase: true          # Keep oscillator phase on note change
+
+tags:
+  - vibrato
+  - classic
+  - strings
+```
+
+### MacroType Options
+
+| Type | Purpose | Parameters |
+|------|---------|------------|
+| **VIBRATO** | Pitch/amp/timbre LFO | rate_hz, depth_pitch_cents, depth_amp_q15, depth_timbre_q15, delay_ms, ramp_ms |
+| **TREMOLO** | Amplitude-only LFO | rate_hz, depth_amp_q15, delay_ms, ramp_ms |
+| **LEGATO** | Smooth transitions | preserve_phase |
+| **PORTAMENTO** | Pitch glide | glide_time_ms, glide_curve |
+
+### Apply Workflow
+
+```python
+from symcrash_python_ap.library.capsule_loader import load_capsule_yaml
+from symcrash_python_ap.macro_runtime import MacroRuntime
+
+# Load instrument first
+violin = load_capsule_yaml("violin_ir_v1.yaml")
+apply_instrument(violin)
+
+# Load and apply vibrato macro (additive)
+vibrato = load_capsule_yaml("vibrato_classic_v0.yaml")
+runtime = MacroRuntime()
+runtime.apply_macro_capsule(vibrato.macro)
+
+# Controller can now modulate vibrato depth
+runtime.set_system_macro(SystemMacro.VIBRATO, depth_q15)
+```
 
 ---
 

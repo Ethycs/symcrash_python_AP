@@ -1,0 +1,30 @@
+{
+  "assets": {},
+  "capsules": {
+    "violin-ir-001": {
+      "latest_revision": 1,
+      "revisions": {
+        "1": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-10T06:13:21.482064+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Violin IR",
+          "path": "capsules/violin-ir-001/1",
+          "retired": false,
+          "tags": [
+            "filtered",
+            "fx",
+            "noise",
+            "saw",
+            "tri"
+          ]
+        }
+      }
+    }
+  },
+  "program_id_map": {
+    "2001": "violin-ir-001"
+  },
+  "version": 0
+}

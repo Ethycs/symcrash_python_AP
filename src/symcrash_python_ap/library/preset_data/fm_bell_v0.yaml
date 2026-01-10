@@ -1,0 +1,83 @@
+# FM Bell v0 - WSE-STD-PRESET v0
+# ===============================
+#
+# DX7-style FM bell using 6-operator FM synthesis.
+# Classic electric piano / bell timbre with inharmonic partials.
+#
+# Algorithm 5: Dual modulator stacks into single carrier
+#   [6] -> [5] -> [4] -+
+#                      +-> [1] -> OUT
+#   [3] -> [2] --------+
+#
+# This creates the characteristic "clang" of FM bells:
+# - Op 1: Carrier (fundamental)
+# - Op 2,4: Modulators at 1:1 ratio (adds harmonics)
+# - Op 3,5,6: Higher ratio modulators (inharmonic content)
+#
+# Target sound: DX7 E.Piano / Tubular Bell
+# - Instant attack (~1ms)
+# - Long decay to zero
+# - Inharmonic bell-like partials
+
+instrument_ir_v0:
+  meta:
+    instrument_id: "fm-bell-v0"
+    name: "FM Bell"
+    version: 0
+    author: "symcrash"
+    seed_u32: 0x464D424C
+
+  io:
+    sample_rate_hz: 48000
+    block_size: 64
+
+  layers:
+    L0_graph:
+      nodes:
+        # 6-operator FM configuration
+        - id: "fm6"
+          type: "FM6"
+          params:
+            algorithm: 5          # DX7 Algorithm 5 (dual stack)
+            feedback: 1           # Light feedback for shimmer
+
+            # Operator frequency ratios (Q16: 65536 = 1.0x)
+            # Inharmonic ratios create the bell "clang"
+            op_ratios:
+              - 65536             # Op 1: 1.0x (carrier/fundamental)
+              - 65536             # Op 2: 1.0x (adds body)
+              - 229376            # Op 3: 3.5x (inharmonic shimmer)
+              - 131072            # Op 4: 2.0x (octave)
+              - 294912            # Op 5: 4.5x (inharmonic)
+              - 917504            # Op 6: 14.0x (classic E.Piano ratio)
+
+            # Operator output levels (Q15)
+            # Lower modulation for cleaner bell tone
+            op_levels:
+              - 32767             # Op 1: Full (carrier)
+              - 8192              # Op 2: 0.25 (subtle body mod)
+              - 6553              # Op 3: 0.20 (subtle shimmer)
+              - 10922             # Op 4: 0.33 (adds harmonics)
+              - 4915              # Op 5: 0.15 (subtle)
+              - 3276              # Op 6: 0.10 (feedback op - keep low)
+
+        - id: "amp1"
+          type: "Amp"
+          params:
+            adsr:
+              a_ms: 1.0           # Instant attack
+              d_ms: 800.0         # Long decay (bell-like)
+              s: 0.0              # No sustain
+              r_ms: 400.0         # Medium release
+
+      edges:
+        - src: "fm6"
+          dst: "amp1"
+
+      macros:
+        - id: "M_BRIGHT"
+          name: "Brightness"
+          default: 0.5
+        - id: "M_INDEX"
+          name: "FM Index"
+          default: 0.6

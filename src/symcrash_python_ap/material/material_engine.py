@@ -39,10 +39,38 @@ class RankState:
     """State for rank statistics filter."""
     buffer: List[int] = None
     idx: int = 0
-    
+
     def __post_init__(self):
         if self.buffer is None:
             self.buffer = [0] * 17  # Max window size
+
+
+@dataclass
+class DelayState:
+    """State for delay line effect (MONO)."""
+    buffer: List[int] = None
+    write_idx: int = 0
+    # FPGA-friendly: 1 second mono = 48000 samples = 96KB
+    # Fits in 128KB BRAM budget for mono operation
+    max_samples: int = 48000  # 1 second at 48kHz
+
+    def __post_init__(self):
+        if self.buffer is None:
+            self.buffer = [0] * self.max_samples
+
+
+@dataclass
+class ChorusState:
+    """State for chorus/flanger effect (MONO)."""
+    buffer: List[int] = None
+    write_idx: int = 0
+    lfo_phase: int = 0  # Q32 phase accumulator
+    # FPGA-friendly: 20ms mono = 960 samples = 1.9KB
+    max_samples: int = 960  # 20ms at 48kHz (typical chorus range: 5-25ms)
+
+    def __post_init__(self):
+        if self.buffer is None:
+            self.buffer = [0] * self.max_samples
 
 
 class MaterialEngine:
@@ -63,7 +91,15 @@ class MaterialEngine:
         
         self.rank_L = RankState()
         self.rank_R = RankState()
-        
+
+        # Delay state (material_id=6)
+        self.delay_L = DelayState()
+        self.delay_R = DelayState()
+
+        # Chorus state (material_id=7)
+        self.chorus_L = ChorusState()
+        self.chorus_R = ChorusState()
+
         # Slewed parameters
         self.params = MaterialParams()
         
@@ -97,6 +133,10 @@ class MaterialEngine:
             return self._cat_fold(L, R)
         elif material_id == 5:
             return self._cat_cusp(L, R)
+        elif material_id == 6:
+            return self._delay_line(L, R)
+        elif material_id == 7:
+            return self._chorus(L, R)
         else:
             return self._clean_glue(L, R)
     
@@ -355,13 +395,193 @@ class MaterialEngine:
         """
         outL = []
         outR = []
-        
+
         for i in range(self.B):
             # Very gentle soft clip only if near max
             yL = soft_clip_q15(L[i], threshold=30000)
             yR = soft_clip_q15(R[i], threshold=30000)
-            
+
             outL.append(yL)
             outR.append(yR)
-        
+
+        return outL, outR
+
+    # =========================================================================
+    # DELAY LINE (material_id=6)
+    # =========================================================================
+
+    def _delay_sample(self, x: int, state: DelayState, delay_samples: int,
+                      feedback_q15: int, mix_q15: int) -> int:
+        """
+        Single-sample delay line with feedback.
+
+        Args:
+            x: Input sample (Q15)
+            state: DelayState with circular buffer
+            delay_samples: Delay time in samples
+            feedback_q15: Feedback amount (Q15, 0-32767)
+            mix_q15: Wet/dry mix (Q15: 0=dry, 32767=wet)
+
+        Returns:
+            Output sample (Q15)
+        """
+        # Clamp delay to valid range
+        delay_samples = max(1, min(delay_samples, state.max_samples - 1))
+
+        # Read from delay line (with wrap)
+        read_idx = (state.write_idx - delay_samples) % state.max_samples
+        delayed = state.buffer[read_idx]
+
+        # Write input + feedback to delay line
+        fb_signal = mul_q15_sat(delayed, feedback_q15)
+        write_val = sat16(x + fb_signal)
+        state.buffer[state.write_idx] = write_val
+
+        # Advance write pointer
+        state.write_idx = (state.write_idx + 1) % state.max_samples
+
+        # Mix dry/wet
+        dry = mul_q15_sat(x, Q15_ONE - mix_q15)
+        wet = mul_q15_sat(delayed, mix_q15)
+
+        return sat16(dry + wet)
+
+    def _delay_line(self, L: List[int], R: List[int]) -> Tuple[List[int], List[int]]:
+        """
+        Delay line processing.
+
+        Uses drive_q15 as delay time (0-32767 maps to 0-500ms)
+        Uses tone_q15 as feedback amount
+        Uses pressure_q15 as wet/dry mix
+        """
+        outL = []
+        outR = []
+
+        # Map parameters to delay settings
+        # drive: 0-32767 -> 0-48000 samples (0-1000ms at 48kHz)
+        # FPGA-friendly: mono fits in BRAM (48000 samples = 96KB)
+        delay_samples = (self.params.drive_q15 * 48000) >> 15
+
+        # tone: feedback (0-32767)
+        # Limit feedback to prevent runaway
+        feedback_q15 = min(self.params.tone_q15, 30000)
+
+        # pressure: wet/dry mix
+        mix_q15 = self.params.pressure_q15
+
+        for i in range(self.B):
+            yL = self._delay_sample(L[i], self.delay_L, delay_samples, feedback_q15, mix_q15)
+            yR = self._delay_sample(R[i], self.delay_R, delay_samples, feedback_q15, mix_q15)
+
+            # Soft clip to prevent feedback buildup
+            yL = soft_clip_q15(yL)
+            yR = soft_clip_q15(yR)
+
+            outL.append(yL)
+            outR.append(yR)
+
+        return outL, outR
+
+    # =========================================================================
+    # CHORUS/FLANGER (material_id=7)
+    # =========================================================================
+
+    def _chorus_sample(self, x: int, state: ChorusState, base_delay: int,
+                       depth: int, lfo_inc: int, mix_q15: int) -> int:
+        """
+        Single-sample chorus with LFO-modulated delay.
+
+        Args:
+            x: Input sample (Q15)
+            state: ChorusState with circular buffer and LFO
+            base_delay: Base delay time in samples
+            depth: LFO modulation depth in samples
+            lfo_inc: LFO phase increment per sample (Q32)
+            mix_q15: Wet/dry mix (Q15)
+
+        Returns:
+            Output sample (Q15)
+        """
+        import math
+
+        # Advance LFO phase
+        state.lfo_phase = (state.lfo_phase + lfo_inc) & 0xFFFFFFFF
+
+        # Convert LFO phase to sine (-1 to +1 as delay offset)
+        # phase_normalized = state.lfo_phase / 2^32 -> [0, 1)
+        # sin_val = sin(2*pi*phase_normalized) -> [-1, +1]
+        phase_float = state.lfo_phase / (1 << 32)
+        lfo_val = math.sin(2 * math.pi * phase_float)  # -1 to +1
+
+        # Modulated delay time
+        delay_samples = base_delay + int(lfo_val * depth)
+        delay_samples = max(1, min(delay_samples, state.max_samples - 1))
+
+        # Read from delay line
+        read_idx = (state.write_idx - delay_samples) % state.max_samples
+        delayed = state.buffer[read_idx]
+
+        # Write input to delay line (no feedback for chorus)
+        state.buffer[state.write_idx] = x
+
+        # Advance write pointer
+        state.write_idx = (state.write_idx + 1) % state.max_samples
+
+        # Mix dry/wet
+        dry = mul_q15_sat(x, Q15_ONE - mix_q15)
+        wet = mul_q15_sat(delayed, mix_q15)
+
+        return sat16(dry + wet)
+
+    def _chorus(self, L: List[int], R: List[int]) -> Tuple[List[int], List[int]]:
+        """
+        Chorus/flanger processing.
+
+        Uses drive_q15 as LFO rate (0-32767 maps to 0.1-5 Hz)
+        Uses tone_q15 as modulation depth
+        Uses pressure_q15 as wet/dry mix
+        Uses bias_q15 as stereo offset (L/R phase difference)
+        """
+        import math
+
+        outL = []
+        outR = []
+
+        # Base delay for chorus effect (10-30ms typical)
+        base_delay = 720  # 15ms at 48kHz
+
+        # Map parameters
+        # drive: LFO rate (0.1 Hz to 5 Hz)
+        # LFO freq = 0.1 + (drive/32767) * 4.9 Hz
+        # phase_inc per sample = freq / sample_rate * 2^32
+        rate_hz = 0.1 + (self.params.drive_q15 / 32767) * 4.9
+        lfo_inc = int(rate_hz / 48000 * (1 << 32))
+
+        # tone: modulation depth (0-480 samples = 0-10ms)
+        depth = (self.params.tone_q15 * 480) >> 15
+
+        # pressure: wet/dry mix
+        mix_q15 = self.params.pressure_q15
+
+        # Stereo offset: fixed phase difference between L and R
+        # bias_q15 = 16384 (0.5) gives 90 degree offset = pi/2
+        # Map to radians: stereo_phase_offset = bias_q15 / 32767 * pi
+        stereo_phase_offset = (self.params.bias_q15 / 32767) * math.pi
+
+        for i in range(self.B):
+            # Process L channel
+            yL = self._chorus_sample(L[i], self.chorus_L, base_delay, depth, lfo_inc, mix_q15)
+
+            # Process R channel with fixed phase offset
+            # Temporarily apply offset to R LFO
+            r_phase_with_offset = int(self.chorus_R.lfo_phase + stereo_phase_offset / (2 * math.pi) * (1 << 32)) & 0xFFFFFFFF
+            old_r_phase = self.chorus_R.lfo_phase
+            self.chorus_R.lfo_phase = r_phase_with_offset
+            yR = self._chorus_sample(R[i], self.chorus_R, base_delay, depth, lfo_inc, mix_q15)
+            # Restore R phase to keep L and R in sync (offset is applied each sample)
+            self.chorus_R.lfo_phase = (old_r_phase + lfo_inc) & 0xFFFFFFFF
+
+            outL.append(yL)
+            outR.append(yR)
+
         return outL, outR

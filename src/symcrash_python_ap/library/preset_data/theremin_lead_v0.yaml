@@ -1,0 +1,48 @@
+# Theremin Lead v0 - WSE-STD-PRESET v0
+# =====================================
+#
+# Continuous pitch lead with theremin-like character.
+# Smooth, singing lead with portamento.
+#
+# Target sound: theremin / singing lead
+# - Slow attack (~50ms)
+# - No decay (full sustain)
+# - Sine-based with slight harmonics
+
+instrument_ir_v0:
+  meta:
+    instrument_id: "theremin-lead-v0"
+    name: "Theremin Lead"
+    version: 0
+    author: "symcrash"
+    seed_u32: 0x54484552
+
+  io:
+    sample_rate_hz: 48000
+    block_size: 64
+
+  layers:
+    L0_graph:
+      nodes:
+        - id: "osc1"
+          type: "Osc"
+          params:
+            waveform: "sine"
+        - id: "amp1"
+          type: "Amp"
+          params:
+            adsr:
+              a_ms: 50.0
+              d_ms: 0.0
+              s: 0.8
+              r_ms: 100.0
+      edges:
+        - src: "osc1"
+          dst: "amp1"
+      macros:
+        - id: "M_BRIGHT"
+          name: "Brightness"
+          default: 0.35
+        - id: "M_GLIDE"
+          name: "Glide Time"
+          default: 0.3

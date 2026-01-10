@@ -1,0 +1,49 @@
+# PWM Pad v0 - WSE-STD-PRESET v0
+# ===============================
+#
+# Pulse width modulation pad with evolving character.
+# Rich, animated pad sound with PWM-style movement.
+#
+# Target sound: PWM pad / chorus strings
+# - Slow attack (~100ms)
+# - Long decay to high sustain
+# - Pulse wave base
+
+instrument_ir_v0:
+  meta:
+    instrument_id: "pwm-pad-v0"
+    name: "PWM Pad"
+    version: 0
+    author: "symcrash"
+    seed_u32: 0x50574D50
+
+  io:
+    sample_rate_hz: 48000
+    block_size: 64
+
+  layers:
+    L0_graph:
+      nodes:
+        - id: "osc1"
+          type: "Osc"
+          params:
+            waveform: "pulse"
+            pw: 0.5               # 50% pulse width
+        - id: "amp1"
+          type: "Amp"
+          params:
+            adsr:
+              a_ms: 100.0
+              d_ms: 260.0
+              s: 0.85
+              r_ms: 320.0
+      edges:
+        - src: "osc1"
+          dst: "amp1"
+      macros:
+        - id: "M_BRIGHT"
+          name: "Brightness"
+          default: 0.4
+        - id: "M_PWM"
+          name: "PWM Depth"
+          default: 0.45

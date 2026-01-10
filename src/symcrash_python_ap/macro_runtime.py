@@ -130,6 +130,12 @@ class MacroRuntime:
 
     Manages the mapping from preset macros to system macros,
     and applies slew filters per WSE-STD-MACRO v0.
+
+    AGE Integrator (per WSE-STD-MACRO v0 §7):
+    - AGE accumulates based on energy_state each block
+    - inc = mul_q15(k_inc_q15, energy_state)
+    - dec = mul_q15(k_dec_q15, (Q15_ONE - energy_state))
+    - age = clamp_q15(age + inc - dec)
     """
     bindings: List[MacroBinding] = field(default_factory=lambda: list(MACROMAP_LITE_V0))
     slew_table: Dict[int, SlewConfig] = field(default_factory=lambda: dict(DEFAULT_SLEW_TABLE))
@@ -137,6 +143,11 @@ class MacroRuntime:
     # Macro state (per system macro ID)
     macro_target_q15: Dict[int, int] = field(default_factory=lambda: {i: 0 for i in range(11)})
     macro_curr_q15: Dict[int, int] = field(default_factory=lambda: {i: 0 for i in range(11)})
+
+    # AGE integrator parameters (per WSE-STD-MACRO v0 §7)
+    # These control how fast AGE accumulates during note-on vs decays during release
+    age_k_inc_q15: int = 64      # ~0.2% per block at full energy (slow accumulation)
+    age_k_dec_q15: int = 32      # ~0.1% per block at zero energy (slow decay)
 
     # Binding lookup
     _binding_map: Dict[str, MacroBinding] = field(default_factory=dict, repr=False)
@@ -224,6 +235,17 @@ class MacroRuntime:
                 if delta == 0 and d != 0:
                     delta = 1 if d > 0 else -1
                 self.macro_curr_q15[macro_id] = clamp_q15(curr + delta)
+
+        # Update AGE integrator (per WSE-STD-MACRO v0 section 7)
+        # AGE accumulates during note-on (energy_state > 0) and decays during release
+        # inc = mul_q15(k_inc_q15, energy_state)
+        # dec = mul_q15(k_dec_q15, (Q15_ONE - energy_state))
+        # age = clamp_q15(age + inc - dec)
+        energy = self.macro_curr_q15.get(SystemMacro.ENERGY_STATE, 0)
+        age = self.macro_curr_q15.get(SystemMacro.AGE, 0)
+        inc = (self.age_k_inc_q15 * energy) >> 15
+        dec = (self.age_k_dec_q15 * (Q15_ONE - energy)) >> 15
+        self.macro_curr_q15[SystemMacro.AGE] = clamp_q15(age + inc - dec)
 
     def get_system_macro(self, macro_id: int) -> int:
         """

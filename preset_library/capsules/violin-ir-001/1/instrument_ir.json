@@ -1,0 +1,19 @@
+{
+  "instrument_ir_v0": {
+    "meta": {
+      "instrument_id": "violin_ir_v1",
+      "name": "Violin IR",
+      "version": 0,
+      "author": "Keytone",
+      "seed_u32": 0,
+      "voice_model": {
+        "max_voices": 128,
+        "tile_size": 16
+      }
+    },
+    "io": {
+      "sample_rate_hz": 48000,
+      "block_size": 64
+    }
+  }
+}

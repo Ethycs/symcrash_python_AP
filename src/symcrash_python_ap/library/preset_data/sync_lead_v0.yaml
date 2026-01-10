@@ -1,0 +1,48 @@
+# Sync Lead v0 - WSE-STD-PRESET v0
+# =================================
+#
+# Hard sync archetype lead with aggressive harmonic character.
+# Uses band shear and rotate for sync-like harmonic movement.
+#
+# Target sound: hard sync lead
+# - Instant attack (~1ms)
+# - Medium decay
+# - Aggressive harmonic shearing
+
+instrument_ir_v0:
+  meta:
+    instrument_id: "sync-lead-v0"
+    name: "Sync Lead"
+    version: 0
+    author: "symcrash"
+    seed_u32: 0x53594E43
+
+  io:
+    sample_rate_hz: 48000
+    block_size: 64
+
+  layers:
+    L0_graph:
+      nodes:
+        - id: "osc1"
+          type: "Osc"
+          params:
+            waveform: "saw"
+        - id: "amp1"
+          type: "Amp"
+          params:
+            adsr:
+              a_ms: 1.0
+              d_ms: 80.0
+              s: 0.67
+              r_ms: 65.0
+      edges:
+        - src: "osc1"
+          dst: "amp1"
+      macros:
+        - id: "M_BRIGHT"
+          name: "Brightness"
+          default: 0.55
+        - id: "M_SYNC"
+          name: "Sync Amount"
+          default: 0.45

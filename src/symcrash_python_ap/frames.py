@@ -150,6 +150,45 @@ class VoiceFrame:
     # Note: Sample buffer is loaded via Voice Engine, not VoiceFrame
     sample_rate_q16: int = 65536    # Playback rate (Q16: 65536=1.0x)
 
+    # =========================================================================
+    # FM6 Parameters (WSE-STD-FM-TOPOLOGY-v0 - coeff_osc_mode=3)
+    # =========================================================================
+
+    # DX7-compatible algorithm (1-32)
+    # See docs/standards/ccs/WSE-STD-FM-TOPOLOGY-v0.md for algorithm diagrams
+    fm_algorithm_id: Optional[int] = None
+
+    # Operator frequency ratios (Q16, 6 operators)
+    # 65536 = 1.0x fundamental, 131072 = 2.0x (octave), etc.
+    fm_op_ratios: Optional[List[int]] = None
+
+    # Operator output levels (Q15, 6 operators)
+    # 32767 = max level, 0 = silent
+    fm_op_levels: Optional[List[int]] = None
+
+    # Feedback depth (DX7 level 0-7)
+    # Maps to Q15 via DX7_FEEDBACK_TABLE
+    fm_feedback_depth: Optional[int] = None
+
+    # =========================================================================
+    # FM Topology Morphing (WSE-STD-FM-TOPOLOGY-v0 Section 8)
+    # =========================================================================
+
+    # Source archetype ID (0-7)
+    # 0=CHAIN, 1=STACK, 2=DUAL, 3=SPLIT, 4=YPAIR, 5=CLOUD, 6=ADDITIVE, 7=FEEDBACK
+    fm_topo_a_id: Optional[int] = None
+
+    # Target archetype ID (0-7)
+    fm_topo_b_id: Optional[int] = None
+
+    # A/B blend amount (Q15: 0=A, 32767=B)
+    # CMMM can drive this for continuous topology transitions
+    fm_topo_blend_q15: int = 0
+
+    # DX7 compatibility mode (1-32, overrides fm_topo_a_id when nonzero)
+    # When set, loads exact DX7 algorithm and maps to closest archetype
+    fm_dx7_compat_id: Optional[int] = None
+
     # Legacy compatibility: convert float betas to IDs
     @property
     def tree_a(self) -> float:

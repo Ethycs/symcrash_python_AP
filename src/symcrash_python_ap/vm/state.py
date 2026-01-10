@@ -22,6 +22,7 @@ from .coeff_lut_streaming import CCSState, midi_to_hz, SAMPLE_RATE
 OSC_MODE_A = 0       # LUT-based (CCSState)
 OSC_MODE_B = 1       # Rotator/Harmonic Bank (ModeBState)
 OSC_MODE_SAMPLE = 2  # Sample playback via FWPT gateway (Phase 3)
+OSC_MODE_FM6 = 3     # 6-operator FM synthesis (WSE-STD-FM-TOPOLOGY-v0)
 
 
 # =============================================================================
@@ -171,6 +172,25 @@ class VMState:
     # Lazy-initialized like mode_b_state to avoid import overhead
     _sample_state: Optional['SampleOscState'] = None  # type: ignore
 
+    # -------------------------------------------------------------------------
+    # FM6 State (WSE-STD-FM-TOPOLOGY-v0 - 6-Operator FM Synthesis)
+    # -------------------------------------------------------------------------
+    # Lazy-initialized to avoid import overhead when not using FM6 mode
+    _fm6_state: Optional['FM6State'] = None  # type: ignore
+
+    @property
+    def fm6_state(self) -> 'FM6State':
+        """Get or create FM6 state (lazy init)."""
+        if self._fm6_state is None:
+            from .fm6_state import FM6State
+            self._fm6_state = FM6State()
+        return self._fm6_state
+
+    @fm6_state.setter
+    def fm6_state(self, value: 'FM6State') -> None:
+        """Set FM6 state."""
+        self._fm6_state = value
+
     @property
     def sample_state(self) -> 'SampleOscState':
         """Get or create Sample state (lazy init)."""
@@ -304,6 +324,10 @@ class VMState:
         # Reset Mode B state (WSE-STD-210) if initialized
         if self._mode_b_state is not None:
             self._mode_b_state.reset(note=note, phase_inc=phase_inc)
+
+        # Reset FM6 state (WSE-STD-FM-TOPOLOGY-v0) if initialized
+        if self._fm6_state is not None:
+            self._fm6_state.reset()
 
         # Reset FM feedback buffer (Phase 3)
         self.prev_fm_mod_buffer.fill(0)
@@ -467,4 +491,5 @@ __all__ = [
     'OSC_MODE_A',
     'OSC_MODE_B',
     'OSC_MODE_SAMPLE',
+    'OSC_MODE_FM6',
 ]

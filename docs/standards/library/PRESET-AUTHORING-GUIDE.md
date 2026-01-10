@@ -1,6 +1,10 @@
 # Preset Authoring Guide
 
-This guide covers how to create presets for the symcrash synthesis engine using InstrumentIR.
+Authoring guide for creating presets using the InstrumentIR API.
+
+**Normative spec:** WSE-STD-PRESET v0 (format + compile semantics), WSE-STD-IPLC v0 (lifecycle)
+
+This guide covers the **Python API** for creating presets. For the raw YAML/JSON schema and canonical examples, see [WSE-STD-PRESET-v0.md](../control/WSE-STD-PRESET-v0.md).
 
 ## Quick Start
 
@@ -59,6 +63,8 @@ L3 (Emit Templates)→  Per-block VoiceFrame emission rules
 ```
 
 For most presets, you only need to define **L0**. The compiler auto-completes L1/L2/L3 with sensible defaults.
+
+For advanced presets with custom state machines, you can define **L2** (regime graph) directly in YAML.
 
 ---
 
@@ -173,6 +179,171 @@ ir.layers.L0_graph.macros = [
 | `M_MORPH` | MORPH | Tree blend |
 | `M_TEXTURE` | TEXTURE | Surface texture |
 | `M_DETUNE` | DETUNE | Pitch detune |
+
+---
+
+## L2: Regime Graph (State Machine)
+
+For presets that need custom behavioral states, define an L2 regime graph. This controls how the voice transitions between different emission modes (attack, sustain, glitch, etc.).
+
+### Regime Kinds
+
+| Kind | Purpose | Typical Use |
+|------|---------|-------------|
+| `Idle` | No note active | Waiting for note-on |
+| `Transient` | Attack phase | Fast onset, high energy |
+| `StableTone` | Sustained phase | Full processing budget |
+| `NoiseTexture` | Noise-based | Breath, wind, texture |
+| `GlitchChatter` | Unstable/glitchy | Risk-driven chaos |
+| `Recovery` | Cooldown phase | After glitch or release |
+
+### YAML Schema
+
+```yaml
+# Inside instrument_ir_v0 wrapper
+layers:
+  L2_regimes:
+    regime_nodes:
+      - id: "R0_IDLE"
+        kind: "Idle"
+        emit_template: "T_IDLE"
+
+      - id: "R1_ATTACK"
+        kind: "Transient"
+        emit_template: "T_ATTACK"
+        dwell_ms: 20              # Minimum time in this state
+
+      - id: "R2_STABLE"
+        kind: "StableTone"
+        emit_template: "T_STABLE"
+
+      - id: "R3_GLITCH"
+        kind: "GlitchChatter"
+        emit_template: "T_GLITCH"
+        dwell_ms: 50
+
+      - id: "R4_RECOVERY"
+        kind: "Recovery"
+        emit_template: "T_RECOVERY"
+        dwell_ms: 80
+
+    transitions:
+      - from: "R0_IDLE"
+        to: "R1_ATTACK"
+        when: "Gate rises"
+
+      - from: "R1_ATTACK"
+        to: "R2_STABLE"
+        when: "dwell_done"
+
+      - from: "R2_STABLE"
+        to: "R3_GLITCH"
+        when: "risk > 0.7"
+        hysteresis:
+          enter: 0.7
+          exit: 0.4
+
+      - from: "R3_GLITCH"
+        to: "R4_RECOVERY"
+        when: "dwell_done"
+
+      - from: "R4_RECOVERY"
+        to: "R2_STABLE"
+        when: "dwell_done"
+
+      - from: "any"
+        to: "R0_IDLE"
+        when: "Gate falls"
+```
+
+### Transition Conditions
+
+| Condition | Meaning |
+|-----------|---------|
+| `Gate rises` | Note-on event |
+| `Gate falls` | Note-off event |
+| `dwell_done` | Minimum dwell time elapsed |
+| `risk > X` | RISK macro exceeds threshold |
+| `energy < X` | Energy state below threshold |
+| `age > X` | AGE integrator above threshold |
+
+### Hysteresis
+
+Hysteresis prevents rapid state oscillation. When a condition has hysteresis:
+- **enter**: Threshold to enter the target state
+- **exit**: Threshold to exit back (must be lower than enter)
+
+```yaml
+hysteresis:
+  enter: 0.7    # Must exceed 0.7 to trigger
+  exit: 0.4     # Must drop below 0.4 to un-trigger
+```
+
+### Emit Templates (L3)
+
+Each regime references an emit template that defines:
+- Which operator families are active
+- Which specific operators to enable
+- Tree blend targets
+- Event lane policies
+
+```yaml
+layers:
+  L3_cmmm:
+    emit_templates:
+      T_IDLE:
+        families:
+          CONSTRAINT: 1.0
+          CALM: 1.0
+        ops_enable: ["NormalizeScale", "FineClamp"]
+        trees:
+          A: "T1"
+          B: "T1"
+          beta: 0.0
+
+      T_ATTACK:
+        families:
+          COLOR: 0.6
+          EXCITE: 1.0
+          CONSTRAINT: 1.0
+        ops_enable: ["Tilt", "IntraMix", "NormalizeScale", "FineClamp"]
+        trees:
+          A: "T1"
+          B: "T1"
+          beta: 0.0
+
+      T_STABLE:
+        families:
+          COLOR: 0.5
+          COHERENCE: 0.4
+          CONSTRAINT: 1.0
+          CALM: 0.7
+        ops_enable: ["Tilt", "LowRankMorph", "NormalizeScale", "FineClamp", "SheafProject"]
+
+      T_GLITCH:
+        families:
+          TOPOLOGY: 0.8
+          CATASTROPHE: 0.6
+          CONSTRAINT: 0.5
+        ops_enable: ["BandShear", "SwapBands", "RotateNodes", "FineClamp"]
+
+      T_RECOVERY:
+        families:
+          COHERENCE: 0.3
+          CONSTRAINT: 1.0
+          CALM: 1.0
+        ops_enable: ["GluePair", "SheafProject", "NormalizeScale", "FineClamp"]
+```
+
+### Default Regime Graph
+
+If you don't define L2, the compiler creates a default 4-state graph:
+
+```
+R0_IDLE → R1_ATTACK → R2_STABLE → R0_IDLE
+              ↓
+         R6_RECOVERY
+```
 
 ---
 
@@ -375,6 +546,8 @@ capsule = ir.to_capsule()
 
 ## Related Documentation
 
+- [WSE-STD-PRESET-v0.md](../control/WSE-STD-PRESET-v0.md) - Normative preset format spec + canonical examples
+- [WSE-STD-IPLC-v0.md](WSE-STD-IPLC-v0.md) - Capsule lifecycle (DRAFT → COMPILED → PUBLISHED → APPLIED)
 - [OPERATORS.md](OPERATORS.md) - Complete operator reference
 - [MACROS-AND-CONTROLS.md](MACROS-AND-CONTROLS.md) - Control system details
 - [BUDGETS-AND-DEGRADATION.md](BUDGETS-AND-DEGRADATION.md) - Performance budgets

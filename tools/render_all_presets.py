@@ -1,0 +1,184 @@
+"""
+Render All Library Presets
+==========================
+
+Generates audio samples for all presets in the library.
+"""
+
+import sys
+from pathlib import Path
+import numpy as np
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+from symcrash_python_ap.instrument_ir import load_instrument
+from symcrash_python_ap.vm.executor import vm_step_block
+from symcrash_python_ap.vm.harmonic_bank import clear_basis_atlas
+from symcrash_python_ap.vm.state import VMState, OSC_MODE_B, OSC_MODE_FM6
+from symcrash_python_ap.frames import VoiceFrame
+from symcrash_python_ap.audio_io import AudioWriter
+
+FS = 48000
+BLOCK_SIZE = 64
+BLOCKS_PER_SEC = FS // BLOCK_SIZE
+OUTPUT_DIR = str(Path(__file__).parent.parent / "audio_generation_tests" / "audio_out")
+
+# DX7 feedback level to Q15 mapping (0-7 -> Q15)
+DX7_FEEDBACK_Q15 = [0, 4681, 9362, 14043, 18724, 23405, 28086, 32767]
+
+
+def ms_to_blocks(ms):
+    return max(1, int(ms / 1000.0 * BLOCKS_PER_SEC))
+
+
+def render_preset(preset_path, note, duration_sec):
+    """Render a single preset to audio."""
+    clear_basis_atlas()
+    ir = load_instrument(str(preset_path))
+
+    # Extract envelope and synthesis params from L0 graph
+    env = {'attack_blocks': 7, 'decay_blocks': 75, 'sustain': 0.7, 'release_blocks': 150}
+    waveform = 1  # saw default
+    use_fm6 = False
+    fm6_params = None
+
+    for node in ir.layers.L0_graph.nodes:
+        if node.type == "Amp" and node.params.adsr:
+            adsr = node.params.adsr
+            env = {
+                'attack_blocks': ms_to_blocks(adsr.a_ms),
+                'decay_blocks': ms_to_blocks(adsr.d_ms),
+                'sustain': adsr.s,
+                'release_blocks': ms_to_blocks(adsr.r_ms),
+            }
+        if node.type == "Osc" and node.params.waveform:
+            wf = node.params.waveform.lower()
+            waveform = {'sine': 0, 'saw': 1, 'pulse': 2, 'square': 2, 'tri': 3}.get(wf, 1)
+        if node.type == "FM6":
+            use_fm6 = True
+            fm6_params = {
+                'algorithm': getattr(node.params, 'algorithm', 1),
+                'feedback': getattr(node.params, 'feedback', 0),
+                'op_ratios': getattr(node.params, 'op_ratios', [65536] * 6),
+                'op_levels': getattr(node.params, 'op_levels', [32767, 0, 0, 0, 0, 0]),
+            }
+
+    attack_blocks = env['attack_blocks']
+    decay_blocks = env['decay_blocks']
+    sustain = env['sustain']
+    release_blocks = env['release_blocks']
+
+    sustain_blocks = int(duration_sec * BLOCKS_PER_SEC) - attack_blocks
+    total_blocks = attack_blocks + sustain_blocks + release_blocks
+
+    attack_level_q15 = 32767
+    sustain_level_q15 = int(sustain * 32767)
+
+    state = VMState.create(voice_id=0)
+    state.reset_for_note_on(note=note)
+
+    # Default harmonic amps for non-FM6 presets
+    harmonic_amps = [32767, 16383, 10922, 8191, 6553, 5461, 4681, 4096]
+    if hasattr(ir, 'carrier') and ir.carrier and hasattr(ir.carrier, 'harmonic_amps_q15'):
+        harmonic_amps = ir.carrier.harmonic_amps_q15
+
+    samples = []
+
+    for block_idx in range(total_blocks):
+        if block_idx < attack_blocks:
+            t = block_idx / attack_blocks if attack_blocks > 0 else 1
+            gain_q15 = int(attack_level_q15 * t)
+        elif block_idx < attack_blocks + decay_blocks:
+            t = (block_idx - attack_blocks) / decay_blocks if decay_blocks > 0 else 1
+            gain_q15 = int(attack_level_q15 - (attack_level_q15 - sustain_level_q15) * t)
+        elif block_idx < attack_blocks + sustain_blocks:
+            gain_q15 = sustain_level_q15
+        else:
+            release_idx = block_idx - (attack_blocks + sustain_blocks)
+            t = release_idx / release_blocks if release_blocks > 0 else 1
+            gain_q15 = int(sustain_level_q15 * (1.0 - t))
+
+        gain_q15 = max(0, min(32767, gain_q15))
+
+        if use_fm6 and fm6_params:
+            # FM6 synthesis mode
+            feedback_level = fm6_params['feedback']
+            feedback_q15 = DX7_FEEDBACK_Q15[min(7, max(0, feedback_level))]
+
+            frame = VoiceFrame(
+                note=note,
+                coeff_osc_mode=OSC_MODE_FM6,
+                gain_q15=gain_q15,
+                beta_target_q15=0,
+                fm_algorithm_id=fm6_params['algorithm'],
+                fm_op_ratios=fm6_params['op_ratios'],
+                fm_op_levels=fm6_params['op_levels'],
+                fm_feedback_depth=feedback_q15,
+            )
+        else:
+            # Standard Mode B synthesis
+            frame = VoiceFrame(
+                note=note,
+                coeff_osc_mode=OSC_MODE_B,
+                H_request=len(harmonic_amps),
+                gain_q15=gain_q15,
+                beta_target_q15=0,
+                partial_amps_q15=harmonic_amps,
+                waveform_type=waveform,
+            )
+
+        state, output = vm_step_block(state, frame)
+        samples.extend(output.tolist())
+
+    return np.array(samples, dtype=np.int16), ir.meta.name or preset_path.stem
+
+
+def main():
+    # Get all presets
+    preset_dir = Path(__file__).parent.parent / "src/symcrash_python_ap/library/preset_data"
+    presets = sorted(preset_dir.glob("*.yaml"))
+
+    # Render each preset
+    audio_io = AudioWriter(output_dir=OUTPUT_DIR)
+    print("Rendering all library presets...")
+    print("=" * 70)
+
+    success_count = 0
+    fail_count = 0
+
+    for preset_path in presets:
+        try:
+            # Choose appropriate note for each preset type
+            name = preset_path.stem
+            if 'bass' in name.lower() or 'sub' in name.lower():
+                note = 36  # C2
+            elif 'pad' in name.lower() or 'string' in name.lower():
+                note = 60  # C4
+            elif 'bell' in name.lower():
+                note = 72  # C5
+            else:
+                note = 60  # C4 default
+
+            duration = 2.0 if 'pad' in name.lower() or 'string' in name.lower() else 1.5
+
+            samples, preset_name = render_preset(preset_path, note, duration)
+            output_name = f"{preset_path.stem}_note{note}"
+
+            metadata = audio_io.write_audio(
+                output_name,
+                samples.tolist(),
+                subdirectory="presets",
+                timestamp=False
+            )
+            print(f"  OK: {preset_path.name:35} -> {output_name}.wav")
+            success_count += 1
+        except Exception as e:
+            print(f"FAIL: {preset_path.name:35} -> {e}")
+            fail_count += 1
+
+    print("=" * 70)
+    print(f"Done! {success_count} succeeded, {fail_count} failed")
+
+
+if __name__ == "__main__":
+    main()

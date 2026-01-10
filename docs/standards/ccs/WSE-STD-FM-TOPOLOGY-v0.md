@@ -444,6 +444,401 @@ These are all standard graph properties computable in O(V+E) time.
 
 ---
 
-**Document Version:** v0.1
-**Last Updated:** 2026-01-09
+## 8. Topology Morphing Extension
+
+### 8.1 Overview
+
+This section defines a continuous FM topology morphing system that factors the 32 DX7 algorithms into 8 canonical archetypes with A/B blend capability. CMMM can drive topology transitions via the blend parameter.
+
+### 8.2 Canonical FM Archetypes
+
+The 32 DX7 algorithms cluster into 8 structural families:
+
+| ID | Name | Carriers | Structure | Character |
+|----|------|----------|-----------|-----------|
+| 0 | CHAIN | 1 | [6]→[5]→[4]→[3]→[2]→[1*] | Deep modulation, metallic |
+| 1 | STACK | 1 | [6,5,4,3,2]→[1*] | Bright, aggressive |
+| 2 | DUAL | 2 | [6]→[5]→[4*], [3]→[2]→[1*] | Dual voice, detuned |
+| 3 | SPLIT | 3+ | [6]→[5]→[4*,3*,2*,1*] | Organ-like, spread |
+| 4 | YPAIR | 2 | [6]→[5,4]→[3*], [2]→[1*] | Y-branch, complex |
+| 5 | CLOUD | 1 | [6,5,4,3,2]→[1*] parallel | Thick, chorused |
+| 6 | ADDITIVE | 6 | [6*,5*,4*,3*,2*,1*] | Pure additive |
+| 7 | FEEDBACK | 1 | Chain with enhanced FB | Harsh, distorted |
+
+### 8.3 Archetype Edge Lists
+
+Each archetype is defined by a canonical edge list `(src, dst, weight_q15)`:
+
+```python
+ARCHETYPE_EDGES = {
+    # 0: CHAIN - Serial 6-op chain
+    0: {
+        'edges': [
+            (5, 4, 32767),  # Op6 → Op5
+            (4, 3, 32767),  # Op5 → Op4
+            (3, 2, 32767),  # Op4 → Op3
+            (2, 1, 32767),  # Op3 → Op2
+            (1, 0, 32767),  # Op2 → Op1
+        ],
+        'carrier_mask': 0b000001,
+        'feedback_op': 0,
+    },
+
+    # 1: STACK - 5 modulators into 1 carrier
+    1: {
+        'edges': [
+            (5, 0, 32767),  # Op6 → Op1
+            (4, 0, 32767),  # Op5 → Op1
+            (3, 0, 32767),  # Op4 → Op1
+            (2, 0, 32767),  # Op3 → Op1
+            (1, 0, 32767),  # Op2 → Op1
+        ],
+        'carrier_mask': 0b000001,
+        'feedback_op': 5,
+    },
+
+    # 2: DUAL - Two parallel 3-op chains
+    2: {
+        'edges': [
+            (5, 4, 32767),  # Op6 → Op5
+            (4, 3, 32767),  # Op5 → Op4
+            (2, 1, 32767),  # Op3 → Op2
+            (1, 0, 32767),  # Op2 → Op1
+        ],
+        'carrier_mask': 0b001001,  # Op1, Op4
+        'feedback_op': 5,
+    },
+
+    # 3: SPLIT - Modulator tree to multiple carriers
+    3: {
+        'edges': [
+            (5, 4, 32767),  # Op6 → Op5
+            (4, 3, 32767),  # Op5 → Op4
+            (4, 2, 32767),  # Op5 → Op3
+            (4, 1, 32767),  # Op5 → Op2
+        ],
+        'carrier_mask': 0b001111,  # Op1-4
+        'feedback_op': 5,
+    },
+
+    # 4: YPAIR - Y-branch structure
+    4: {
+        'edges': [
+            (5, 4, 32767),  # Op6 → Op5
+            (5, 3, 32767),  # Op6 → Op4
+            (4, 2, 32767),  # Op5 → Op3
+            (3, 2, 32767),  # Op4 → Op3
+            (1, 0, 32767),  # Op2 → Op1
+        ],
+        'carrier_mask': 0b000101,  # Op1, Op3
+        'feedback_op': 5,
+    },
+
+    # 5: CLOUD - Parallel modulators (thick)
+    5: {
+        'edges': [
+            (5, 0, 32767),  # Op6 → Op1
+            (4, 0, 24576),  # Op5 → Op1 (slightly reduced)
+            (3, 0, 16384),  # Op4 → Op1
+            (2, 0, 16384),  # Op3 → Op1
+            (1, 0, 24576),  # Op2 → Op1
+        ],
+        'carrier_mask': 0b000001,
+        'feedback_op': 5,
+    },
+
+    # 6: ADDITIVE - All carriers, no modulation
+    6: {
+        'edges': [],
+        'carrier_mask': 0b111111,  # All carriers
+        'feedback_op': 5,
+    },
+
+    # 7: FEEDBACK - Chain with enhanced feedback flag
+    7: {
+        'edges': [
+            (5, 4, 32767),
+            (4, 3, 32767),
+            (3, 2, 32767),
+            (2, 1, 32767),
+            (1, 0, 32767),
+        ],
+        'carrier_mask': 0b000001,
+        'feedback_op': 0,
+        'feedback_enhanced': True,  # 2x feedback depth
+    },
+}
+```
+
+### 8.4 DX7 → Archetype Mapping
+
+Each DX7 algorithm maps to its closest archetype:
+
+| DX7 Alg | Archetype | Notes |
+|---------|-----------|-------|
+| 1, 2 | CHAIN (0) | Serial chain variants |
+| 3, 4, 9, 10, 11, 12, 13, 30 | DUAL (2) | Parallel chain variants |
+| 5, 6, 20 | YPAIR (4) | Y-branch structures |
+| 7, 8, 14, 15, 19, 21, 22, 28, 29 | SPLIT (3) | Multi-carrier splits |
+| 16, 17 | STACK (1) | All-to-one modulation |
+| 18 | CLOUD (5) | Thick parallel |
+| 23, 24, 25, 26, 27, 31, 32 | ADDITIVE (6) | Mostly/all carriers |
+
+```python
+DX7_TO_ARCHETYPE = {
+    1: 0, 2: 0,                           # CHAIN
+    3: 2, 4: 2, 9: 2, 10: 2, 11: 2,        # DUAL
+    12: 2, 13: 2, 30: 2,
+    5: 4, 6: 4, 20: 4,                     # YPAIR
+    7: 3, 8: 3, 14: 3, 15: 3, 19: 3,       # SPLIT
+    21: 3, 22: 3, 28: 3, 29: 3,
+    16: 1, 17: 1,                          # STACK
+    18: 5,                                  # CLOUD
+    23: 6, 24: 6, 25: 6, 26: 6,            # ADDITIVE
+    27: 6, 31: 6, 32: 6,
+}
+```
+
+### 8.5 Morphing Parameters
+
+| Parameter | ID | Type | Range | Default | Description |
+|-----------|-----|------|-------|---------|-------------|
+| `fm.topo_a_id` | 0x40 | u8 | 0-7 | 0 | Source archetype |
+| `fm.topo_b_id` | 0x41 | u8 | 0-7 | 0 | Target archetype |
+| `fm.topo_blend_q15` | 0x42 | i16 | 0-32767 | 0 | A/B blend (0=A, 32767=B) |
+| `fm.dx7_compat_id` | 0x43 | u8 | 1-32 | 0 | DX7 algorithm (overrides topo_a when nonzero) |
+
+### 8.6 Blend Interpolation
+
+#### 8.6.1 Edge Weight Interpolation
+
+For each edge `(src, dst)`, compute blended weight:
+
+```python
+def blend_edge_weight(edge_a_q15: int, edge_b_q15: int, blend_q15: int) -> int:
+    """Interpolate edge weight between A and B topologies."""
+    # Linear interpolation: result = A*(1-blend) + B*blend
+    Q15_ONE = 32767
+    inv_blend = Q15_ONE - blend_q15
+    result = (edge_a_q15 * inv_blend + edge_b_q15 * blend_q15) >> 15
+    return result
+```
+
+#### 8.6.2 Carrier Mask Interpolation
+
+Carrier membership is binary but can be smoothly faded:
+
+```python
+def blend_carrier_level(is_carrier_a: bool, is_carrier_b: bool,
+                        level_q15: int, blend_q15: int) -> int:
+    """Blend carrier output level based on topology transition."""
+    Q15_ONE = 32767
+    if is_carrier_a and is_carrier_b:
+        return level_q15  # Carrier in both - full level
+    elif is_carrier_a and not is_carrier_b:
+        # Fading out as carrier
+        return (level_q15 * (Q15_ONE - blend_q15)) >> 15
+    elif not is_carrier_a and is_carrier_b:
+        # Fading in as carrier
+        return (level_q15 * blend_q15) >> 15
+    else:
+        return 0  # Carrier in neither
+```
+
+#### 8.6.3 Feedback Operator Transition
+
+When feedback operator changes between topologies:
+
+```python
+def blend_feedback(fb_op_a: int, fb_op_b: int, blend_q15: int,
+                   op_outputs: np.ndarray) -> np.ndarray:
+    """Blend feedback from two different operators."""
+    Q15_ONE = 32767
+    if fb_op_a == fb_op_b:
+        return op_outputs[fb_op_a]
+
+    # Crossfade between feedback sources
+    inv_blend = Q15_ONE - blend_q15
+    fb_a = (op_outputs[fb_op_a] * inv_blend) >> 15
+    fb_b = (op_outputs[fb_op_b] * blend_q15) >> 15
+    return fb_a + fb_b
+```
+
+### 8.7 Blended Modulation Matrix
+
+```python
+def compute_blended_matrix(topo_a_id: int, topo_b_id: int,
+                           blend_q15: int) -> np.ndarray:
+    """Compute blended modulation matrix from two archetypes."""
+    mat = np.zeros((6, 6), dtype=np.int16)
+
+    edges_a = {(e[0], e[1]): e[2] for e in ARCHETYPE_EDGES[topo_a_id]['edges']}
+    edges_b = {(e[0], e[1]): e[2] for e in ARCHETYPE_EDGES[topo_b_id]['edges']}
+
+    # All possible edges from both topologies
+    all_edges = set(edges_a.keys()) | set(edges_b.keys())
+
+    for src, dst in all_edges:
+        w_a = edges_a.get((src, dst), 0)
+        w_b = edges_b.get((src, dst), 0)
+        mat[src, dst] = blend_edge_weight(w_a, w_b, blend_q15)
+
+    return mat
+```
+
+### 8.8 CMMM Integration
+
+#### 8.8.1 Regime-Driven Topology
+
+CMMM regime transitions can drive FM topology morphing:
+
+| CMMM Regime | Suggested Archetype | Rationale |
+|-------------|---------------------|-----------|
+| IDLE (0) | ADDITIVE (6) | Clean, pure |
+| SUSTAIN (1) | DUAL (2) | Rich, stable |
+| ATTACK (2) | CHAIN (0) | Bright, punchy |
+| DECAY (3) | SPLIT (3) | Complex decay |
+| CHAOS (4) | FEEDBACK (7) | Harsh, unstable |
+| MORPH (5) | Blend A↔B | Transitioning |
+
+#### 8.8.2 Binding Targets
+
+```python
+CMMM_FM_TARGETS = {
+    'fm.topo_blend_q15': 0x42,        # Primary morph control
+    'fm.master_level_q15': 0x70,      # Output scaling
+    'fm.feedback_global_q15': 0x71,   # Feedback amount
+    'fm.op[0].level_q15': 0x58,       # Per-op level modulation
+    'fm.op[1].level_q15': 0x59,
+    'fm.op[2].level_q15': 0x5A,
+    'fm.op[3].level_q15': 0x5B,
+    'fm.op[4].level_q15': 0x5C,
+    'fm.op[5].level_q15': 0x5D,
+}
+```
+
+### 8.9 DX7 Compatibility Mode
+
+When `fm.dx7_compat_id` is set (1-32):
+
+1. Look up DX7 algorithm → archetype mapping
+2. Set `topo_a_id` to matched archetype
+3. Set `blend_q15 = 0` (pure A topology)
+4. Load exact DX7 edge weights from `fm_algorithms.py`
+
+This provides bit-exact DX7 compatibility while allowing morph-out transitions.
+
+### 8.10 Archetype Visual Diagrams
+
+#### A.0 CHAIN
+```
+[Op6] → [Op5] → [Op4] → [Op3] → [Op2] → [Op1*]
+                                          ↺fb
+```
+
+#### A.1 STACK
+```
+[Op6] ─┐
+[Op5] ─┤
+[Op4] ─┼──→ [Op1*]
+[Op3] ─┤     ↺fb
+[Op2] ─┘
+```
+
+#### A.2 DUAL
+```
+[Op6] → [Op5] → [Op4*]
+[Op3] → [Op2] → [Op1*]
+```
+
+#### A.3 SPLIT
+```
+              ┌──→ [Op4*]
+[Op6] → [Op5] ┼──→ [Op3*]
+              ├──→ [Op2*]
+              └──→ [Op1*]
+```
+
+#### A.4 YPAIR
+```
+        ┌──→ [Op5] ──┐
+[Op6] ──┤            ├──→ [Op3*]
+        └──→ [Op4] ──┘
+              [Op2] → [Op1*]
+```
+
+#### A.5 CLOUD
+```
+[Op6] ═══╗
+[Op5] ═══╬═══→ [Op1*]   (weighted parallel)
+[Op4] ═══╣
+[Op3] ═══╣
+[Op2] ═══╝
+```
+
+#### A.6 ADDITIVE
+```
+[Op6*]  [Op5*]  [Op4*]  [Op3*]  [Op2*]  [Op1*]
+  │       │       │       │       │       │
+  └───────┴───────┴───────┴───────┴───────┘
+                      ↓
+                    OUTPUT
+```
+
+#### A.7 FEEDBACK
+```
+[Op6] → [Op5] → [Op4] → [Op3] → [Op2] → [Op1*]
+                                          ⟲2x
+```
+
+### 8.11 Example Morph Sequences
+
+#### E.Piano → Brass Morph
+```python
+# Start: E.Piano (DX7 Alg 5 → YPAIR)
+# End: Brass (DX7 Alg 16 → STACK)
+
+frame.fm_topo_a_id = 4  # YPAIR
+frame.fm_topo_b_id = 1  # STACK
+frame.fm_topo_blend_q15 = cmmm_blend  # 0 → 32767 over transition
+```
+
+#### Additive → Chain Morph
+```python
+# Organ to Lead transition
+frame.fm_topo_a_id = 6  # ADDITIVE
+frame.fm_topo_b_id = 0  # CHAIN
+frame.fm_topo_blend_q15 = attack_envelope  # Fast morph on attack
+```
+
+### 8.12 Resource Estimates
+
+| Resource | Size | Notes |
+|----------|------|-------|
+| Archetype table | 320 bytes | 8 archetypes × 40 bytes |
+| DX7 mapping | 32 bytes | 32 × 1 byte archetype ID |
+| Blend state | 16 bytes | topo_a, topo_b, blend, cache |
+| Per-voice | 256 bytes | Operators + outputs |
+
+### 8.13 Conformance Requirements
+
+#### 8.13.1 Required
+
+- Support all 8 canonical archetypes
+- Implement edge weight interpolation (§8.6.1)
+- Implement carrier fade interpolation (§8.6.2)
+- Support DX7 compatibility mode (1-32)
+- Q15 blend parameter range [0, 32767]
+
+#### 8.13.2 Optional
+
+- Feedback operator crossfade (§8.6.3)
+- CMMM binding targets (§8.8.2)
+- Real-time archetype switching without glitches
+- Custom archetype definition
+
+---
+
+**Document Version:** v0.2
+**Last Updated:** 2026-01-10
 **Author:** CCS Development Team

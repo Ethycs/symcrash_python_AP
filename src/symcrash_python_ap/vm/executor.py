@@ -9,7 +9,7 @@ Executes one block for one voice with fixed lane schedule.
 from typing import Tuple, Optional, TYPE_CHECKING
 import numpy as np
 
-from .state import VMState, OSC_MODE_A, OSC_MODE_B, OSC_MODE_SAMPLE
+from .state import VMState, OSC_MODE_A, OSC_MODE_B, OSC_MODE_SAMPLE, OSC_MODE_FM6
 from .decode import DecodedPlan, CarrierRole, decode_frame, FM_SOURCE_FEEDBACK
 from .tables import Tables, DEFAULT_TABLES, BLOCK_SAMPLES
 from .lanes import (
@@ -244,6 +244,48 @@ def vm_step_block(
             # Generate coefficients from sample playback
             # Note: Sample buffer must be loaded via Voice Engine before playback
             sample_generate_coeffs(sample_state, carrier_512)
+        elif osc_mode == OSC_MODE_FM6:
+            # -----------------------------------------------------------------
+            # MODE FM6: 6-Operator FM Synthesis (WSE-STD-FM-TOPOLOGY-v0)
+            # -----------------------------------------------------------------
+            from .fm6_engine import fm6_generate_coeffs
+
+            # Get or create FM6 state
+            fm6_state = state.fm6_state
+
+            # Configure FM6 from VoiceFrame parameters if provided
+            fm_algorithm_id = getattr(frame, 'fm_algorithm_id', None)
+            fm_op_ratios = getattr(frame, 'fm_op_ratios', None)
+            fm_op_levels = getattr(frame, 'fm_op_levels', None)
+            fm_feedback_depth = getattr(frame, 'fm_feedback_depth', None)
+
+            # Update algorithm if specified
+            if fm_algorithm_id is not None and fm_algorithm_id != fm6_state.algorithm_id:
+                fm6_state.set_algorithm(fm_algorithm_id)
+
+            # Update operator ratios if specified
+            if fm_op_ratios is not None:
+                for i, ratio in enumerate(fm_op_ratios[:6]):
+                    fm6_state.operators[i].ratio_q16 = ratio
+
+            # Update operator levels if specified
+            if fm_op_levels is not None:
+                for i, level in enumerate(fm_op_levels[:6]):
+                    fm6_state.operators[i].level_q15 = level
+
+            # Update feedback depth if specified
+            if fm_feedback_depth is not None:
+                from .fm6_state import dx7_feedback_to_q15
+                from .fm_algorithms import get_algorithm
+                alg = get_algorithm(fm6_state.algorithm_id)
+                feedback_q15 = dx7_feedback_to_q15(fm_feedback_depth)
+                if alg.feedback_op >= 0:
+                    fm6_state.operators[alg.feedback_op].feedback_q15 = feedback_q15
+
+            # Generate FM6 coefficients
+            # base_phase_inc is the Q32 phase increment for the fundamental
+            base_phase_inc = params.phase_inc
+            fm6_generate_coeffs(fm6_state, carrier_512, base_phase_inc)
         else:
             # -----------------------------------------------------------------
             # MODE A: LUT-based (existing path)

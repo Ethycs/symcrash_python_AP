@@ -1,85 +1,157 @@
 # Brass Stab v0 - WSE-STD-PRESET v0
 # =================================
 #
-# Punchy brass stab with carrier + material texture (no filter).
-# Classic subtractive synthesis character via wavelet backbone shaping.
+# Punchy brass section stab using FM synthesis for brass character.
+# Uses DX7 Algorithm 22 (classic brass algorithm).
 #
-# Target sound: thick, punchy brass section stab
-# - Near-instant attack (~2.7ms)
-# - Fast decay to mid sustain
-# - Rich saw harmonics
-# - Slight material texture for body
+# Algorithm 22: Brass (Split 3) - 4 carriers, 2 modulators
+#   [6] -> [5] -+-> [4*]
+#               +-> [3*]
+#               +-> [2*]
+#               [1*]
 #
-# Macros (not modulated in v0):
-# - IMPACT: Not bound (fixed envelope)
-# - BRIGHT: Not bound (fixed tilt)
-# - BODY: Not bound (fixed density)
+# Brass FM Strategy (DX7-derived):
+# --------------------------------
+# - Op1 is unmodulated carrier at 1:1 (pure fundamental anchor)
+# - Op2/3/4 are modulated carriers for harmonic richness
+# - Op5 modulator at 1:1 adds 2nd/3rd harmonics
+# - Op6 modulator at 2:1 with feedback adds higher partials (brass "edge")
+# - Slight carrier detune (+/-3 cents) for ensemble thickness
+# - Higher mod index during attack for "blat", decay to sustain for warmth
+#
+# Target sound: thick brass section stab / horn hit
+# - Fast attack with "blat" (~8ms)
+# - Quick decay to warm sustain
+# - Rich harmonic content with brass edge
 
-preset:
-  preset_id: "BRASS_STAB_V0"
-  preset_version: "v0"
-  author: "symcrash"
-  description: "Punchy brass stab. Carrier + material (no filter)."
+instrument_ir_v0:
+  meta:
+    instrument_id: "brass-stab-v0"
+    name: "Brass Stab"
+    version: 0
+    author: "symcrash"
+    seed_u32: 0x42525353
 
-compat:
-  voiceframe_std: "WSE-STD-020 v1"
-  vm_std: "WSE-STD-VM-HYBRID v0"
-  operator_lib_id: "WSE-OPLIB-24 v0"
+  io:
+    sample_rate_hz: 48000
+    block_size: 64
 
-latch_defaults:
-  pattern_id: 0
-  tail_mode: "FULL"
-  tree_a_id: 0
-  tree_b_id: 0
-  tree_blend_q15: 0
-  carrier:
-    model: "SAW"
-    role: "AUDIBLE"
-    transition: "RETRIGGER"
-    detune_cents: 0
-    pulse_width_q15: 16384
+  layers:
+    L0_graph:
+      nodes:
+        # 6-operator FM for brass character
+        - id: "fm6"
+          type: "FM6"
+          params:
+            algorithm: 22         # Classic DX7 brass algorithm
+            feedback: 4           # Moderate feedback for brass edge
 
-env:
-  amp:
-    attack_ms: 2.67          # ~2 blocks at 750 blocks/sec
-    decay_ms: 120.0          # ~90 blocks
-    sustain: 0.5             # sustain_q15: 16384
-    release_ms: 100.0        # ~75 blocks
+            # Operator frequency ratios (Q16: 65536 = 1.0x)
+            # Carriers mostly 1:1 with slight detune, modulator at 2:1
+            op_ratios:
+              - 65536             # Op 1: 1.0x (carrier, anchor fundamental)
+              - 65602             # Op 2: 1.001x (carrier, +1.7 cents detune)
+              - 65470             # Op 3: 0.999x (carrier, -1.7 cents detune)
+              - 65668             # Op 4: 1.002x (carrier, +3.4 cents detune)
+              - 65536             # Op 5: 1.0x (modulator - creates 2nd harmonic)
+              - 131072            # Op 6: 2.0x (modulator - creates 3rd harmonic + brass edge)
 
-material:
-  beta_start_q15: 4915       # 0.15 (mostly dry at attack)
-  beta_target_q15: 11468     # 0.35 (bring in texture)
-  beta_ramp_blocks: 8        # ~10.7ms ramp
+            # Operator output levels (Q15)
+            # Balanced carriers, higher modulator levels for brass bite
+            op_levels:
+              - 32767             # Op 1: Full (anchor carrier, unmodulated)
+              - 24576             # Op 2: 0.75 (modulated carrier)
+              - 24576             # Op 3: 0.75 (modulated carrier)
+              - 20480             # Op 4: 0.625 (modulated carrier)
+              - 20480             # Op 5: 0.625 (modulator - main mod depth)
+              - 16384             # Op 6: 0.5 (modulator w/feedback - adds edge)
 
-backbone:
-  - op: "TILT"
-    strength_q15: 14746      # 0.45
-  - op: "INTRA_MIX"
-    strength_q15: 8192       # 0.25
-  - op: "DIFFUSE_DOWN"
-    strength_q15: 6554       # 0.20
+        - id: "amp1"
+          type: "Amp"
+          params:
+            adsr:
+              a_ms: 8.0           # Fast "blat" onset
+              d_ms: 85.0          # Decay to warm sustain
+              s: 0.55             # Warm sustain level
+              r_ms: 95.0          # Natural brass release
 
-carrier:
-  # Saw harmonics: 1/n falloff for 8 harmonics
-  # These match the acceptance test expectations
-  harmonic_amps_q15:
-    - 32767    # fundamental
-    - 16383    # 2nd harmonic (1/2)
-    - 10922    # 3rd harmonic (1/3)
-    - 8191     # 4th harmonic (1/4)
-    - 6553     # 5th harmonic (1/5)
-    - 5461     # 6th harmonic (1/6)
-    - 4681     # 7th harmonic (1/7)
-    - 4096     # 8th harmonic (1/8)
+      edges:
+        - src: "fm6"
+          dst: "amp1"
 
-# Macros section (for future use - not modulated in v0)
-macros:
-  BRIGHT:
-    target: brightness
-    default_q15: 16384       # 0.5 (neutral)
-  BODY:
-    target: density
-    default_q15: 16384       # 0.5 (neutral)
-  IMPACT:
-    target: energy_intent
-    default_q15: 0           # Not used in v0
+      macros:
+        - id: "M_BRIGHT"
+          name: "Brightness"
+          default: 0.75
+        - id: "M_TEXTURE"
+          name: "Brass Edge"
+          default: 0.55
+        - id: "M_MORPH"
+          name: "Section Blend"
+          default: 0.2
+        - id: "M_ATTACK"
+          name: "Attack"
+          default: 0.2
+        - id: "M_DECAY"
+          name: "Decay"
+          default: 0.35
+        - id: "M_SUSTAIN"
+          name: "Sustain"
+          default: 0.65
+        - id: "M_RELEASE"
+          name: "Release"
+          default: 0.3
+        - id: "M_DETUNE"
+          name: "Detune"
+          default: 0.02
+
+    L3_cmmm:
+      emit_templates:
+        T_IDLE:
+          families:
+            CONSTRAINT: 1.0
+            CALM: 1.0
+          ops_enable: ["NormalizeScale", "FineClamp"]
+          trees:
+            A: "T1"
+            B: "T1"
+            beta: 0.0
+        T_ATTACK:
+          families:
+            COLOR: 0.85
+            EXCITE: 1.0
+            CONSTRAINT: 1.0
+            CALM: 0.2
+          ops_enable: ["Tilt", "IntraMix", "Impulse", "GlobalPulse", "NormalizeScale", "FineClamp"]
+          trees:
+            A: "T1"
+            B: "T1"
+            beta: 0.15
+        T_STABLE:
+          families:
+            COLOR: 0.7
+            COHERENCE: 0.4
+            CONSTRAINT: 1.0
+            CALM: 0.5
+          ops_enable: ["Tilt", "DiffuseDown", "IntraMix", "NormalizeScale", "FineClamp"]
+          trees:
+            A: "T1"
+            B: "T1"
+            beta: 0.25
+        T_RECOVERY:
+          families:
+            COHERENCE: 0.3
+            CONSTRAINT: 1.0
+            CALM: 1.0
+          ops_enable: ["GluePair", "SheafProject", "NormalizeScale", "FineClamp"]
+          trees:
+            A: "T1"
+            B: "T1"
+            beta: 0.0
+
+  compile:
+    completion_policy:
+      default_tree:
+        A: "T1"
+        B: "T1"
+        beta: 0.2

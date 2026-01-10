@@ -250,6 +250,12 @@ class NodeParams:
     send_a: float = 0.0
     send_b: float = 0.0
 
+    # FM6 parameters (6-operator FM synthesis)
+    algorithm: Optional[int] = None          # DX7 algorithm 1-32
+    feedback: Optional[int] = None           # Feedback level 0-7
+    op_ratios: Optional[List[int]] = None    # 6 Q16 frequency ratios
+    op_levels: Optional[List[int]] = None    # 6 Q15 output levels
+
 
 @dataclass
 class L0Node:
@@ -918,6 +924,15 @@ def _parse_node_params(data: dict) -> NodeParams:
         params.send_a = data['send_a']
     if 'send_b' in data:
         params.send_b = data['send_b']
+    # FM6 parameters
+    if 'algorithm' in data:
+        params.algorithm = data['algorithm']
+    if 'feedback' in data:
+        params.feedback = data['feedback']
+    if 'op_ratios' in data:
+        params.op_ratios = data['op_ratios']
+    if 'op_levels' in data:
+        params.op_levels = data['op_levels']
     return params
 
 

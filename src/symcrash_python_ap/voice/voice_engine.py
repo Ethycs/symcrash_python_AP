@@ -2200,7 +2200,8 @@ class VoiceEngine:
     """
 
     def __init__(self, max_voices: int = 12, block_size: int = BLOCK_SIZE,
-                 sample_rate: float = SAMPLE_RATE):
+                 sample_rate: float = SAMPLE_RATE,
+                 macro_runtime: Optional['MacroRuntime'] = None):
         self.max_voices = max_voices
         self.block_size = block_size
         self.sample_rate = sample_rate
@@ -2224,9 +2225,31 @@ class VoiceEngine:
         # Global degradation level (from CPU monitor)
         self.global_degradation = DegradationLevel.NONE
 
+        # MacroRuntime for SystemMacro integration (optional)
+        # When set, macros (BRIGHTNESS, DENSITY, RISK, etc.) influence CMMM
+        self.macro_runtime: Optional['MacroRuntime'] = macro_runtime
+
     def set_degradation_level(self, level: DegradationLevel):
         """Set global degradation level for CPU load management."""
         self.global_degradation = level
+
+    def set_macro_runtime(self, macro_runtime: 'MacroRuntime'):
+        """
+        Set MacroRuntime for SystemMacro integration.
+
+        When set, macros (BRIGHTNESS, DENSITY, RISK, MOTION, etc.)
+        influence the CMMM gesture→intent→family weight pipeline.
+
+        Usage:
+            from symcrash_python_ap.macro_runtime import MacroRuntime
+            runtime = MacroRuntime()
+            engine.set_macro_runtime(runtime)
+
+            # Now macros affect synthesis
+            runtime.set_macro("BRIGHT", 24576)  # Increase brightness
+            runtime.tick()
+        """
+        self.macro_runtime = macro_runtime
 
     def allocate_voice(self, voice_id: Optional[int] = None,
                        program_id: int = 0) -> Optional[int]:
@@ -2604,7 +2627,15 @@ class VoiceEngine:
         state.degradation = self.global_degradation
 
         # 1. Gesture -> Intent (Controller input processing)
-        state.intent = state.program.gesture_to_intent(state.gesture)
+        # If macro_runtime is set, apply SystemMacros to gesture/intent pipeline
+        if self.macro_runtime is not None:
+            state.intent = gesture_to_intent_with_macros(
+                state.gesture,
+                self.macro_runtime,
+                state.program.gesture_to_intent
+            )
+        else:
+            state.intent = state.program.gesture_to_intent(state.gesture)
 
         # 2. Check regime transition via RegimeGraph
         target_regime = self._check_regime_transition(state)
@@ -2790,6 +2821,177 @@ def demo_voice_engine():
 
     print("-" * 40)
     print(f"Final active voices: {engine.get_active_voice_count()}")
+
+
+# =============================================================================
+# MACRO → CMMM BRIDGE (SystemMacro integration per WSE-STD-MACRO v0)
+# =============================================================================
+
+def apply_macros_to_gesture(gesture: GestureBasis, macro_runtime: 'MacroRuntime') -> GestureBasis:
+    """
+    Apply SystemMacro values to a GestureBasis.
+
+    This bridges MacroRuntime (controller state) to GestureBasis (CMMM input).
+
+    Mapping (per WSE-STD-MACRO v0 §2):
+    - BRIGHTNESS (4) → tilt_q15 (spectral tilt)
+    - DENSITY (5) → pressure_q15 boost (body/sustain)
+    - RISK (6) → chaos_q15 (stochastic behavior)
+    - MOTION (2) → speed_q15 boost (movement)
+    - SPACE (8) → position_q15 spread (stereo width)
+    - MATERIAL (9) → tilt_q15 secondary (wood=negative, glass=positive)
+
+    Args:
+        gesture: Base gesture from controller input
+        macro_runtime: MacroRuntime with current slewed macro values
+
+    Returns:
+        Modified GestureBasis with macro influence applied
+    """
+    from ..macro_runtime import SystemMacro
+
+    # Get current macro values (post-slew)
+    brightness = macro_runtime.get_system_macro(SystemMacro.BRIGHTNESS)
+    density = macro_runtime.get_system_macro(SystemMacro.DENSITY)
+    risk = macro_runtime.get_system_macro(SystemMacro.RISK)
+    motion = macro_runtime.get_system_macro(SystemMacro.MOTION)
+    space = macro_runtime.get_system_macro(SystemMacro.SPACE)
+    material = macro_runtime.get_system_macro(SystemMacro.MATERIAL)
+
+    # BRIGHTNESS → tilt (0=dark, 32767=bright)
+    # Map 0-32767 to -16384..+16384 tilt offset
+    brightness_offset = brightness - Q15_HALF
+    new_tilt = sat16(gesture.tilt_q15 + brightness_offset)
+
+    # MATERIAL modifies tilt further (wood=low=dark, glass=high=bright)
+    # 0=wood (-4096), 16384=neutral (0), 32767=glass (+4096)
+    material_offset = (material - Q15_HALF) >> 2
+    new_tilt = sat16(new_tilt + material_offset)
+
+    # DENSITY → pressure boost (more body = more sustained pressure)
+    # Add up to 25% pressure boost at full density
+    density_boost = mul_q15_sat(density, Q15_ONE >> 2)
+    new_pressure = sat16(gesture.pressure_q15 + density_boost)
+
+    # RISK → chaos (direct mapping, additive)
+    # RISK at 32767 adds full chaos
+    new_chaos = sat16(gesture.chaos_q15 + (risk >> 1))
+
+    # MOTION → speed boost (movement/modulation)
+    # MOTION adds up to 50% speed
+    motion_boost = mul_q15_sat(motion, Q15_HALF)
+    new_speed = sat16(gesture.speed_q15 + motion_boost)
+
+    # SPACE → position spread (subtle stereo widening)
+    # At high SPACE, amplify position; at low, center
+    space_factor = space  # 0=center, 32767=wide
+    new_position = mul_q15_sat(gesture.position_q15, space_factor >> 1 + Q15_HALF)
+
+    return GestureBasis(
+        gate=gesture.gate,
+        pressure_q15=new_pressure,
+        position_q15=new_position,
+        speed_q15=new_speed,
+        tilt_q15=new_tilt,
+        chaos_q15=new_chaos,
+        pitch_q15=gesture.pitch_q15,
+        pan_q15=gesture.pan_q15,
+    )
+
+
+def apply_macros_to_intent(intent: IntentVector, macro_runtime: 'MacroRuntime') -> IntentVector:
+    """
+    Apply SystemMacro values directly to IntentVector.
+
+    This is an alternative to apply_macros_to_gesture when you want
+    direct semantic control over intent lanes.
+
+    Mapping:
+    - ENERGY_INTENT (1) -> I_TONE, I_BOW boost
+    - FOCUS (3) -> I_TONE boost, I_AIR reduction
+    - RISK (6) -> I_GLITCH boost
+    - AGE (7) -> I_CALM boost, I_SNAP reduction (older voices settle)
+    - UNITY (10) -> I_GLUE boost
+
+    Args:
+        intent: Base intent computed from gesture
+        macro_runtime: MacroRuntime with current macro values
+
+    Returns:
+        Modified IntentVector with macro influence applied
+    """
+    from ..macro_runtime import SystemMacro
+
+    # Get macro values
+    energy_intent = macro_runtime.get_system_macro(SystemMacro.ENERGY_INTENT)
+    focus = macro_runtime.get_system_macro(SystemMacro.FOCUS)
+    risk = macro_runtime.get_system_macro(SystemMacro.RISK)
+    age = macro_runtime.get_system_macro(SystemMacro.AGE)
+    unity = macro_runtime.get_system_macro(SystemMacro.UNITY)
+
+    # Create modified intent
+    new_lanes = list(intent.lanes)
+
+    # ENERGY_INTENT -> boost TONE and BOW
+    intent_boost = energy_intent >> 2  # Up to 25% boost
+    new_lanes[I_TONE] = sat16(new_lanes[I_TONE] + intent_boost)
+    new_lanes[I_BOW] = sat16(new_lanes[I_BOW] + intent_boost)
+
+    # FOCUS -> boost TONE, reduce AIR (concentrated vs diffuse)
+    focus_offset = focus - Q15_HALF
+    new_lanes[I_TONE] = sat16(new_lanes[I_TONE] + (focus_offset >> 2))
+    new_lanes[I_AIR] = sat16(new_lanes[I_AIR] - (focus_offset >> 2))
+
+    # RISK -> boost GLITCH
+    new_lanes[I_GLITCH] = sat16(new_lanes[I_GLITCH] + (risk >> 1))
+
+    # AGE -> older voices become calmer, less snappy (natural settling)
+    # High AGE boosts CALM, reduces SNAP
+    age_effect = age >> 3  # Up to 12.5% effect
+    new_lanes[I_CALM] = sat16(new_lanes[I_CALM] + age_effect)
+    new_lanes[I_SNAP] = sat16(new_lanes[I_SNAP] - (age_effect >> 1))
+
+    # UNITY -> boost GLUE (coherence)
+    new_lanes[I_GLUE] = sat16(new_lanes[I_GLUE] + (unity >> 2))
+
+    return IntentVector(lanes=new_lanes)
+
+
+def gesture_to_intent_with_macros(
+    gesture: GestureBasis,
+    macro_runtime: 'MacroRuntime',
+    gesture_to_intent_fn: callable = None
+) -> IntentVector:
+    """
+    Complete pipeline: Gesture + Macros → Intent.
+
+    This is the recommended way to compute intent when using MacroRuntime.
+
+    1. Apply macros to gesture (BRIGHTNESS, DENSITY, RISK, etc.)
+    2. Compute base intent from modified gesture
+    3. Apply macro refinements to intent (ENERGY_INTENT, FOCUS, UNITY)
+
+    Args:
+        gesture: Raw gesture from controller
+        macro_runtime: MacroRuntime with current macro state
+        gesture_to_intent_fn: Custom gesture→intent function (default: default_gesture_to_intent)
+
+    Returns:
+        IntentVector with full macro influence
+    """
+    if gesture_to_intent_fn is None:
+        gesture_to_intent_fn = default_gesture_to_intent
+
+    # Step 1: Apply macros to gesture
+    modified_gesture = apply_macros_to_gesture(gesture, macro_runtime)
+
+    # Step 2: Compute base intent
+    base_intent = gesture_to_intent_fn(modified_gesture)
+
+    # Step 3: Apply macro refinements to intent
+    final_intent = apply_macros_to_intent(base_intent, macro_runtime)
+
+    return final_intent
 
 
 if __name__ == "__main__":

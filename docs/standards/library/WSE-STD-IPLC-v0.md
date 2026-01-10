@@ -28,11 +28,12 @@
 
 ## 1. Artifact Kinds (Frozen v0)
 
-IPLC recognizes three capsule kinds:
+IPLC recognizes four capsule kinds:
 
-1. **CapsuleInstrument** — “instrument identity” (regime graph, tree family, voice defaults)
-2. **CapsuleSynth** — “synth architecture identity” (osc mode, harmonic basis, FX toggles, etc.)
-3. **CapsuleAsset** — “data only” (tables/materials/atlases); no control defaults required
+1. **CapsuleInstrument** — "instrument identity" (regime graph, tree family, voice defaults)
+2. **CapsuleSynth** — "synth architecture identity" (osc mode, harmonic basis, FX toggles, etc.)
+3. **CapsuleAsset** — "data only" (tables/materials/atlases); no control defaults required
+4. **CapsuleMacro** — "performance macro" (vibrato, legato, tremolo, portamento); additive modulation
 
 Each capsule kind MUST declare `kind` in its manifest.
 
@@ -167,7 +168,85 @@ Those belong to Snapshot standards (separate).
 
 ---
 
-## 6. Determinism Requirements (v0)
+## 6. CapsuleMacro Lifecycle (Frozen v0)
+
+CapsuleMacro is a first-class capsule kind for performance modulation presets.
+
+### 6.1 MacroType Enum
+
+| ID | Type | Description |
+|----|------|-------------|
+| 0 | VIBRATO | Pitch/amplitude/timbre LFO modulation |
+| 1 | LEGATO | Smooth pitch transition (preserves phase) |
+| 2 | TREMOLO | Amplitude-only LFO modulation |
+| 3 | PORTAMENTO | Pitch glide between notes |
+
+### 6.2 MacroProgram Object
+
+```text
+MacroProgram:
+  macro_type: MacroType          # VIBRATO | LEGATO | TREMOLO | PORTAMENTO
+
+  # LFO parameters (VIBRATO, TREMOLO)
+  rate_hz: float                 # LFO rate in Hz (default 5.5)
+  depth_pitch_cents: int         # Pitch modulation depth in cents
+  depth_amp_q15: int             # Amplitude modulation depth (Q15)
+  depth_timbre_q15: int          # Timbre modulation depth (Q15)
+
+  # Envelope parameters
+  delay_ms: float                # Delay before modulation onset
+  ramp_ms: float                 # Ramp time to full depth
+
+  # Glide parameters (LEGATO, PORTAMENTO)
+  glide_time_ms: float           # Pitch glide duration
+  glide_curve: int               # 0=linear, 1=exp, 2=log
+
+  # Phase behavior (LEGATO)
+  preserve_phase: bool           # Keep oscillator phase on note change
+```
+
+### 6.3 SystemMacro Mapping
+
+| MacroType | SystemMacro ID | Slew Policy |
+|-----------|----------------|-------------|
+| VIBRATO | 11 (VIBRATO) | ONE_POLE(4096) |
+| TREMOLO | 11 (VIBRATO) | ONE_POLE(4096) |
+| LEGATO | 12 (LEGATO) | NONE |
+| PORTAMENTO | 12 (LEGATO) | NBLOCK(8) |
+
+### 6.4 Apply Semantics (MUST)
+
+When applying a CapsuleMacro:
+
+1. **Register SystemMacro** in MacroRuntime (for controller depth modulation)
+2. **Configure ModulationState** in VoiceEngine (LFO rate, delay, ramp)
+3. **DO NOT** reset voice allocation or program selector
+4. **DO NOT** modify SystemMacros 0-10 (CMMM control axes)
+
+CapsuleMacro is **additive** - it configures modulation on top of the current instrument.
+
+### 6.5 Stacking Rules
+
+* Same MacroType **replaces** previous (new vibrato replaces old vibrato)
+* Different MacroTypes are **cumulative** (can have vibrato + legato)
+
+### 6.6 Controller Modulation
+
+After apply, controllers can modulate depth via SystemMacro:
+
+```python
+macro_runtime.set_system_macro(SystemMacro.VIBRATO, depth_q15)
+```
+
+The modulation engine reads this value each block:
+
+```python
+effective_depth = (base_depth * macro_runtime.get_system_macro(SystemMacro.VIBRATO)) >> 15
+```
+
+---
+
+## 7. Determinism Requirements (v0)
 
 * `voice_params.bin` and `control_defaults.bin` MUST be applied in canonical sorted order (as per their standards)
 * Seeds MUST be derivable from a declared seed policy (master seed + derivation rule id)
@@ -175,9 +254,9 @@ Those belong to Snapshot standards (separate).
 
 ---
 
-## 7. Versioning and Identity Rules (Frozen v0)
+## 8. Versioning and Identity Rules (Frozen v0)
 
-* `capsule_id` identifies “the instrument identity” across versions
+* `capsule_id` identifies "the instrument identity" across versions
 * A new compilation that changes identity MUST mint a new `capsule_id`
 * A new compilation that only changes tuning defaults SHOULD bump the library version but keep `capsule_id`
 
@@ -185,7 +264,7 @@ Those belong to Snapshot standards (separate).
 
 ---
 
-## 8. Conformance Checklist (IPLC v0)
+## 9. Conformance Checklist (IPLC v0)
 
 A system conforms iff:
 
@@ -194,6 +273,7 @@ A system conforms iff:
 * [ ] Implements compiler outputs with ABI compat declared (§4)
 * [ ] Implements runtime apply semantics exactly (§5)
 * [ ] Enforces preset vs snapshot boundary (§5.3)
-* [ ] Deterministic application order + seed policy enforcement (§6)
+* [ ] Implements CapsuleMacro additive apply semantics (§6)
+* [ ] Deterministic application order + seed policy enforcement (§7)
 
 ---
