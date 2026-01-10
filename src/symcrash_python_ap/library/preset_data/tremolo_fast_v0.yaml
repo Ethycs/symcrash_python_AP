@@ -1,0 +1,42 @@
+# Tremolo Fast v0 - WSE-STD-CAPSULE-COMPAT v0 §2.4
+# =================================================
+#
+# Fast tremolo for dramatic effect.
+# Can be applied to any instrument preset.
+#
+# Macro Type: TREMOLO
+# - Amplitude-only modulation (no pitch wobble)
+# - Fast rate for dramatic trembling effect
+# - Immediate onset
+#
+
+preset:
+  preset_id: "TREMOLO_FAST_V0"
+  preset_version: "v0"
+  author: "symcrash"
+  description: "Fast tremolo with amplitude-only modulation."
+
+compat:
+  voiceframe_std: "WSE-STD-020 v1"
+  vm_std: "WSE-STD-VM-HYBRID v0"
+
+kind: MACRO
+
+macro:
+  macro_type: TREMOLO
+
+  # LFO parameters
+  rate_hz: 8.0              # Fast tremolo rate
+  depth_pitch_cents: 0      # No pitch modulation
+  depth_amp_q15: 8192       # 25% amplitude modulation
+  depth_timbre_q15: 0       # No timbre modulation
+
+  # Envelope parameters
+  delay_ms: 0.0             # Immediate onset
+  ramp_ms: 10.0             # Quick ramp
+
+tags:
+  - tremolo
+  - fast
+  - dramatic
+  - strings

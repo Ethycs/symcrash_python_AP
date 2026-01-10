@@ -30,13 +30,14 @@ Define a **portable Capsule object** that can be:
 
 ## 1. First-class Capsule Types (v0)
 
-v0 defines three artifact kinds:
+v0 defines four artifact kinds:
 
 1. `CapsuleInstrument` (ProgramPreset + optional InstrumentIR references)
 2. `CapsuleSynth` (ProgramPreset + synth-focused defaults)
 3. `CapsuleAsset` (references only; no control semantics)
+4. `CapsuleMacro` (performance macro: vibrato, legato, tremolo, portamento)
 
-This spec covers (1) and (2) primarily; (3) is a manifest-only bundle.
+This spec covers (1) and (2) primarily; (3) is a manifest-only bundle; (4) defines modulation behavior.
 
 ---
 
@@ -48,7 +49,7 @@ A capsule is a bundle with this logical structure:
 CapsuleV0:
   identity:
     capsule_id (string)
-    kind (INSTRUMENT | SYNTH | ASSET)
+    kind (INSTRUMENT | SYNTH | ASSET | MACRO)
     name, author, tags
     engine_compat:
       control_registry_abi = 0
@@ -58,7 +59,7 @@ CapsuleV0:
       block_size
 
   program:
-    program_id OR instrument_ir_id
+    program_id OR instrument_ir_id  (required for INSTRUMENT/SYNTH)
     optional regime_graph_id
     optional tree_family_id
 
@@ -74,9 +75,130 @@ CapsuleV0:
   seeds:
     master_seed
     derivation_rule_id
+
+  macro: (only for kind=MACRO)
+    macro_type (VIBRATO | LEGATO | TREMOLO | PORTAMENTO)
+    rate_hz, depth_pitch_cents, depth_amp_q15, depth_timbre_q15
+    delay_ms, ramp_ms
+    glide_time_ms, glide_curve
+    preserve_phase
 ```
 
 **Capsule MUST NOT contain runtime histories** (coeff_state, phase, ADSR state, PRNG state).
+
+---
+
+## 2.4 CapsuleMacro Section (Performance Macros)
+
+`CapsuleMacro` defines portable performance modulation behavior that can be applied to any instrument.
+
+### 2.4.1 MacroType (MUST)
+
+| Type | ID | Description |
+|------|----|-------------|
+| VIBRATO | 0 | Pitch/amplitude/timbre LFO modulation |
+| LEGATO | 1 | Smooth pitch transition (preserves phase) |
+| TREMOLO | 2 | Amplitude-only LFO modulation |
+| PORTAMENTO | 3 | Pitch glide between notes |
+
+### 2.4.2 MacroProgram Fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `macro_type` | MacroType | VIBRATO | Which modulation behavior |
+| `rate_hz` | float | 5.5 | LFO rate in Hz (VIBRATO, TREMOLO) |
+| `depth_pitch_cents` | int | 0 | Pitch modulation depth in cents |
+| `depth_amp_q15` | int | 0 | Amplitude modulation depth (Q15) |
+| `depth_timbre_q15` | int | 0 | Timbre modulation depth (Q15) |
+| `delay_ms` | float | 0.0 | Delay before modulation onset |
+| `ramp_ms` | float | 0.0 | Ramp time to full depth |
+| `glide_time_ms` | float | 0.0 | Pitch glide duration (LEGATO, PORTAMENTO) |
+| `glide_curve` | int | 0 | 0=linear, 1=exp, 2=log |
+| `preserve_phase` | bool | false | Keep oscillator phase on note change (LEGATO) |
+
+### 2.4.3 Validation Rules
+
+* `CapsuleMacro` MUST have `kind = MACRO`
+* `CapsuleMacro` MUST have `macro` field set
+* `CapsuleMacro` does NOT require `program_id` or `instrument_ir_id`
+* `control_defaults` and `voice_param_defaults` MAY be empty
+
+### 2.4.4 Apply Semantics
+
+When applying a CapsuleMacro:
+
+1. Configure the runtime modulation state (VibratoState, LegatoState, etc.)
+2. Set SystemMacro values (VIBRATO=11, LEGATO=12) in MacroRuntime
+3. DO NOT reset voice allocation or program selector
+
+CapsuleMacro is **additive** — it configures modulation on top of the current instrument.
+
+---
+
+## 2.5 SystemMacro Control Axes (Global Controller State)
+
+SystemMacros are **global semantic control axes** managed by the controller layer, not preset-specific.
+They drive CMMM decisions and are distinct from CapsuleMacro performance modulation.
+
+### 2.5.1 SystemMacroID (per WSE-STD-MACRO v0 §2)
+
+| ID | Name | Scope | Owner | Semantic Meaning |
+|----|------|-------|-------|------------------|
+| 0 | ENERGY_STATE | per-voice | Envelope only | Envelope phase (0=silent, 32767=peak) |
+| 1 | ENERGY_INTENT | per-voice | Controller → CMMM | Playing intensity / attack character |
+| 2 | MOTION | per-voice | Controller → CMMM | Movement / modulation amount |
+| 3 | FOCUS | per-voice | Controller → CMMM | Attention / emphasis (spectral concentration) |
+| 4 | BRIGHTNESS | per-voice | Controller → CMMM | Timbral brightness (harmonic content) |
+| 5 | DENSITY | per-voice | Controller → CMMM | Body / thickness (low-mid presence) |
+| 6 | RISK | per-voice | Controller → CMMM | Chaos / instability (stochastic behavior) |
+| 7 | AGE | per-voice | CMMM integrator | Voice age (accumulates over note duration) |
+| 8 | SPACE | per-voice | Controller → CMMM | Spatial / reverb character |
+| 9 | MATERIAL | per-voice | Controller → CMMM | Surface texture (wood=low, metal=mid, glass=high) |
+| 10 | UNITY | per-voice | Controller → CMMM | Coherence / blend (how voices blend together) |
+| 11 | VIBRATO | per-voice | Controller → Mode B | Vibrato depth modulation |
+| 12 | LEGATO | per-voice | Controller → Mode B | Legato mode (0=retrigger, >0=legato) |
+
+### 2.5.2 Ownership Rules (MUST)
+
+* `ENERGY_STATE` (0) MUST be written ONLY by the envelope generator
+* `AGE` (7) MUST evolve via CMMM integrator, never set directly by controllers
+* All other macros (1-6, 8-12) are Controller → CMMM/Mode B
+
+### 2.5.3 ControlProgram (Session-Level Defaults)
+
+`ControlProgram` holds default values for semantic control axes at the **session/controller level**.
+It is NOT part of instrument presets — presets define timbre, not global expression state.
+
+```text
+ControlProgram:
+  energy_intent_q15: int  # 0.5 = neutral intensity
+  motion_q15: int         # 0.0 = no modulation
+  focus_q15: int          # 0.5 = balanced emphasis
+  brightness_q15: int     # 0.5 = neutral brightness
+  density_q15: int        # 0.5 = neutral body
+  risk_q15: int           # 0.0 = stable, no chaos
+  space_q15: int          # 0.25 = subtle spatial
+  material_q15: int       # 0.5 = neutral texture
+  unity_q15: int          # 0.5 = balanced blend
+```
+
+### 2.5.4 Apply Semantics
+
+ControlProgram is applied at **session initialization** or **controller reset**, NOT at preset load:
+
+```python
+# At session start
+runtime = MacroRuntime()
+runtime.apply_control_defaults(ControlProgram())
+
+# At preset load — DO NOT apply ControlProgram
+capsule = load_preset("violin_ir_v1.yaml")
+# Only apply MacroProgram if present
+if capsule.macro:
+    runtime.apply_macro_capsule(capsule.macro)
+```
+
+**Rule (MUST):** Presets MUST NOT override SystemMacro values (0-10). They configure modulation behavior via MacroProgram only.
 
 ---
 

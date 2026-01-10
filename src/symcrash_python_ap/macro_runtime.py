@@ -54,6 +54,8 @@ class SystemMacro(IntEnum):
     SPACE = 8            # Controller → CMMM
     MATERIAL = 9         # Controller → CMMM
     UNITY = 10           # Controller → CMMM
+    VIBRATO = 11         # Controller → Mode B (pitch modulation depth, 0-32767)
+    LEGATO = 12          # Controller → Mode B (0=retrigger, >0=legato mode)
 
 
 # =============================================================================
@@ -184,7 +186,7 @@ class MacroRuntime:
 
         Call once per block to update all macro current values.
         """
-        for macro_id in range(11):
+        for macro_id in self.macro_target_q15.keys():
             if macro_id == SystemMacro.ENERGY_STATE:
                 continue  # Envelope-owned
             if macro_id == SystemMacro.AGE:
@@ -261,9 +263,112 @@ class MacroRuntime:
 
     def reset(self) -> None:
         """Reset all macros to zero."""
-        for i in range(11):
+        for i in range(len(self.macro_target_q15)):
             self.macro_target_q15[i] = 0
             self.macro_curr_q15[i] = 0
+
+    def register_macro(
+        self,
+        macro_id: int,
+        preset_name: str,
+        slew_config: Optional[SlewConfig] = None,
+        default_q15: int = 0,
+    ) -> None:
+        """
+        Register a new macro dynamically (e.g., from a MacroProgram capsule).
+
+        This allows capsules to extend the macro system without hardcoding.
+
+        Args:
+            macro_id: System macro ID (should be >= 11 for user macros)
+            preset_name: Preset macro name (e.g., "VIBRATO", "LEGATO")
+            slew_config: Slew configuration (defaults to ONE_POLE with alpha=2048)
+            default_q15: Initial value
+        """
+        # Ensure state dictionaries are large enough
+        if macro_id not in self.macro_target_q15:
+            self.macro_target_q15[macro_id] = default_q15
+            self.macro_curr_q15[macro_id] = default_q15
+
+        # Add slew config
+        if slew_config is None:
+            slew_config = SlewConfig(SlewPolicy.ONE_POLE, 2048)
+        self.slew_table[macro_id] = slew_config
+
+        # Add binding
+        binding = MacroBinding(preset_name.upper(), macro_id, "AFFINE_Q15", Q15_ONE, 0)
+        self.bindings.append(binding)
+        self._binding_map[preset_name.upper()] = binding
+
+    def apply_macro_capsule(self, macro_program: 'MacroProgram') -> None:
+        """
+        Apply a MacroProgram capsule to register its macro and set defaults.
+
+        This is the integration point between the capsule library and runtime.
+
+        Args:
+            macro_program: MacroProgram from a CapsuleMacro
+        """
+        from symcrash_python_ap.library.capsule import MacroType
+
+        if macro_program.macro_type == MacroType.VIBRATO:
+            # Register VIBRATO macro with smooth slew
+            self.register_macro(
+                macro_id=SystemMacro.VIBRATO,
+                preset_name="VIBRATO",
+                slew_config=SlewConfig(SlewPolicy.ONE_POLE, 4096),
+                default_q15=Q15_ONE,  # Full depth by default
+            )
+        elif macro_program.macro_type == MacroType.LEGATO:
+            # Register LEGATO macro with instant toggle
+            self.register_macro(
+                macro_id=SystemMacro.LEGATO,
+                preset_name="LEGATO",
+                slew_config=SlewConfig(SlewPolicy.NONE),
+                default_q15=Q15_ONE if macro_program.preserve_phase else 0,
+            )
+        elif macro_program.macro_type == MacroType.TREMOLO:
+            # Tremolo uses VIBRATO macro but amplitude-only
+            self.register_macro(
+                macro_id=SystemMacro.VIBRATO,
+                preset_name="TREMOLO",
+                slew_config=SlewConfig(SlewPolicy.ONE_POLE, 4096),
+                default_q15=Q15_ONE,
+            )
+        elif macro_program.macro_type == MacroType.PORTAMENTO:
+            # Portamento uses LEGATO macro
+            self.register_macro(
+                macro_id=SystemMacro.LEGATO,
+                preset_name="PORTAMENTO",
+                slew_config=SlewConfig(SlewPolicy.NBLOCK, 8),
+                default_q15=Q15_ONE,
+            )
+
+    def apply_control_defaults(self, control: 'ControlProgram') -> None:
+        """
+        Apply ControlProgram defaults to set initial macro target values.
+
+        This is called at preset load time to configure the semantic control axes
+        (BRIGHTNESS, DENSITY, MOTION, etc.) from the preset's control section.
+
+        Args:
+            control: ControlProgram from a CapsuleV0.control field
+
+        Example:
+            capsule = load_preset("violin_ir_v1.yaml")
+            if capsule.control:
+                runtime.apply_control_defaults(capsule.control)
+        """
+        macro_dict = control.to_macro_dict()
+        for macro_id, value_q15 in macro_dict.items():
+            # Skip envelope-owned and integrator macros
+            if macro_id == SystemMacro.ENERGY_STATE:
+                continue
+            if macro_id == SystemMacro.AGE:
+                continue
+            # Set both target and current to apply immediately
+            self.macro_target_q15[macro_id] = clamp_q15(value_q15)
+            self.macro_curr_q15[macro_id] = clamp_q15(value_q15)
 
 
 # =============================================================================

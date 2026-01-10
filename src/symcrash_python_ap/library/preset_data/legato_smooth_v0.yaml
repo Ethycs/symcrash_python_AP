@@ -1,0 +1,39 @@
+# Legato Smooth v0 - WSE-STD-CAPSULE-COMPAT v0 §2.4
+# ==================================================
+#
+# Smooth legato mode with phase preservation.
+# Can be applied to any instrument preset.
+#
+# Macro Type: LEGATO
+# - Preserves oscillator phase on note transitions
+# - Smooth pitch glide between notes
+# - No re-trigger of envelope on legato notes
+#
+
+preset:
+  preset_id: "LEGATO_SMOOTH_V0"
+  preset_version: "v0"
+  author: "symcrash"
+  description: "Smooth legato with phase preservation and pitch glide."
+
+compat:
+  voiceframe_std: "WSE-STD-020 v1"
+  vm_std: "WSE-STD-VM-HYBRID v0"
+
+kind: MACRO
+
+macro:
+  macro_type: LEGATO
+
+  # Pitch glide parameters
+  glide_time_ms: 50.0       # 50ms glide between notes
+  glide_curve: 0            # 0=linear, 1=exp, 2=log
+
+  # Phase behavior
+  preserve_phase: true      # Keep oscillator phase on note change
+
+tags:
+  - legato
+  - smooth
+  - monophonic
+  - expressive

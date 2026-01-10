@@ -252,6 +252,205 @@ class HarmonicWeights:
 # =============================================================================
 
 @dataclass
+class VibratoState:
+    """
+    Vibrato LFO state for expressive pitch/amplitude/timbre modulation.
+
+    Supports delayed onset with ramp-in for natural performance feel.
+    All depths are in Q15 format (32767 = 100%).
+    """
+    # LFO configuration
+    enabled: bool = False
+    rate_hz: float = 5.5              # LFO frequency (typical: 4-7 Hz)
+    phase: int = 0                     # LFO phase accumulator (Q32)
+    phase_inc: int = 0                 # LFO phase increment per sample
+
+    # Modulation depths (Q15: 0-32767)
+    depth_pitch_cents: int = 0         # Pitch vibrato depth in cents (typ: 20-50)
+    depth_amp_q15: int = 0             # Amplitude modulation depth
+    depth_timbre_q15: int = 0          # Timbre shift depth (H2/H4 energy exchange)
+
+    # Envelope (delayed onset with ramp)
+    delay_samples: int = 0             # Delay before vibrato starts
+    ramp_samples: int = 0              # Ramp-in duration after delay
+    elapsed_samples: int = 0           # Samples since note-on
+
+    # Runtime state
+    current_depth_scale: int = 0       # Current envelope level (Q15, 0-32767)
+
+    def configure(
+        self,
+        rate_hz: float = 5.5,
+        depth_pitch_cents: int = 30,
+        depth_amp_q15: int = 0,
+        depth_timbre_q15: int = 0,
+        delay_ms: float = 40.0,
+        ramp_ms: float = 27.0,
+        sample_rate: int = SAMPLE_RATE,
+    ) -> None:
+        """
+        Configure vibrato parameters.
+
+        Args:
+            rate_hz: LFO frequency in Hz (typically 4-7 Hz)
+            depth_pitch_cents: Pitch modulation depth in cents
+            depth_amp_q15: Amplitude modulation depth (Q15)
+            depth_timbre_q15: Timbre modulation depth (Q15)
+            delay_ms: Delay before vibrato starts (ms)
+            ramp_ms: Ramp-in time after delay (ms)
+            sample_rate: Sample rate in Hz
+        """
+        self.enabled = True
+        self.rate_hz = rate_hz
+        self.depth_pitch_cents = depth_pitch_cents
+        self.depth_amp_q15 = depth_amp_q15
+        self.depth_timbre_q15 = depth_timbre_q15
+
+        # Compute LFO phase increment
+        # phase_inc = rate_hz * 2^32 / sample_rate
+        self.phase_inc = int((rate_hz * (1 << 32)) / sample_rate)
+
+        # Compute envelope timing
+        self.delay_samples = int(delay_ms * sample_rate / 1000.0)
+        self.ramp_samples = max(1, int(ramp_ms * sample_rate / 1000.0))
+
+        # Reset runtime state
+        self.phase = 0
+        self.elapsed_samples = 0
+        self.current_depth_scale = 0
+
+    def reset(self) -> None:
+        """Reset vibrato state for new note."""
+        self.phase = 0
+        self.elapsed_samples = 0
+        self.current_depth_scale = 0
+
+    def disable(self) -> None:
+        """Disable vibrato."""
+        self.enabled = False
+        self.current_depth_scale = 0
+
+    def advance_block(self, block_samples: int = BLOCK_SIZE) -> None:
+        """
+        Advance vibrato LFO by one block.
+
+        Updates phase accumulator and envelope level.
+        """
+        if not self.enabled:
+            return
+
+        # Advance elapsed time
+        self.elapsed_samples += block_samples
+
+        # Update envelope (delayed onset with ramp)
+        if self.elapsed_samples <= self.delay_samples:
+            # Still in delay period
+            self.current_depth_scale = 0
+        elif self.elapsed_samples <= self.delay_samples + self.ramp_samples:
+            # Ramping in
+            ramp_progress = self.elapsed_samples - self.delay_samples
+            self.current_depth_scale = (ramp_progress * Q15_ONE) // self.ramp_samples
+        else:
+            # Fully ramped in
+            self.current_depth_scale = Q15_ONE
+
+        # Advance LFO phase (per block, using center sample)
+        self.phase = (self.phase + self.phase_inc * block_samples) & PHASE_MASK
+
+    def get_lfo_value(self) -> int:
+        """
+        Get current LFO value scaled by envelope.
+
+        Returns:
+            Q15 value in range [-32767, 32767]
+        """
+        if not self.enabled or self.current_depth_scale == 0:
+            return 0
+
+        # Get raw LFO sine value
+        sin_val, _ = sin_cos_q15(self.phase)
+
+        # Scale by envelope
+        return RSHIFT_RNE(sin_val * self.current_depth_scale, 15)
+
+    def get_pitch_mod_phase_inc_delta(self, base_phase_inc: int) -> int:
+        """
+        Get phase increment delta for pitch vibrato.
+
+        Pitch modulation in cents: cents = depth * sin(lfo)
+        Phase inc delta = base_phase_inc * (2^(cents/1200) - 1)
+
+        For small cents, approximation: delta ≈ base * cents * ln(2) / 1200
+
+        Args:
+            base_phase_inc: Base phase increment for the note
+
+        Returns:
+            Delta to add to phase_inc for this block
+        """
+        if not self.enabled or self.depth_pitch_cents == 0:
+            return 0
+
+        lfo = self.get_lfo_value()
+
+        # cents_now = depth_pitch_cents * lfo / 32767
+        # For ±50 cents at full depth: multiplier range is [0.9715, 1.0293]
+        #
+        # Using fixed-point approximation:
+        # delta = base_phase_inc * cents * ln(2) / 1200 * lfo / 32767
+        # ln(2) ≈ 0.693 ≈ 22713/32768
+        #
+        # Simplified: delta = base * depth_cents * lfo * 22713 / (1200 * 32767 * 32768)
+        #           = base * depth_cents * lfo / 56883507
+        #           ≈ base * depth_cents * lfo >> 25.76
+        #
+        # For accuracy, compute: base * depth * lfo / (1200 * 32767) * ln2_q15
+        LN2_Q15 = 22713  # ln(2) in Q15
+
+        # Step by step to avoid overflow:
+        # 1. cents_scaled = depth_cents * lfo (max ~50 * 32767 = 1.6M)
+        # 2. ratio = cents_scaled * LN2_Q15 / (1200 * 32767) = cents_scaled * 22713 / 39320400
+        #          ≈ cents_scaled / 1731
+        # 3. delta = base * ratio / 32768
+
+        cents_scaled = self.depth_pitch_cents * lfo  # max ±1.6M
+        ratio = cents_scaled // 1731  # Approximation for cents_scaled * ln2 / 1200
+        delta = RSHIFT_RNE(base_phase_inc * ratio, 15)
+
+        return delta
+
+    def get_amp_mod_q15(self) -> int:
+        """
+        Get amplitude modulation factor.
+
+        Returns:
+            Q15 multiplier (32767 = 1.0, range varies with depth)
+        """
+        if not self.enabled or self.depth_amp_q15 == 0:
+            return Q15_ONE
+
+        lfo = self.get_lfo_value()
+
+        # amp_mod = 1.0 + depth * lfo / 32767
+        # In Q15: result = 32767 + depth * lfo / 32767
+        mod = RSHIFT_RNE(self.depth_amp_q15 * lfo, 15)
+        return Q15_ONE + mod
+
+    def get_timbre_shift_q15(self) -> int:
+        """
+        Get timbre shift value for harmonic energy redistribution.
+
+        Returns:
+            Q15 shift value for H2/H4 energy exchange
+        """
+        if not self.enabled or self.depth_timbre_q15 == 0:
+            return 0
+
+        lfo = self.get_lfo_value()
+        return RSHIFT_RNE(self.depth_timbre_q15 * lfo, 15)
+
+
+@dataclass
 class ModeBState:
     """
     Per-voice Mode B oscillator state.
@@ -291,6 +490,9 @@ class ModeBState:
     # Unison state
     unison_voices: int = 1
     unison_spread_cents: int = 0
+
+    # Vibrato state
+    vibrato: VibratoState = field(default_factory=VibratoState)
 
     def reset(self, note: int, phase_inc: int) -> None:
         """Reset state for a new note (hard reset - zeros phase)."""
