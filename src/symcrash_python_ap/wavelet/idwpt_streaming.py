@@ -68,7 +68,7 @@ class IDWPTPolyphaseState:
     """
 
     K: int = 4
-    headroom_bits: int = 1
+    headroom_bits: int = 2  # Must match basis frame generation headroom
 
 
 # -----------------------------------------------------------------------------
@@ -78,7 +78,7 @@ class IDWPTPolyphaseState:
 def idwpt_polyphase_block(
     coeff_2d: np.ndarray,
     *,
-    headroom_bits: int = 1,
+    headroom_bits: int = 2,  # Must match basis frame generation headroom
 ) -> np.ndarray:
     """Run K IDWPTs and combine into one 64-sample audio block.
 
@@ -117,7 +117,7 @@ def idwpt_polyphase_from_flat(
     coeff_flat: np.ndarray,
     *,
     K: int = 4,
-    headroom_bits: int = 1,
+    headroom_bits: int = 2,  # Must match basis frame generation headroom
 ) -> np.ndarray:
     """Convenience wrapper for flat [64*K] coefficient state."""
     coeff_flat = np.asarray(coeff_flat)
@@ -137,7 +137,7 @@ IDWPTStreamingState = IDWPTPolyphaseState
 def idwpt_streaming_block(
     state: Optional[IDWPTPolyphaseState],
     coeff_state_flat: np.ndarray,
-    headroom_bits: int = 1,
+    headroom_bits: int = 2,  # Must match basis frame generation headroom
 ) -> np.ndarray:
     """Back-compat wrapper.
 

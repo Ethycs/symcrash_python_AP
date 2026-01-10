@@ -395,10 +395,18 @@ def generate_basis_frames(
 
     # Generate basis frames for each k-slot
     # Slot k handles samples [k*16 : (k+1)*16], so basis starts at sample k*16
+    #
+    # NOTE: headroom_bits=2 is critical for Mode B accuracy.
+    # The int16 quantization in FWPT causes the trigonometric modulation identity
+    # to break down for harmonics with non-integer cycles per block.
+    # With headroom_bits=1, H5 at 440Hz has RMS error ~1429 and -16 dB 50Hz artifact.
+    # With headroom_bits=2, error drops to ~22 and artifact drops to -47 dB.
+    headroom = 2
+
     for k in range(VM_K):
         # DC basis: constant signal (same for all k)
         dc_block = [Q15_ONE] * BLOCK_SIZE
-        dc_coeffs = fwpt_jit(dc_block)
+        dc_coeffs = fwpt_jit(dc_block, headroom_bits=headroom)
         DC_frame[:, k] = dc_coeffs
 
         # Starting phase for this k-slot
@@ -419,8 +427,8 @@ def generate_basis_frames(
                 phase = (phase + phase_inc) & PHASE_MASK
 
             # Transform to coefficients
-            cos_coeffs = fwpt_jit(cos_block)
-            sin_coeffs = fwpt_jit(sin_block)
+            cos_coeffs = fwpt_jit(cos_block, headroom_bits=headroom)
+            sin_coeffs = fwpt_jit(sin_block, headroom_bits=headroom)
 
             Ucos_h[h - 1, :, k] = cos_coeffs
             Usin_h[h - 1, :, k] = sin_coeffs

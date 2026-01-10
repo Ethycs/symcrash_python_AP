@@ -1151,7 +1151,7 @@ def lane_ccs_render(
 
     # Run K=8 polyphase IDWPT with interleaving
     # Each sample n uses the reconstruction from slot (n % 8)
-    _CCS_OUTPUT[:] = idwpt_polyphase_block(coeff_2d, headroom_bits=1)
+    _CCS_OUTPUT[:] = idwpt_polyphase_block(coeff_2d, headroom_bits=2)
 
     return _CCS_OUTPUT
 

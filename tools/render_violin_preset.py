@@ -2,26 +2,29 @@
 Render Violin Preset from YAML Specification
 =============================================
 
-Builds and renders the violin_ir preset with:
+Loads and renders the violin_ir_v1.yaml preset with:
 - Expressive bowed-string character
-- Noisy bow bite on attack
-- Warm body texture via beta ramp
-- TILT, INTRA_MIX, DIFFUSE_DOWN, LOWRANK_MORPH, IMPULSE, NOISE_BAND operators
+- Bow pressure vibrato (5.5 Hz)
+- Body resonance warble
+- Attack brightness that settles
 """
 
 import sys
+import math
+import json
 import numpy as np
 from pathlib import Path
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from symcrash_python_ap.instrument_ir import (
-    InstrumentIR,
-    L0Node, L0Edge, L0Graph,
-    NodeParams, ADSR, Macro,
-    ms_to_blocks, pct_to_q15,
-)
+# Try to import yaml, fall back to JSON
+try:
+    import yaml
+    HAS_YAML = True
+except ImportError:
+    HAS_YAML = False
+
 from symcrash_python_ap.vm.executor import vm_step_block
 from symcrash_python_ap.vm.harmonic_bank import clear_basis_atlas
 from symcrash_python_ap.vm.state import VMState
@@ -34,177 +37,115 @@ BLOCK_SIZE = 64
 BLOCKS_PER_SEC = FS // BLOCK_SIZE
 
 OUTPUT_DIR = str(Path(__file__).parent.parent / "audio_generation_tests" / "audio_out")
+PRESET_PATH = Path(__file__).parent.parent / "src/symcrash_python_ap/library/preset_data/violin_ir_v1.yaml"
+PRESET_PATH_JSON = Path(__file__).parent.parent / "src/symcrash_python_ap/library/preset_data/violin_ir_v1.json"
 
 
-def build_violin_ir() -> InstrumentIR:
-    """
-    Build the violin IR from the YAML specification.
-
-    preset:
-      preset_id: "VIOLIN_IR_V1"
-      description: "Expressive bowed-string with noisy bow bite and warm body."
-
-    env:
-      amp: attack=30ms, decay=220ms, sustain=0.75, release=550ms
-
-    material:
-      beta_start=0.10 (mostly dry bow attack)
-      beta_target=0.45 (add body texture)
-      beta_ramp_blocks=24
-
-    backbone ops: TILT, INTRA_MIX, DIFFUSE_DOWN, LOWRANK_MORPH, IMPULSE, NOISE_BAND
-    """
-    ir = InstrumentIR()
-
-    # Metadata
-    ir.meta.instrument_id = "violin-ir-v1"
-    ir.meta.name = "Violin IR V1"
-    ir.meta.author = "preset-author"
-
-    # L0 Graph: osc_string + osc_body + noise_bow -> mix -> filter -> amp -> fx_send
-    ir.layers.L0_graph.nodes = [
-        # Primary string oscillator (saw for rich harmonics)
-        L0Node(
-            id="osc_string",
-            type="Osc",
-            params=NodeParams(
-                waveform="saw",
-                detune_cents=2.0,
-                role="audible",
-                archetype="harmonic"
-            )
-        ),
-        # Body resonance oscillator (tri for hollow body)
-        L0Node(
-            id="osc_body",
-            type="Osc",
-            params=NodeParams(
-                waveform="tri",
-                detune_cents=-3.0,
-                role="audible",
-                archetype="hollow"
-            )
-        ),
-        # Bow noise (pink noise for rosiny texture)
-        L0Node(
-            id="noise_bow",
-            type="Noise",
-            params=NodeParams(color="pink")
-        ),
-        # Mixer
-        L0Node(id="mix", type="Mixer", params=NodeParams()),
-        # Low-pass filter for body warmth
-        L0Node(
-            id="filt",
-            type="Filter",
-            params=NodeParams(mode="lp")
-        ),
-        # Amplitude with ADSR
-        L0Node(
-            id="amp",
-            type="Amp",
-            params=NodeParams(
-                adsr=ADSR(
-                    a_ms=30.0,    # Slow attack for bowed string
-                    d_ms=220.0,   # Medium decay
-                    s=0.75,       # High sustain
-                    r_ms=550.0    # Long release
-                )
-            )
-        ),
-        # FX Send (reverb for room)
-        L0Node(
-            id="fx_send",
-            type="FXSend",
-            params=NodeParams(send_a=0.18, send_b=0.0)
-        ),
-    ]
-
-    # Edges
-    ir.layers.L0_graph.edges = [
-        L0Edge(src="osc_string", dst="mix"),
-        L0Edge(src="osc_body", dst="mix"),
-        L0Edge(src="noise_bow", dst="mix"),
-        L0Edge(src="mix", dst="filt"),
-        L0Edge(src="filt", dst="amp"),
-        L0Edge(src="amp", dst="fx_send"),
-    ]
-
-    # Macros
-    ir.layers.L0_graph.macros = [
-        Macro(id="M_BRIGHT", name="Brightness", default=0.42),
-        Macro(id="M_TEXTURE", name="Bow Texture", default=0.35),
-        Macro(id="M_MORPH", name="Body Morph", default=0.15),
-        Macro(id="M_ATTACK", name="Attack", default=0.30),
-        Macro(id="M_RELEASE", name="Release", default=0.45),
-        Macro(id="M_DETUNE", name="Detune", default=0.02),
-    ]
-
-    return ir
+def load_violin_preset() -> dict:
+    """Load the violin preset from YAML or JSON file."""
+    # Try YAML first if available
+    if HAS_YAML and PRESET_PATH.exists():
+        with open(PRESET_PATH, 'r') as f:
+            return yaml.safe_load(f)
+    # Fall back to JSON
+    elif PRESET_PATH_JSON.exists():
+        with open(PRESET_PATH_JSON, 'r') as f:
+            return json.load(f)
+    else:
+        raise FileNotFoundError(
+            f"Neither {PRESET_PATH} nor {PRESET_PATH_JSON} found. "
+            f"PyYAML installed: {HAS_YAML}"
+        )
 
 
-def render_violin_note(
+def render_violin_note_from_preset(
+    preset: dict,
     note: int = 60,
     duration_sec: float = 2.0,
-    attack_blocks: int = 23,  # ~30ms
-    release_blocks: int = 413,  # ~550ms
 ) -> np.ndarray:
     """
-    Render a violin note with proper ADSR envelope and beta ramp.
+    Render a violin note using parameters from the YAML preset.
 
-    Material params (warmer variant):
-    - beta_start_q15: 1638 (0.05, very dry bow attack)
-    - beta_target_q15: 9830 (0.30, subtle body texture - warmer)
-    - beta_ramp_blocks: 32 (slower bloom)
+    Reads all modulation parameters from the preset 'modulation' section:
+    - vibrato: rate_hz, depth_amp, depth_timbre, delay_ms, ramp_ms
+    - body_warble: rate_hz, depth, target_harmonic
+    - attack_texture: bright_ms, bright_amount, harmonics
     """
-    # Calculate blocks
+    # Extract envelope params
+    env = preset.get('env', {}).get('amp', {})
+    attack_ms = env.get('attack_ms', 30.0)
+    decay_ms = env.get('decay_ms', 250.0)
+    sustain = env.get('sustain', 0.80)
+    release_ms = env.get('release_ms', 550.0)
+
+    # Convert to blocks
+    attack_blocks = max(1, int(attack_ms / 1000.0 * BLOCKS_PER_SEC))
+    decay_blocks = max(1, int(decay_ms / 1000.0 * BLOCKS_PER_SEC))
+    release_blocks = max(1, int(release_ms / 1000.0 * BLOCKS_PER_SEC))
     sustain_blocks = int(duration_sec * BLOCKS_PER_SEC) - attack_blocks
     total_blocks = attack_blocks + sustain_blocks + release_blocks
 
-    # Material beta ramp - TESTING: pure carrier to isolate spurs
-    # The 750 Hz spur = 48000/64 block rate suggests IDWPT seam issues
-    beta_start = 0         # Q15 for 0.0 (pure carrier - test)
-    beta_target = 0        # Q15 for 0.0 (pure carrier throughout)
-    beta_ramp_blocks = 1   # No ramp needed
+    # Extract material params
+    material = preset.get('material', {})
+    beta_start = material.get('beta_start_q15', 0)
+    beta_target = material.get('beta_target_q15', 0)
+    beta_ramp_blocks = material.get('beta_ramp_blocks', 1)
 
-    # ADSR envelope params (slightly slower attack for warmth)
-    # attack=40ms, decay=250ms, sustain=0.80, release=600ms
+    # Extract carrier harmonic amps
+    carrier = preset.get('carrier', {})
+    base_harmonics = carrier.get('harmonic_amps_q15', [32767])
+
+    # Extract modulation params
+    mod = preset.get('modulation', {})
+
+    # Vibrato params
+    vib = mod.get('vibrato', {})
+    vibrato_rate_hz = vib.get('rate_hz', 5.5)
+    vibrato_depth_amp = vib.get('depth_amp', 0.0)
+    vibrato_depth_timbre = vib.get('depth_timbre', 0.0)
+    vibrato_delay_ms = vib.get('delay_ms', 40.0)
+    vibrato_ramp_ms = vib.get('ramp_ms', 27.0)
+    vibrato_delay_blocks = int(vibrato_delay_ms / 1000.0 * BLOCKS_PER_SEC)
+    vibrato_ramp_blocks = max(1, int(vibrato_ramp_ms / 1000.0 * BLOCKS_PER_SEC))
+
+    # Body warble params
+    body = mod.get('body_warble', {})
+    body_rate_hz = body.get('rate_hz', 1.2)
+    body_depth = body.get('depth', 0.0)
+    body_target_harmonic = body.get('target_harmonic', 4) - 1  # Convert to 0-indexed
+
+    # Attack texture params
+    attack_tex = mod.get('attack_texture', {})
+    attack_bright_ms = attack_tex.get('bright_ms', 60.0)
+    attack_bright_amount = attack_tex.get('bright_amount', 0.0)
+    attack_harmonics = attack_tex.get('harmonics', [5, 6])
+    attack_bright_blocks = int(attack_bright_ms / 1000.0 * BLOCKS_PER_SEC)
+
+    # ADSR envelope params
     attack_level_q15 = 32767
-    sustain_level_q15 = int(0.80 * 32767)  # Higher sustain
-    decay_blocks = 188  # ~250ms (slower decay)
+    sustain_level_q15 = int(sustain * 32767)
 
-    # Create VM state and frame
+    # Create VM state
     state = VMState.create(voice_id=0)
     state.reset_for_note_on(note=note)
-    # Use CCS path with Mode B for custom harmonics (now supported!)
 
-    # Operators for organic sound - MINIMAL to avoid aliasing artifacts
-    # The spurs at high frequencies suggest operator processing is creating artifacts
-    # Let's try with NO operators first to verify clean synthesis
-    ops_enable = []  # Empty - pure Mode B synthesis
-
-    # Operator strengths (not used when ops_enable is empty)
+    # No CMMM operators
+    ops_enable = []
     families = {}
-
-    # Carrier harmonic amps (REVERSE-ENGINEERED from violin.wav via FWPT)
-    # The reference violin has H2 strongest, with body resonance at H4
-    harmonic_amps = [
-        30890,  # H1: 94.3% - strong fundamental
-        32767,  # H2: 100.0% - STRONGEST (characteristic violin sound)
-        6926,   # H3: 21.1% - moderate
-        23969,  # H4: 73.2% - STRONG body resonance
-        3673,   # H5: 11.2% - weak
-        6138,   # H6: 18.7% - moderate
-        1164,   # H7: 3.6% - very weak
-        1228,   # H8: 3.7% - very weak
-    ]
 
     samples = []
 
+    print(f"  Rendering {total_blocks} blocks with modulation:")
+    print(f"    Vibrato: {vibrato_rate_hz} Hz, amp={vibrato_depth_amp}, timbre={vibrato_depth_timbre}")
+    print(f"    Body warble: {body_rate_hz} Hz, depth={body_depth}")
+    print(f"    Attack texture: {attack_bright_amount} brightness over {attack_bright_ms}ms")
+
     for block_idx in range(total_blocks):
+        # Time in seconds for LFO calculations
+        t_sec = block_idx * BLOCK_SIZE / FS
+
         # Compute beta with ramp
         if block_idx < beta_ramp_blocks:
-            # Ramp from start to target
             t = block_idx / beta_ramp_blocks
             beta_q15 = int(beta_start + (beta_target - beta_start) * t)
         else:
@@ -212,36 +153,75 @@ def render_violin_note(
 
         # Compute gain envelope (ADSR)
         if block_idx < attack_blocks:
-            # Attack phase
             t = block_idx / attack_blocks
             gain_q15 = int(attack_level_q15 * t)
         elif block_idx < attack_blocks + decay_blocks:
-            # Decay phase
             t = (block_idx - attack_blocks) / decay_blocks
             gain_q15 = int(attack_level_q15 - (attack_level_q15 - sustain_level_q15) * t)
         elif block_idx < attack_blocks + sustain_blocks:
-            # Sustain phase
             gain_q15 = sustain_level_q15
         else:
-            # Release phase
             release_idx = block_idx - (attack_blocks + sustain_blocks)
             t = release_idx / release_blocks
             gain_q15 = int(sustain_level_q15 * (1.0 - t))
 
         gain_q15 = max(0, min(32767, gain_q15))
 
+        # =====================================================================
+        # Modulate harmonic amplitudes for organic character
+        # =====================================================================
+
+        # Copy base harmonics
+        harmonic_amps = list(base_harmonics)
+
+        # 1. Vibrato: amplitude + timbre wobble (delayed onset)
+        if block_idx > vibrato_delay_blocks and (vibrato_depth_amp > 0 or vibrato_depth_timbre > 0):
+            # Ramp in vibrato
+            vib_ramp = min(1.0, (block_idx - vibrato_delay_blocks) / vibrato_ramp_blocks)
+            vib_phase = 2.0 * math.pi * vibrato_rate_hz * t_sec
+
+            # Amplitude wobble (affects gain)
+            if vibrato_depth_amp > 0:
+                amp_mod = 1.0 + vibrato_depth_amp * vib_ramp * math.sin(vib_phase)
+                gain_q15 = int(gain_q15 * amp_mod)
+                gain_q15 = max(0, min(32767, gain_q15))
+
+            # Timbre wobble: shift energy between H2 (string) and H4 (body)
+            if vibrato_depth_timbre > 0 and len(harmonic_amps) >= 4:
+                timbre_shift = vibrato_depth_timbre * vib_ramp * math.sin(vib_phase + 0.3)
+                harmonic_amps[1] = int(base_harmonics[1] * (1.0 + timbre_shift))  # H2
+                harmonic_amps[3] = int(base_harmonics[3] * (1.0 - timbre_shift * 0.5))  # H4
+
+        # 2. Body warble: slow harmonic drift (body resonance movement)
+        if body_depth > 0 and body_target_harmonic < len(harmonic_amps):
+            body_phase = 2.0 * math.pi * body_rate_hz * t_sec
+            body_mod = 1.0 + body_depth * math.sin(body_phase)
+            harmonic_amps[body_target_harmonic] = int(harmonic_amps[body_target_harmonic] * body_mod)
+
+        # 3. Attack brightness: extra upper harmonics that settle
+        if block_idx < attack_bright_blocks and attack_bright_amount > 0:
+            bright_env = 1.0 - (block_idx / attack_bright_blocks)
+            bright_boost = 1.0 + attack_bright_amount * bright_env
+            # Boost specified harmonics on attack
+            for h in attack_harmonics:
+                h_idx = h - 1  # Convert to 0-indexed
+                if h_idx < len(harmonic_amps):
+                    harmonic_amps[h_idx] = int(base_harmonics[h_idx] * bright_boost * (1.5 if h == 5 else 1.3))
+
+        # Clamp all harmonics to Q15 range
+        harmonic_amps = [max(0, min(32767, h)) for h in harmonic_amps]
+
         # Create frame for this block
-        # Mode B now supports custom harmonics via partial_amps_q15
         frame = VoiceFrame(
             note=note,
-            coeff_osc_mode=1,  # Mode B for harmonic bank with custom harmonics
-            H_request=8,
+            coeff_osc_mode=1,  # Mode B for harmonic bank
+            H_request=len(harmonic_amps),
             gain_q15=gain_q15,
             beta_target_q15=beta_q15,
             partial_amps_q15=harmonic_amps,
             ops_enable=ops_enable,
             families=families,
-            waveform_type=0,  # Ignored when partial_amps_q15 is provided
+            waveform_type=0,
         )
 
         # Render block
@@ -251,18 +231,15 @@ def render_violin_note(
     return np.array(samples, dtype=np.int16)
 
 
-def render_violin_phrase():
+def render_violin_phrase(preset: dict):
     """Render a short violin phrase to demonstrate the preset."""
     print("\n" + "=" * 60)
     print("VIOLIN IR PRESET - Audio Rendering")
     print("=" * 60)
 
-    # Build the IR (for reference)
-    ir = build_violin_ir()
-    print(f"\nPreset: {ir.meta.name}")
-    print(f"ID: {ir.meta.instrument_id}")
-    print(f"L0 Nodes: {[n.id for n in ir.layers.L0_graph.nodes]}")
-    print(f"Macros: {[m.name for m in ir.layers.L0_graph.macros]}")
+    preset_info = preset.get('preset', {})
+    print(f"\nPreset: {preset_info.get('preset_id', 'Unknown')}")
+    print(f"Description: {preset_info.get('description', 'N/A')}")
 
     # Render a simple phrase: C4 - E4 - G4 - C5
     notes = [
@@ -276,8 +253,8 @@ def render_violin_phrase():
 
     all_samples = []
     for note, duration in notes:
-        print(f"  Note {note} ({duration}s)...")
-        samples = render_violin_note(note=note, duration_sec=duration)
+        print(f"\n  Note {note} ({duration}s)...")
+        samples = render_violin_note_from_preset(preset, note=note, duration_sec=duration)
         all_samples.extend(samples.tolist())
         # Small gap between notes (50ms)
         gap = np.zeros(int(0.05 * FS), dtype=np.int16)
@@ -303,7 +280,7 @@ def render_violin_phrase():
     return final_samples, metadata.filepath
 
 
-def render_single_note():
+def render_single_note(preset: dict):
     """Render a single sustained violin note."""
     print("\n" + "=" * 60)
     print("VIOLIN IR - Single Note Demo")
@@ -314,7 +291,7 @@ def render_single_note():
 
     print(f"\nRendering single note: A4 (MIDI {note}), {duration}s")
 
-    samples = render_violin_note(note=note, duration_sec=duration)
+    samples = render_violin_note_from_preset(preset, note=note, duration_sec=duration)
 
     # Save to file (mono)
     audio_io = AudioWriter(output_dir=OUTPUT_DIR)
@@ -338,15 +315,30 @@ if __name__ == "__main__":
     print("VIOLIN IR PRESET RENDERER")
     print("=" * 60)
 
-    # Clear cached basis frames to use K=8 reconstruction
+    # Clear cached basis frames
     clear_basis_atlas()
-    print("Cleared basis atlas cache (using K=8 reconstruction for clean signal)")
+    print("Cleared basis atlas cache")
+
+    # Load preset from YAML
+    print(f"\nLoading preset from: {PRESET_PATH}")
+    preset = load_violin_preset()
+
+    preset_info = preset.get('preset', {})
+    print(f"Preset ID: {preset_info.get('preset_id')}")
+    print(f"Version: {preset_info.get('preset_version')}")
+
+    # Show modulation params
+    mod = preset.get('modulation', {})
+    print("\nModulation parameters from YAML:")
+    print(f"  Vibrato: {mod.get('vibrato', {})}")
+    print(f"  Body warble: {mod.get('body_warble', {})}")
+    print(f"  Attack texture: {mod.get('attack_texture', {})}")
 
     # Render single note
-    single_samples, single_path = render_single_note()
+    single_samples, single_path = render_single_note(preset)
 
     # Render phrase
-    phrase_samples, phrase_path = render_violin_phrase()
+    phrase_samples, phrase_path = render_violin_phrase(preset)
 
     print("\n" + "=" * 60)
     print("COMPLETE")

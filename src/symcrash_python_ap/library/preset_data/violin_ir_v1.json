@@ -1,0 +1,85 @@
+{
+  "preset": {
+    "preset_id": "VIOLIN_IR_V1",
+    "preset_version": "v1",
+    "author": "symcrash",
+    "description": "Expressive bowed-string with bow pressure vibrato and body warble."
+  },
+  "compat": {
+    "voiceframe_std": "WSE-STD-020 v1",
+    "vm_std": "WSE-STD-VM-HYBRID v0",
+    "operator_lib_id": "WSE-OPLIB-24 v0"
+  },
+  "latch_defaults": {
+    "pattern_id": 0,
+    "tail_mode": "FULL",
+    "tree_a_id": 0,
+    "tree_b_id": 0,
+    "tree_blend_q15": 0,
+    "carrier": {
+      "model": "CUSTOM",
+      "role": "AUDIBLE",
+      "transition": "RETRIGGER",
+      "detune_cents": 0,
+      "pulse_width_q15": 16384
+    }
+  },
+  "env": {
+    "amp": {
+      "attack_ms": 30.0,
+      "decay_ms": 250.0,
+      "sustain": 0.80,
+      "release_ms": 550.0
+    }
+  },
+  "material": {
+    "beta_start_q15": 0,
+    "beta_target_q15": 0,
+    "beta_ramp_blocks": 1
+  },
+  "backbone": [],
+  "carrier": {
+    "harmonic_amps_q15": [30890, 32767, 6926, 23969, 3673, 6138, 1164, 1228]
+  },
+  "modulation": {
+    "vibrato": {
+      "rate_hz": 5.5,
+      "depth_amp": 0.06,
+      "depth_timbre": 0.08,
+      "delay_ms": 40.0,
+      "ramp_ms": 27.0
+    },
+    "body_warble": {
+      "rate_hz": 1.2,
+      "depth": 0.04,
+      "target_harmonic": 4
+    },
+    "attack_texture": {
+      "bright_ms": 60.0,
+      "bright_amount": 0.15,
+      "harmonics": [5, 6]
+    }
+  },
+  "macros": {
+    "VIBRATO": {
+      "target": "vibrato_depth",
+      "default_q15": 16384
+    },
+    "BRIGHT": {
+      "target": "attack_bright",
+      "default_q15": 16384
+    },
+    "BODY": {
+      "target": "body_depth",
+      "default_q15": 16384
+    },
+    "ATTACK": {
+      "target": "attack_time",
+      "default_q15": 8192
+    },
+    "RELEASE": {
+      "target": "release_time",
+      "default_q15": 14746
+    }
+  }
+}

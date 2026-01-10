@@ -186,6 +186,38 @@ class ADSR:
 
 
 @dataclass
+class VibratoParams:
+    """Vibrato/LFO modulation parameters."""
+    rate_hz: float = 5.5         # LFO rate in Hz (typical vibrato 5-7 Hz)
+    depth_amp: float = 0.0       # Amplitude modulation depth (0-1)
+    depth_timbre: float = 0.0    # Timbre modulation depth (0-1)
+    delay_ms: float = 40.0       # Delay before vibrato onset
+    ramp_ms: float = 30.0        # Ramp-in time for vibrato
+
+
+@dataclass
+class BodyWarbleParams:
+    """Body resonance warble parameters (slow formant drift)."""
+    rate_hz: float = 1.2         # Slow LFO rate (0.5-2 Hz typical)
+    depth: float = 0.0           # Warble depth (0-1)
+    target_harmonic: int = 4     # Which harmonic to modulate (1-indexed)
+
+
+@dataclass
+class AttackTextureParams:
+    """Attack texture parameters (brightness settling)."""
+    bright_ms: float = 60.0      # Time for brightness to settle
+    bright_amount: float = 0.0   # Extra brightness on attack (0-1)
+    harmonics: List[int] = field(default_factory=lambda: [5, 6])  # Which harmonics to boost
+
+
+@dataclass
+class HarmonicProfile:
+    """Custom harmonic amplitude profile."""
+    amplitudes: List[float] = field(default_factory=lambda: [1.0])  # H1, H2, H3... (0-1 scale)
+
+
+@dataclass
 class NodeParams:
     """Parameters for DSP nodes."""
     # Oscillator
@@ -196,6 +228,14 @@ class NodeParams:
     # Carrier-specific fields (v1 Addendum A)
     role: Optional[str] = None        # "off" | "audible" | "exciter_only"
     archetype: Optional[str] = None   # TreeArchetype name
+
+    # Harmonic profile (for Mode B synthesis)
+    harmonics: Optional[HarmonicProfile] = None
+
+    # Modulation parameters
+    vibrato: Optional[VibratoParams] = None
+    body_warble: Optional[BodyWarbleParams] = None
+    attack_texture: Optional[AttackTextureParams] = None
 
     # Noise
     color: Optional[str] = None
