@@ -235,8 +235,9 @@ def fm6_to_coefficients(output_k: np.ndarray) -> np.ndarray:
     """
     Convert lane-rate FM output to CCS coefficient format.
 
-    Per WSE-STD-FM-TOPOLOGY-v0, this replicates across leaves
-    for direct IDWPT synthesis (FM signal becomes the carrier).
+    DEPRECATED: This function produces stair-stepped output because it
+    replicates K values across all 64 leaves. Use fm6_generate_coeffs_native()
+    instead for coefficient-native FM synthesis.
 
     Args:
         output_k: [K] lane-rate FM output samples
@@ -257,23 +258,92 @@ def fm6_to_coefficients(output_k: np.ndarray) -> np.ndarray:
 
 def fm6_generate_coeffs(state: FM6State, output: np.ndarray, base_phase_inc: int):
     """
-    Generate FM6 output directly into coefficient buffer.
+    Generate FM6 coefficients using coefficient-native synthesis.
 
-    This is the main entry point for CCS integration.
+    Like Mode B, but with 6 operators evaluated in topological order.
+    Each operator uses pre-computed basis frames for its frequency ratio.
+    FM modulation is lane-rate (K samples per block).
+
+    This function outputs true CCS coefficients that flow through the
+    standard IDWPT reconstruction path.
 
     Args:
         state: FM6State with operators and algorithm
-        output: [512] output coefficient array (modified in place)
-        base_phase_inc: Q32 phase increment for fundamental
+        output: coefficient buffer [COEFF_LEN] to fill
+        base_phase_inc: Q32 phase increment for fundamental frequency
     """
-    # Generate lane-rate FM output
-    fm_output = fm6_generate_block(state, base_phase_inc)
+    from .harmonic_bank import get_basis_for_ratio, NUM_LEAVES, VM_K
 
-    # Convert to coefficient format
-    coeffs = fm6_to_coefficients(fm_output)
+    alg = get_algorithm(state.algorithm_id)
+    ops = state.operators
 
-    # Copy to output
-    np.copyto(output[:COEFF_LEN], coeffs)
+    # Per-operator coefficient outputs [6 ops, COEFF_LEN]
+    op_coeff_outputs = np.zeros((6, COEFF_LEN), dtype=np.int32)
+
+    # Per-operator lane-rate samples for FM modulation [6 ops, K samples]
+    # Extracted from coefficient as modulator proxy
+    op_mod_samples = np.zeros((6, VM_K), dtype=np.int32)
+
+    for op_idx in alg.eval_order:
+        op = ops[op_idx]
+        op_phase_inc = op.compute_phase_inc(base_phase_inc)
+
+        # Get pre-computed basis frames for this operator's ratio
+        basis = get_basis_for_ratio(base_phase_inc, op.ratio_q16)
+
+        for k in range(VM_K):
+            # Sum modulation from upstream operators (lane-rate)
+            mod_sum = 0
+            for mod_idx in alg.get_modulators(op_idx):
+                mod_sum += op_mod_samples[mod_idx, k]
+
+            # Apply self-feedback (z⁻¹ block delay)
+            if alg.feedback_op == op_idx and op.feedback_q15 > 0:
+                mod_sum += _rshift_rne(int(state.feedback_buffer[k]) * op.feedback_q15, 15)
+
+            # Effective phase = base phase + k*phase_inc + FM modulation
+            # Scale modulation to Q32 phase offset
+            mod_phase = (int(mod_sum) << 16) & Q32_MASK
+            eff_phase = (op.phase + k * op_phase_inc + mod_phase) & Q32_MASK
+            sin_phi, cos_phi = sin_cos_q15(eff_phase)
+
+            # Combine basis frames with phase rotation (Mode B pattern)
+            # output = cos(φ)*Usin + sin(φ)*Ucos
+            for leaf in range(NUM_LEAVES):
+                idx = leaf * VM_K + k
+                # Basis frames are int16, phase values are Q15
+                sin_contrib = _rshift_rne(cos_phi * int(basis.Usin[leaf, k]), 15)
+                cos_contrib = _rshift_rne(sin_phi * int(basis.Ucos[leaf, k]), 15)
+                val = sin_contrib + cos_contrib
+                # Apply operator level
+                val = _rshift_rne(val * op.level_q15, 15)
+                # Apply envelope
+                val = _rshift_rne(val * op.env_value_q15, 15)
+                op_coeff_outputs[op_idx, idx] = val
+
+            # Store lane-rate sample for downstream FM modulation
+            # Use leaf 0 (DC-ish component) as modulator proxy
+            op_mod_samples[op_idx, k] = op_coeff_outputs[op_idx, 0 * VM_K + k]
+
+        # Advance phase for next block
+        op.phase = (op.phase + 64 * op_phase_inc) & Q32_MASK
+
+    # Update feedback buffer for next block (z⁻¹ delay)
+    if alg.feedback_op >= 0:
+        state.feedback_buffer[:] = op_mod_samples[alg.feedback_op]
+
+    # Sum carrier coefficient outputs into output buffer
+    output.fill(0)
+    carriers = alg.get_carriers()
+    for c in carriers:
+        output[:] += op_coeff_outputs[c]
+
+    # Scale down by carrier count to prevent clipping
+    if len(carriers) > 1:
+        output[:] = output[:] // len(carriers)
+
+    # Saturate to int16 range
+    np.clip(output, -32768, 32767, out=output)
 
 
 def fm6_generate_audio(state: FM6State, base_phase_inc: int, num_blocks: int = 1) -> np.ndarray:

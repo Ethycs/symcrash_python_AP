@@ -29,6 +29,8 @@ class ValueType(IntEnum):
     U16 = 2    # Unsigned int16 (0 to 65535)
     BOOL = 3   # Boolean (0 or 1)
     ENUM8 = 4  # Enumerated value (0 to 255)
+    U32 = 5    # Unsigned int32 (0 to 4294967295) - for Q16.16 ratios etc.
+    Q15S = 6   # Signed Q0.15 (-32768 to 32767)
 
 
 class UpdateMode(IntEnum):
@@ -653,13 +655,14 @@ VOICE_ENGINE_REGISTRY_V0: List[VoiceParamEntry] = [
     ),
 
     # Op frequency ratios Q16.16 (65536 = 1.0x carrier frequency)
+    # Stored as U32 to support ratios > 1.0x (e.g., 131072 = 2.0x)
     VoiceParamEntry(
         param_id=VoiceParamID.FM6_OP0_RATIO,
         name="fm6_op0_ratio",
-        value_type=ValueType.U16,
+        value_type=ValueType.U32,
         min_value=0,
-        max_value=65535,
-        default_value=65535,  # 1.0x
+        max_value=0xFFFFFFFF,
+        default_value=65536,  # 1.0x in Q16.16
         update_mode=UpdateMode.ABS,
         persistence=Persistence.PROGRAM,
         domain=Domain.CCS,
@@ -669,10 +672,10 @@ VOICE_ENGINE_REGISTRY_V0: List[VoiceParamEntry] = [
     VoiceParamEntry(
         param_id=VoiceParamID.FM6_OP1_RATIO,
         name="fm6_op1_ratio",
-        value_type=ValueType.U16,
+        value_type=ValueType.U32,
         min_value=0,
-        max_value=65535,
-        default_value=65535,  # 1.0x
+        max_value=0xFFFFFFFF,
+        default_value=65536,  # 1.0x in Q16.16
         update_mode=UpdateMode.ABS,
         persistence=Persistence.PROGRAM,
         domain=Domain.CCS,
@@ -682,10 +685,10 @@ VOICE_ENGINE_REGISTRY_V0: List[VoiceParamEntry] = [
     VoiceParamEntry(
         param_id=VoiceParamID.FM6_OP2_RATIO,
         name="fm6_op2_ratio",
-        value_type=ValueType.U16,
+        value_type=ValueType.U32,
         min_value=0,
-        max_value=65535,
-        default_value=65535,  # 1.0x
+        max_value=0xFFFFFFFF,
+        default_value=65536,  # 1.0x in Q16.16
         update_mode=UpdateMode.ABS,
         persistence=Persistence.PROGRAM,
         domain=Domain.CCS,
@@ -695,10 +698,10 @@ VOICE_ENGINE_REGISTRY_V0: List[VoiceParamEntry] = [
     VoiceParamEntry(
         param_id=VoiceParamID.FM6_OP3_RATIO,
         name="fm6_op3_ratio",
-        value_type=ValueType.U16,
+        value_type=ValueType.U32,
         min_value=0,
-        max_value=65535,
-        default_value=65535,  # 1.0x
+        max_value=0xFFFFFFFF,
+        default_value=65536,  # 1.0x in Q16.16
         update_mode=UpdateMode.ABS,
         persistence=Persistence.PROGRAM,
         domain=Domain.CCS,
@@ -708,10 +711,10 @@ VOICE_ENGINE_REGISTRY_V0: List[VoiceParamEntry] = [
     VoiceParamEntry(
         param_id=VoiceParamID.FM6_OP4_RATIO,
         name="fm6_op4_ratio",
-        value_type=ValueType.U16,
+        value_type=ValueType.U32,
         min_value=0,
-        max_value=65535,
-        default_value=65535,  # 1.0x
+        max_value=0xFFFFFFFF,
+        default_value=65536,  # 1.0x in Q16.16
         update_mode=UpdateMode.ABS,
         persistence=Persistence.PROGRAM,
         domain=Domain.CCS,
@@ -721,10 +724,10 @@ VOICE_ENGINE_REGISTRY_V0: List[VoiceParamEntry] = [
     VoiceParamEntry(
         param_id=VoiceParamID.FM6_OP5_RATIO,
         name="fm6_op5_ratio",
-        value_type=ValueType.U16,
+        value_type=ValueType.U32,
         min_value=0,
-        max_value=65535,
-        default_value=65535,  # 1.0x
+        max_value=0xFFFFFFFF,
+        default_value=65536,  # 1.0x in Q16.16
         update_mode=UpdateMode.ABS,
         persistence=Persistence.PROGRAM,
         domain=Domain.CCS,

@@ -598,7 +598,8 @@ class CapsuleCompiler:
                 if node.params.feedback is not None:
                     defaults[VoiceParamID.FM6_FEEDBACK] = node.params.feedback
 
-                # Operator ratios (Q16: 65536 = 1.0)
+                # Operator ratios (Q16.16: 65536 = 1.0x)
+                # Stored as U32 to support ratios > 1.0x
                 if node.params.op_ratios:
                     ratio_params = [
                         VoiceParamID.FM6_OP0_RATIO,

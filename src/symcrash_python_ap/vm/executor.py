@@ -337,7 +337,9 @@ def vm_step_block(
         # Step 6: LANE_TAIL (safety constraints)
         lane_tail(state, cfg)
 
-        # Step 7: LANE_CCS_RENDER (now just extracts and calls IDWPT)
+        # Step 7: LANE_CCS_RENDER (all oscillator modes use standard CCS path)
+        # FM6 now generates true coefficients via basis frames, so it goes through
+        # the same IDWPT polyphase reconstruction as Mode A/B
         output = lane_ccs_render(state, cfg)
 
         # Apply gain with proper rounding (WSE-STD-001 compliant)

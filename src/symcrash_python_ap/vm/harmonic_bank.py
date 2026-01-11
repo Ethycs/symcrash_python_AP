@@ -720,6 +720,131 @@ def get_basis_for_note(midi_note: int) -> HarmonicBasisFrames:
 
 
 # =============================================================================
+# FM6 BASIS FRAME SUPPORT (Arbitrary Ratio Basis Frames)
+# =============================================================================
+
+@dataclass
+class RatioBasisFrame:
+    """
+    Basis frame for a single frequency ratio.
+
+    Used by FM6 to generate coefficient-native output for each operator.
+    Each operator has a ratio (e.g., 1.0, 2.0, 1.5) relative to the fundamental.
+
+    Unlike HarmonicBasisFrames (which stores frames for harmonics 1..H),
+    this stores frames for a SINGLE ratio.
+    """
+    Ucos: np.ndarray  # [64, K] Q15 - cos basis
+    Usin: np.ndarray  # [64, K] Q15 - sin basis
+    ratio_q16: int    # Q16 ratio (65536 = 1.0)
+    base_phase_inc: int  # Base phase increment this was generated for
+
+
+# Cache for ratio basis frames: key = (base_phase_inc, ratio_q16)
+_RATIO_BASIS_CACHE: Dict[Tuple[int, int], RatioBasisFrame] = {}
+
+
+def generate_ratio_basis_frame(
+    base_phase_inc: int,
+    ratio_q16: int,
+) -> RatioBasisFrame:
+    """
+    Generate basis frames for a single frequency ratio.
+
+    This creates sin/cos basis frames for FM6 operators, allowing
+    coefficient-native FM synthesis (no FWPT at runtime).
+
+    The basis frames are generated at the effective frequency:
+        effective_phase_inc = (base_phase_inc * ratio_q16) >> 16
+
+    K Polyphase Strategy (Interleaved):
+    -----------------------------------
+    Each slot k represents a 1-sample phase offset for interleaved reconstruction.
+    The IDWPT polyphase uses: out[k::K] = idwpt(slot_k)[0::K]
+
+    With K_STRIDE=1, the basis for slot k starts at sample position k.
+    This matches the interleaved polyphase reconstruction pattern.
+
+    Args:
+        base_phase_inc: Q32 phase increment for fundamental frequency
+        ratio_q16: Q16 frequency ratio (65536 = 1.0x)
+
+    Returns:
+        RatioBasisFrame with Ucos and Usin basis arrays
+    """
+    from ..wavelet.fast_lifting import fwpt_jit
+
+    # Compute effective phase increment for this ratio
+    # ratio_q16 = 65536 means 1.0x, so 131072 means 2.0x
+    eff_phase_inc = (base_phase_inc * ratio_q16) >> 16
+
+    # Allocate arrays
+    Ucos = np.zeros((NUM_LEAVES, VM_K), dtype=np.int16)
+    Usin = np.zeros((NUM_LEAVES, VM_K), dtype=np.int16)
+
+    # headroom_bits=2 critical for Mode B accuracy (see generate_basis_frames)
+    headroom = 2
+
+    # Generate basis frames for each k-slot using interleaved strategy
+    # K_STRIDE=1 matches idwpt_polyphase_block() reconstruction pattern
+
+    for k in range(VM_K):
+        # Starting phase for this k-slot (K_STRIDE=1 for interleaved)
+        k_phase_offset = (k * K_STRIDE * eff_phase_inc) & PHASE_MASK
+
+        # Generate sin/cos blocks at this ratio's frequency
+        cos_block = [0] * BLOCK_SIZE
+        sin_block = [0] * BLOCK_SIZE
+
+        phase = k_phase_offset
+        for n in range(BLOCK_SIZE):
+            sin_val, cos_val = sin_cos_q15(phase)
+            cos_block[n] = cos_val
+            sin_block[n] = sin_val
+            phase = (phase + eff_phase_inc) & PHASE_MASK
+
+        # Transform to coefficients
+        cos_coeffs = fwpt_jit(cos_block, headroom_bits=headroom)
+        sin_coeffs = fwpt_jit(sin_block, headroom_bits=headroom)
+
+        Ucos[:, k] = cos_coeffs
+        Usin[:, k] = sin_coeffs
+
+    return RatioBasisFrame(
+        Ucos=Ucos,
+        Usin=Usin,
+        ratio_q16=ratio_q16,
+        base_phase_inc=base_phase_inc,
+    )
+
+
+def get_basis_for_ratio(base_phase_inc: int, ratio_q16: int) -> RatioBasisFrame:
+    """
+    Get or create basis frames for a frequency ratio.
+
+    This is the main entry point for FM6 coefficient-native synthesis.
+    Caches basis frames by (base_phase_inc, ratio_q16) key.
+
+    Args:
+        base_phase_inc: Q32 phase increment for fundamental frequency
+        ratio_q16: Q16 frequency ratio (65536 = 1.0x)
+
+    Returns:
+        RatioBasisFrame for the given ratio
+    """
+    key = (base_phase_inc, ratio_q16)
+    if key not in _RATIO_BASIS_CACHE:
+        _RATIO_BASIS_CACHE[key] = generate_ratio_basis_frame(base_phase_inc, ratio_q16)
+    return _RATIO_BASIS_CACHE[key]
+
+
+def clear_ratio_basis_cache() -> None:
+    """Clear the ratio basis frame cache."""
+    global _RATIO_BASIS_CACHE
+    _RATIO_BASIS_CACHE.clear()
+
+
+# =============================================================================
 # COEFFICIENT SYNTHESIS (WSE-STD-210 Section 3.2.1)
 # =============================================================================
 
@@ -875,14 +1000,15 @@ def mode_b_generate_coeffs_matrix(
     # Get precomputed coefficient LUT for this waveform type
     coeff_lut = get_waveform_coeff_lut(waveform_type, state.phase_inc)
 
-    # Sample from LUT at current phase (with interpolation)
-    coeffs_64 = coeff_lut.sample_coeffs(state.phase)
-
-    # Replicate across K=8 time slots
+    # Sample from LUT at phase for each k-slot
+    # Each k-slot needs its own phase-shifted coefficients for smooth output
     for k in range(VM_K):
+        # Compute phase for this k-slot: phase + k * phase_inc
+        phase_k = (state.phase + k * state.phase_inc) & PHASE_MASK
+        coeffs_k = coeff_lut.sample_coeffs(phase_k)
         for leaf in range(NUM_LEAVES):
             idx = leaf * VM_K + k
-            output_coeffs[idx] = coeffs_64[leaf]
+            output_coeffs[idx] = coeffs_k[leaf]
 
 
 # =============================================================================
@@ -1170,6 +1296,7 @@ __all__ = [
     'ModeBState',
     'BasisFrameAtlas',
     'WaveformCoeffLUT',
+    'RatioBasisFrame',
     # Functions
     'generate_basis_frames',
     'get_basis_atlas',
@@ -1183,4 +1310,8 @@ __all__ = [
     'clear_waveform_coeff_lut_cache',
     # FM modulator extraction (Phase 3)
     'extract_modulator_signal',
+    # FM6 ratio basis frames
+    'get_basis_for_ratio',
+    'generate_ratio_basis_frame',
+    'clear_ratio_basis_cache',
 ]

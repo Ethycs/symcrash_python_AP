@@ -115,14 +115,20 @@ def pack_voice_params(defaults: Dict[int, int]) -> bytes:
     """
     Pack voice param defaults to binary per §4.
 
-    Format per entry:
+    Format per 16-bit entry (6 bytes):
         u8  persistence (0=PER_VOICE, 1=PROGRAM, 2=GLOBAL)
         u8  value_type
         u16 param_id
         i16/u16 value (signed or unsigned based on registry value_type)
 
+    Format per 32-bit entry (8 bytes):
+        u8  persistence
+        u8  value_type (5 = U32)
+        u16 param_id
+        u32 value
+
     Sorted by param_id ascending. Uses VoiceEngineRegistry to determine
-    whether each parameter should be packed as signed or unsigned.
+    whether each parameter should be packed as signed, unsigned 16-bit, or 32-bit.
     """
     if not defaults:
         return b''
@@ -138,10 +144,17 @@ def pack_voice_params(defaults: Dict[int, int]) -> bytes:
         # Look up value type from registry
         entry = registry.get(param_id)
 
-        # Determine signedness from registry
-        # U16 and Q15U are unsigned, everything else uses signed
-        if entry is not None and entry.value_type in (ValueType.U16, ValueType.Q15U):
-            # Unsigned: pack with 'H' format
+        if entry is not None and entry.value_type == ValueType.U32:
+            # 32-bit unsigned: 8-byte entry
+            parts.append(struct.pack(
+                '<BBHI',
+                0,  # persistence (default PER_VOICE)
+                int(ValueType.U32),
+                param_id,
+                value & 0xFFFFFFFF,  # Ensure u32 range
+            ))
+        elif entry is not None and entry.value_type in (ValueType.U16, ValueType.Q15U):
+            # 16-bit unsigned: 6-byte entry
             parts.append(struct.pack(
                 '<BBHH',
                 0,  # persistence (default PER_VOICE)
@@ -150,7 +163,7 @@ def pack_voice_params(defaults: Dict[int, int]) -> bytes:
                 value & 0xFFFF,  # Ensure u16 range
             ))
         else:
-            # Signed: pack with 'h' format (default for unknown params)
+            # 16-bit signed: 6-byte entry (default for unknown params)
             value_type_id = int(entry.value_type) if entry else 0
             parts.append(struct.pack(
                 '<BBHh',
@@ -168,7 +181,7 @@ def unpack_voice_params(data: bytes) -> Dict[int, int]:
     Unpack voice param defaults from binary.
 
     Uses the value_type field stored in the binary to determine
-    whether to interpret the value as signed or unsigned.
+    whether to interpret the value as signed, unsigned 16-bit, or 32-bit.
 
     Returns:
         Dict mapping param_id -> value
@@ -177,21 +190,32 @@ def unpack_voice_params(data: bytes) -> Dict[int, int]:
         return {}
 
     offset = 0
-    entry_size = 6
     defaults = {}
 
-    while offset + entry_size <= len(data):
+    while offset + 4 <= len(data):  # At minimum need header (4 bytes)
         # Read header fields
         _, value_type, param_id = struct.unpack_from('<BBH', data, offset)
 
-        # Determine signedness from stored value_type
-        # ValueType.U16 = 2, ValueType.Q15U = 0 are unsigned
-        if value_type in (int(ValueType.U16), int(ValueType.Q15U)):
+        # Determine entry size and value format from stored value_type
+        if value_type == int(ValueType.U32):
+            # 32-bit unsigned: 8-byte entry
+            if offset + 8 > len(data):
+                break
+            value, = struct.unpack_from('<I', data, offset + 4)
+            offset += 8
+        elif value_type in (int(ValueType.U16), int(ValueType.Q15U)):
+            # 16-bit unsigned: 6-byte entry
+            if offset + 6 > len(data):
+                break
             value, = struct.unpack_from('<H', data, offset + 4)
+            offset += 6
         else:
+            # 16-bit signed: 6-byte entry
+            if offset + 6 > len(data):
+                break
             value, = struct.unpack_from('<h', data, offset + 4)
+            offset += 6
 
-        offset += entry_size
         defaults[param_id] = value
 
     return defaults

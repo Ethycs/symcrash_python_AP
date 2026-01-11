@@ -23,9 +23,6 @@ BLOCK_SIZE = 64
 BLOCKS_PER_SEC = FS // BLOCK_SIZE
 OUTPUT_DIR = str(Path(__file__).parent.parent / "audio_generation_tests" / "audio_out")
 
-# DX7 feedback level to Q15 mapping (0-7 -> Q15)
-DX7_FEEDBACK_Q15 = [0, 4681, 9362, 14043, 18724, 23405, 28086, 32767]
-
 
 def ms_to_blocks(ms):
     return max(1, int(ms / 1000.0 * BLOCKS_PER_SEC))
@@ -103,8 +100,8 @@ def render_preset(preset_path, note, duration_sec):
 
         if use_fm6 and fm6_params:
             # FM6 synthesis mode
+            # Note: fm_feedback_depth expects DX7 level 0-7 (executor converts to Q15)
             feedback_level = fm6_params['feedback']
-            feedback_q15 = DX7_FEEDBACK_Q15[min(7, max(0, feedback_level))]
 
             frame = VoiceFrame(
                 note=note,
@@ -114,7 +111,7 @@ def render_preset(preset_path, note, duration_sec):
                 fm_algorithm_id=fm6_params['algorithm'],
                 fm_op_ratios=fm6_params['op_ratios'],
                 fm_op_levels=fm6_params['op_levels'],
-                fm_feedback_depth=feedback_q15,
+                fm_feedback_depth=feedback_level,  # DX7 level 0-7, not Q15
             )
         else:
             # Standard Mode B synthesis
@@ -132,6 +129,45 @@ def render_preset(preset_path, note, duration_sec):
         samples.extend(output.tolist())
 
     return np.array(samples, dtype=np.int16), ir.meta.name or preset_path.stem
+
+
+def normalize_to_rms(samples: np.ndarray, target_rms_dbfs: float = -12.0) -> np.ndarray:
+    """
+    Normalize audio to target RMS level in dBFS.
+
+    Args:
+        samples: Audio samples (int16)
+        target_rms_dbfs: Target RMS level in dBFS (default -12 dBFS)
+
+    Returns:
+        Normalized samples (int16)
+    """
+    # Convert to float for calculation
+    samples_f = samples.astype(np.float64)
+
+    # Calculate current RMS
+    rms = np.sqrt(np.mean(samples_f ** 2))
+    if rms < 1.0:
+        return samples  # Too quiet, don't amplify noise
+
+    # Convert target dBFS to linear
+    # 0 dBFS = 32767 RMS for full-scale sine
+    # For int16: 0 dBFS peak = 32767, so -12 dBFS RMS ≈ 8211
+    target_rms = 32767 * (10 ** (target_rms_dbfs / 20))
+
+    # Calculate gain
+    gain = target_rms / rms
+
+    # Apply gain with peak limiting
+    normalized = samples_f * gain
+
+    # Soft clip to prevent harsh clipping
+    peak = np.max(np.abs(normalized))
+    if peak > 32000:  # Leave ~1 dB headroom
+        # Apply gentle compression above threshold
+        normalized = np.clip(normalized, -32000, 32000)
+
+    return normalized.astype(np.int16)
 
 
 def main():
@@ -163,6 +199,16 @@ def main():
             duration = 2.0 if 'pad' in name.lower() or 'string' in name.lower() else 1.5
 
             samples, preset_name = render_preset(preset_path, note, duration)
+
+            # Calculate pre-normalization RMS for logging
+            pre_rms = np.sqrt(np.mean(samples.astype(np.float64) ** 2))
+
+            # Normalize to -12 dBFS RMS
+            samples = normalize_to_rms(samples, target_rms_dbfs=-12.0)
+
+            # Calculate post-normalization RMS
+            post_rms = np.sqrt(np.mean(samples.astype(np.float64) ** 2))
+
             output_name = f"{preset_path.stem}_note{note}"
 
             metadata = audio_io.write_audio(
@@ -171,7 +217,7 @@ def main():
                 subdirectory="presets",
                 timestamp=False
             )
-            print(f"  OK: {preset_path.name:35} -> {output_name}.wav")
+            print(f"  OK: {preset_path.name:35} -> {output_name}.wav (RMS: {int(pre_rms):5} -> {int(post_rms):5})")
             success_count += 1
         except Exception as e:
             print(f"FAIL: {preset_path.name:35} -> {e}")
