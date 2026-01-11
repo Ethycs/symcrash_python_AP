@@ -2,7 +2,7 @@
 
 **Standard ID:** WSE-STD-PRESET v0
 **Title:** Preset Format, Compile Semantics, and Canonical Examples
-**Status:** Normative (v0 frozen)
+**Status:** Normative (v0 frozen) — **DEPRECATION NOTICE BELOW**
 **Applies to:** PresetCompiler + VoiceFrameEmitter + PresetLibrary
 **Depends on:**
 
@@ -13,6 +13,23 @@
 
 ---
 
+## IMPORTANT: Format Migration Notice
+
+The `preset:` format described in this document is **deprecated** in favor of the newer canonical formats:
+
+| Preset Type | Legacy Format | Canonical Format |
+|-------------|---------------|------------------|
+| Instruments | `preset:` | `instrument_ir_v0:` |
+| Macros | `preset:` + `kind: MACRO` | `macro_ir_v0:` |
+
+**For new presets, use:**
+- **`instrument_ir_v0:`** for instrument presets (see [PRESET-AUTHORING-GUIDE.md](../../library/PRESET-AUTHORING-GUIDE.md))
+- **`macro_ir_v0:`** for performance macros (vibrato, legato, tremolo, portamento)
+
+The canonical examples in Appendix A use the legacy format and are preserved for historical reference.
+
+---
+
 ## 0. Scope
 
 This standard defines:
@@ -20,7 +37,7 @@ This standard defines:
 1. A **portable preset format** (text, versioned) that can be stored as an L5 "instrument"
 2. A **deterministic compiler** from preset → **VoiceFrame latch defaults + per-block deltas**
 3. A **conformance test contract** (golden traces + acceptance tests)
-4. **Canonical preset examples** (12 classic voice presets)
+4. **Canonical preset examples** (12 classic voice presets — legacy format)
 
 This standard does **not** define:
 

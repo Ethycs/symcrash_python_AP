@@ -53,7 +53,8 @@ def render_preset(preset_path, note, duration_sec):
             }
         if node.type == "Osc" and node.params.waveform:
             wf = node.params.waveform.lower()
-            waveform = {'sine': 0, 'saw': 1, 'pulse': 2, 'square': 2, 'tri': 3}.get(wf, 1)
+            # WaveformType: SINE=0, SQUARE=1, PULSE=2, SAW=3, SAW_DOWN=4, TRIANGLE=5
+            waveform = {'sine': 0, 'square': 1, 'pulse': 2, 'saw': 3, 'tri': 5, 'triangle': 5}.get(wf, 0)
         if node.type == "FM6":
             use_fm6 = True
             fm6_params = {
@@ -134,8 +135,8 @@ def render_preset(preset_path, note, duration_sec):
 
 
 def main():
-    # Get all presets from the new presets/ directory
-    preset_dir = Path(__file__).parent.parent / "presets" / "instruments"
+    # Get all presets from the presets/ directory (relative to repo root)
+    preset_dir = Path(__file__).parent.parent.parent / "presets" / "instruments"
     presets = sorted(preset_dir.glob("*.yaml"))
 
     # Render each preset

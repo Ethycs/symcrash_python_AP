@@ -13,13 +13,26 @@ Features:
 
 Storage Layout:
     library_root/
-      capsules/<capsule_id>/<revision_id>/
-        manifest.json
-        voice_params.bin
-        control_defaults.bin
+      capsules/
+        instruments/<capsule_id>/<revision_id>/
+          manifest.json
+          voice_params.bin
+          control_defaults.bin
+        synths/<capsule_id>/<revision_id>/
+          ...
+        assets/<capsule_id>/<revision_id>/
+          ...
+        macros/<capsule_id>/<revision_id>/
+          ...
       assets/<asset_id>/<revision_id>/
         ...
       index/library_index.json
+
+Category folders are determined by CapsuleKind:
+  INSTRUMENT -> instruments/
+  SYNTH      -> synths/
+  ASSET      -> assets/
+  MACRO      -> macros/
 """
 
 import json
@@ -205,6 +218,24 @@ class LibraryIndex:
 
 
 # =============================================================================
+# CATEGORY FOLDER MAPPING
+# =============================================================================
+
+# Map CapsuleKind to storage folder name
+CAPSULE_KIND_FOLDERS = {
+    CapsuleKind.INSTRUMENT: "instruments",
+    CapsuleKind.SYNTH: "synths",
+    CapsuleKind.ASSET: "assets",
+    CapsuleKind.MACRO: "macros",
+}
+
+
+def get_category_folder(kind: CapsuleKind) -> str:
+    """Get storage folder name for capsule kind."""
+    return CAPSULE_KIND_FOLDERS.get(kind, "instruments")
+
+
+# =============================================================================
 # PRESET LIBRARY V0
 # =============================================================================
 
@@ -254,7 +285,9 @@ class PresetLibraryV0:
 
     def _init_storage(self):
         """Create storage directories if needed."""
-        (self.root_path / "capsules").mkdir(parents=True, exist_ok=True)
+        # Create category subfolders for capsules
+        for folder in CAPSULE_KIND_FOLDERS.values():
+            (self.root_path / "capsules" / folder).mkdir(parents=True, exist_ok=True)
         (self.root_path / "assets").mkdir(parents=True, exist_ok=True)
         (self.root_path / "index").mkdir(parents=True, exist_ok=True)
 
@@ -357,7 +390,9 @@ class PresetLibraryV0:
         result.revision_id = revision_id
 
         # Step 6: Commit atomically
-        storage_path = self.root_path / "capsules" / capsule_id / str(revision_id)
+        # Get category folder from capsule kind
+        category_folder = get_category_folder(capsule.identity.kind)
+        storage_path = self.root_path / "capsules" / category_folder / capsule_id / str(revision_id)
 
         try:
             # Create directory
@@ -369,7 +404,7 @@ class PresetLibraryV0:
             # Update index
             self._index.capsules[capsule_id].latest_revision = revision_id
             self._index.capsules[capsule_id].revisions[revision_id] = RevisionEntry(
-                path=f"capsules/{capsule_id}/{revision_id}",
+                path=f"capsules/{category_folder}/{capsule_id}/{revision_id}",
                 deprecated=False,
                 retired=False,
                 compatible=is_compatible,
@@ -744,4 +779,6 @@ __all__ = [
     'Query',
     'ResolutionSelector',
     'PresetLibraryV0',
+    'CAPSULE_KIND_FOLDERS',
+    'get_category_folder',
 ]

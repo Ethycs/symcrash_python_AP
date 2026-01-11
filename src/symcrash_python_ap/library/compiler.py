@@ -42,7 +42,7 @@ from .capsule import (
 )
 from .lifecycle import LifecycleState, CapsuleRecord, create_compiled_record
 from ..control_registry import ControlRegistry, ControlID
-from ..voice.voice_engine_registry import VoiceEngineRegistry, get_registry
+from ..voice.voice_engine_registry import VoiceEngineRegistry, VoiceParamID, get_registry
 
 if TYPE_CHECKING:
     from ..instrument_ir import InstrumentIR
@@ -570,10 +570,11 @@ class CapsuleCompiler:
         Sources:
         - compile.frame_emitter_policy for frame emission params
         - L0 nodes for waveform/carrier params
+        - L0 FM6 nodes for 6-operator FM synthesis params
         """
         defaults: Dict[int, int] = {}
 
-        # Extract from L0 Osc nodes
+        # Extract from L0 nodes
         for node in ir.layers.L0_graph.nodes:
             if node.type == "Osc":
                 # Could map waveform, detune, pulse width to voice params
@@ -583,6 +584,53 @@ class CapsuleCompiler:
                     wave_id = wave_map.get(node.params.waveform.lower(), 0)
                     # Would need VoiceParamID.WAVEFORM constant
                     pass
+
+            elif node.type == "FM6":
+                # Extract FM6 synthesis parameters
+                # Set OSC_MODE to 3 (FM6)
+                defaults[VoiceParamID.OSC_MODE] = 3
+
+                # Algorithm (1-32)
+                if node.params.algorithm is not None:
+                    defaults[VoiceParamID.FM6_ALGORITHM] = node.params.algorithm
+
+                # Feedback (0-7)
+                if node.params.feedback is not None:
+                    defaults[VoiceParamID.FM6_FEEDBACK] = node.params.feedback
+
+                # Operator ratios (Q16: 65536 = 1.0)
+                if node.params.op_ratios:
+                    ratio_params = [
+                        VoiceParamID.FM6_OP0_RATIO,
+                        VoiceParamID.FM6_OP1_RATIO,
+                        VoiceParamID.FM6_OP2_RATIO,
+                        VoiceParamID.FM6_OP3_RATIO,
+                        VoiceParamID.FM6_OP4_RATIO,
+                        VoiceParamID.FM6_OP5_RATIO,
+                    ]
+                    for i, ratio in enumerate(node.params.op_ratios[:6]):
+                        defaults[ratio_params[i]] = ratio
+
+                # Operator levels (Q15: 32767 = full)
+                if node.params.op_levels:
+                    level_params = [
+                        VoiceParamID.FM6_OP0_LEVEL,
+                        VoiceParamID.FM6_OP1_LEVEL,
+                        VoiceParamID.FM6_OP2_LEVEL,
+                        VoiceParamID.FM6_OP3_LEVEL,
+                        VoiceParamID.FM6_OP4_LEVEL,
+                        VoiceParamID.FM6_OP5_LEVEL,
+                    ]
+                    for i, level in enumerate(node.params.op_levels[:6]):
+                        defaults[level_params[i]] = level
+
+                # Topology morphing
+                if node.params.fm6_topo_a is not None:
+                    defaults[VoiceParamID.FM6_TOPO_A] = node.params.fm6_topo_a
+                if node.params.fm6_topo_b is not None:
+                    defaults[VoiceParamID.FM6_TOPO_B] = node.params.fm6_topo_b
+                if node.params.fm6_topo_blend_q15 is not None:
+                    defaults[VoiceParamID.FM6_TOPO_BLEND] = node.params.fm6_topo_blend_q15
 
         return defaults
 
@@ -650,6 +698,9 @@ class CapsuleCompiler:
             tags.append("noise")
         if "FXSend" in node_types:
             tags.append("fx")
+        if "FM6" in node_types:
+            tags.append("fm6")
+            tags.append("fm")
 
         # Check waveforms
         for node in ir.layers.L0_graph.nodes:

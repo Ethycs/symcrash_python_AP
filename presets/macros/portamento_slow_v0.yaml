@@ -1,5 +1,5 @@
-# Portamento Slow v0 - WSE-STD-CAPSULE-COMPAT v0 §2.4
-# ====================================================
+# Portamento Slow v0 - MacroIR v0
+# ================================
 #
 # Slow portamento for expressive slides.
 # Can be applied to any instrument preset.
@@ -8,32 +8,27 @@
 # - Pitch glide between all notes (not just legato)
 # - Slow glide for expressive effect
 # - Exponential curve for natural feel
-#
 
-preset:
-  preset_id: "PORTAMENTO_SLOW_V0"
-  preset_version: "v0"
-  author: "symcrash"
-  description: "Slow portamento with exponential glide curve."
+macro_ir_v0:
+  meta:
+    macro_id: "portamento-slow-v0"
+    name: "Slow Portamento"
+    version: 0
+    author: "symcrash"
+    description: "Slow portamento with exponential glide curve."
 
-compat:
-  voiceframe_std: "WSE-STD-020 v1"
-  vm_std: "WSE-STD-VM-HYBRID v0"
+  macro:
+    macro_type: PORTAMENTO
 
-kind: MACRO
+    # Pitch glide parameters
+    glide_time_ms: 200.0      # Slow 200ms glide
+    glide_curve: 1            # 1=exponential curve
 
-macro:
-  macro_type: PORTAMENTO
+    # Phase behavior
+    preserve_phase: false     # Retrigger on each note
 
-  # Pitch glide parameters
-  glide_time_ms: 200.0      # Slow 200ms glide
-  glide_curve: 1            # 1=exponential curve
-
-  # Phase behavior
-  preserve_phase: false     # Retrigger on each note
-
-tags:
-  - portamento
-  - glide
-  - slow
-  - expressive
+  tags:
+    - portamento
+    - glide
+    - slow
+    - expressive

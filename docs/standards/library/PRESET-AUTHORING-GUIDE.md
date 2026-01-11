@@ -347,85 +347,159 @@ R0_IDLE → R1_ATTACK → R2_STABLE → R0_IDLE
 
 ---
 
-## YAML Preset Format
+## YAML Preset Format (instrument_ir_v0)
 
-For complex presets, use YAML files:
+The canonical format for instrument presets is `instrument_ir_v0`. This is a layered tower format that provides explicit control over all synthesis layers.
 
 ```yaml
 # my_preset.yaml
-preset:
-  preset_id: "MY_PRESET_V1"
-  preset_version: "v1"
-  author: "Your Name"
-  description: "A rich synth pad"
+instrument_ir_v0:
+  meta:
+    instrument_id: "my-preset-v1"
+    name: "My Rich Synth Pad"
+    version: 1
+    author: "Your Name"
+    seed_u32: 0x12345678      # Optional: deterministic PRNG seed
 
-compat:
-  voiceframe_std: "WSE-STD-020 v1"
-  vm_std: "WSE-STD-VM-HYBRID v0"
-  operator_lib_id: "WSE-OPLIB-24 v0"
+  io:
+    sample_rate_hz: 48000
+    block_size: 64
 
-latch_defaults:
-  pattern_id: 0
-  tail_mode: "FULL"
-  tree_a_id: 0
-  tree_b_id: 0
-  tree_blend_q15: 0
-  carrier:
-    model: "SAW"
-    role: "AUDIBLE"
-    transition: "RETRIGGER"
-    detune_cents: 0
-    pulse_width_q15: 16384
+  layers:
+    L0_graph:
+      nodes:
+        - id: "osc1"
+          type: "Osc"
+          params:
+            waveform: "saw"
+            detune_cents: 0
 
-env:
-  amp:
-    attack_ms: 300.0
-    decay_ms: 200.0
-    sustain: 0.8
-    release_ms: 800.0
+        - id: "amp1"
+          type: "Amp"
+          params:
+            adsr:
+              a_ms: 300.0       # Attack (ms)
+              d_ms: 200.0       # Decay (ms)
+              s: 0.8            # Sustain level (0.0-1.0)
+              r_ms: 800.0       # Release (ms)
 
-material:
-  beta_start_q15: 4915       # 0.15 (mostly dry at attack)
-  beta_target_q15: 16384     # 0.50 (bring in texture)
-  beta_ramp_blocks: 16       # Ramp time in blocks
+      edges:
+        - src: "osc1"
+          dst: "amp1"
 
-backbone:
-  - op: "TILT"
-    strength_q15: 14746      # 0.45
-  - op: "INTRA_MIX"
-    strength_q15: 8192       # 0.25
-  - op: "DIFFUSE_DOWN"
-    strength_q15: 6554       # 0.20
-  - op: "LOWRANK_MORPH"
-    strength_q15: 4915       # 0.15
+      macros:
+        - id: "M_BRIGHT"
+          name: "Brightness"
+          default: 0.5
+        - id: "M_BODY"
+          name: "Body"
+          default: 0.5
 
-carrier:
-  harmonic_amps_q15:
-    - 32767    # fundamental
-    - 16383    # 2nd harmonic
-    - 10922    # 3rd harmonic
-    - 8191     # 4th harmonic
-    - 6553     # 5th harmonic
-    - 5461     # 6th harmonic
-    - 4681     # 7th harmonic
-    - 4096     # 8th harmonic
+    L3_cmmm:
+      emit_templates:
+        T_IDLE:
+          families:
+            CONSTRAINT: 1.0
+            CALM: 1.0
+          ops_enable: ["NormalizeScale", "FineClamp"]
+          trees:
+            A: "T1"
+            B: "T1"
+            beta: 0.0
 
-macros:
-  BRIGHT:
-    target: brightness
-    default_q15: 16384
-  BODY:
-    target: density
-    default_q15: 16384
+        T_STABLE:
+          families:
+            COLOR: 0.5
+            COHERENCE: 0.4
+            CONSTRAINT: 1.0
+            CALM: 0.7
+          ops_enable: ["Tilt", "LowRankMorph", "NormalizeScale", "FineClamp"]
+          trees:
+            A: "T1"
+            B: "T1"
+            beta: 0.25
+
+  compile:
+    material:
+      beta_start_q15: 4915       # 0.15 (mostly dry at attack)
+      beta_target_q15: 16384     # 0.50 (bring in texture)
+      beta_ramp_blocks: 16       # Ramp time in blocks
 ```
 
-Load and compile:
+### Required vs Optional Sections
+
+| Section | Required | Purpose |
+|---------|----------|---------|
+| `meta.instrument_id` | **Yes** | Unique identifier |
+| `meta.name` | **Yes** | Human-readable name |
+| `meta.version` | No | Version number (default: 0) |
+| `meta.author` | No | Author name |
+| `meta.seed_u32` | No | PRNG seed (auto-generated if omitted) |
+| `io` | No | Sample rate/block size (defaults: 48kHz/64) |
+| `layers.L0_graph` | No | DSP graph (auto-completed if omitted) |
+| `layers.L2_regimes` | No | State machine (auto-completed if omitted) |
+| `layers.L3_cmmm` | No | Emit templates (auto-completed if omitted) |
+| `compile.material` | No | Dry/wet blend settings |
+
+### Load and Compile
 
 ```python
 from symcrash_python_ap.instrument_ir import load_instrument
 
 ir = load_instrument("my_preset.yaml")
 capsule = ir.to_capsule()
+```
+
+---
+
+## Macro Preset Format (macro_ir_v0)
+
+Performance macros (vibrato, legato, tremolo, portamento) use a separate `macro_ir_v0` format. These are NOT instruments - they are modifiers that can be applied to any instrument.
+
+```yaml
+# vibrato_classic.yaml
+macro_ir_v0:
+  meta:
+    macro_id: "vibrato-classic-v0"
+    name: "Classic Vibrato"
+    version: 0
+    author: "symcrash"
+    description: "Classic vibrato with delayed onset."
+
+  macro:
+    macro_type: VIBRATO       # VIBRATO | TREMOLO | LEGATO | PORTAMENTO
+
+    # LFO parameters (VIBRATO, TREMOLO)
+    rate_hz: 5.5
+    depth_pitch_cents: 25
+    depth_amp_q15: 1966       # 6%
+    depth_timbre_q15: 2621    # 8%
+
+    # Envelope parameters
+    delay_ms: 40.0
+    ramp_ms: 30.0
+
+  tags:
+    - vibrato
+    - expressive
+```
+
+### Macro Types
+
+| Type | Purpose | Key Parameters |
+|------|---------|----------------|
+| `VIBRATO` | Pitch/amp/timbre LFO | `rate_hz`, `depth_*`, `delay_ms`, `ramp_ms` |
+| `TREMOLO` | Amplitude-only LFO | `rate_hz`, `depth_amp_q15`, `delay_ms`, `ramp_ms` |
+| `LEGATO` | Smooth pitch glide | `glide_time_ms`, `glide_curve`, `preserve_phase` |
+| `PORTAMENTO` | Always-on pitch glide | `glide_time_ms`, `glide_curve` |
+
+### Load Macro Preset
+
+```python
+from symcrash_python_ap.macro_ir import load_macro
+
+macro = load_macro("vibrato_classic.yaml")
+capsule = macro.to_capsule()
 ```
 
 ---

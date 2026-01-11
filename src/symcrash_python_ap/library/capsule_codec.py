@@ -25,6 +25,9 @@ from .capsule import (
     CapsuleDefaults, AssetRef, SeedConfig,
 )
 
+# Import registry for value type lookup
+from symcrash_python_ap.voice.voice_engine_registry import get_registry, ValueType
+
 
 # =============================================================================
 # CONSTANTS
@@ -116,26 +119,46 @@ def pack_voice_params(defaults: Dict[int, int]) -> bytes:
         u8  persistence (0=PER_VOICE, 1=PROGRAM, 2=GLOBAL)
         u8  value_type
         u16 param_id
-        i16 value
+        i16/u16 value (signed or unsigned based on registry value_type)
 
-    Sorted by param_id ascending (simplified; full sorting per persistence/domain
-    would require registry lookup).
+    Sorted by param_id ascending. Uses VoiceEngineRegistry to determine
+    whether each parameter should be packed as signed or unsigned.
     """
     if not defaults:
         return b''
+
+    # Get registry for value type lookup
+    registry = get_registry()
 
     # Sort by param_id
     sorted_items = sorted(defaults.items(), key=lambda x: x[0])
 
     parts = []
     for param_id, value in sorted_items:
-        parts.append(struct.pack(
-            '<BBHh',
-            0,  # persistence (default PER_VOICE)
-            0,  # value_type (default)
-            param_id,
-            value,
-        ))
+        # Look up value type from registry
+        entry = registry.get(param_id)
+
+        # Determine signedness from registry
+        # U16 and Q15U are unsigned, everything else uses signed
+        if entry is not None and entry.value_type in (ValueType.U16, ValueType.Q15U):
+            # Unsigned: pack with 'H' format
+            parts.append(struct.pack(
+                '<BBHH',
+                0,  # persistence (default PER_VOICE)
+                int(entry.value_type),
+                param_id,
+                value & 0xFFFF,  # Ensure u16 range
+            ))
+        else:
+            # Signed: pack with 'h' format (default for unknown params)
+            value_type_id = int(entry.value_type) if entry else 0
+            parts.append(struct.pack(
+                '<BBHh',
+                0,  # persistence (default PER_VOICE)
+                value_type_id,
+                param_id,
+                value,
+            ))
 
     return b''.join(parts)
 
@@ -143,6 +166,9 @@ def pack_voice_params(defaults: Dict[int, int]) -> bytes:
 def unpack_voice_params(data: bytes) -> Dict[int, int]:
     """
     Unpack voice param defaults from binary.
+
+    Uses the value_type field stored in the binary to determine
+    whether to interpret the value as signed or unsigned.
 
     Returns:
         Dict mapping param_id -> value
@@ -155,7 +181,16 @@ def unpack_voice_params(data: bytes) -> Dict[int, int]:
     defaults = {}
 
     while offset + entry_size <= len(data):
-        _, _, param_id, value = struct.unpack_from('<BBHh', data, offset)
+        # Read header fields
+        _, value_type, param_id = struct.unpack_from('<BBH', data, offset)
+
+        # Determine signedness from stored value_type
+        # ValueType.U16 = 2, ValueType.Q15U = 0 are unsigned
+        if value_type in (int(ValueType.U16), int(ValueType.Q15U)):
+            value, = struct.unpack_from('<H', data, offset + 4)
+        else:
+            value, = struct.unpack_from('<h', data, offset + 4)
+
         offset += entry_size
         defaults[param_id] = value
 

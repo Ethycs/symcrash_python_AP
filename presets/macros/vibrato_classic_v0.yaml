@@ -1,5 +1,5 @@
-# Vibrato Classic v0 - WSE-STD-CAPSULE-COMPAT v0 §2.4
-# ====================================================
+# Vibrato Classic v0 - MacroIR v0
+# ================================
 #
 # Classic violin-style vibrato with delayed onset.
 # Can be applied to any instrument preset.
@@ -8,35 +8,30 @@
 # - LFO modulates pitch, amplitude, and timbre
 # - Delayed onset simulates natural bow/finger vibrato
 # - Gradual ramp to full depth
-#
 
-preset:
-  preset_id: "VIBRATO_CLASSIC_V0"
-  preset_version: "v0"
-  author: "symcrash"
-  description: "Classic vibrato with delayed onset and gradual ramp."
+macro_ir_v0:
+  meta:
+    macro_id: "vibrato-classic-v0"
+    name: "Classic Vibrato"
+    version: 0
+    author: "symcrash"
+    description: "Classic vibrato with delayed onset and gradual ramp."
 
-compat:
-  voiceframe_std: "WSE-STD-020 v1"
-  vm_std: "WSE-STD-VM-HYBRID v0"
+  macro:
+    macro_type: VIBRATO
 
-kind: MACRO
+    # LFO parameters
+    rate_hz: 5.5              # Classic vibrato rate
+    depth_pitch_cents: 25     # Quarter-semitone pitch wobble
+    depth_amp_q15: 1966       # 6% amplitude modulation
+    depth_timbre_q15: 2621    # 8% timbre modulation
 
-macro:
-  macro_type: VIBRATO
+    # Envelope parameters
+    delay_ms: 40.0            # Wait before vibrato starts
+    ramp_ms: 30.0             # Gradual onset to full depth
 
-  # LFO parameters
-  rate_hz: 5.5              # Classic vibrato rate
-  depth_pitch_cents: 25     # Quarter-semitone pitch wobble
-  depth_amp_q15: 1966       # 6% amplitude modulation
-  depth_timbre_q15: 2621    # 8% timbre modulation
-
-  # Envelope parameters
-  delay_ms: 40.0            # Wait before vibrato starts
-  ramp_ms: 30.0             # Gradual onset to full depth
-
-tags:
-  - vibrato
-  - classic
-  - strings
-  - expressive
+  tags:
+    - vibrato
+    - classic
+    - strings
+    - expressive

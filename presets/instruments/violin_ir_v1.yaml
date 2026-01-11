@@ -1,109 +1,102 @@
-# Violin IR v1 - WSE-STD-PRESET v0
-# =================================
+# Violin IR v1 - InstrumentIR v0
+# ==============================
 #
 # Expressive bowed-string with organic character.
-# Uses Mode B synthesis with custom harmonic profile and modulation.
+# Uses Mode B synthesis with custom harmonic profile.
 #
 # Target sound: solo violin with natural character
 # - Slow attack (~30ms) for bow contact
 # - Rich harmonics from real violin analysis
-# - Bow pressure vibrato (5.5 Hz)
-# - Body resonance warble (slow formant drift)
-# - Attack brightness (bow bite that settles)
+# - High sustain for bowed string
+# - Long release for natural decay
 #
-# Macros:
-# - VIBRATO: Vibrato depth control
-# - BRIGHT: Attack brightness
-# - BODY: Body resonance amount
-# - ATTACK: Attack time
-# - RELEASE: Release time
-
-preset:
-  preset_id: "VIOLIN_IR_V1"
-  preset_version: "v1"
-  author: "symcrash"
-  description: "Expressive bowed-string with bow pressure vibrato and body warble."
-
-compat:
-  voiceframe_std: "WSE-STD-020 v1"
-  vm_std: "WSE-STD-VM-HYBRID v0"
-  operator_lib_id: "WSE-OPLIB-24 v0"
-
-latch_defaults:
-  pattern_id: 0
-  tail_mode: "FULL"
-  tree_a_id: 0
-  tree_b_id: 0
-  tree_blend_q15: 0
-  carrier:
-    model: "CUSTOM"       # Mode B with custom harmonics
-    role: "AUDIBLE"
-    transition: "RETRIGGER"
-    detune_cents: 0
-    pulse_width_q15: 16384
-
-env:
-  amp:
-    attack_ms: 30.0         # Slow attack for bowed string
-    decay_ms: 250.0         # Medium decay
-    sustain: 0.80           # High sustain
-    release_ms: 550.0       # Long release for natural decay
-
-material:
-  beta_start_q15: 0         # Pure carrier (no CMMM operators)
-  beta_target_q15: 0        # Keep pure carrier
-  beta_ramp_blocks: 1
-
-backbone: []                # No backbone operators (pure Mode B)
-
-# Custom harmonic profile from real violin analysis
+# Custom harmonic profile from real violin analysis:
 # H1=94%, H2=100%, H3=21%, H4=73%, H5=11%, H6=19%, H7=4%, H8=4%
-carrier:
-  harmonic_amps_q15:
-    - 30890    # H1: 94.3% - strong fundamental
-    - 32767    # H2: 100.0% - STRONGEST (characteristic violin sound)
-    - 6926     # H3: 21.1% - moderate
-    - 23969    # H4: 73.2% - STRONG body resonance
-    - 3673     # H5: 11.2% - weak
-    - 6138     # H6: 18.7% - moderate
-    - 1164     # H7: 3.6% - very weak
-    - 1228     # H8: 3.7% - very weak
 
-# Modulation parameters for organic violin character
-modulation:
-  # Bow pressure vibrato: 5-6 Hz wobble with delayed onset
-  vibrato:
-    rate_hz: 5.5            # Typical violin vibrato frequency
-    depth_amp: 0.06         # 6% amplitude wobble
-    depth_timbre: 0.08      # 8% timbre wobble (H2/H4 balance)
-    delay_ms: 40.0          # Delay before vibrato onset (bow settling)
-    ramp_ms: 27.0           # Gradual vibrato onset
+instrument_ir_v0:
+  meta:
+    instrument_id: "violin-ir-v1"
+    name: "Violin IR"
+    version: 1
+    author: "symcrash"
+    seed_u32: 0x56494F4C
 
-  # Body resonance warble: slow formant drift
-  body_warble:
-    rate_hz: 1.2            # Slow LFO rate
-    depth: 0.04             # 4% body resonance wobble
-    target_harmonic: 4      # H4 = body resonance
+  io:
+    sample_rate_hz: 48000
+    block_size: 64
 
-  # Attack texture: bow bite brightness that settles
-  attack_texture:
-    bright_ms: 60.0         # Time for brightness to settle
-    bright_amount: 0.15     # 15% extra upper harmonics on attack
-    harmonics: [5, 6]       # Boost H5, H6 on attack (bow bite)
+  layers:
+    L0_graph:
+      nodes:
+        - id: "osc1"
+          type: "Osc"
+          params:
+            waveform: "partials"
+            # Custom harmonic profile - H2 strongest (characteristic violin)
+            partials:
+              - 30890    # H1: 94.3%
+              - 32767    # H2: 100.0% (STRONGEST)
+              - 6926     # H3: 21.1%
+              - 23969    # H4: 73.2% (body resonance)
+              - 3673     # H5: 11.2%
+              - 6138     # H6: 18.7%
+              - 1164     # H7: 3.6%
+              - 1228     # H8: 3.7%
 
-macros:
-  VIBRATO:
-    target: vibrato_depth
-    default_q15: 16384      # 0.5 (moderate vibrato)
-  BRIGHT:
-    target: attack_bright
-    default_q15: 16384      # 0.5 (moderate brightness)
-  BODY:
-    target: body_depth
-    default_q15: 16384      # 0.5 (moderate body warble)
-  ATTACK:
-    target: attack_time
-    default_q15: 8192       # 0.25 (30ms attack)
-  RELEASE:
-    target: release_time
-    default_q15: 14746      # 0.45 (550ms release)
+        - id: "amp1"
+          type: "Amp"
+          params:
+            adsr:
+              a_ms: 30.0          # Slow attack for bow contact
+              d_ms: 250.0         # Medium decay
+              s: 0.80             # High sustain
+              r_ms: 550.0         # Long release for natural decay
+
+      edges:
+        - src: "osc1"
+          dst: "amp1"
+
+      macros:
+        - id: "M_VIBRATO"
+          name: "Vibrato"
+          default: 0.5
+        - id: "M_BRIGHT"
+          name: "Brightness"
+          default: 0.5
+        - id: "M_BODY"
+          name: "Body"
+          default: 0.5
+        - id: "M_ATTACK"
+          name: "Attack"
+          default: 0.25
+        - id: "M_RELEASE"
+          name: "Release"
+          default: 0.45
+
+    L3_cmmm:
+      emit_templates:
+        T_IDLE:
+          families:
+            CONSTRAINT: 1.0
+            CALM: 1.0
+          ops_enable: ["NormalizeScale", "FineClamp"]
+          trees:
+            A: "T1"
+            B: "T1"
+            beta: 0.0
+
+        T_STABLE:
+          families:
+            CONSTRAINT: 1.0
+            CALM: 0.8
+          ops_enable: ["NormalizeScale", "FineClamp"]
+          trees:
+            A: "T1"
+            B: "T1"
+            beta: 0.0
+
+  compile:
+    material:
+      beta_start_q15: 0         # Pure carrier (no CMMM processing)
+      beta_target_q15: 0        # Stay pure
+      beta_ramp_blocks: 1

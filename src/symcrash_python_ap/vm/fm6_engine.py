@@ -302,6 +302,28 @@ def fm6_generate_audio(state: FM6State, base_phase_inc: int, num_blocks: int = 1
 # =============================================================================
 # Preset Configurations
 # =============================================================================
+#
+# DEPRECATED: These configure_* functions are legacy convenience functions.
+# New code should use instrument_ir_v0 YAML presets with FM6 nodes in L0_graph.
+#
+# Example YAML (preferred):
+#   layers:
+#     L0_graph:
+#       nodes:
+#         - id: "fm6"
+#           type: "FM6"
+#           params:
+#             algorithm: 22
+#             feedback: 4
+#             op_ratios: [65536, 65602, ...]
+#             op_levels: [32767, 24576, ...]
+#
+# The CapsuleCompiler extracts FM6 parameters from L0 nodes and populates
+# VoiceParamID.FM6_* defaults. This integrates with the standard voice engine
+# pipeline (VoiceFrameEmitter -> VoiceFrame -> Executor).
+#
+# These functions remain for backwards compatibility with render scripts.
+# =============================================================================
 
 def configure_electric_piano(state: FM6State):
     """

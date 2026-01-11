@@ -71,7 +71,11 @@ class AudioSink:
     def get_numpy(self) -> Tuple[np.ndarray, np.ndarray]:
         """Get as numpy arrays (float -1..1)."""
         L = np.array(self.L, dtype=np.float32) / 32768.0
-        R = np.array(self.R, dtype=np.float32) / 32768.0
+        # For mono mode, R may be empty - return copy of L for consistency
+        if self.mono or len(self.R) == 0:
+            R = L.copy()
+        else:
+            R = np.array(self.R, dtype=np.float32) / 32768.0
         return L, R
     
     def clear(self):
@@ -124,57 +128,62 @@ class Pipeline:
         """Set the operator program for all voices."""
         self.symbol.ops.set_program(op_ids)
     
-    def inject_note(self, voice_id: int, frequency: float = 440.0, 
+    def inject_note(self, voice_id: int, frequency: float = 440.0,
                     amplitude: int = 0x4000):
         """
         Inject a note into a voice.
-        
-        The wavelet synthesis treats each leaf's 8 coefficients as an amplitude
+
+        The wavelet synthesis treats each leaf's coefficients as an amplitude
         envelope that modulates a carrier at the leaf's center frequency.
-        
+
         To create a tone at a specific frequency, we need to:
         1. Find the leaf whose frequency band contains the target frequency
         2. Set that leaf's coefficients to encode the amplitude envelope
         """
         coeffs = [0] * self.coeff_len
-        
+
         # Frequency parameters
         nyquist = self.fs / 2  # 24000 Hz at 48kHz sample rate
-        
-        # For wavelet packet trees with 32 leaves at depth 5:
-        # - Leaf 0 covers [0, 1/32] of Nyquist = 0-750 Hz
-        # - Leaf 1 covers [1/32, 2/32] = 750-1500 Hz
-        # - etc.
-        
-        band_width = nyquist / 32  # ~750 Hz per leaf
-        
+
+        # Derive number of leaves and coefficients per leaf from coeff_len
+        # Common configurations:
+        #   coeff_len=256 -> 32 leaves × 8 coeffs
+        #   coeff_len=512 -> 64 leaves × 8 coeffs or 32 leaves × 16 coeffs
+        # Assume 8 coefficients per leaf (standard for 64-sample blocks)
+        coeffs_per_leaf = 8
+        num_leaves = self.coeff_len // coeffs_per_leaf
+
+        band_width = nyquist / num_leaves
+
         # Generate harmonics
         for harmonic in range(1, 16):
             freq = frequency * harmonic
             if freq >= nyquist * 0.95:  # Stay below Nyquist
                 break
-            
+
             # Find which leaf contains this frequency
             leaf_idx = int(freq / band_width)
-            leaf_idx = max(0, min(31, leaf_idx))
-            
+            leaf_idx = max(0, min(num_leaves - 1, leaf_idx))
+
             # Harmonic amplitude (natural 1/n rolloff)
             harm_amp = amplitude // harmonic
-            
+
             # For a sustained tone, we want constant amplitude envelope
-            # The 8 coefficients represent the envelope over the block
+            # The coefficients represent the envelope over the block
             # For a steady tone, make them all the same (with slight variation for richness)
-            node_start = leaf_idx * 8
-            
-            for i in range(8):
+            node_start = leaf_idx * coeffs_per_leaf
+
+            for i in range(coeffs_per_leaf):
                 # Create slight amplitude modulation for naturalness
                 # but keep it mostly constant for sustained tone
-                mod = 1.0 + 0.1 * np.sin(2 * np.pi * i / 8 + harmonic * 0.5)
+                mod = 1.0 + 0.1 * np.sin(2 * np.pi * i / coeffs_per_leaf + harmonic * 0.5)
                 coeff_val = int(harm_amp * mod)
-                
+
                 # Add to existing (allows multiple harmonics in same band)
-                coeffs[node_start + i] = sat16(coeffs[node_start + i] + coeff_val)
-        
+                # Clamp to Q15 range (±32767) not sat16 (±32768)
+                new_val = coeffs[node_start + i] + coeff_val
+                coeffs[node_start + i] = max(-32767, min(32767, new_val))
+
         self.symbol.inject_note(voice_id, coeffs)
     
     def step(self) -> Tuple[List[int], List[int]]:
@@ -238,6 +247,16 @@ PROGRAMS = {
 # DEMO / TEST
 # =============================================================================
 
+def _get_demo_output_dir() -> str:
+    """Get cross-platform demo output directory."""
+    import os
+    # Use output/ relative to package root, create if needed
+    pkg_dir = os.path.dirname(os.path.abspath(__file__))
+    output_dir = os.path.join(os.path.dirname(os.path.dirname(pkg_dir)), "output", "demos")
+    os.makedirs(output_dir, exist_ok=True)
+    return output_dir
+
+
 def demo_basic():
     """Basic demo: generate a sustained test tone."""
     print("=" * 60)
@@ -266,8 +285,9 @@ def demo_basic():
         pipe.step()
     
     # Export
-    pipe.export_wav("/home/claude/synth_pipeline/demo_basic.wav")
-    
+    import os
+    pipe.export_wav(os.path.join(_get_demo_output_dir(), "demo_basic.wav"))
+
     return pipe
 
 
@@ -296,9 +316,10 @@ def demo_evolving():
         pipe.params.morph_q15 = int(t * Q15_ONE)
         
         pipe.step()
-    
-    pipe.export_wav("/home/claude/synth_pipeline/demo_evolving.wav")
-    
+
+    import os
+    pipe.export_wav(os.path.join(_get_demo_output_dir(), "demo_evolving.wav"))
+
     return pipe
 
 
@@ -390,10 +411,11 @@ def demo_catastrophe():
             pipe.inject_note(0, frequency=base_freq, amplitude=0x4000)
         
         pipe.step()
-    
-    pipe.export_wav("/home/claude/synth_pipeline/demo_catastrophe.wav")
+
+    import os
+    pipe.export_wav(os.path.join(_get_demo_output_dir(), "demo_catastrophe.wav"))
     print(f"  Total duration: 10 seconds")
-    
+
     return pipe
 
 
@@ -431,9 +453,10 @@ def demo_all_materials():
                 pipe.inject_note(0, frequency=150.0, amplitude=0x3000)
                 pipe.inject_note(1, frequency=225.0, amplitude=0x2800)
             pipe.step()
-    
-    pipe.export_wav("/home/claude/synth_pipeline/demo_materials.wav")
-    
+
+    import os
+    pipe.export_wav(os.path.join(_get_demo_output_dir(), "demo_materials.wav"))
+
     return pipe
 
 
@@ -442,8 +465,8 @@ def demo_tree_types():
     print("=" * 60)
     print("TREE TYPES DEMO")
     print("=" * 60)
-    
-    from wavelet_packet_trees import PacketTreeSet
+
+    from .wavelet_packet_trees import PacketTreeSet
     tree_set = PacketTreeSet()
     
     pipe = Pipeline(n_voices=2, block_size=64)
@@ -470,9 +493,10 @@ def demo_tree_types():
                 pipe.inject_note(0, frequency=110.0, amplitude=0x3000)
                 pipe.inject_note(1, frequency=165.0, amplitude=0x2800)
             pipe.step()
-    
-    pipe.export_wav("/home/claude/synth_pipeline/demo_trees.wav")
-    
+
+    import os
+    pipe.export_wav(os.path.join(_get_demo_output_dir(), "demo_trees.wav"))
+
     return pipe
 
 
@@ -516,9 +540,10 @@ def demo_tree_transition():
             pipe.inject_note(1, frequency=196.0, amplitude=0x2800)
         
         pipe.step()
-    
-    pipe.export_wav("/home/claude/synth_pipeline/demo_transitions.wav")
-    
+
+    import os
+    pipe.export_wav(os.path.join(_get_demo_output_dir(), "demo_transitions.wav"))
+
     return pipe
 
 
@@ -530,7 +555,7 @@ if __name__ == "__main__":
     demo_all_materials()
     demo_tree_types()
     demo_tree_transition()
-    
+
     print("\n" + "=" * 60)
-    print("All demos complete. WAV files in /home/claude/synth_pipeline/")
+    print(f"All demos complete. WAV files in {_get_demo_output_dir()}")
     print("=" * 60)

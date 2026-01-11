@@ -278,6 +278,10 @@ class VoiceFrameEmitter:
         # Use control-driven tree_blend_q15 if available
         tree_blend = self._tree_blend_q15 if self._tree_blend_q15 != 0 else self.preset.latch.tree_blend_q15
 
+        # Determine oscillator mode and FM6 fields from preset
+        osc_mode = getattr(self.preset, 'osc_mode', 0)
+        fm6_config = getattr(self.preset, 'fm6', None)
+
         # Build VoiceFrame
         frame = VoiceFrame(
             voice_id=self.voice_id,
@@ -294,6 +298,12 @@ class VoiceFrameEmitter:
             tree_blend_q15=tree_blend,
             is_starting=(self.block_index == 0),
             is_active=self.is_active,
+            # FM6 fields (from preset if available)
+            coeff_osc_mode=osc_mode,
+            fm_algorithm_id=fm6_config.algorithm_id if fm6_config else None,
+            fm_op_ratios=list(fm6_config.op_ratios) if fm6_config else None,
+            fm_op_levels=list(fm6_config.op_levels) if fm6_config else None,
+            fm_feedback_depth=fm6_config.feedback_depth if fm6_config else None,
         )
 
         # Advance block counter

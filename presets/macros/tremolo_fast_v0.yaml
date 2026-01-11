@@ -1,5 +1,5 @@
-# Tremolo Fast v0 - WSE-STD-CAPSULE-COMPAT v0 §2.4
-# =================================================
+# Tremolo Fast v0 - MacroIR v0
+# =============================
 #
 # Fast tremolo for dramatic effect.
 # Can be applied to any instrument preset.
@@ -8,35 +8,30 @@
 # - Amplitude-only modulation (no pitch wobble)
 # - Fast rate for dramatic trembling effect
 # - Immediate onset
-#
 
-preset:
-  preset_id: "TREMOLO_FAST_V0"
-  preset_version: "v0"
-  author: "symcrash"
-  description: "Fast tremolo with amplitude-only modulation."
+macro_ir_v0:
+  meta:
+    macro_id: "tremolo-fast-v0"
+    name: "Fast Tremolo"
+    version: 0
+    author: "symcrash"
+    description: "Fast tremolo with amplitude-only modulation."
 
-compat:
-  voiceframe_std: "WSE-STD-020 v1"
-  vm_std: "WSE-STD-VM-HYBRID v0"
+  macro:
+    macro_type: TREMOLO
 
-kind: MACRO
+    # LFO parameters
+    rate_hz: 8.0              # Fast tremolo rate
+    depth_pitch_cents: 0      # No pitch modulation
+    depth_amp_q15: 8192       # 25% amplitude modulation
+    depth_timbre_q15: 0       # No timbre modulation
 
-macro:
-  macro_type: TREMOLO
+    # Envelope parameters
+    delay_ms: 0.0             # Immediate onset
+    ramp_ms: 10.0             # Quick ramp
 
-  # LFO parameters
-  rate_hz: 8.0              # Fast tremolo rate
-  depth_pitch_cents: 0      # No pitch modulation
-  depth_amp_q15: 8192       # 25% amplitude modulation
-  depth_timbre_q15: 0       # No timbre modulation
-
-  # Envelope parameters
-  delay_ms: 0.0             # Immediate onset
-  ramp_ms: 10.0             # Quick ramp
-
-tags:
-  - tremolo
-  - fast
-  - dramatic
-  - strings
+  tags:
+    - tremolo
+    - fast
+    - dramatic
+    - strings

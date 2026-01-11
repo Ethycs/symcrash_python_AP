@@ -51,3 +51,7 @@ vgcore.*
 
 # Audio files
 *.wav
+
+# Audio presets
+*.json
+*.bin

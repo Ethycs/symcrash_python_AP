@@ -118,6 +118,16 @@ class VoiceParamID(IntEnum):
     FM6_TOPO_B = 95         # Target archetype 0-7
     FM6_TOPO_BLEND = 96     # Topology morph Q0.15 (0=A, 32767=B)
 
+    # Filter (97-104) - Subtractive synthesis filter
+    FILTER_ENABLE = 97          # Filter enable (0=bypass, 1=active)
+    FILTER_TYPE = 98            # 0=LP, 1=HP, 2=BP, 3=Notch
+    FILTER_CUTOFF_Q15 = 99      # Cutoff frequency Q0.15 (0=20Hz, 32767=20kHz log)
+    FILTER_RESONANCE_Q15 = 100  # Resonance/Q Q0.15 (0=none, 32767=self-osc)
+    FILTER_ENV_DEPTH_Q15 = 101  # Envelope mod depth Q1.15 (signed, -32768 to 32767)
+    FILTER_KEY_TRACK_Q15 = 102  # Key tracking Q0.15 (0=none, 16384=50%, 32767=100%)
+    FILTER_DRIVE_Q15 = 103      # Pre-filter drive/saturation Q0.15
+    FILTER_SLOPE = 104          # Slope: 0=12dB/oct, 1=24dB/oct, 2=6dB/oct
+
     # IDWPT (128-159)
     K_REQUEST = 128
     TAIL_POLICY_HINT = 129
@@ -838,6 +848,112 @@ VOICE_ENGINE_REGISTRY_V0: List[VoiceParamEntry] = [
         persistence=Persistence.PER_VOICE,
         domain=Domain.CCS,
         binding_target="ccs.fm6_topo_blend",
+    ),
+
+    # --- Filter (97-104) - Subtractive synthesis ---
+
+    VoiceParamEntry(
+        param_id=VoiceParamID.FILTER_ENABLE,
+        name="filter_enable",
+        value_type=ValueType.BOOL,
+        min_value=0,
+        max_value=1,
+        default_value=0,  # Bypass by default
+        update_mode=UpdateMode.ABS,
+        persistence=Persistence.PROGRAM,
+        domain=Domain.CCS,
+        binding_target="ccs.filter_enable",
+    ),
+
+    VoiceParamEntry(
+        param_id=VoiceParamID.FILTER_TYPE,
+        name="filter_type",
+        value_type=ValueType.ENUM8,
+        min_value=0,
+        max_value=3,  # 0=LP, 1=HP, 2=BP, 3=Notch
+        default_value=0,  # Lowpass
+        update_mode=UpdateMode.ABS,
+        persistence=Persistence.PROGRAM,
+        domain=Domain.CCS,
+        binding_target="ccs.filter_type",
+    ),
+
+    VoiceParamEntry(
+        param_id=VoiceParamID.FILTER_CUTOFF_Q15,
+        name="filter_cutoff_q15",
+        value_type=ValueType.Q15U,
+        min_value=0,
+        max_value=32767,  # Q0.15: log scale 20Hz-20kHz
+        default_value=32767,  # Wide open
+        update_mode=UpdateMode.BOTH,
+        persistence=Persistence.PER_VOICE,
+        domain=Domain.CCS,
+        binding_target="ccs.filter_cutoff",
+    ),
+
+    VoiceParamEntry(
+        param_id=VoiceParamID.FILTER_RESONANCE_Q15,
+        name="filter_resonance_q15",
+        value_type=ValueType.Q15U,
+        min_value=0,
+        max_value=32767,  # Q0.15: 0=flat, 32767=self-oscillation
+        default_value=0,  # No resonance
+        update_mode=UpdateMode.BOTH,
+        persistence=Persistence.PER_VOICE,
+        domain=Domain.CCS,
+        binding_target="ccs.filter_resonance",
+    ),
+
+    VoiceParamEntry(
+        param_id=VoiceParamID.FILTER_ENV_DEPTH_Q15,
+        name="filter_env_depth_q15",
+        value_type=ValueType.I16,  # SIGNED for bipolar modulation
+        min_value=-32768,
+        max_value=32767,  # Q1.15: negative = inverted env
+        default_value=0,  # No envelope modulation
+        update_mode=UpdateMode.BOTH,
+        persistence=Persistence.PER_VOICE,
+        domain=Domain.CCS,
+        binding_target="ccs.filter_env_depth",
+    ),
+
+    VoiceParamEntry(
+        param_id=VoiceParamID.FILTER_KEY_TRACK_Q15,
+        name="filter_key_track_q15",
+        value_type=ValueType.Q15U,
+        min_value=0,
+        max_value=32767,  # Q0.15: 16384=50%, 32767=100% tracking
+        default_value=0,  # No key tracking
+        update_mode=UpdateMode.ABS,
+        persistence=Persistence.PROGRAM,
+        domain=Domain.CCS,
+        binding_target="ccs.filter_key_track",
+    ),
+
+    VoiceParamEntry(
+        param_id=VoiceParamID.FILTER_DRIVE_Q15,
+        name="filter_drive_q15",
+        value_type=ValueType.Q15U,
+        min_value=0,
+        max_value=32767,  # Q0.15: pre-filter saturation
+        default_value=0,  # Clean
+        update_mode=UpdateMode.BOTH,
+        persistence=Persistence.PER_VOICE,
+        domain=Domain.CCS,
+        binding_target="ccs.filter_drive",
+    ),
+
+    VoiceParamEntry(
+        param_id=VoiceParamID.FILTER_SLOPE,
+        name="filter_slope",
+        value_type=ValueType.ENUM8,
+        min_value=0,
+        max_value=2,  # 0=12dB/oct, 1=24dB/oct, 2=6dB/oct
+        default_value=1,  # 24dB/oct (classic 4-pole)
+        update_mode=UpdateMode.ABS,
+        persistence=Persistence.PROGRAM,
+        domain=Domain.CCS,
+        binding_target="ccs.filter_slope",
     ),
 
     # =========================================================================

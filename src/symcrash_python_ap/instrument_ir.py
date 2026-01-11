@@ -274,8 +274,18 @@ class NodeParams:
     # Noise
     color: Optional[str] = None
 
-    # Filter
+    # Filter (legacy mode string)
     mode: Optional[str] = None
+
+    # Filter parameters (subtractive synthesis, Q0.15 per WSE-STD-001)
+    filter_enable: bool = False
+    filter_type: int = 0              # 0=LP, 1=HP, 2=BP, 3=Notch
+    filter_cutoff_q15: int = 32767    # Cutoff Q0.15 (log scale 20Hz-20kHz)
+    filter_resonance_q15: int = 0     # Resonance Q0.15 (0=flat, 32767=self-osc)
+    filter_env_depth_q15: int = 0     # Envelope mod Q1.15 (signed)
+    filter_key_track_q15: int = 0     # Key tracking Q0.15 (16384=50%)
+    filter_drive_q15: int = 0         # Pre-filter saturation Q0.15
+    filter_slope: int = 1             # 0=12dB/oct, 1=24dB/oct, 2=6dB/oct
 
     # Amp
     adsr: Optional[ADSR] = None
@@ -564,12 +574,26 @@ class FrameEmitterPolicy:
 
 
 @dataclass
+class MaterialConfig:
+    """
+    Material (dry/wet blend) configuration.
+
+    Controls the blend between dry carrier signal and wet CMMM-processed material.
+    Beta ramps from start to target over ramp_blocks after note-on.
+    """
+    beta_start_q15: int = 0          # Starting blend (0 = fully dry)
+    beta_target_q15: int = 16384     # Target blend (0.5 default)
+    beta_ramp_blocks: int = 8        # Blocks to ramp from start to target
+
+
+@dataclass
 class CompileConfig:
     """Compile section configuration."""
     map_library: Dict[str, str] = field(default_factory=dict)
     completion_policy: CompletionPolicy = field(default_factory=CompletionPolicy)
     degrade_profile: DegradeProfile = field(default_factory=DegradeProfile)
     frame_emitter_policy: FrameEmitterPolicy = field(default_factory=FrameEmitterPolicy)
+    material: MaterialConfig = field(default_factory=MaterialConfig)
 
 
 # =============================================================================
@@ -995,11 +1019,31 @@ def _parse_node_params(data: dict) -> NodeParams:
     if 'sample_rate_q16' in data:
         params.sample_rate_q16 = data['sample_rate_q16']
 
-    # Noise / Filter / Amp
+    # Noise
     if 'color' in data:
         params.color = data['color']
+
+    # Filter (legacy mode string + new Q15 parameters)
     if 'mode' in data:
         params.mode = data['mode']
+    if 'filter_enable' in data:
+        params.filter_enable = data['filter_enable']
+    if 'filter_type' in data:
+        params.filter_type = data['filter_type']
+    if 'filter_cutoff_q15' in data:
+        params.filter_cutoff_q15 = data['filter_cutoff_q15']
+    if 'filter_resonance_q15' in data:
+        params.filter_resonance_q15 = data['filter_resonance_q15']
+    if 'filter_env_depth_q15' in data:
+        params.filter_env_depth_q15 = data['filter_env_depth_q15']
+    if 'filter_key_track_q15' in data:
+        params.filter_key_track_q15 = data['filter_key_track_q15']
+    if 'filter_drive_q15' in data:
+        params.filter_drive_q15 = data['filter_drive_q15']
+    if 'filter_slope' in data:
+        params.filter_slope = data['filter_slope']
+
+    # Amp / FX Send
     if 'adsr' in data:
         params.adsr = _parse_adsr(data['adsr'])
     if 'send_a' in data:
@@ -1333,6 +1377,15 @@ def _parse_frame_emitter_policy(data: dict) -> FrameEmitterPolicy:
     )
 
 
+def _parse_material_config(data: dict) -> MaterialConfig:
+    """Parse material config from dict."""
+    return MaterialConfig(
+        beta_start_q15=data.get('beta_start_q15', 0),
+        beta_target_q15=data.get('beta_target_q15', 16384),
+        beta_ramp_blocks=data.get('beta_ramp_blocks', 8),
+    )
+
+
 def _parse_compile_config(data: dict) -> CompileConfig:
     """Parse compile config from dict."""
     return CompileConfig(
@@ -1340,6 +1393,7 @@ def _parse_compile_config(data: dict) -> CompileConfig:
         completion_policy=_parse_completion_policy(data.get('completion_policy', {})),
         degrade_profile=_parse_degrade_profile(data.get('degrade_profile', {})),
         frame_emitter_policy=_parse_frame_emitter_policy(data.get('frame_emitter_policy', {})),
+        material=_parse_material_config(data.get('material', {})),
     )
 
 
@@ -1389,15 +1443,53 @@ def load_instrument_from_dict(data: dict) -> InstrumentIR:
     """
     Load InstrumentIR from a dictionary.
 
+    The canonical format uses the instrument_ir_v0 wrapper:
+
+        instrument_ir_v0:
+          meta:
+            instrument_id: "my-synth"
+            name: "My Synth"
+            ...
+          layers:
+            L0_graph:
+              nodes: [...]
+            L3_cmmm:
+              emit_templates: {...}
+          compile:
+            material:
+              beta_start_q15: 0
+              beta_target_q15: 16384
+
+    Required fields:
+    - meta.instrument_id: Unique identifier
+    - meta.name: Human-readable name
+
+    Optional fields (with defaults):
+    - meta.version: 0
+    - meta.author: ""
+    - io.sample_rate_hz: 48000
+    - io.block_size: 64
+    - layers.L0_graph: Auto-completed if missing
+    - layers.L3_cmmm: Auto-completed if missing
+    - compile.material: Default blend settings
+
     Args:
-        data: Dictionary with instrument IR data
+        data: Dictionary with instrument_ir_v0 wrapper
 
     Returns:
         InstrumentIR object
+
+    Raises:
+        ValueError: If using deprecated preset: format
     """
-    # Handle top-level wrapper if present
+    # Handle top-level wrapper
     if 'instrument_ir_v0' in data:
         data = data['instrument_ir_v0']
+    elif 'preset' in data:
+        raise ValueError(
+            "The 'preset:' format is deprecated. Use 'instrument_ir_v0:' format instead. "
+            "See PRESET-AUTHORING-GUIDE.md for the canonical format."
+        )
 
     return InstrumentIR(
         meta=_parse_instrument_meta(data.get('meta', {})),

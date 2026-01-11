@@ -57,6 +57,50 @@ class BackboneOp:
 
 
 # =============================================================================
+# FM6 CONFIG
+# =============================================================================
+
+@dataclass
+class FM6Config:
+    """
+    FM6 synthesis configuration.
+
+    Contains all parameters needed to configure the 6-operator FM engine
+    from a YAML preset.
+    """
+    algorithm_id: int = 1                   # DX7 algorithm (1-32)
+    op_ratios: list = field(default_factory=lambda: [65536]*6)   # 6 × Q16 ratios
+    op_levels: list = field(default_factory=lambda: [32767]*6)   # 6 × Q15 levels
+    feedback_depth: int = 0                 # DX7 feedback level (0-7)
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> 'FM6Config':
+        """Parse FM6 config from dict."""
+        # Support both 'algorithm_id' and 'algorithm' keys
+        algorithm_id = d.get('algorithm_id', d.get('algorithm', 1))
+
+        # Parse operator ratios (Q16: 65536 = 1.0)
+        op_ratios = d.get('op_ratios', [65536]*6)
+        if len(op_ratios) < 6:
+            op_ratios = op_ratios + [65536] * (6 - len(op_ratios))
+
+        # Parse operator levels (Q15: 32767 = 1.0)
+        op_levels = d.get('op_levels', [32767]*6)
+        if len(op_levels) < 6:
+            op_levels = op_levels + [32767] * (6 - len(op_levels))
+
+        # Support both 'feedback_depth' and 'feedback' keys
+        feedback_depth = d.get('feedback_depth', d.get('feedback', 0))
+
+        return cls(
+            algorithm_id=algorithm_id,
+            op_ratios=op_ratios[:6],
+            op_levels=op_levels[:6],
+            feedback_depth=feedback_depth,
+        )
+
+
+# =============================================================================
 # CARRIER CONFIG
 # =============================================================================
 
@@ -195,6 +239,13 @@ class CompiledPreset:
     # Harmonic amplitudes for saw/partial carriers
     harmonic_amps_q15: List[int] = field(default_factory=lambda: [32767, 16383, 10922, 8191, 6553, 5461, 4681, 4096])
 
+    # FM6 configuration (optional - if present, enables FM6 mode)
+    fm6: Optional[FM6Config] = None
+
+    # Oscillator mode (0=ModeA, 1=ModeB, 2=Sample, 3=FM6)
+    # Auto-set to 3 when fm6 section is present
+    osc_mode: int = 0
+
     def backbone_ops(self) -> List[str]:
         """Get list of enabled operator names."""
         return [op.op for op in self.backbone]
@@ -300,6 +351,15 @@ class PresetCompiler:
             # Default saw harmonics: 1/n falloff
             harmonic_amps = [Q15_ONE // n for n in range(1, 9)]
 
+        # Parse FM6 section (optional - enables FM6 mode when present)
+        fm6_section = preset_dict.get('fm6', None)
+        fm6_config = None
+        osc_mode = 0
+
+        if fm6_section is not None:
+            fm6_config = FM6Config.from_dict(fm6_section)
+            osc_mode = 3  # OSC_MODE_FM6
+
         return CompiledPreset(
             preset_id=preset_id,
             preset_version=preset_version,
@@ -313,6 +373,8 @@ class PresetCompiler:
             material=material,
             backbone=backbone,
             harmonic_amps_q15=harmonic_amps,
+            fm6=fm6_config,
+            osc_mode=osc_mode,
         )
 
     def compile_file(self, filepath: str) -> CompiledPreset:
@@ -423,6 +485,7 @@ class PresetCompiler:
 __all__ = [
     'Q15_ONE',
     'BackboneOp',
+    'FM6Config',
     'CarrierConfig',
     'MaterialConfig',
     'LatchDefaults',
