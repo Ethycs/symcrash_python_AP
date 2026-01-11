@@ -134,8 +134,8 @@ def render_preset(preset_path, note, duration_sec):
 
 
 def main():
-    # Get all presets
-    preset_dir = Path(__file__).parent.parent / "src/symcrash_python_ap/library/preset_data"
+    # Get all presets from the new presets/ directory
+    preset_dir = Path(__file__).parent.parent / "presets" / "instruments"
     presets = sorted(preset_dir.glob("*.yaml"))
 
     # Render each preset

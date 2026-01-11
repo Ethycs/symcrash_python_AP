@@ -219,11 +219,21 @@ class HarmonicProfile:
 
 @dataclass
 class NodeParams:
-    """Parameters for DSP nodes."""
+    """
+    Parameters for DSP nodes.
+
+    Per WSE-STD-001: Q1.15 for gains/strengths, Q0.16 for unipolar, ENUM8 for modes.
+    """
     # Oscillator
     waveform: Optional[str] = None
     detune_cents: float = 0.0
-    pw: float = 0.5  # Pulse width
+    pw: float = 0.5  # Pulse width (legacy, use pwm_width_q15 for precision)
+
+    # Oscillator mode (0=A/LUT, 1=B/Rotator, 2=Sample, 3=FM6)
+    osc_mode: int = 0
+
+    # Waveform type (0=sine, 1=square, 2=pulse, 3=saw, 4=saw_down, 5=tri)
+    waveform_type: int = 0
 
     # Carrier-specific fields (v1 Addendum A)
     role: Optional[str] = None        # "off" | "audible" | "exciter_only"
@@ -236,6 +246,30 @@ class NodeParams:
     vibrato: Optional[VibratoParams] = None
     body_warble: Optional[BodyWarbleParams] = None
     attack_texture: Optional[AttackTextureParams] = None
+
+    # PWM parameters (Q0.15 per WSE-STD-001)
+    pwm_enable: bool = False
+    pwm_width_q15: int = 16384        # Duty cycle Q0.15 (16384=50%)
+
+    # Hard sync parameters
+    sync_enable: bool = False
+    sync_ratio_q16: int = 65536       # Master/slave ratio Q16.16 (65536=1.0)
+
+    # Mode B FM parameters
+    fm_enable: bool = False
+    fm_depth_q15: int = 0             # FM depth Q0.15
+    fm_source: int = 0                # 0=off, 1=feedback, 2=LFO
+
+    # Unison parameters
+    unison_voices: int = 1            # Voice count (1-8)
+    unison_spread: int = 10           # Detune spread in cents
+
+    # Mode flags
+    drone_mode: bool = False          # Sustained coefficient mode
+    legato_mode: bool = False         # Smooth pitch transitions
+
+    # Sample playback parameters
+    sample_rate_q16: int = 65536      # Playback rate Q16.16 (65536=1.0x)
 
     # Noise
     color: Optional[str] = None
@@ -250,11 +284,14 @@ class NodeParams:
     send_a: float = 0.0
     send_b: float = 0.0
 
-    # FM6 parameters (6-operator FM synthesis)
+    # FM6 parameters (6-operator FM synthesis, OSC_MODE=3)
     algorithm: Optional[int] = None          # DX7 algorithm 1-32
     feedback: Optional[int] = None           # Feedback level 0-7
-    op_ratios: Optional[List[int]] = None    # 6 Q16 frequency ratios
-    op_levels: Optional[List[int]] = None    # 6 Q15 output levels
+    op_ratios: Optional[List[int]] = None    # 6 Q16.16 frequency ratios
+    op_levels: Optional[List[int]] = None    # 6 Q0.15 output levels
+    fm6_topo_a: int = 0                      # Source archetype 0-7
+    fm6_topo_b: int = 0                      # Target archetype 0-7
+    fm6_topo_blend_q15: int = 0              # Topology morph Q0.15
 
 
 @dataclass
@@ -903,17 +940,62 @@ def _parse_adsr(data: dict) -> ADSR:
 def _parse_node_params(data: dict) -> NodeParams:
     """Parse node params from dict."""
     params = NodeParams()
+
+    # Oscillator basics
     if 'waveform' in data:
         params.waveform = data['waveform']
     if 'detune_cents' in data:
         params.detune_cents = data['detune_cents']
     if 'pw' in data:
         params.pw = data['pw']
+    if 'osc_mode' in data:
+        params.osc_mode = data['osc_mode']
+    if 'waveform_type' in data:
+        params.waveform_type = data['waveform_type']
+
     # Carrier-specific fields (v1 Addendum A)
     if 'role' in data:
         params.role = data['role']
     if 'archetype' in data:
         params.archetype = data['archetype']
+
+    # PWM parameters
+    if 'pwm_enable' in data:
+        params.pwm_enable = data['pwm_enable']
+    if 'pwm_width_q15' in data:
+        params.pwm_width_q15 = data['pwm_width_q15']
+
+    # Hard sync parameters
+    if 'sync_enable' in data:
+        params.sync_enable = data['sync_enable']
+    if 'sync_ratio_q16' in data:
+        params.sync_ratio_q16 = data['sync_ratio_q16']
+
+    # Mode B FM parameters
+    if 'fm_enable' in data:
+        params.fm_enable = data['fm_enable']
+    if 'fm_depth_q15' in data:
+        params.fm_depth_q15 = data['fm_depth_q15']
+    if 'fm_source' in data:
+        params.fm_source = data['fm_source']
+
+    # Unison parameters
+    if 'unison_voices' in data:
+        params.unison_voices = data['unison_voices']
+    if 'unison_spread' in data:
+        params.unison_spread = data['unison_spread']
+
+    # Mode flags
+    if 'drone_mode' in data:
+        params.drone_mode = data['drone_mode']
+    if 'legato_mode' in data:
+        params.legato_mode = data['legato_mode']
+
+    # Sample playback
+    if 'sample_rate_q16' in data:
+        params.sample_rate_q16 = data['sample_rate_q16']
+
+    # Noise / Filter / Amp
     if 'color' in data:
         params.color = data['color']
     if 'mode' in data:
@@ -924,7 +1006,8 @@ def _parse_node_params(data: dict) -> NodeParams:
         params.send_a = data['send_a']
     if 'send_b' in data:
         params.send_b = data['send_b']
-    # FM6 parameters
+
+    # FM6 parameters (6-operator synthesis)
     if 'algorithm' in data:
         params.algorithm = data['algorithm']
     if 'feedback' in data:
@@ -933,6 +1016,13 @@ def _parse_node_params(data: dict) -> NodeParams:
         params.op_ratios = data['op_ratios']
     if 'op_levels' in data:
         params.op_levels = data['op_levels']
+    if 'fm6_topo_a' in data:
+        params.fm6_topo_a = data['fm6_topo_a']
+    if 'fm6_topo_b' in data:
+        params.fm6_topo_b = data['fm6_topo_b']
+    if 'fm6_topo_blend_q15' in data:
+        params.fm6_topo_blend_q15 = data['fm6_topo_blend_q15']
+
     return params
 
 

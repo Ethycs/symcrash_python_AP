@@ -3,7 +3,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from symcrash_python_ap.instrument_ir import load_instrument
 
-ir = load_instrument('src/symcrash_python_ap/library/preset_data/brass_stab_v0.yaml')
+ir = load_instrument('presets/instruments/brass_stab_v0.yaml')
 for node in ir.layers.L0_graph.nodes:
     if node.type == 'FM6':
         print(f'Algorithm: {node.params.algorithm}')

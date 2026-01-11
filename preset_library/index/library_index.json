@@ -1,6 +1,220 @@
 {
   "assets": {},
   "capsules": {
+    "brass-stab-7d19ab6a2ef8": {
+      "latest_revision": 1,
+      "revisions": {
+        "1": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-10T23:39:26.246260+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Brass Stab",
+          "path": "capsules/brass-stab-7d19ab6a2ef8/1",
+          "retired": false,
+          "tags": []
+        }
+      }
+    },
+    "fm-bell-147b22e38ba0": {
+      "latest_revision": 1,
+      "revisions": {
+        "1": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-10T23:39:26.304683+00:00",
+          "kind": "INSTRUMENT",
+          "name": "FM Bell",
+          "path": "capsules/fm-bell-147b22e38ba0/1",
+          "retired": false,
+          "tags": []
+        }
+      }
+    },
+    "glitch-lead-424fa816d36b": {
+      "latest_revision": 1,
+      "revisions": {
+        "1": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-10T23:39:26.330921+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Glitch Lead",
+          "path": "capsules/glitch-lead-424fa816d36b/1",
+          "retired": false,
+          "tags": [
+            "glitch",
+            "saw"
+          ]
+        }
+      }
+    },
+    "jump-brass-48258ae59583": {
+      "latest_revision": 1,
+      "revisions": {
+        "1": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-10T23:39:26.354880+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Jump Brass",
+          "path": "capsules/jump-brass-48258ae59583/1",
+          "retired": false,
+          "tags": []
+        }
+      }
+    },
+    "pluck-1e1880eaa8e3": {
+      "latest_revision": 1,
+      "revisions": {
+        "1": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-10T23:39:26.371996+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Pluck",
+          "path": "capsules/pluck-1e1880eaa8e3/1",
+          "retired": false,
+          "tags": [
+            "saw"
+          ]
+        }
+      }
+    },
+    "pwm-pad-1049070764bf": {
+      "latest_revision": 1,
+      "revisions": {
+        "1": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-10T23:39:26.388733+00:00",
+          "kind": "INSTRUMENT",
+          "name": "PWM Pad",
+          "path": "capsules/pwm-pad-1049070764bf/1",
+          "retired": false,
+          "tags": [
+            "pulse"
+          ]
+        }
+      }
+    },
+    "saw-lead-5f455c335c61": {
+      "latest_revision": 1,
+      "revisions": {
+        "1": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-10T23:39:26.405675+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Saw Lead",
+          "path": "capsules/saw-lead-5f455c335c61/1",
+          "retired": false,
+          "tags": [
+            "saw"
+          ]
+        }
+      }
+    },
+    "square-bass-5df2e0c261be": {
+      "latest_revision": 1,
+      "revisions": {
+        "1": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-10T23:39:26.422064+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Square Bass",
+          "path": "capsules/square-bass-5df2e0c261be/1",
+          "retired": false,
+          "tags": [
+            "square"
+          ]
+        }
+      }
+    },
+    "string-pad-5d9d74422451": {
+      "latest_revision": 1,
+      "revisions": {
+        "1": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-10T23:39:26.438883+00:00",
+          "kind": "INSTRUMENT",
+          "name": "String Pad",
+          "path": "capsules/string-pad-5d9d74422451/1",
+          "retired": false,
+          "tags": [
+            "saw"
+          ]
+        }
+      }
+    },
+    "sub-bass-cf83426de4aa": {
+      "latest_revision": 1,
+      "revisions": {
+        "1": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-10T23:39:26.455113+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Sub Bass",
+          "path": "capsules/sub-bass-cf83426de4aa/1",
+          "retired": false,
+          "tags": [
+            "sine"
+          ]
+        }
+      }
+    },
+    "sync-lead-4c877a255c52": {
+      "latest_revision": 1,
+      "revisions": {
+        "1": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-10T23:39:26.488591+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Sync Lead",
+          "path": "capsules/sync-lead-4c877a255c52/1",
+          "retired": false,
+          "tags": [
+            "saw"
+          ]
+        }
+      }
+    },
+    "synth-brass-92a0f0362c17": {
+      "latest_revision": 1,
+      "revisions": {
+        "1": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-10T23:39:26.283629+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Synth Brass",
+          "path": "capsules/synth-brass-92a0f0362c17/1",
+          "retired": false,
+          "tags": []
+        }
+      }
+    },
+    "theremin-lead-8968f2274ac7": {
+      "latest_revision": 1,
+      "revisions": {
+        "1": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-10T23:39:26.505260+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Theremin Lead",
+          "path": "capsules/theremin-lead-8968f2274ac7/1",
+          "retired": false,
+          "tags": [
+            "sine"
+          ]
+        }
+      }
+    },
     "violin-ir-001": {
       "latest_revision": 1,
       "revisions": {
@@ -21,10 +235,41 @@
           ]
         }
       }
+    },
+    "wobble-bass-daac9b2e27bf": {
+      "latest_revision": 1,
+      "revisions": {
+        "1": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-10T23:39:26.530262+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Wobble Bass",
+          "path": "capsules/wobble-bass-daac9b2e27bf/1",
+          "retired": false,
+          "tags": [
+            "square"
+          ]
+        }
+      }
     }
   },
   "program_id_map": {
-    "2001": "violin-ir-001"
+    "1163238173": "sync-lead-4c877a255c52",
+    "1163888049": "string-pad-5d9d74422451",
+    "1254036454": "pwm-pad-1049070764bf",
+    "1476221186": "jump-brass-48258ae59583",
+    "1675326602": "brass-stab-7d19ab6a2ef8",
+    "1954319054": "saw-lead-5f455c335c61",
+    "2001": "violin-ir-001",
+    "2056854389": "square-bass-5df2e0c261be",
+    "234640873": "synth-brass-92a0f0362c17",
+    "259003674": "sub-bass-cf83426de4aa",
+    "372835072": "theremin-lead-8968f2274ac7",
+    "642297337": "glitch-lead-424fa816d36b",
+    "685195083": "pluck-1e1880eaa8e3",
+    "879252156": "wobble-bass-daac9b2e27bf",
+    "925367568": "fm-bell-147b22e38ba0"
   },
   "version": 0
 }

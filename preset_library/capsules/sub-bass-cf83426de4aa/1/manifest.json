@@ -1,0 +1,36 @@
+{
+  "format": "WSE_CAPSULE_V0",
+  "capsule_version": 0,
+  "identity": {
+    "capsule_id": "sub-bass-cf83426de4aa",
+    "kind": "INSTRUMENT",
+    "name": "Sub Bass",
+    "author": "symcrash",
+    "tags": [
+      "sine"
+    ]
+  },
+  "engine_compat": {
+    "control_registry_abi": 0,
+    "voice_registry_abi": 0,
+    "voiceframe_abi": 0,
+    "sample_rate_hz": 48000,
+    "block_size": 64
+  },
+  "program": {
+    "program_id": 259003674,
+    "instrument_ir_id": "sub-bass-v0",
+    "regime_graph_id": null,
+    "tree_family_id": null
+  },
+  "seeds": {
+    "master_seed": 1398096450,
+    "derivation_rule_id": 0
+  },
+  "files": {
+    "control_defaults": "control_defaults.bin"
+  },
+  "crc": {
+    "control_defaults": "0x889E2EFF"
+  }
+}

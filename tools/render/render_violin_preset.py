@@ -37,8 +37,8 @@ BLOCK_SIZE = 64
 BLOCKS_PER_SEC = FS // BLOCK_SIZE
 
 OUTPUT_DIR = str(Path(__file__).parent.parent / "audio_generation_tests" / "audio_out")
-PRESET_PATH = Path(__file__).parent.parent / "src/symcrash_python_ap/library/preset_data/violin_ir_v1.yaml"
-PRESET_PATH_JSON = Path(__file__).parent.parent / "src/symcrash_python_ap/library/preset_data/violin_ir_v1.json"
+PRESET_PATH = Path(__file__).parent.parent / "presets/instruments/violin_ir_v1.yaml"
+PRESET_PATH_JSON = None  # JSON duplicates removed - use YAML only
 
 
 def load_violin_preset() -> dict:

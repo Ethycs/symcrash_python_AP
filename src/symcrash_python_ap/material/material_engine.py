@@ -73,6 +73,48 @@ class ChorusState:
             self.buffer = [0] * self.max_samples
 
 
+@dataclass
+class ReverbState:
+    """
+    State for Schroeder reverb (MONO).
+
+    FPGA NOTE: This reverb requires significant memory for delay lines.
+    Total buffer: ~100ms worth = 4800 samples per channel = ~10KB per channel.
+    For stereo: ~20KB total. Use external SRAM/SDRAM, not BRAM.
+
+    Structure: 4 parallel comb filters -> 2 series allpass filters
+    """
+    # Comb filter delay lines (parallel)
+    # Delay times chosen for dense, non-metallic reverb
+    comb1: List[int] = None  # 29.7ms = 1426 samples
+    comb2: List[int] = None  # 37.1ms = 1781 samples
+    comb3: List[int] = None  # 41.1ms = 1973 samples
+    comb4: List[int] = None  # 43.7ms = 2098 samples
+    comb_idx: List[int] = None
+
+    # Allpass filter delay lines (series)
+    ap1: List[int] = None    # 5.0ms = 240 samples
+    ap2: List[int] = None    # 1.7ms = 82 samples
+    ap_idx: List[int] = None
+
+    # Comb filter delays (samples at 48kHz)
+    COMB_DELAYS = (1426, 1781, 1973, 2098)
+    # Allpass delays
+    AP_DELAYS = (240, 82)
+
+    def __post_init__(self):
+        if self.comb1 is None:
+            self.comb1 = [0] * self.COMB_DELAYS[0]
+            self.comb2 = [0] * self.COMB_DELAYS[1]
+            self.comb3 = [0] * self.COMB_DELAYS[2]
+            self.comb4 = [0] * self.COMB_DELAYS[3]
+            self.comb_idx = [0, 0, 0, 0]
+
+            self.ap1 = [0] * self.AP_DELAYS[0]
+            self.ap2 = [0] * self.AP_DELAYS[1]
+            self.ap_idx = [0, 0]
+
+
 class MaterialEngine:
     """
     Applies material programs to stereo audio blocks.
@@ -99,6 +141,11 @@ class MaterialEngine:
         # Chorus state (material_id=7)
         self.chorus_L = ChorusState()
         self.chorus_R = ChorusState()
+
+        # Reverb state (material_id=8)
+        # FPGA NOTE: Reverb buffers should use external SRAM/SDRAM
+        self.reverb_L = ReverbState()
+        self.reverb_R = ReverbState()
 
         # Slewed parameters
         self.params = MaterialParams()
@@ -137,6 +184,8 @@ class MaterialEngine:
             return self._delay_line(L, R)
         elif material_id == 7:
             return self._chorus(L, R)
+        elif material_id == 8:
+            return self._reverb(L, R)
         else:
             return self._clean_glue(L, R)
     
@@ -583,5 +632,158 @@ class MaterialEngine:
 
             outL.append(yL)
             outR.append(yR)
+
+        return outL, outR
+
+    # =========================================================================
+    # REVERB (material_id=8)
+    # =========================================================================
+    #
+    # FPGA IMPLEMENTATION NOTES:
+    # --------------------------
+    # Total delay buffer per channel: ~7600 samples = ~15KB (Q15)
+    # Stereo total: ~30KB - TOO LARGE FOR BRAM
+    #
+    # Recommended FPGA approach:
+    # 1. Use external SRAM or SDRAM for delay lines
+    # 2. Prefetch next samples during processing
+    # 3. Or use reduced delay times (halve for ~15KB total)
+    # 4. Consider mono reverb bus with stereo decorrelation at output
+    #
+    # Alternative: Freeverb-style with 8 combs + 4 allpass = more memory
+    # This Schroeder design is more FPGA-friendly (4 combs + 2 allpass)
+
+    def _comb_filter(self, x: int, buffer: List[int], idx: int, delay: int,
+                     feedback_q15: int) -> Tuple[int, int]:
+        """
+        Comb filter: y[n] = x[n-D] + g * y[n-D]
+
+        Returns (output, new_idx)
+        """
+        # Read delayed sample
+        read_idx = idx
+        delayed = buffer[read_idx]
+
+        # Output is just the delayed sample
+        output = delayed
+
+        # Write input + feedback to buffer
+        fb = mul_q15_sat(delayed, feedback_q15)
+        buffer[idx] = sat16(x + fb)
+
+        # Advance index
+        new_idx = (idx + 1) % delay
+
+        return output, new_idx
+
+    def _allpass_filter(self, x: int, buffer: List[int], idx: int, delay: int,
+                        g_q15: int) -> Tuple[int, int]:
+        """
+        Allpass filter: y[n] = -g*x[n] + x[n-D] + g*y[n-D]
+
+        Returns (output, new_idx)
+        """
+        # Read delayed sample
+        delayed = buffer[idx]
+
+        # Allpass output: -g*x + delayed + g*delayed_feedback
+        # Simplified: output = delayed - g * (x - delayed)
+        diff = sat16(x - delayed)
+        output = sat16(delayed - mul_q15_sat(g_q15, diff))
+
+        # Write input to buffer (for next iteration)
+        buffer[idx] = x
+
+        # Advance index
+        new_idx = (idx + 1) % delay
+
+        return output, new_idx
+
+    def _reverb_sample(self, x: int, state: ReverbState,
+                       decay_q15: int, damping_q15: int) -> int:
+        """
+        Single-sample Schroeder reverb.
+
+        Args:
+            x: Input sample (Q15)
+            state: ReverbState with comb and allpass buffers
+            decay_q15: Reverb decay/size (Q15, 0-32767)
+            damping_q15: High frequency damping (Q15, 0-32767)
+
+        Returns:
+            Reverb output (Q15)
+        """
+        # Scale input to prevent clipping in feedback loops
+        x_scaled = x >> 2
+
+        # Comb filter feedback based on decay
+        # Higher decay = longer reverb tail
+        # Typical comb feedback: 0.7-0.9 for natural reverb
+        fb = (decay_q15 * 28000) >> 15  # Scale to ~0.85 max
+
+        # Process 4 parallel comb filters
+        c1, state.comb_idx[0] = self._comb_filter(
+            x_scaled, state.comb1, state.comb_idx[0],
+            state.COMB_DELAYS[0], fb)
+        c2, state.comb_idx[1] = self._comb_filter(
+            x_scaled, state.comb2, state.comb_idx[1],
+            state.COMB_DELAYS[1], fb)
+        c3, state.comb_idx[2] = self._comb_filter(
+            x_scaled, state.comb3, state.comb_idx[2],
+            state.COMB_DELAYS[2], fb)
+        c4, state.comb_idx[3] = self._comb_filter(
+            x_scaled, state.comb4, state.comb_idx[3],
+            state.COMB_DELAYS[3], fb)
+
+        # Sum comb outputs (with scaling to prevent overflow)
+        comb_sum = (c1 + c2 + c3 + c4) >> 2
+
+        # Apply damping (simple lowpass via averaging with previous)
+        # Higher damping = more muffled reverb
+        # TODO: Could add proper one-pole lowpass here
+
+        # Series allpass filters for diffusion
+        # Allpass coefficient ~0.5 for good diffusion
+        ap_g = Q15_HALF
+
+        ap1_out, state.ap_idx[0] = self._allpass_filter(
+            comb_sum, state.ap1, state.ap_idx[0],
+            state.AP_DELAYS[0], ap_g)
+        ap2_out, state.ap_idx[1] = self._allpass_filter(
+            ap1_out, state.ap2, state.ap_idx[1],
+            state.AP_DELAYS[1], ap_g)
+
+        # Scale output back up
+        return sat16(ap2_out << 1)
+
+    def _reverb(self, L: List[int], R: List[int]) -> Tuple[List[int], List[int]]:
+        """
+        Reverb processing.
+
+        Uses drive_q15 as decay/size (0-32767: small room to large hall)
+        Uses tone_q15 as damping (0=bright, 32767=dark)
+        Uses pressure_q15 as wet/dry mix
+        """
+        outL = []
+        outR = []
+
+        # Map parameters
+        decay_q15 = self.params.drive_q15
+        damping_q15 = self.params.tone_q15
+        mix_q15 = self.params.pressure_q15
+
+        for i in range(self.B):
+            # Process reverb
+            wetL = self._reverb_sample(L[i], self.reverb_L, decay_q15, damping_q15)
+            wetR = self._reverb_sample(R[i], self.reverb_R, decay_q15, damping_q15)
+
+            # Mix dry/wet
+            dryL = mul_q15_sat(L[i], Q15_ONE - mix_q15)
+            dryR = mul_q15_sat(R[i], Q15_ONE - mix_q15)
+            wetL = mul_q15_sat(wetL, mix_q15)
+            wetR = mul_q15_sat(wetR, mix_q15)
+
+            outL.append(sat16(dryL + wetL))
+            outR.append(sat16(dryR + wetR))
 
         return outL, outR

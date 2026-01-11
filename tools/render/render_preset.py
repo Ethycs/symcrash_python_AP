@@ -14,8 +14,8 @@ Usage:
 
 Examples:
     python tools/render_preset.py  # Renders glitch_lead_v0 by default
-    python tools/render_preset.py src/symcrash_python_ap/library/preset_data/brass_stab_v0.yaml
-    python tools/render_preset.py src/symcrash_python_ap/library/preset_data/violin_ir_v1.yaml --note 69
+    python tools/render_preset.py presets/instruments/brass_stab_v0.yaml
+    python tools/render_preset.py presets/instruments/violin_ir_v1.yaml --note 69
 """
 
 import sys
@@ -42,7 +42,7 @@ BLOCKS_PER_SEC = FS // BLOCK_SIZE
 OUTPUT_DIR = str(Path(__file__).parent.parent / "audio_generation_tests" / "audio_out")
 
 # Default preset
-DEFAULT_PRESET = Path(__file__).parent.parent / "src/symcrash_python_ap/library/preset_data/glitch_lead_v0.yaml"
+DEFAULT_PRESET = Path(__file__).parent.parent / "presets/instruments/glitch_lead_v0.yaml"
 
 
 def ms_to_blocks(ms: float) -> int:

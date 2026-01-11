@@ -2,50 +2,81 @@
 Classic L0 Synthesizer Presets
 ==============================
 
-This module provides 12 classic synthesizer presets as InstrumentIR v0 JSON files.
+This module provides synthesizer presets as InstrumentIR v0 YAML files.
+
+Preset authoring files are stored in the top-level presets/ directory:
+    presets/
+        instruments/   - Instrument presets (brass_stab, saw_lead, etc.)
+        macros/        - Macro presets (vibrato, legato, etc.)
 
 Usage:
     from symcrash_python_ap.library.preset_data import list_presets, load_preset
 
     # List available presets
-    names = list_presets()  # ['saw_lead', 'square_bass', ...]
+    names = list_presets()  # ['saw_lead_v0', 'square_bass_v0', ...]
 
     # Load a specific preset
-    ir = load_preset('saw_lead')
+    ir = load_preset('saw_lead_v0')
 
     # Load all presets
     all_presets = get_all_presets()
 
-Available presets:
-    1. saw_lead      - Bright, cutting lead with TILT + COMPRESS_K
-    2. square_bass   - Fat, punchy bass with negative TILT + LOWRANK_MORPH
-    3. sync_lead     - Hard sync resonance with SHEAF_PROJECT + COMPRESS_K
-    4. brass_stab    - Classic brass hit with TILT + DIFFUSE_DOWN
-    5. string_pad    - Lush ensemble with DIFFUSE_UP + INTRA_MIX
-    6. fm_bell       - Metallic bell with SHEAF_PROJECT + FINE_CLAMP
-    7. jump_brass    - Van Halen style with TILT + COMPRESS_K + DIFFUSE_DOWN
-    8. sub_bass      - Deep sub with negative TILT + LOWRANK_MORPH
-    9. pwm_pad       - Slow pulse width mod with DIFFUSE_UP + INTRA_MIX
-    10. pluck        - Quick attack pluck with TILT + COMPRESS_K
-    11. wobble_bass  - Dubstep wobble with TILT + LOWRANK_MORPH
-    12. theremin_lead - Ethereal theremin with IDENTITY + FINE_CLAMP
+Available instrument presets:
+    - saw_lead_v0      - Bright, cutting lead with TILT + COMPRESS_K
+    - square_bass_v0   - Fat, punchy bass with negative TILT + LOWRANK_MORPH
+    - sync_lead_v0     - Hard sync resonance with SHEAF_PROJECT + COMPRESS_K
+    - brass_stab_v0    - Classic brass hit with TILT + DIFFUSE_DOWN
+    - string_pad_v0    - Lush ensemble with DIFFUSE_UP + INTRA_MIX
+    - fm_bell_v0       - Metallic bell with SHEAF_PROJECT + FINE_CLAMP
+    - jump_brass_v0    - Van Halen style with TILT + COMPRESS_K + DIFFUSE_DOWN
+    - sub_bass_v0      - Deep sub with negative TILT + LOWRANK_MORPH
+    - pwm_pad_v0       - Slow pulse width mod with DIFFUSE_UP + INTRA_MIX
+    - pluck_v0         - Quick attack pluck with TILT + COMPRESS_K
+    - wobble_bass_v0   - Dubstep wobble with TILT + LOWRANK_MORPH
+    - theremin_lead_v0 - Ethereal theremin with IDENTITY + FINE_CLAMP
+    - glitch_lead_v0   - Experimental glitchy lead
+    - violin_ir_v1     - Violin with vibrato
+
+Available macro presets:
+    - vibrato_classic_v0  - Classic vibrato modulation
+    - legato_smooth_v0    - Smooth legato transitions
+    - tremolo_fast_v0     - Fast tremolo effect
+    - portamento_slow_v0  - Slow pitch glide
 """
 from pathlib import Path
 from typing import Dict, List
 
 from ...instrument_ir import InstrumentIR, load_instrument
 
-PRESET_DIR = Path(__file__).parent
+# Find the presets directory (relative to repo root)
+_MODULE_DIR = Path(__file__).parent
+_REPO_ROOT = _MODULE_DIR.parent.parent.parent.parent  # src/symcrash.../library/preset_data -> repo root
+PRESET_DIR = _REPO_ROOT / "presets"
+INSTRUMENTS_DIR = PRESET_DIR / "instruments"
+MACROS_DIR = PRESET_DIR / "macros"
 
 
-def list_presets() -> List[str]:
+def list_presets(category: str = None) -> List[str]:
     """
     List all available preset names.
 
+    Args:
+        category: Optional filter - 'instruments', 'macros', or None for all.
+
     Returns:
-        List of preset names (without .json extension), sorted alphabetically.
+        List of preset names (without .yaml extension), sorted alphabetically.
     """
-    return sorted([f.stem for f in PRESET_DIR.glob("*.json")])
+    presets = []
+
+    if category is None or category == 'instruments':
+        if INSTRUMENTS_DIR.exists():
+            presets.extend(f.stem for f in INSTRUMENTS_DIR.glob("*.yaml"))
+
+    if category is None or category == 'macros':
+        if MACROS_DIR.exists():
+            presets.extend(f.stem for f in MACROS_DIR.glob("*.yaml"))
+
+    return sorted(presets)
 
 
 def load_preset(name: str) -> InstrumentIR:
@@ -53,7 +84,7 @@ def load_preset(name: str) -> InstrumentIR:
     Load a preset by name.
 
     Args:
-        name: Preset name (without .json extension), e.g. 'saw_lead'
+        name: Preset name (without .yaml extension), e.g. 'saw_lead_v0'
 
     Returns:
         InstrumentIR object with the preset configuration.
@@ -61,7 +92,11 @@ def load_preset(name: str) -> InstrumentIR:
     Raises:
         ValueError: If preset not found.
     """
-    path = PRESET_DIR / f"{name}.json"
+    # Check instruments first, then macros
+    path = INSTRUMENTS_DIR / f"{name}.yaml"
+    if not path.exists():
+        path = MACROS_DIR / f"{name}.yaml"
+
     if not path.exists():
         available = list_presets()
         raise ValueError(
@@ -86,7 +121,7 @@ def get_preset_info(name: str) -> Dict[str, any]:
     Get summary info about a preset without loading the full IR.
 
     Args:
-        name: Preset name (without .json extension)
+        name: Preset name (without .yaml extension)
 
     Returns:
         Dictionary with preset metadata.
@@ -104,10 +139,39 @@ def get_preset_info(name: str) -> Dict[str, any]:
     }
 
 
+def get_preset_path(name: str) -> Path:
+    """
+    Get the file path for a preset.
+
+    Args:
+        name: Preset name (without .yaml extension)
+
+    Returns:
+        Path to the preset YAML file.
+
+    Raises:
+        ValueError: If preset not found.
+    """
+    path = INSTRUMENTS_DIR / f"{name}.yaml"
+    if not path.exists():
+        path = MACROS_DIR / f"{name}.yaml"
+
+    if not path.exists():
+        available = list_presets()
+        raise ValueError(
+            f"Preset not found: {name}. "
+            f"Available presets: {', '.join(available)}"
+        )
+    return path
+
+
 __all__ = [
     'list_presets',
     'load_preset',
     'get_all_presets',
     'get_preset_info',
+    'get_preset_path',
     'PRESET_DIR',
+    'INSTRUMENTS_DIR',
+    'MACROS_DIR',
 ]

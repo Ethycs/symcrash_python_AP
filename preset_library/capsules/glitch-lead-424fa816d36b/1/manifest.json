@@ -1,0 +1,37 @@
+{
+  "format": "WSE_CAPSULE_V0",
+  "capsule_version": 0,
+  "identity": {
+    "capsule_id": "glitch-lead-424fa816d36b",
+    "kind": "INSTRUMENT",
+    "name": "Glitch Lead",
+    "author": "symcrash",
+    "tags": [
+      "glitch",
+      "saw"
+    ]
+  },
+  "engine_compat": {
+    "control_registry_abi": 0,
+    "voice_registry_abi": 0,
+    "voiceframe_abi": 0,
+    "sample_rate_hz": 48000,
+    "block_size": 64
+  },
+  "program": {
+    "program_id": 642297337,
+    "instrument_ir_id": "glitch-lead-v0",
+    "regime_graph_id": 565067850,
+    "tree_family_id": 215197828
+  },
+  "seeds": {
+    "master_seed": 3735928559,
+    "derivation_rule_id": 0
+  },
+  "files": {
+    "control_defaults": "control_defaults.bin"
+  },
+  "crc": {
+    "control_defaults": "0x037DB7EB"
+  }
+}

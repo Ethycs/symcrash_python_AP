@@ -80,12 +80,43 @@ class VoiceParamID(IntEnum):
     DWELL_MIN_BLOCKS = 34
     TRANSITION_POLICY = 35
 
-    # CCS (64-127)
-    OSC_MODE = 64
-    WAVE_ID = 65
-    H_REQUEST = 66
-    PWM_ENABLE = 67
-    FM_ENABLE = 68
+    # CCS (64-127) - Coefficient/Carrier/Synthesis
+    # Per WSE-STD-001: Q1.15 for gains/strengths, Q0.16 for unipolar, ENUM8 for modes
+    OSC_MODE = 64           # 0=A(LUT), 1=B(Rotator), 2=Sample, 3=FM6
+    WAVE_ID = 65            # Waveform LUT index
+    H_REQUEST = 66          # Harmonic count request
+    PWM_ENABLE = 67         # PWM modulation enable
+    FM_ENABLE = 68          # Mode B FM feedback enable
+    WAVEFORM_TYPE = 69      # 0=sine, 1=square, 2=pulse, 3=saw, 4=saw_down, 5=tri
+    PWM_WIDTH_Q15 = 70      # Duty cycle Q0.15 (16384=50%)
+    SYNC_ENABLE = 71        # Hard sync enable
+    SYNC_RATIO_Q16 = 72     # Master/slave ratio Q16.16 (65536=1.0)
+    FM_DEPTH_Q15 = 73       # Mode B FM depth Q0.15
+    FM_SOURCE = 74          # 0=off, 1=feedback, 2=LFO
+    UNISON_VOICES = 75      # Unison voice count (1-8)
+    UNISON_SPREAD = 76      # Detune spread in cents
+    DRONE_MODE = 77         # Sustained coefficient mode
+    LEGATO_MODE = 78        # Smooth pitch transitions
+    SAMPLE_RATE_Q16 = 79    # Sample playback rate Q16.16
+
+    # FM6 (80-99) - 6-operator FM synthesis (OSC_MODE=3)
+    FM6_ALGORITHM = 80      # DX7 algorithm 1-32
+    FM6_FEEDBACK = 81       # Feedback level 0-7 (maps to Q15 via DX7 table)
+    FM6_OP0_RATIO = 82      # Op1 frequency ratio Q16.16 (65536=1.0)
+    FM6_OP1_RATIO = 83      # Op2 frequency ratio Q16.16
+    FM6_OP2_RATIO = 84      # Op3 frequency ratio Q16.16
+    FM6_OP3_RATIO = 85      # Op4 frequency ratio Q16.16
+    FM6_OP4_RATIO = 86      # Op5 frequency ratio Q16.16
+    FM6_OP5_RATIO = 87      # Op6 frequency ratio Q16.16
+    FM6_OP0_LEVEL = 88      # Op1 output level Q0.15 (32767=full)
+    FM6_OP1_LEVEL = 89      # Op2 output level Q0.15
+    FM6_OP2_LEVEL = 90      # Op3 output level Q0.15
+    FM6_OP3_LEVEL = 91      # Op4 output level Q0.15
+    FM6_OP4_LEVEL = 92      # Op5 output level Q0.15
+    FM6_OP5_LEVEL = 93      # Op6 output level Q0.15
+    FM6_TOPO_A = 94         # Source archetype 0-7 (CHAIN,STACK,DUAL,SPLIT,etc)
+    FM6_TOPO_B = 95         # Target archetype 0-7
+    FM6_TOPO_BLEND = 96     # Topology morph Q0.15 (0=A, 32767=B)
 
     # IDWPT (128-159)
     K_REQUEST = 128
@@ -370,7 +401,7 @@ VOICE_ENGINE_REGISTRY_V0: List[VoiceParamEntry] = [
         name="osc_mode",
         value_type=ValueType.ENUM8,
         min_value=0,
-        max_value=1,  # 0=Mode A (LUT), 1=Mode B (Rotator)
+        max_value=3,  # 0=Mode A (LUT), 1=Mode B (Rotator), 2=Sample, 3=FM6
         default_value=0,  # Mode A
         update_mode=UpdateMode.ABS,
         persistence=Persistence.PROGRAM,
@@ -428,6 +459,385 @@ VOICE_ENGINE_REGISTRY_V0: List[VoiceParamEntry] = [
         persistence=Persistence.PROGRAM,
         domain=Domain.CCS,
         binding_target="ccs.fm_enable",
+    ),
+
+    # --- Waveform and PWM (69-72) ---
+
+    VoiceParamEntry(
+        param_id=VoiceParamID.WAVEFORM_TYPE,
+        name="waveform_type",
+        value_type=ValueType.ENUM8,
+        min_value=0,
+        max_value=5,  # 0=sine, 1=square, 2=pulse, 3=saw, 4=saw_down, 5=tri
+        default_value=0,  # Sine
+        update_mode=UpdateMode.ABS,
+        persistence=Persistence.PROGRAM,
+        domain=Domain.CCS,
+        binding_target="ccs.waveform_type",
+    ),
+
+    VoiceParamEntry(
+        param_id=VoiceParamID.PWM_WIDTH_Q15,
+        name="pwm_width_q15",
+        value_type=ValueType.Q15U,
+        min_value=0,
+        max_value=32767,  # Q0.15: 16384 = 50% duty cycle
+        default_value=16384,  # 50%
+        update_mode=UpdateMode.BOTH,
+        persistence=Persistence.PER_VOICE,
+        domain=Domain.CCS,
+        binding_target="ccs.pwm_width",
+    ),
+
+    VoiceParamEntry(
+        param_id=VoiceParamID.SYNC_ENABLE,
+        name="sync_enable",
+        value_type=ValueType.BOOL,
+        min_value=0,
+        max_value=1,
+        default_value=0,
+        update_mode=UpdateMode.ABS,
+        persistence=Persistence.PROGRAM,
+        domain=Domain.CCS,
+        binding_target="ccs.sync_enable",
+    ),
+
+    VoiceParamEntry(
+        param_id=VoiceParamID.SYNC_RATIO_Q16,
+        name="sync_ratio_q16",
+        value_type=ValueType.U16,
+        min_value=0,
+        max_value=65535,  # Q16.16 stored as U16 (high bits) - 65536 = 1.0
+        default_value=65535,  # ~1.0
+        update_mode=UpdateMode.ABS,
+        persistence=Persistence.PROGRAM,
+        domain=Domain.CCS,
+        binding_target="ccs.sync_ratio",
+    ),
+
+    # --- Mode B FM (73-74) ---
+
+    VoiceParamEntry(
+        param_id=VoiceParamID.FM_DEPTH_Q15,
+        name="fm_depth_q15",
+        value_type=ValueType.Q15U,
+        min_value=0,
+        max_value=32767,  # Q0.15 depth
+        default_value=0,
+        update_mode=UpdateMode.BOTH,
+        persistence=Persistence.PER_VOICE,
+        domain=Domain.CCS,
+        binding_target="ccs.fm_depth",
+    ),
+
+    VoiceParamEntry(
+        param_id=VoiceParamID.FM_SOURCE,
+        name="fm_source",
+        value_type=ValueType.ENUM8,
+        min_value=0,
+        max_value=2,  # 0=off, 1=feedback, 2=LFO
+        default_value=0,
+        update_mode=UpdateMode.ABS,
+        persistence=Persistence.PROGRAM,
+        domain=Domain.CCS,
+        binding_target="ccs.fm_source",
+    ),
+
+    # --- Unison (75-76) ---
+
+    VoiceParamEntry(
+        param_id=VoiceParamID.UNISON_VOICES,
+        name="unison_voices",
+        value_type=ValueType.ENUM8,
+        min_value=1,
+        max_value=8,  # 1-8 voices
+        default_value=1,  # No unison
+        update_mode=UpdateMode.ABS,
+        persistence=Persistence.PROGRAM,
+        domain=Domain.CCS,
+        binding_target="ccs.unison_voices",
+    ),
+
+    VoiceParamEntry(
+        param_id=VoiceParamID.UNISON_SPREAD,
+        name="unison_spread",
+        value_type=ValueType.U16,
+        min_value=0,
+        max_value=100,  # Detune spread in cents (0-100)
+        default_value=10,
+        update_mode=UpdateMode.ABS,
+        persistence=Persistence.PROGRAM,
+        domain=Domain.CCS,
+        binding_target="ccs.unison_spread",
+    ),
+
+    # --- Mode flags (77-78) ---
+
+    VoiceParamEntry(
+        param_id=VoiceParamID.DRONE_MODE,
+        name="drone_mode",
+        value_type=ValueType.BOOL,
+        min_value=0,
+        max_value=1,
+        default_value=0,
+        update_mode=UpdateMode.ABS,
+        persistence=Persistence.PROGRAM,
+        domain=Domain.CCS,
+        binding_target="ccs.drone_mode",
+    ),
+
+    VoiceParamEntry(
+        param_id=VoiceParamID.LEGATO_MODE,
+        name="legato_mode",
+        value_type=ValueType.BOOL,
+        min_value=0,
+        max_value=1,
+        default_value=0,
+        update_mode=UpdateMode.ABS,
+        persistence=Persistence.PROGRAM,
+        domain=Domain.CCS,
+        binding_target="ccs.legato_mode",
+    ),
+
+    # --- Sample mode (79) ---
+
+    VoiceParamEntry(
+        param_id=VoiceParamID.SAMPLE_RATE_Q16,
+        name="sample_rate_q16",
+        value_type=ValueType.U16,
+        min_value=0,
+        max_value=65535,  # Q16.16 playback rate (65536 = 1.0x)
+        default_value=65535,  # ~1.0x
+        update_mode=UpdateMode.BOTH,
+        persistence=Persistence.PER_VOICE,
+        domain=Domain.CCS,
+        binding_target="ccs.sample_rate",
+    ),
+
+    # --- FM6 6-operator synthesis (80-96) ---
+
+    VoiceParamEntry(
+        param_id=VoiceParamID.FM6_ALGORITHM,
+        name="fm6_algorithm",
+        value_type=ValueType.ENUM8,
+        min_value=1,
+        max_value=32,  # DX7 algorithms 1-32
+        default_value=1,  # Algorithm 1
+        update_mode=UpdateMode.ABS,
+        persistence=Persistence.PROGRAM,
+        domain=Domain.CCS,
+        binding_target="ccs.fm6_algorithm",
+    ),
+
+    VoiceParamEntry(
+        param_id=VoiceParamID.FM6_FEEDBACK,
+        name="fm6_feedback",
+        value_type=ValueType.ENUM8,
+        min_value=0,
+        max_value=7,  # 0-7 maps to DX7 feedback table
+        default_value=0,
+        update_mode=UpdateMode.ABS,
+        persistence=Persistence.PROGRAM,
+        domain=Domain.CCS,
+        binding_target="ccs.fm6_feedback",
+    ),
+
+    # Op frequency ratios Q16.16 (65536 = 1.0x carrier frequency)
+    VoiceParamEntry(
+        param_id=VoiceParamID.FM6_OP0_RATIO,
+        name="fm6_op0_ratio",
+        value_type=ValueType.U16,
+        min_value=0,
+        max_value=65535,
+        default_value=65535,  # 1.0x
+        update_mode=UpdateMode.ABS,
+        persistence=Persistence.PROGRAM,
+        domain=Domain.CCS,
+        binding_target="ccs.fm6_op0_ratio",
+    ),
+
+    VoiceParamEntry(
+        param_id=VoiceParamID.FM6_OP1_RATIO,
+        name="fm6_op1_ratio",
+        value_type=ValueType.U16,
+        min_value=0,
+        max_value=65535,
+        default_value=65535,  # 1.0x
+        update_mode=UpdateMode.ABS,
+        persistence=Persistence.PROGRAM,
+        domain=Domain.CCS,
+        binding_target="ccs.fm6_op1_ratio",
+    ),
+
+    VoiceParamEntry(
+        param_id=VoiceParamID.FM6_OP2_RATIO,
+        name="fm6_op2_ratio",
+        value_type=ValueType.U16,
+        min_value=0,
+        max_value=65535,
+        default_value=65535,  # 1.0x
+        update_mode=UpdateMode.ABS,
+        persistence=Persistence.PROGRAM,
+        domain=Domain.CCS,
+        binding_target="ccs.fm6_op2_ratio",
+    ),
+
+    VoiceParamEntry(
+        param_id=VoiceParamID.FM6_OP3_RATIO,
+        name="fm6_op3_ratio",
+        value_type=ValueType.U16,
+        min_value=0,
+        max_value=65535,
+        default_value=65535,  # 1.0x
+        update_mode=UpdateMode.ABS,
+        persistence=Persistence.PROGRAM,
+        domain=Domain.CCS,
+        binding_target="ccs.fm6_op3_ratio",
+    ),
+
+    VoiceParamEntry(
+        param_id=VoiceParamID.FM6_OP4_RATIO,
+        name="fm6_op4_ratio",
+        value_type=ValueType.U16,
+        min_value=0,
+        max_value=65535,
+        default_value=65535,  # 1.0x
+        update_mode=UpdateMode.ABS,
+        persistence=Persistence.PROGRAM,
+        domain=Domain.CCS,
+        binding_target="ccs.fm6_op4_ratio",
+    ),
+
+    VoiceParamEntry(
+        param_id=VoiceParamID.FM6_OP5_RATIO,
+        name="fm6_op5_ratio",
+        value_type=ValueType.U16,
+        min_value=0,
+        max_value=65535,
+        default_value=65535,  # 1.0x
+        update_mode=UpdateMode.ABS,
+        persistence=Persistence.PROGRAM,
+        domain=Domain.CCS,
+        binding_target="ccs.fm6_op5_ratio",
+    ),
+
+    # Op output levels Q0.15 (32767 = full output)
+    VoiceParamEntry(
+        param_id=VoiceParamID.FM6_OP0_LEVEL,
+        name="fm6_op0_level",
+        value_type=ValueType.Q15U,
+        min_value=0,
+        max_value=32767,
+        default_value=32767,  # Full level
+        update_mode=UpdateMode.BOTH,
+        persistence=Persistence.PROGRAM,
+        domain=Domain.CCS,
+        binding_target="ccs.fm6_op0_level",
+    ),
+
+    VoiceParamEntry(
+        param_id=VoiceParamID.FM6_OP1_LEVEL,
+        name="fm6_op1_level",
+        value_type=ValueType.Q15U,
+        min_value=0,
+        max_value=32767,
+        default_value=0,
+        update_mode=UpdateMode.BOTH,
+        persistence=Persistence.PROGRAM,
+        domain=Domain.CCS,
+        binding_target="ccs.fm6_op1_level",
+    ),
+
+    VoiceParamEntry(
+        param_id=VoiceParamID.FM6_OP2_LEVEL,
+        name="fm6_op2_level",
+        value_type=ValueType.Q15U,
+        min_value=0,
+        max_value=32767,
+        default_value=0,
+        update_mode=UpdateMode.BOTH,
+        persistence=Persistence.PROGRAM,
+        domain=Domain.CCS,
+        binding_target="ccs.fm6_op2_level",
+    ),
+
+    VoiceParamEntry(
+        param_id=VoiceParamID.FM6_OP3_LEVEL,
+        name="fm6_op3_level",
+        value_type=ValueType.Q15U,
+        min_value=0,
+        max_value=32767,
+        default_value=0,
+        update_mode=UpdateMode.BOTH,
+        persistence=Persistence.PROGRAM,
+        domain=Domain.CCS,
+        binding_target="ccs.fm6_op3_level",
+    ),
+
+    VoiceParamEntry(
+        param_id=VoiceParamID.FM6_OP4_LEVEL,
+        name="fm6_op4_level",
+        value_type=ValueType.Q15U,
+        min_value=0,
+        max_value=32767,
+        default_value=0,
+        update_mode=UpdateMode.BOTH,
+        persistence=Persistence.PROGRAM,
+        domain=Domain.CCS,
+        binding_target="ccs.fm6_op4_level",
+    ),
+
+    VoiceParamEntry(
+        param_id=VoiceParamID.FM6_OP5_LEVEL,
+        name="fm6_op5_level",
+        value_type=ValueType.Q15U,
+        min_value=0,
+        max_value=32767,
+        default_value=0,
+        update_mode=UpdateMode.BOTH,
+        persistence=Persistence.PROGRAM,
+        domain=Domain.CCS,
+        binding_target="ccs.fm6_op5_level",
+    ),
+
+    # Topology morphing
+    VoiceParamEntry(
+        param_id=VoiceParamID.FM6_TOPO_A,
+        name="fm6_topo_a",
+        value_type=ValueType.ENUM8,
+        min_value=0,
+        max_value=7,  # Source archetype 0-7 (CHAIN, STACK, DUAL, SPLIT, etc.)
+        default_value=0,  # CHAIN
+        update_mode=UpdateMode.ABS,
+        persistence=Persistence.PROGRAM,
+        domain=Domain.CCS,
+        binding_target="ccs.fm6_topo_a",
+    ),
+
+    VoiceParamEntry(
+        param_id=VoiceParamID.FM6_TOPO_B,
+        name="fm6_topo_b",
+        value_type=ValueType.ENUM8,
+        min_value=0,
+        max_value=7,  # Target archetype 0-7
+        default_value=0,  # CHAIN
+        update_mode=UpdateMode.ABS,
+        persistence=Persistence.PROGRAM,
+        domain=Domain.CCS,
+        binding_target="ccs.fm6_topo_b",
+    ),
+
+    VoiceParamEntry(
+        param_id=VoiceParamID.FM6_TOPO_BLEND,
+        name="fm6_topo_blend",
+        value_type=ValueType.Q15U,
+        min_value=0,
+        max_value=32767,  # Q0.15: 0 = A, 32767 = B
+        default_value=0,  # Full A
+        update_mode=UpdateMode.BOTH,
+        persistence=Persistence.PER_VOICE,
+        domain=Domain.CCS,
+        binding_target="ccs.fm6_topo_blend",
     ),
 
     # =========================================================================
