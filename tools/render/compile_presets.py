@@ -6,12 +6,11 @@ This script transforms human-editable YAML preset files into compiled
 capsule bundles stored in the preset_library.
 
 Usage:
-    python scripts/compile_presets.py              # Compile modified presets only
-    python scripts/compile_presets.py brass_stab   # Compile matching presets
-    python scripts/compile_presets.py --clean      # Clean and recompile all
-    python scripts/compile_presets.py --all        # Force recompile all
-    python scripts/compile_presets.py --preview    # Render audio previews
-
+    pixi run python scripts/compile_presets.py              # Compile modified presets only
+    pixi run python scripts/compile_presets.py brass_stab   # Compile matching presets
+    pixi run python scripts/compile_presets.py --clean      # Clean and recompile all
+    pixi run python scripts/compile_presets.py --all        # Force recompile all
+    pixi run python scripts/compile_presets.py --preview    # Render audio previews
 Directory structure:
     presets/
         instruments/   <- Instrument preset YAML files (instrument_ir_v0)

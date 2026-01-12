@@ -170,14 +170,17 @@ The control registry defines all external control inputs with ranges, defaults, 
 
 ## Value Types
 
-| Type | Description | Range |
-|------|-------------|-------|
-| **Q15U** | Unsigned Q15 fixed-point | 0 to 32767 |
-| **Q15S** | Signed Q15 fixed-point | -32768 to 32767 |
-| **I16** | Signed 16-bit integer | -32768 to 32767 |
-| **U16** | Unsigned 16-bit integer | 0 to 65535 |
-| **BOOL** | Boolean flag | 0 or 1 |
-| **ENUM8** | 8-bit enumeration | 0 to 255 |
+| ID | Type | Description | Range |
+|----|------|-------------|-------|
+| 0 | **Q15U** | Unsigned Q15 fixed-point | 0 to 32767 |
+| 1 | **I16** | Signed 16-bit integer | -32768 to 32767 |
+| 2 | **U16** | Unsigned 16-bit integer | 0 to 65535 |
+| 3 | **BOOL** | Boolean flag | 0 or 1 |
+| 4 | **ENUM8** | 8-bit enumeration | 0 to 255 |
+| 5 | **U32** | Unsigned 32-bit integer | 0 to 4294967295 |
+| 6 | **Q15S** | Signed Q15 fixed-point | -32768 to 32767 |
+
+**Note:** U32 is used for FM6 operator frequency ratios in Q16.16 format (65536 = 1.0x).
 
 ---
 

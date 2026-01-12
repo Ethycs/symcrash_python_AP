@@ -25,7 +25,7 @@ import numpy as np
 from pathlib import Path
 
 # Add src to path
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from symcrash_python_ap.instrument_ir import load_instrument
 from symcrash_python_ap.vm.executor import vm_step_block
@@ -39,10 +39,10 @@ FS = 48000
 BLOCK_SIZE = 64
 BLOCKS_PER_SEC = FS // BLOCK_SIZE
 
-OUTPUT_DIR = str(Path(__file__).parent.parent / "audio_generation_tests" / "audio_out")
+OUTPUT_DIR = str(Path(__file__).parent.parent.parent / "audio_out")
 
 # Default preset
-DEFAULT_PRESET = Path(__file__).parent.parent / "presets/instruments/glitch_lead_v0.yaml"
+DEFAULT_PRESET = Path(__file__).parent.parent.parent / "presets/instruments/glitch_lead_v0.yaml"
 
 
 def ms_to_blocks(ms: float) -> int:

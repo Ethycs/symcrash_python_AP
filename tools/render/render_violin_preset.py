@@ -16,7 +16,7 @@ import numpy as np
 from pathlib import Path
 
 # Add src to path
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 # Try to import yaml, fall back to JSON
 try:
@@ -36,8 +36,8 @@ FS = 48000
 BLOCK_SIZE = 64
 BLOCKS_PER_SEC = FS // BLOCK_SIZE
 
-OUTPUT_DIR = str(Path(__file__).parent.parent / "audio_generation_tests" / "audio_out")
-PRESET_PATH = Path(__file__).parent.parent / "presets/instruments/violin_ir_v1.yaml"
+OUTPUT_DIR = str(Path(__file__).parent.parent.parent / "audio_out")
+PRESET_PATH = Path(__file__).parent.parent.parent / "presets/instruments/violin_ir_v1.yaml"
 PRESET_PATH_JSON = None  # JSON duplicates removed - use YAML only
 
 

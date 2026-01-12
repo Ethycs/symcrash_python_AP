@@ -26,12 +26,14 @@ from typing import Dict, List
 # =============================================================================
 
 class ValueType(IntEnum):
-    """Control value type."""
+    """Control value type (shared with VoiceEngineRegistry)."""
     Q15U = 0      # Q15 unsigned: 0..32767
     I16 = 1       # Signed int16: -32768..32767
     U16 = 2       # Unsigned int16: 0..65535
     BOOL = 3      # Boolean: 0 or 1
     ENUM8 = 4     # Enumeration: 0..255
+    U32 = 5       # Unsigned int32: 0..4294967295 (Q16.16 ratios)
+    Q15S = 6      # Q15 signed: -32768..32767 (bipolar modulation)
 
 
 class SlewPolicy(IntEnum):

@@ -76,7 +76,17 @@ class VoiceParamEntry:
 
 Reuse the exact ValueType enum used by ControlRegistry:
 
-* `Q15U`, `I16`, `U16`, `BOOL`, `ENUM8`
+| ID | Name | Range | Description |
+|----|------|-------|-------------|
+| 0 | Q15U | 0..32767 | Unsigned Q0.15 fixed-point |
+| 1 | I16 | -32768..32767 | Signed 16-bit integer |
+| 2 | U16 | 0..65535 | Unsigned 16-bit integer |
+| 3 | BOOL | 0..1 | Boolean flag |
+| 4 | ENUM8 | 0..255 | Enumerated value |
+| 5 | U32 | 0..4294967295 | Unsigned 32-bit (Q16.16 ratios) |
+| 6 | Q15S | -32768..32767 | Signed Q0.15 (bipolar modulation) |
+
+**Note:** U32 is used for FM6 operator frequency ratios in Q16.16 format (65536 = 1.0x).
 
 ### 1.2 UpdateMode (Frozen v0)
 
@@ -308,14 +318,25 @@ A ProgramPreset bundle MUST include:
 Entries sorted lexicographically by:
 `(persistence asc, domain asc, param_id asc)`
 
-Each entry:
+Entry format is **variable-length** based on value_type:
 
+**16-bit entries (6 bytes)** for Q15U, I16, U16, BOOL, ENUM8, Q15S:
 ```
 u8  persistence
-u8  value_type
+u8  value_type    (0-4, 6)
 u16 param_id
-i16 value
+i16/u16 value     (signed or unsigned based on type)
 ```
+
+**32-bit entries (8 bytes)** for U32:
+```
+u8  persistence
+u8  value_type    (5 = U32)
+u16 param_id
+u32 value
+```
+
+The `value_type` field is self-describing, allowing the unpacker to determine entry size.
 
 Optional: CRC16 per block.
 

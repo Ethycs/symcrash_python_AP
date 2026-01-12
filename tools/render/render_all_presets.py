@@ -1,15 +1,34 @@
+#!/usr/bin/env python3
 """
 Render All Library Presets
 ==========================
 
 Generates audio samples for all presets in the library.
+
+Usage:
+    pixi run python tools/render/render_all_presets.py              # Render modified presets only
+    pixi run python tools/render/render_all_presets.py brass        # Render matching presets
+    pixi run python tools/render/render_all_presets.py --clean      # Clean and re-render all
+    pixi run python tools/render/render_all_presets.py --all        # Force re-render all
+
+Directory structure:
+    presets/
+        instruments/   <- Instrument preset YAML files
+
+    audio_out/
+        presets/       <- Rendered audio files
+        .render_cache.json <- Modification date tracking
 """
 
+import argparse
+import json
 import sys
 from pathlib import Path
+from typing import Dict
+
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from symcrash_python_ap.instrument_ir import load_instrument
 from symcrash_python_ap.vm.executor import vm_step_block
@@ -21,8 +40,76 @@ from symcrash_python_ap.audio_io import AudioWriter
 FS = 48000
 BLOCK_SIZE = 64
 BLOCKS_PER_SEC = FS // BLOCK_SIZE
-OUTPUT_DIR = str(Path(__file__).parent.parent / "audio_generation_tests" / "audio_out")
 
+PRESETS_DIR = Path(__file__).parent.parent.parent / "presets" / "instruments"
+OUTPUT_DIR = Path(__file__).parent.parent.parent / "audio_out"
+CACHE_FILE = OUTPUT_DIR / ".render_cache.json"
+
+
+# =============================================================================
+# MODIFICATION DATE CACHE
+# =============================================================================
+
+def load_cache() -> Dict[str, float]:
+    """
+    Load the modification date cache.
+
+    Returns:
+        Dictionary mapping preset path (relative) -> last rendered mtime.
+    """
+    if not CACHE_FILE.exists():
+        return {}
+    try:
+        with open(CACHE_FILE, 'r') as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return {}
+
+
+def save_cache(cache: Dict[str, float]) -> None:
+    """Save the modification date cache."""
+    CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(CACHE_FILE, 'w') as f:
+        json.dump(cache, f, indent=2)
+
+
+def get_relative_path(yaml_path: Path) -> str:
+    """Get path relative to PRESETS_DIR for cache key."""
+    try:
+        return str(yaml_path.relative_to(PRESETS_DIR))
+    except ValueError:
+        return str(yaml_path)
+
+
+def needs_rerender(yaml_path: Path, cache: Dict[str, float]) -> bool:
+    """
+    Check if a preset needs re-rendering.
+
+    Args:
+        yaml_path: Path to the YAML preset file
+        cache: Modification date cache
+
+    Returns:
+        True if the file has been modified since last render.
+    """
+    rel_path = get_relative_path(yaml_path)
+    current_mtime = yaml_path.stat().st_mtime
+
+    if rel_path not in cache:
+        return True
+
+    return current_mtime > cache[rel_path]
+
+
+def update_cache_entry(yaml_path: Path, cache: Dict[str, float]) -> None:
+    """Update the cache with the current file's modification time."""
+    rel_path = get_relative_path(yaml_path)
+    cache[rel_path] = yaml_path.stat().st_mtime
+
+
+# =============================================================================
+# RENDERING
+# =============================================================================
 
 def ms_to_blocks(ms):
     return max(1, int(ms / 1000.0 * BLOCKS_PER_SEC))
@@ -171,14 +258,88 @@ def normalize_to_rms(samples: np.ndarray, target_rms_dbfs: float = -12.0) -> np.
 
 
 def main():
-    # Get all presets from the presets/ directory (relative to repo root)
-    preset_dir = Path(__file__).parent.parent.parent / "presets" / "instruments"
-    presets = sorted(preset_dir.glob("*.yaml"))
+    parser = argparse.ArgumentParser(
+        description="Render preset YAML files to audio samples"
+    )
+    parser.add_argument(
+        "pattern",
+        nargs="?",
+        default=None,
+        help="Optional pattern to filter preset names (e.g., 'brass')"
+    )
+    parser.add_argument(
+        "--clean",
+        action="store_true",
+        help="Clean existing renders and cache, then re-render all"
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Force re-render all presets (ignore modification dates)"
+    )
+    parser.add_argument(
+        "-q", "--quiet",
+        action="store_true",
+        help="Suppress progress output"
+    )
+    args = parser.parse_args()
+
+    verbose = not args.quiet
+
+    # Clean if requested
+    if args.clean:
+        import shutil
+        presets_out_dir = OUTPUT_DIR / "presets"
+        if presets_out_dir.exists():
+            if verbose:
+                print(f"Cleaning {presets_out_dir}...")
+            shutil.rmtree(presets_out_dir)
+        if CACHE_FILE.exists():
+            if verbose:
+                print(f"Cleaning {CACHE_FILE}...")
+            CACHE_FILE.unlink()
+
+    # Load modification date cache
+    cache = load_cache()
+
+    # Collect YAML files
+    if not PRESETS_DIR.exists():
+        print(f"Presets directory not found: {PRESETS_DIR}")
+        return 1
+
+    presets = sorted(PRESETS_DIR.glob("*.yaml"))
+
+    if not presets:
+        print(f"No YAML files found in {PRESETS_DIR}")
+        return 1
+
+    # Filter if pattern provided
+    if args.pattern:
+        presets = [f for f in presets if args.pattern.lower() in f.stem.lower()]
+        if not presets:
+            print(f"No presets matching '{args.pattern}'")
+            return 1
+
+    # Filter to only modified files (unless --all or --clean)
+    force_all = args.all or args.clean
+    if not force_all:
+        presets_to_render = [f for f in presets if needs_rerender(f, cache)]
+        skipped = len(presets) - len(presets_to_render)
+        if skipped > 0 and verbose:
+            print(f"Skipping {skipped} unchanged preset(s)")
+        presets = presets_to_render
+
+    if not presets:
+        if verbose:
+            print("All presets up to date.")
+        return 0
 
     # Render each preset
-    audio_io = AudioWriter(output_dir=OUTPUT_DIR)
-    print("Rendering all library presets...")
-    print("=" * 70)
+    audio_io = AudioWriter(output_dir=str(OUTPUT_DIR))
+
+    if verbose:
+        print(f"Rendering {len(presets)} preset(s)...")
+        print("=" * 70)
 
     success_count = 0
     fail_count = 0
@@ -217,15 +378,27 @@ def main():
                 subdirectory="presets",
                 timestamp=False
             )
-            print(f"  OK: {preset_path.name:35} -> {output_name}.wav (RMS: {int(pre_rms):5} -> {int(post_rms):5})")
+
+            if verbose:
+                print(f"  OK: {preset_path.name:35} -> {output_name}.wav (RMS: {int(pre_rms):5} -> {int(post_rms):5})")
+
             success_count += 1
+            update_cache_entry(preset_path, cache)
+
         except Exception as e:
-            print(f"FAIL: {preset_path.name:35} -> {e}")
+            if verbose:
+                print(f"FAIL: {preset_path.name:35} -> {e}")
             fail_count += 1
 
-    print("=" * 70)
-    print(f"Done! {success_count} succeeded, {fail_count} failed")
+    # Save updated cache
+    save_cache(cache)
+
+    if verbose:
+        print("=" * 70)
+        print(f"Done: {success_count} rendered, {fail_count} failed")
+
+    return 0 if fail_count == 0 else 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

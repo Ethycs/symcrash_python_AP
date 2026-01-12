@@ -20,9 +20,11 @@ import os
 import argparse
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
 sys.path.insert(0, str(SRC))
+
+OUTPUT_DIR = str(ROOT / "audio_out")
 
 import numpy as np
 from symcrash_python_ap.vm import vm_step_block, VMState
@@ -96,7 +98,7 @@ def main():
     parser = argparse.ArgumentParser(description='Generate waveform WAV samples')
     parser.add_argument('--note', type=int, default=69, help='MIDI note (default: 69 = A4)')
     parser.add_argument('--duration', type=float, default=2.0, help='Duration in seconds')
-    parser.add_argument('--output', type=str, default='waveform_samples', help='Output directory')
+    parser.add_argument('--output', type=str, default=OUTPUT_DIR, help='Output directory')
     args = parser.parse_args()
 
     # Create output directory
