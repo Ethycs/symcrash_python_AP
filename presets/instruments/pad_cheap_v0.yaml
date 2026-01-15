@@ -1,0 +1,179 @@
+# Pad Cheap v0 - Cheap-First Preset Design
+# =========================================
+#
+# Evolving pad designed for degradation-resilient playback.
+# Uses cheap Tier A operators only for core identity.
+#
+# Operator Philosophy (cheap-first):
+# - Core identity: DiffuseUp + IntraMix (air + body)
+# - Slow macro motion via family weights
+# - Minimal events - pad character from operators alone
+# - Tail: MIN (FineClamp only) for K=16 testing
+#
+# Pad Strategy:
+# - DiffuseUp for air and shimmer
+# - IntraMix for warmth and coherence
+# - Slow attack envelope for pad feel
+# - FM6 with detuned ratios for width
+#
+# Algorithm 32 (DX7 Two-voice):
+#   [6] -> [5] -> [4*]
+#   [3] -> [2] -> [1*]
+# Two detuned carrier streams for pad width
+
+instrument_ir_v0:
+  meta:
+    instrument_id: "pad-cheap-v0"
+    name: "Pad Cheap"
+    version: 0
+    author: "symcrash"
+    seed_u32: 0x50414443  # "PADC"
+
+  # Control axis defaults (WSE-STD-MACRO v0)
+  control:
+    brightness: 0.3        # Dark, warm pad
+    density: 0.6           # Fuller body
+    energy_intent: 0.2     # Very gentle character
+    risk: 0.02             # Very stable
+    material: 0.4          # Slightly soft/woody
+    space: 0.5             # More spatial/atmospheric feel
+
+  # Matrix Envelope System
+  # Very slow envelopes for atmospheric pad character
+  envelopes:
+    - id: "carrier_env"
+      adsr:
+        a_ms: 400.0        # Very slow attack (atmospheric swell)
+        d_ms: 800.0        # Long decay
+        s: 0.65            # Moderate sustain
+        r_ms: 800.0        # Long release (fade out gently)
+      targets:
+        - FM_OP1
+        - FM_OP4
+
+    - id: "mod_env"
+      adsr:
+        a_ms: 500.0        # Even slower attack (brightness fades in gently)
+        d_ms: 1200.0       # Very long decay
+        s: 0.25            # Low sustain (dark, warm sustain)
+        r_ms: 600.0
+      targets:
+        - FM_OP2
+        - FM_OP3
+        - FM_OP5
+        - FM_OP6
+
+  io:
+    sample_rate_hz: 48000
+    block_size: 64
+
+  layers:
+    L0_graph:
+      nodes:
+        - id: "fm6"
+          type: "FM6"
+          params:
+            algorithm: 32       # Two-voice: [6->5->4*] + [3->2->1*]
+            feedback: 0         # No feedback (clean pad)
+
+            # Operator frequency ratios (Q16: 65536 = 1.0x)
+            # Detuned voices for stereo width
+            op_ratios:
+              - 65536           # Op1: 1.0x (carrier A)
+              - 65536           # Op2: 1.0x (mod A)
+              - 65536           # Op3: 1.0x (mod A)
+              - 65631           # Op4: +2.5 cents (carrier B - detuned)
+              - 65536           # Op5: 1.0x (mod B)
+              - 65536           # Op6: 1.0x (mod B)
+
+            # Operator output levels (Q15)
+            # Equal carriers, very gentle modulation for soft pad
+            op_levels:
+              - 32767           # Op1: Full (carrier A)
+              - 6144            # Op2: 0.19 (soft mod)
+              - 4096            # Op3: 0.125 (subtle)
+              - 32767           # Op4: Full (carrier B)
+              - 6144            # Op5: 0.19 (soft mod)
+              - 4096            # Op6: 0.125 (subtle)
+
+        - id: "amp1"
+          type: "Amp"
+          params:
+            adsr:
+              a_ms: 400.0       # Slow swell
+              d_ms: 800.0       # Long decay
+              s: 0.65           # Moderate sustain
+              r_ms: 800.0       # Long fade
+
+      edges:
+        - src: "fm6"
+          dst: "amp1"
+
+      macros:
+        - id: "M_SHIMMER"
+          name: "Shimmer"
+          default: 0.4
+        - id: "M_WARMTH"
+          name: "Warmth"
+          default: 0.55
+
+    # CMMM Configuration - Cheap-First Operator Design
+    # DiffuseUp for air, IntraMix for warmth
+    L3_cmmm:
+      emit_templates:
+        # IDLE: Minimal shimmer
+        T_IDLE:
+          families:
+            TRANSPORT: 0.2    # Light DiffuseUp
+            CONSTRAINT: 1.0
+            CALM: 1.0
+          ops_enable: ["DiffuseUp", "FineClamp"]
+          trees:
+            A: "T1"
+            B: "T1"
+            beta: 0.0
+
+        # ATTACK: Slow build with shimmer
+        T_ATTACK:
+          families:
+            TRANSPORT: 0.4    # DiffuseUp
+            LOCAL: 0.5        # IntraMix
+            CONSTRAINT: 1.0
+            CALM: 0.6
+          ops_enable: ["DiffuseUp", "IntraMix", "FineClamp"]
+          trees:
+            A: "T1"
+            B: "T1"
+            beta: 0.1
+
+        # STABLE: Full shimmer + warmth
+        T_STABLE:
+          families:
+            TRANSPORT: 0.5    # DiffuseUp shimmer
+            LOCAL: 0.6        # IntraMix warmth
+            CONSTRAINT: 1.0
+            CALM: 0.5
+          ops_enable: ["DiffuseUp", "IntraMix", "FineClamp"]
+          trees:
+            A: "T1"
+            B: "T1"
+            beta: 0.15
+
+        # RECOVERY: Gentle fadeout
+        T_RECOVERY:
+          families:
+            TRANSPORT: 0.3
+            LOCAL: 0.4
+            CONSTRAINT: 1.0
+            CALM: 0.9
+          ops_enable: ["DiffuseUp", "IntraMix", "FineClamp"]
+          trees:
+            A: "T1"
+            B: "T1"
+            beta: 0.05
+
+  compile:
+    material:
+      beta_start_q15: 0
+      beta_target_q15: 6144    # Moderate material blend
+      beta_ramp_blocks: 24     # Slow ramp for pad

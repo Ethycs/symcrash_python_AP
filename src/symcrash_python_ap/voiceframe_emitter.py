@@ -34,11 +34,12 @@ Usage:
 """
 
 from dataclasses import dataclass, field
-from typing import Optional, List
+from typing import Optional, List, Dict, Tuple
 import math
 
 from .library.preset_compiler import CompiledPreset, Q15_ONE
 from .envelope_scheduler import EnvelopeScheduler, ADSRSpec
+from .envelope_targets import EnvelopeTarget, parse_envelope_target
 from .frames import VoiceFrame
 from .control_frame import ControlFrame, EventType
 from .control_registry import ControlID
@@ -115,6 +116,9 @@ class VoiceFrameEmitter:
     _sustain_level_q15: Optional[int] = None
     _release_blocks: Optional[int] = None
 
+    # Matrix envelope system: envelope_id → (scheduler, target_ids)
+    _envelope_matrix: Dict[str, Tuple[EnvelopeScheduler, List[int]]] = field(default_factory=dict, repr=False)
+
     def __post_init__(self):
         """Initialize envelope from preset."""
         if self.preset.amp_env:
@@ -125,6 +129,46 @@ class VoiceFrameEmitter:
 
         # Initialize beta to start value
         self._beta_current_q15 = self.preset.material.beta_start_q15
+
+        # Initialize envelope matrix if preset has envelope_bindings
+        envelope_bindings = getattr(self.preset, 'envelope_bindings', None)
+        if envelope_bindings:
+            self._init_envelope_matrix(envelope_bindings)
+
+    def _init_envelope_matrix(self, bindings: List) -> None:
+        """
+        Initialize the matrix envelope system from EnvelopeBinding list.
+
+        Args:
+            bindings: List of EnvelopeBinding from InstrumentIR or CompiledPreset
+        """
+        from .instrument_ir import EnvelopeBinding, ADSR
+
+        for binding in bindings:
+            # Convert ADSR to ADSRSpec
+            adsr = binding.adsr
+            spec = ADSRSpec(
+                attack_ms=adsr.a_ms,
+                decay_ms=adsr.d_ms,
+                sustain=adsr.s,
+                release_ms=adsr.r_ms,
+            )
+
+            # Parse target names to EnvelopeTarget IDs
+            target_ids = []
+            for target_name in binding.targets:
+                try:
+                    target = parse_envelope_target(target_name)
+                    target_ids.append(int(target))
+                except KeyError:
+                    # Skip unknown targets
+                    pass
+
+            if target_ids:
+                self._envelope_matrix[binding.id] = (
+                    EnvelopeScheduler(spec=spec),
+                    target_ids
+                )
 
     def note_on(self, note: int, velocity_q15: int = Q15_ONE, cents: int = 0) -> None:
         """
@@ -144,16 +188,25 @@ class VoiceFrameEmitter:
         # Reset beta ramp
         self._beta_current_q15 = self.preset.material.beta_start_q15
 
-        # Trigger envelope
+        # Trigger main envelope
         if self._envelope:
             self._envelope.trigger_note()
+
+        # Trigger all matrix envelopes
+        for scheduler, _ in self._envelope_matrix.values():
+            scheduler.trigger_note()
 
     def note_off(self) -> None:
         """Trigger note-off event (start release phase)."""
         self._is_note_on = False
 
+        # Release main envelope
         if self._envelope:
             self._envelope.release_note()
+
+        # Release all matrix envelopes
+        for scheduler, _ in self._envelope_matrix.values():
+            scheduler.release_note()
 
     def consume_control_frame(self, frame: ControlFrame) -> None:
         """
@@ -282,6 +335,15 @@ class VoiceFrameEmitter:
         osc_mode = getattr(self.preset, 'osc_mode', 0)
         fm6_config = getattr(self.preset, 'fm6', None)
 
+        # Tick all matrix envelopes and collect target values
+        env_targets_q15 = None
+        if self._envelope_matrix:
+            env_targets_q15 = {}
+            for env_id, (scheduler, target_ids) in self._envelope_matrix.items():
+                value = scheduler.tick()
+                for target_id in target_ids:
+                    env_targets_q15[target_id] = value
+
         # Build VoiceFrame
         frame = VoiceFrame(
             voice_id=self.voice_id,
@@ -304,6 +366,8 @@ class VoiceFrameEmitter:
             fm_op_ratios=list(fm6_config.op_ratios) if fm6_config else None,
             fm_op_levels=list(fm6_config.op_levels) if fm6_config else None,
             fm_feedback_depth=fm6_config.feedback_depth if fm6_config else None,
+            # Matrix envelope targets
+            env_targets_q15=env_targets_q15,
         )
 
         # Advance block counter
@@ -341,6 +405,9 @@ class VoiceFrameEmitter:
         self._release_blocks = None
         if self._envelope:
             self._envelope.reset()
+        # Reset all matrix envelopes
+        for scheduler, _ in self._envelope_matrix.values():
+            scheduler.reset()
 
 
 # =============================================================================

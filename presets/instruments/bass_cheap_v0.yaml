@@ -1,0 +1,166 @@
+# Bass Cheap v0 - Cheap-First Preset Design
+# ==========================================
+#
+# Synth bass designed for degradation-resilient playback.
+# Uses cheap Tier A operators only for core identity.
+#
+# Operator Philosophy (cheap-first):
+# - Core identity: IntraMix (body) + conservative Tilt
+# - Less DiffuseDown than brass (bass needs weight)
+# - Tail: MIN (FineClamp only) for K=16 testing
+#
+# Bass Strategy:
+# - Heavy IntraMix for body and weight
+# - Conservative Tilt (not too bright)
+# - Skip DiffuseDown (preserves low-end mass)
+# - FM6 with 2:1 ratio modulation for growl
+#
+# Algorithm 1 (DX7 Stack):
+#   [6] -> [5] -> [4] -> [3] -> [2] -> [1*]
+# Single carrier stack - clean bass foundation
+
+instrument_ir_v0:
+  meta:
+    instrument_id: "bass-cheap-v0"
+    name: "Bass Cheap"
+    version: 0
+    author: "symcrash"
+    seed_u32: 0x42415343  # "BASC"
+
+  # Control axis defaults (WSE-STD-MACRO v0)
+  control:
+    brightness: 0.35       # Dark bass tone
+    density: 0.7           # Heavy body
+    energy_intent: 0.5     # Neutral attack
+    risk: 0.01             # Very stable
+    material: 0.4          # Slightly woody
+
+  # Matrix Envelope System
+  # Simple: all ops share same envelope for punchy bass
+  envelopes:
+    - id: "bass_env"
+      adsr:
+        a_ms: 4.0          # Fast punch
+        d_ms: 80.0         # Quick decay
+        s: 0.6             # Medium sustain
+        r_ms: 60.0         # Quick release
+      targets:
+        - FM_OP1
+        - FM_OP2
+        - FM_OP3
+        - FM_OP4
+        - FM_OP5
+        - FM_OP6
+
+  io:
+    sample_rate_hz: 48000
+    block_size: 64
+
+  layers:
+    L0_graph:
+      nodes:
+        - id: "fm6"
+          type: "FM6"
+          params:
+            algorithm: 1        # Stack: 6->5->4->3->2->1*
+            feedback: 2         # Light feedback for growl
+
+            # Operator frequency ratios (Q16: 65536 = 1.0x)
+            # 2:1 modulator ratios for FM bass character
+            op_ratios:
+              - 65536           # Op1: 1.0x (carrier)
+              - 131072          # Op2: 2.0x (adds growl)
+              - 65536           # Op3: 1.0x (reinforces fundamental)
+              - 131072          # Op4: 2.0x
+              - 65536           # Op5: 1.0x
+              - 131072          # Op6: 2.0x (with feedback)
+
+            # Operator output levels (Q15)
+            # Heavy carrier, moderate modulation
+            op_levels:
+              - 32767           # Op1: Full (carrier)
+              - 14336           # Op2: 0.44 (controlled mod)
+              - 10922           # Op3: 0.33
+              - 8192            # Op4: 0.25
+              - 6144            # Op5: 0.19
+              - 8192            # Op6: 0.25 (feedback growl)
+
+        - id: "amp1"
+          type: "Amp"
+          params:
+            adsr:
+              a_ms: 4.0
+              d_ms: 80.0
+              s: 0.6
+              r_ms: 60.0
+
+      edges:
+        - src: "fm6"
+          dst: "amp1"
+
+      macros:
+        - id: "M_GROWL"
+          name: "Growl"
+          default: 0.4
+        - id: "M_BODY"
+          name: "Body"
+          default: 0.7
+
+    # CMMM Configuration - Cheap-First Operator Design
+    # Focus on IntraMix for body, minimal Tilt
+    L3_cmmm:
+      emit_templates:
+        # IDLE: Minimal
+        T_IDLE:
+          families:
+            CONSTRAINT: 1.0
+            CALM: 1.0
+          ops_enable: ["FineClamp"]
+          trees:
+            A: "T1"
+            B: "T1"
+            beta: 0.0
+
+        # ATTACK: Body-focused operators
+        T_ATTACK:
+          families:
+            LOCAL: 0.8        # Heavy IntraMix
+            COLOR: 0.3        # Conservative Tilt
+            CONSTRAINT: 1.0
+            CALM: 0.3
+          ops_enable: ["IntraMix", "FineClamp"]
+          trees:
+            A: "T1"
+            B: "T1"
+            beta: 0.0
+
+        # STABLE: Add light Tilt, keep IntraMix heavy
+        T_STABLE:
+          families:
+            LOCAL: 0.7
+            COLOR: 0.25       # Very conservative Tilt
+            CONSTRAINT: 1.0
+            CALM: 0.5
+          ops_enable: ["IntraMix", "Tilt", "FineClamp"]
+          trees:
+            A: "T1"
+            B: "T1"
+            beta: 0.0
+
+        # RECOVERY: Just body
+        T_RECOVERY:
+          families:
+            LOCAL: 0.5
+            CONSTRAINT: 1.0
+            CALM: 0.8
+          ops_enable: ["IntraMix", "FineClamp"]
+          trees:
+            A: "T1"
+            B: "T1"
+            beta: 0.0
+
+  compile:
+    material:
+      beta_start_q15: 0
+      beta_target_q15: 2048    # Very light material
+      beta_ramp_blocks: 4

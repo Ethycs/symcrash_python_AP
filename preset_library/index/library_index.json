@@ -2,7 +2,7 @@
   "assets": {},
   "capsules": {
     "brass-stab-7d19ab6a2ef8": {
-      "latest_revision": 11,
+      "latest_revision": 25,
       "revisions": {
         "1": {
           "compatible": true,
@@ -43,6 +43,110 @@
             "fm6"
           ]
         },
+        "12": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T18:29:55.840991+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Brass Stab",
+          "path": "capsules/instruments/brass-stab-7d19ab6a2ef8/12",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "13": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T18:30:45.890164+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Brass Stab",
+          "path": "capsules/instruments/brass-stab-7d19ab6a2ef8/13",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "14": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T18:33:26.850384+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Brass Stab",
+          "path": "capsules/instruments/brass-stab-7d19ab6a2ef8/14",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "15": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T18:35:06.676273+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Brass Stab",
+          "path": "capsules/instruments/brass-stab-7d19ab6a2ef8/15",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "16": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T18:57:24.167705+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Brass Stab",
+          "path": "capsules/instruments/brass-stab-7d19ab6a2ef8/16",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "17": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T20:02:18.077088+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Brass Stab",
+          "path": "capsules/instruments/brass-stab-7d19ab6a2ef8/17",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "18": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T21:13:41.807904+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Brass Stab",
+          "path": "capsules/instruments/brass-stab-7d19ab6a2ef8/18",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "19": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T21:14:34.026625+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Brass Stab",
+          "path": "capsules/instruments/brass-stab-7d19ab6a2ef8/19",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
         "2": {
           "compatible": true,
           "deprecated": false,
@@ -50,6 +154,84 @@
           "kind": "INSTRUMENT",
           "name": "Brass Stab",
           "path": "capsules/instruments/brass-stab-7d19ab6a2ef8/2",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "20": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T21:26:23.363050+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Brass Stab",
+          "path": "capsules/instruments/brass-stab-7d19ab6a2ef8/20",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "21": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-13T20:33:30.589005+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Brass Stab",
+          "path": "capsules/instruments/brass-stab-7d19ab6a2ef8/21",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "22": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-13T20:58:26.874390+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Brass Stab",
+          "path": "capsules/instruments/brass-stab-7d19ab6a2ef8/22",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "23": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:47:23.163394+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Brass Stab",
+          "path": "capsules/instruments/brass-stab-7d19ab6a2ef8/23",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "24": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:48:30.724548+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Brass Stab",
+          "path": "capsules/instruments/brass-stab-7d19ab6a2ef8/24",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "25": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:50:51.973554+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Brass Stab",
+          "path": "capsules/instruments/brass-stab-7d19ab6a2ef8/25",
           "retired": false,
           "tags": [
             "fm",
@@ -150,7 +332,7 @@
       }
     },
     "fm-bell-147b22e38ba0": {
-      "latest_revision": 9,
+      "latest_revision": 18,
       "revisions": {
         "1": {
           "compatible": true,
@@ -159,6 +341,123 @@
           "kind": "INSTRUMENT",
           "name": "FM Bell",
           "path": "capsules/instruments/fm-bell-147b22e38ba0/1",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "10": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T18:58:12.545021+00:00",
+          "kind": "INSTRUMENT",
+          "name": "FM Bell",
+          "path": "capsules/instruments/fm-bell-147b22e38ba0/10",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "11": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T20:02:18.183087+00:00",
+          "kind": "INSTRUMENT",
+          "name": "FM Bell",
+          "path": "capsules/instruments/fm-bell-147b22e38ba0/11",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "12": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T21:14:34.143108+00:00",
+          "kind": "INSTRUMENT",
+          "name": "FM Bell",
+          "path": "capsules/instruments/fm-bell-147b22e38ba0/12",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "13": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T21:34:31.681394+00:00",
+          "kind": "INSTRUMENT",
+          "name": "FM Bell",
+          "path": "capsules/instruments/fm-bell-147b22e38ba0/13",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "14": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-13T20:33:30.769229+00:00",
+          "kind": "INSTRUMENT",
+          "name": "FM Bell",
+          "path": "capsules/instruments/fm-bell-147b22e38ba0/14",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "15": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-13T20:58:26.997472+00:00",
+          "kind": "INSTRUMENT",
+          "name": "FM Bell",
+          "path": "capsules/instruments/fm-bell-147b22e38ba0/15",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "16": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:47:23.280398+00:00",
+          "kind": "INSTRUMENT",
+          "name": "FM Bell",
+          "path": "capsules/instruments/fm-bell-147b22e38ba0/16",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "17": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:48:30.839271+00:00",
+          "kind": "INSTRUMENT",
+          "name": "FM Bell",
+          "path": "capsules/instruments/fm-bell-147b22e38ba0/17",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "18": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:50:52.100783+00:00",
+          "kind": "INSTRUMENT",
+          "name": "FM Bell",
+          "path": "capsules/instruments/fm-bell-147b22e38ba0/18",
           "retired": false,
           "tags": [
             "fm",
@@ -272,7 +571,7 @@
       }
     },
     "fm-brass-bc31e99ba956": {
-      "latest_revision": 10,
+      "latest_revision": 26,
       "revisions": {
         "1": {
           "compatible": true,
@@ -300,6 +599,123 @@
             "fm6"
           ]
         },
+        "11": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T18:29:55.937160+00:00",
+          "kind": "INSTRUMENT",
+          "name": "FM Brass",
+          "path": "capsules/instruments/fm-brass-bc31e99ba956/11",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "12": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T18:30:46.002035+00:00",
+          "kind": "INSTRUMENT",
+          "name": "FM Brass",
+          "path": "capsules/instruments/fm-brass-bc31e99ba956/12",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "13": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T18:33:26.966748+00:00",
+          "kind": "INSTRUMENT",
+          "name": "FM Brass",
+          "path": "capsules/instruments/fm-brass-bc31e99ba956/13",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "14": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T18:35:06.775756+00:00",
+          "kind": "INSTRUMENT",
+          "name": "FM Brass",
+          "path": "capsules/instruments/fm-brass-bc31e99ba956/14",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "15": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T18:57:24.295247+00:00",
+          "kind": "INSTRUMENT",
+          "name": "FM Brass",
+          "path": "capsules/instruments/fm-brass-bc31e99ba956/15",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "16": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T18:58:12.598803+00:00",
+          "kind": "INSTRUMENT",
+          "name": "FM Brass",
+          "path": "capsules/instruments/fm-brass-bc31e99ba956/16",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "17": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T20:02:18.234897+00:00",
+          "kind": "INSTRUMENT",
+          "name": "FM Brass",
+          "path": "capsules/instruments/fm-brass-bc31e99ba956/17",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "18": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T21:13:41.932303+00:00",
+          "kind": "INSTRUMENT",
+          "name": "FM Brass",
+          "path": "capsules/instruments/fm-brass-bc31e99ba956/18",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "19": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T21:14:34.195782+00:00",
+          "kind": "INSTRUMENT",
+          "name": "FM Brass",
+          "path": "capsules/instruments/fm-brass-bc31e99ba956/19",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
         "2": {
           "compatible": true,
           "deprecated": false,
@@ -307,6 +723,97 @@
           "kind": "INSTRUMENT",
           "name": "FM Brass",
           "path": "capsules/instruments/fm-brass-bc31e99ba956/2",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "20": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T21:26:23.479945+00:00",
+          "kind": "INSTRUMENT",
+          "name": "FM Brass",
+          "path": "capsules/instruments/fm-brass-bc31e99ba956/20",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "21": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-13T20:33:30.846482+00:00",
+          "kind": "INSTRUMENT",
+          "name": "FM Brass",
+          "path": "capsules/instruments/fm-brass-bc31e99ba956/21",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "22": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-13T20:58:27.057987+00:00",
+          "kind": "INSTRUMENT",
+          "name": "FM Brass",
+          "path": "capsules/instruments/fm-brass-bc31e99ba956/22",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "23": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:47:09.645995+00:00",
+          "kind": "INSTRUMENT",
+          "name": "FM Brass",
+          "path": "capsules/instruments/fm-brass-bc31e99ba956/23",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "24": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:47:23.354984+00:00",
+          "kind": "INSTRUMENT",
+          "name": "FM Brass",
+          "path": "capsules/instruments/fm-brass-bc31e99ba956/24",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "25": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:48:30.909983+00:00",
+          "kind": "INSTRUMENT",
+          "name": "FM Brass",
+          "path": "capsules/instruments/fm-brass-bc31e99ba956/25",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "26": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:50:52.176879+00:00",
+          "kind": "INSTRUMENT",
+          "name": "FM Brass",
+          "path": "capsules/instruments/fm-brass-bc31e99ba956/26",
           "retired": false,
           "tags": [
             "fm",
@@ -406,8 +913,96 @@
         }
       }
     },
+    "fm-french-horn-e0c3e2d95a02": {
+      "latest_revision": 3,
+      "revisions": {
+        "1": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:47:23.422499+00:00",
+          "kind": "INSTRUMENT",
+          "name": "FM French Horn",
+          "path": "capsules/instruments/fm-french-horn-e0c3e2d95a02/1",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "2": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:48:30.968548+00:00",
+          "kind": "INSTRUMENT",
+          "name": "FM French Horn",
+          "path": "capsules/instruments/fm-french-horn-e0c3e2d95a02/2",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "3": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:50:52.237419+00:00",
+          "kind": "INSTRUMENT",
+          "name": "FM French Horn",
+          "path": "capsules/instruments/fm-french-horn-e0c3e2d95a02/3",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        }
+      }
+    },
+    "fm-trumpet-94498f8dfc67": {
+      "latest_revision": 3,
+      "revisions": {
+        "1": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:47:23.546746+00:00",
+          "kind": "INSTRUMENT",
+          "name": "FM Trumpet",
+          "path": "capsules/instruments/fm-trumpet-94498f8dfc67/1",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "2": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:48:31.031512+00:00",
+          "kind": "INSTRUMENT",
+          "name": "FM Trumpet",
+          "path": "capsules/instruments/fm-trumpet-94498f8dfc67/2",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "3": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:50:52.304066+00:00",
+          "kind": "INSTRUMENT",
+          "name": "FM Trumpet",
+          "path": "capsules/instruments/fm-trumpet-94498f8dfc67/3",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        }
+      }
+    },
     "glitch-lead-424fa816d36b": {
-      "latest_revision": 9,
+      "latest_revision": 17,
       "revisions": {
         "1": {
           "compatible": true,
@@ -416,6 +1011,110 @@
           "kind": "INSTRUMENT",
           "name": "Glitch Lead",
           "path": "capsules/instruments/glitch-lead-424fa816d36b/1",
+          "retired": false,
+          "tags": [
+            "glitch",
+            "saw"
+          ]
+        },
+        "10": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T18:50:08.314348+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Glitch Lead",
+          "path": "capsules/instruments/glitch-lead-424fa816d36b/10",
+          "retired": false,
+          "tags": [
+            "glitch",
+            "saw"
+          ]
+        },
+        "11": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T20:02:18.306362+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Glitch Lead",
+          "path": "capsules/instruments/glitch-lead-424fa816d36b/11",
+          "retired": false,
+          "tags": [
+            "glitch",
+            "saw"
+          ]
+        },
+        "12": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T21:14:34.263047+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Glitch Lead",
+          "path": "capsules/instruments/glitch-lead-424fa816d36b/12",
+          "retired": false,
+          "tags": [
+            "glitch",
+            "saw"
+          ]
+        },
+        "13": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-13T20:33:30.930190+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Glitch Lead",
+          "path": "capsules/instruments/glitch-lead-424fa816d36b/13",
+          "retired": false,
+          "tags": [
+            "glitch",
+            "saw"
+          ]
+        },
+        "14": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-13T20:58:27.134432+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Glitch Lead",
+          "path": "capsules/instruments/glitch-lead-424fa816d36b/14",
+          "retired": false,
+          "tags": [
+            "glitch",
+            "saw"
+          ]
+        },
+        "15": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:47:23.621713+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Glitch Lead",
+          "path": "capsules/instruments/glitch-lead-424fa816d36b/15",
+          "retired": false,
+          "tags": [
+            "glitch",
+            "saw"
+          ]
+        },
+        "16": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:48:31.102495+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Glitch Lead",
+          "path": "capsules/instruments/glitch-lead-424fa816d36b/16",
+          "retired": false,
+          "tags": [
+            "glitch",
+            "saw"
+          ]
+        },
+        "17": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:50:52.381647+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Glitch Lead",
+          "path": "capsules/instruments/glitch-lead-424fa816d36b/17",
           "retired": false,
           "tags": [
             "glitch",
@@ -529,7 +1228,7 @@
       }
     },
     "jump-brass-48258ae59583": {
-      "latest_revision": 10,
+      "latest_revision": 24,
       "revisions": {
         "1": {
           "compatible": true,
@@ -557,6 +1256,123 @@
             "fm6"
           ]
         },
+        "11": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T18:29:55.993710+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Jump Brass",
+          "path": "capsules/instruments/jump-brass-48258ae59583/11",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "12": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T18:30:46.066100+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Jump Brass",
+          "path": "capsules/instruments/jump-brass-48258ae59583/12",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "13": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T18:33:27.031308+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Jump Brass",
+          "path": "capsules/instruments/jump-brass-48258ae59583/13",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "14": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T18:35:06.837305+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Jump Brass",
+          "path": "capsules/instruments/jump-brass-48258ae59583/14",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "15": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T18:57:24.367412+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Jump Brass",
+          "path": "capsules/instruments/jump-brass-48258ae59583/15",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "16": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T20:02:18.367867+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Jump Brass",
+          "path": "capsules/instruments/jump-brass-48258ae59583/16",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "17": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T21:13:42.006218+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Jump Brass",
+          "path": "capsules/instruments/jump-brass-48258ae59583/17",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "18": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T21:14:34.330118+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Jump Brass",
+          "path": "capsules/instruments/jump-brass-48258ae59583/18",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "19": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T21:26:23.554922+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Jump Brass",
+          "path": "capsules/instruments/jump-brass-48258ae59583/19",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
         "2": {
           "compatible": true,
           "deprecated": false,
@@ -564,6 +1380,71 @@
           "kind": "INSTRUMENT",
           "name": "Jump Brass",
           "path": "capsules/instruments/jump-brass-48258ae59583/2",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "20": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-13T20:33:31.014640+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Jump Brass",
+          "path": "capsules/instruments/jump-brass-48258ae59583/20",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "21": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-13T20:58:27.204106+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Jump Brass",
+          "path": "capsules/instruments/jump-brass-48258ae59583/21",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "22": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:47:23.696759+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Jump Brass",
+          "path": "capsules/instruments/jump-brass-48258ae59583/22",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "23": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:48:31.170501+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Jump Brass",
+          "path": "capsules/instruments/jump-brass-48258ae59583/23",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "24": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:50:52.456098+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Jump Brass",
+          "path": "capsules/instruments/jump-brass-48258ae59583/24",
           "retired": false,
           "tags": [
             "fm",
@@ -664,7 +1545,7 @@
       }
     },
     "legato-smooth-v0-e6014b6e89c4": {
-      "latest_revision": 7,
+      "latest_revision": 11,
       "revisions": {
         "1": {
           "compatible": true,
@@ -673,6 +1554,36 @@
           "kind": "MACRO",
           "name": "Smooth Legato",
           "path": "capsules/macros/legato-smooth-v0-e6014b6e89c4/1",
+          "retired": false,
+          "tags": [
+            "expressive",
+            "legato",
+            "monophonic",
+            "smooth"
+          ]
+        },
+        "10": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:48:31.734059+00:00",
+          "kind": "MACRO",
+          "name": "Smooth Legato",
+          "path": "capsules/macros/legato-smooth-v0-e6014b6e89c4/10",
+          "retired": false,
+          "tags": [
+            "expressive",
+            "legato",
+            "monophonic",
+            "smooth"
+          ]
+        },
+        "11": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:50:53.093568+00:00",
+          "kind": "MACRO",
+          "name": "Smooth Legato",
+          "path": "capsules/macros/legato-smooth-v0-e6014b6e89c4/11",
           "retired": false,
           "tags": [
             "expressive",
@@ -770,11 +1681,41 @@
             "monophonic",
             "smooth"
           ]
+        },
+        "8": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-13T20:58:27.741072+00:00",
+          "kind": "MACRO",
+          "name": "Smooth Legato",
+          "path": "capsules/macros/legato-smooth-v0-e6014b6e89c4/8",
+          "retired": false,
+          "tags": [
+            "expressive",
+            "legato",
+            "monophonic",
+            "smooth"
+          ]
+        },
+        "9": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:47:24.322520+00:00",
+          "kind": "MACRO",
+          "name": "Smooth Legato",
+          "path": "capsules/macros/legato-smooth-v0-e6014b6e89c4/9",
+          "retired": false,
+          "tags": [
+            "expressive",
+            "legato",
+            "monophonic",
+            "smooth"
+          ]
         }
       }
     },
     "pluck-1e1880eaa8e3": {
-      "latest_revision": 8,
+      "latest_revision": 15,
       "revisions": {
         "1": {
           "compatible": true,
@@ -783,6 +1724,78 @@
           "kind": "INSTRUMENT",
           "name": "Pluck",
           "path": "capsules/instruments/pluck-1e1880eaa8e3/1",
+          "retired": false,
+          "tags": [
+            "saw"
+          ]
+        },
+        "10": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T21:14:34.374341+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Pluck",
+          "path": "capsules/instruments/pluck-1e1880eaa8e3/10",
+          "retired": false,
+          "tags": [
+            "saw"
+          ]
+        },
+        "11": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-13T20:33:31.071269+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Pluck",
+          "path": "capsules/instruments/pluck-1e1880eaa8e3/11",
+          "retired": false,
+          "tags": [
+            "saw"
+          ]
+        },
+        "12": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-13T20:58:27.266263+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Pluck",
+          "path": "capsules/instruments/pluck-1e1880eaa8e3/12",
+          "retired": false,
+          "tags": [
+            "saw"
+          ]
+        },
+        "13": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:47:23.742529+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Pluck",
+          "path": "capsules/instruments/pluck-1e1880eaa8e3/13",
+          "retired": false,
+          "tags": [
+            "saw"
+          ]
+        },
+        "14": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:48:31.217279+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Pluck",
+          "path": "capsules/instruments/pluck-1e1880eaa8e3/14",
+          "retired": false,
+          "tags": [
+            "saw"
+          ]
+        },
+        "15": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:50:52.511344+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Pluck",
+          "path": "capsules/instruments/pluck-1e1880eaa8e3/15",
           "retired": false,
           "tags": [
             "saw"
@@ -871,11 +1884,23 @@
           "tags": [
             "saw"
           ]
+        },
+        "9": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T20:02:18.412598+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Pluck",
+          "path": "capsules/instruments/pluck-1e1880eaa8e3/9",
+          "retired": false,
+          "tags": [
+            "saw"
+          ]
         }
       }
     },
     "portamento-slow-v0-5f4e4cd75366": {
-      "latest_revision": 7,
+      "latest_revision": 11,
       "revisions": {
         "1": {
           "compatible": true,
@@ -884,6 +1909,36 @@
           "kind": "MACRO",
           "name": "Slow Portamento",
           "path": "capsules/macros/portamento-slow-v0-5f4e4cd75366/1",
+          "retired": false,
+          "tags": [
+            "expressive",
+            "glide",
+            "portamento",
+            "slow"
+          ]
+        },
+        "10": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:48:31.799418+00:00",
+          "kind": "MACRO",
+          "name": "Slow Portamento",
+          "path": "capsules/macros/portamento-slow-v0-5f4e4cd75366/10",
+          "retired": false,
+          "tags": [
+            "expressive",
+            "glide",
+            "portamento",
+            "slow"
+          ]
+        },
+        "11": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:50:53.157978+00:00",
+          "kind": "MACRO",
+          "name": "Slow Portamento",
+          "path": "capsules/macros/portamento-slow-v0-5f4e4cd75366/11",
           "retired": false,
           "tags": [
             "expressive",
@@ -981,11 +2036,41 @@
             "portamento",
             "slow"
           ]
+        },
+        "8": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-13T20:58:27.782998+00:00",
+          "kind": "MACRO",
+          "name": "Slow Portamento",
+          "path": "capsules/macros/portamento-slow-v0-5f4e4cd75366/8",
+          "retired": false,
+          "tags": [
+            "expressive",
+            "glide",
+            "portamento",
+            "slow"
+          ]
+        },
+        "9": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:47:24.365540+00:00",
+          "kind": "MACRO",
+          "name": "Slow Portamento",
+          "path": "capsules/macros/portamento-slow-v0-5f4e4cd75366/9",
+          "retired": false,
+          "tags": [
+            "expressive",
+            "glide",
+            "portamento",
+            "slow"
+          ]
         }
       }
     },
     "pwm-pad-1049070764bf": {
-      "latest_revision": 8,
+      "latest_revision": 15,
       "revisions": {
         "1": {
           "compatible": true,
@@ -994,6 +2079,78 @@
           "kind": "INSTRUMENT",
           "name": "PWM Pad",
           "path": "capsules/instruments/pwm-pad-1049070764bf/1",
+          "retired": false,
+          "tags": [
+            "pulse"
+          ]
+        },
+        "10": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T21:14:34.418887+00:00",
+          "kind": "INSTRUMENT",
+          "name": "PWM Pad",
+          "path": "capsules/instruments/pwm-pad-1049070764bf/10",
+          "retired": false,
+          "tags": [
+            "pulse"
+          ]
+        },
+        "11": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-13T20:33:31.129380+00:00",
+          "kind": "INSTRUMENT",
+          "name": "PWM Pad",
+          "path": "capsules/instruments/pwm-pad-1049070764bf/11",
+          "retired": false,
+          "tags": [
+            "pulse"
+          ]
+        },
+        "12": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-13T20:58:27.314672+00:00",
+          "kind": "INSTRUMENT",
+          "name": "PWM Pad",
+          "path": "capsules/instruments/pwm-pad-1049070764bf/12",
+          "retired": false,
+          "tags": [
+            "pulse"
+          ]
+        },
+        "13": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:47:23.805702+00:00",
+          "kind": "INSTRUMENT",
+          "name": "PWM Pad",
+          "path": "capsules/instruments/pwm-pad-1049070764bf/13",
+          "retired": false,
+          "tags": [
+            "pulse"
+          ]
+        },
+        "14": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:48:31.262741+00:00",
+          "kind": "INSTRUMENT",
+          "name": "PWM Pad",
+          "path": "capsules/instruments/pwm-pad-1049070764bf/14",
+          "retired": false,
+          "tags": [
+            "pulse"
+          ]
+        },
+        "15": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:50:52.578649+00:00",
+          "kind": "INSTRUMENT",
+          "name": "PWM Pad",
+          "path": "capsules/instruments/pwm-pad-1049070764bf/15",
           "retired": false,
           "tags": [
             "pulse"
@@ -1082,11 +2239,23 @@
           "tags": [
             "pulse"
           ]
+        },
+        "9": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T20:02:18.462298+00:00",
+          "kind": "INSTRUMENT",
+          "name": "PWM Pad",
+          "path": "capsules/instruments/pwm-pad-1049070764bf/9",
+          "retired": false,
+          "tags": [
+            "pulse"
+          ]
         }
       }
     },
     "saw-lead-5f455c335c61": {
-      "latest_revision": 9,
+      "latest_revision": 17,
       "revisions": {
         "1": {
           "compatible": true,
@@ -1095,6 +2264,102 @@
           "kind": "INSTRUMENT",
           "name": "Saw Lead",
           "path": "capsules/instruments/saw-lead-5f455c335c61/1",
+          "retired": false,
+          "tags": [
+            "saw"
+          ]
+        },
+        "10": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T17:25:16.306024+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Saw Lead",
+          "path": "capsules/instruments/saw-lead-5f455c335c61/10",
+          "retired": false,
+          "tags": [
+            "saw"
+          ]
+        },
+        "11": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T20:02:18.506364+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Saw Lead",
+          "path": "capsules/instruments/saw-lead-5f455c335c61/11",
+          "retired": false,
+          "tags": [
+            "saw"
+          ]
+        },
+        "12": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T21:14:34.462679+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Saw Lead",
+          "path": "capsules/instruments/saw-lead-5f455c335c61/12",
+          "retired": false,
+          "tags": [
+            "saw"
+          ]
+        },
+        "13": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-13T20:33:31.203714+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Saw Lead",
+          "path": "capsules/instruments/saw-lead-5f455c335c61/13",
+          "retired": false,
+          "tags": [
+            "saw"
+          ]
+        },
+        "14": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-13T20:58:27.365666+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Saw Lead",
+          "path": "capsules/instruments/saw-lead-5f455c335c61/14",
+          "retired": false,
+          "tags": [
+            "saw"
+          ]
+        },
+        "15": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:47:23.863875+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Saw Lead",
+          "path": "capsules/instruments/saw-lead-5f455c335c61/15",
+          "retired": false,
+          "tags": [
+            "saw"
+          ]
+        },
+        "16": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:48:31.311447+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Saw Lead",
+          "path": "capsules/instruments/saw-lead-5f455c335c61/16",
+          "retired": false,
+          "tags": [
+            "saw"
+          ]
+        },
+        "17": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:50:52.628328+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Saw Lead",
+          "path": "capsules/instruments/saw-lead-5f455c335c61/17",
           "retired": false,
           "tags": [
             "saw"
@@ -1199,7 +2464,7 @@
       }
     },
     "square-bass-5df2e0c261be": {
-      "latest_revision": 8,
+      "latest_revision": 15,
       "revisions": {
         "1": {
           "compatible": true,
@@ -1208,6 +2473,78 @@
           "kind": "INSTRUMENT",
           "name": "Square Bass",
           "path": "capsules/instruments/square-bass-5df2e0c261be/1",
+          "retired": false,
+          "tags": [
+            "square"
+          ]
+        },
+        "10": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T21:14:34.722902+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Square Bass",
+          "path": "capsules/instruments/square-bass-5df2e0c261be/10",
+          "retired": false,
+          "tags": [
+            "square"
+          ]
+        },
+        "11": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-13T20:33:31.269098+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Square Bass",
+          "path": "capsules/instruments/square-bass-5df2e0c261be/11",
+          "retired": false,
+          "tags": [
+            "square"
+          ]
+        },
+        "12": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-13T20:58:27.413201+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Square Bass",
+          "path": "capsules/instruments/square-bass-5df2e0c261be/12",
+          "retired": false,
+          "tags": [
+            "square"
+          ]
+        },
+        "13": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:47:23.913533+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Square Bass",
+          "path": "capsules/instruments/square-bass-5df2e0c261be/13",
+          "retired": false,
+          "tags": [
+            "square"
+          ]
+        },
+        "14": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:48:31.375819+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Square Bass",
+          "path": "capsules/instruments/square-bass-5df2e0c261be/14",
+          "retired": false,
+          "tags": [
+            "square"
+          ]
+        },
+        "15": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:50:52.678013+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Square Bass",
+          "path": "capsules/instruments/square-bass-5df2e0c261be/15",
           "retired": false,
           "tags": [
             "square"
@@ -1296,11 +2633,23 @@
           "tags": [
             "square"
           ]
+        },
+        "9": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T20:02:18.559015+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Square Bass",
+          "path": "capsules/instruments/square-bass-5df2e0c261be/9",
+          "retired": false,
+          "tags": [
+            "square"
+          ]
         }
       }
     },
     "string-pad-5d9d74422451": {
-      "latest_revision": 8,
+      "latest_revision": 15,
       "revisions": {
         "1": {
           "compatible": true,
@@ -1309,6 +2658,78 @@
           "kind": "INSTRUMENT",
           "name": "String Pad",
           "path": "capsules/instruments/string-pad-5d9d74422451/1",
+          "retired": false,
+          "tags": [
+            "saw"
+          ]
+        },
+        "10": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T21:14:34.764165+00:00",
+          "kind": "INSTRUMENT",
+          "name": "String Pad",
+          "path": "capsules/instruments/string-pad-5d9d74422451/10",
+          "retired": false,
+          "tags": [
+            "saw"
+          ]
+        },
+        "11": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-13T20:33:31.329492+00:00",
+          "kind": "INSTRUMENT",
+          "name": "String Pad",
+          "path": "capsules/instruments/string-pad-5d9d74422451/11",
+          "retired": false,
+          "tags": [
+            "saw"
+          ]
+        },
+        "12": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-13T20:58:27.459871+00:00",
+          "kind": "INSTRUMENT",
+          "name": "String Pad",
+          "path": "capsules/instruments/string-pad-5d9d74422451/12",
+          "retired": false,
+          "tags": [
+            "saw"
+          ]
+        },
+        "13": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:47:23.962099+00:00",
+          "kind": "INSTRUMENT",
+          "name": "String Pad",
+          "path": "capsules/instruments/string-pad-5d9d74422451/13",
+          "retired": false,
+          "tags": [
+            "saw"
+          ]
+        },
+        "14": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:48:31.422696+00:00",
+          "kind": "INSTRUMENT",
+          "name": "String Pad",
+          "path": "capsules/instruments/string-pad-5d9d74422451/14",
+          "retired": false,
+          "tags": [
+            "saw"
+          ]
+        },
+        "15": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:50:52.731599+00:00",
+          "kind": "INSTRUMENT",
+          "name": "String Pad",
+          "path": "capsules/instruments/string-pad-5d9d74422451/15",
           "retired": false,
           "tags": [
             "saw"
@@ -1397,11 +2818,23 @@
           "tags": [
             "saw"
           ]
+        },
+        "9": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T20:02:18.607983+00:00",
+          "kind": "INSTRUMENT",
+          "name": "String Pad",
+          "path": "capsules/instruments/string-pad-5d9d74422451/9",
+          "retired": false,
+          "tags": [
+            "saw"
+          ]
         }
       }
     },
     "sub-bass-cf83426de4aa": {
-      "latest_revision": 8,
+      "latest_revision": 15,
       "revisions": {
         "1": {
           "compatible": true,
@@ -1410,6 +2843,78 @@
           "kind": "INSTRUMENT",
           "name": "Sub Bass",
           "path": "capsules/instruments/sub-bass-cf83426de4aa/1",
+          "retired": false,
+          "tags": [
+            "sine"
+          ]
+        },
+        "10": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T21:14:34.811953+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Sub Bass",
+          "path": "capsules/instruments/sub-bass-cf83426de4aa/10",
+          "retired": false,
+          "tags": [
+            "sine"
+          ]
+        },
+        "11": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-13T20:33:31.387091+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Sub Bass",
+          "path": "capsules/instruments/sub-bass-cf83426de4aa/11",
+          "retired": false,
+          "tags": [
+            "sine"
+          ]
+        },
+        "12": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-13T20:58:27.506189+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Sub Bass",
+          "path": "capsules/instruments/sub-bass-cf83426de4aa/12",
+          "retired": false,
+          "tags": [
+            "sine"
+          ]
+        },
+        "13": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:47:24.030855+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Sub Bass",
+          "path": "capsules/instruments/sub-bass-cf83426de4aa/13",
+          "retired": false,
+          "tags": [
+            "sine"
+          ]
+        },
+        "14": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:48:31.471025+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Sub Bass",
+          "path": "capsules/instruments/sub-bass-cf83426de4aa/14",
+          "retired": false,
+          "tags": [
+            "sine"
+          ]
+        },
+        "15": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:50:52.786406+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Sub Bass",
+          "path": "capsules/instruments/sub-bass-cf83426de4aa/15",
           "retired": false,
           "tags": [
             "sine"
@@ -1498,11 +3003,23 @@
           "tags": [
             "sine"
           ]
+        },
+        "9": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T20:02:18.655032+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Sub Bass",
+          "path": "capsules/instruments/sub-bass-cf83426de4aa/9",
+          "retired": false,
+          "tags": [
+            "sine"
+          ]
         }
       }
     },
     "sync-lead-4c877a255c52": {
-      "latest_revision": 8,
+      "latest_revision": 15,
       "revisions": {
         "1": {
           "compatible": true,
@@ -1511,6 +3028,78 @@
           "kind": "INSTRUMENT",
           "name": "Sync Lead",
           "path": "capsules/instruments/sync-lead-4c877a255c52/1",
+          "retired": false,
+          "tags": [
+            "saw"
+          ]
+        },
+        "10": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T21:14:34.861111+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Sync Lead",
+          "path": "capsules/instruments/sync-lead-4c877a255c52/10",
+          "retired": false,
+          "tags": [
+            "saw"
+          ]
+        },
+        "11": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-13T20:33:31.458729+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Sync Lead",
+          "path": "capsules/instruments/sync-lead-4c877a255c52/11",
+          "retired": false,
+          "tags": [
+            "saw"
+          ]
+        },
+        "12": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-13T20:58:27.550378+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Sync Lead",
+          "path": "capsules/instruments/sync-lead-4c877a255c52/12",
+          "retired": false,
+          "tags": [
+            "saw"
+          ]
+        },
+        "13": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:47:24.080623+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Sync Lead",
+          "path": "capsules/instruments/sync-lead-4c877a255c52/13",
+          "retired": false,
+          "tags": [
+            "saw"
+          ]
+        },
+        "14": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:48:31.518674+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Sync Lead",
+          "path": "capsules/instruments/sync-lead-4c877a255c52/14",
+          "retired": false,
+          "tags": [
+            "saw"
+          ]
+        },
+        "15": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:50:52.835791+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Sync Lead",
+          "path": "capsules/instruments/sync-lead-4c877a255c52/15",
           "retired": false,
           "tags": [
             "saw"
@@ -1599,11 +3188,23 @@
           "tags": [
             "saw"
           ]
+        },
+        "9": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T20:02:18.703099+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Sync Lead",
+          "path": "capsules/instruments/sync-lead-4c877a255c52/9",
+          "retired": false,
+          "tags": [
+            "saw"
+          ]
         }
       }
     },
     "synth-brass-92a0f0362c17": {
-      "latest_revision": 10,
+      "latest_revision": 24,
       "revisions": {
         "1": {
           "compatible": true,
@@ -1631,6 +3232,123 @@
             "fm6"
           ]
         },
+        "11": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T18:29:55.890237+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Synth Brass",
+          "path": "capsules/instruments/synth-brass-92a0f0362c17/11",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "12": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T18:30:45.949700+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Synth Brass",
+          "path": "capsules/instruments/synth-brass-92a0f0362c17/12",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "13": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T18:33:26.912339+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Synth Brass",
+          "path": "capsules/instruments/synth-brass-92a0f0362c17/13",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "14": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T18:35:06.726291+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Synth Brass",
+          "path": "capsules/instruments/synth-brass-92a0f0362c17/14",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "15": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T18:57:24.235177+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Synth Brass",
+          "path": "capsules/instruments/synth-brass-92a0f0362c17/15",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "16": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T20:02:18.137198+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Synth Brass",
+          "path": "capsules/instruments/synth-brass-92a0f0362c17/16",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "17": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T21:13:41.871443+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Synth Brass",
+          "path": "capsules/instruments/synth-brass-92a0f0362c17/17",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "18": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T21:14:34.093848+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Synth Brass",
+          "path": "capsules/instruments/synth-brass-92a0f0362c17/18",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "19": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T21:26:23.421699+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Synth Brass",
+          "path": "capsules/instruments/synth-brass-92a0f0362c17/19",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
         "2": {
           "compatible": true,
           "deprecated": false,
@@ -1638,6 +3356,71 @@
           "kind": "INSTRUMENT",
           "name": "Synth Brass",
           "path": "capsules/instruments/synth-brass-92a0f0362c17/2",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "20": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-13T20:33:30.687869+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Synth Brass",
+          "path": "capsules/instruments/synth-brass-92a0f0362c17/20",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "21": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-13T20:58:26.938131+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Synth Brass",
+          "path": "capsules/instruments/synth-brass-92a0f0362c17/21",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "22": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:47:23.229409+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Synth Brass",
+          "path": "capsules/instruments/synth-brass-92a0f0362c17/22",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "23": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:48:30.784539+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Synth Brass",
+          "path": "capsules/instruments/synth-brass-92a0f0362c17/23",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "24": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:50:52.041049+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Synth Brass",
+          "path": "capsules/instruments/synth-brass-92a0f0362c17/24",
           "retired": false,
           "tags": [
             "fm",
@@ -1738,7 +3521,7 @@
       }
     },
     "theremin-lead-8968f2274ac7": {
-      "latest_revision": 7,
+      "latest_revision": 14,
       "revisions": {
         "1": {
           "compatible": true,
@@ -1747,6 +3530,66 @@
           "kind": "INSTRUMENT",
           "name": "Theremin Lead",
           "path": "capsules/instruments/theremin-lead-8968f2274ac7/1",
+          "retired": false,
+          "tags": [
+            "sine"
+          ]
+        },
+        "10": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-13T20:33:31.510653+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Theremin Lead",
+          "path": "capsules/instruments/theremin-lead-8968f2274ac7/10",
+          "retired": false,
+          "tags": [
+            "sine"
+          ]
+        },
+        "11": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-13T20:58:27.595731+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Theremin Lead",
+          "path": "capsules/instruments/theremin-lead-8968f2274ac7/11",
+          "retired": false,
+          "tags": [
+            "sine"
+          ]
+        },
+        "12": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:47:24.130337+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Theremin Lead",
+          "path": "capsules/instruments/theremin-lead-8968f2274ac7/12",
+          "retired": false,
+          "tags": [
+            "sine"
+          ]
+        },
+        "13": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:48:31.565816+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Theremin Lead",
+          "path": "capsules/instruments/theremin-lead-8968f2274ac7/13",
+          "retired": false,
+          "tags": [
+            "sine"
+          ]
+        },
+        "14": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:50:52.891926+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Theremin Lead",
+          "path": "capsules/instruments/theremin-lead-8968f2274ac7/14",
           "retired": false,
           "tags": [
             "sine"
@@ -1823,11 +3666,35 @@
           "tags": [
             "sine"
           ]
+        },
+        "8": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T20:02:18.751933+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Theremin Lead",
+          "path": "capsules/instruments/theremin-lead-8968f2274ac7/8",
+          "retired": false,
+          "tags": [
+            "sine"
+          ]
+        },
+        "9": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T21:14:34.909349+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Theremin Lead",
+          "path": "capsules/instruments/theremin-lead-8968f2274ac7/9",
+          "retired": false,
+          "tags": [
+            "sine"
+          ]
         }
       }
     },
     "tremolo-fast-v0-4c8651f37529": {
-      "latest_revision": 7,
+      "latest_revision": 11,
       "revisions": {
         "1": {
           "compatible": true,
@@ -1836,6 +3703,36 @@
           "kind": "MACRO",
           "name": "Fast Tremolo",
           "path": "capsules/macros/tremolo-fast-v0-4c8651f37529/1",
+          "retired": false,
+          "tags": [
+            "dramatic",
+            "fast",
+            "strings",
+            "tremolo"
+          ]
+        },
+        "10": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:48:31.867587+00:00",
+          "kind": "MACRO",
+          "name": "Fast Tremolo",
+          "path": "capsules/macros/tremolo-fast-v0-4c8651f37529/10",
+          "retired": false,
+          "tags": [
+            "dramatic",
+            "fast",
+            "strings",
+            "tremolo"
+          ]
+        },
+        "11": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:50:53.205356+00:00",
+          "kind": "MACRO",
+          "name": "Fast Tremolo",
+          "path": "capsules/macros/tremolo-fast-v0-4c8651f37529/11",
           "retired": false,
           "tags": [
             "dramatic",
@@ -1933,11 +3830,41 @@
             "strings",
             "tremolo"
           ]
+        },
+        "8": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-13T20:58:27.823905+00:00",
+          "kind": "MACRO",
+          "name": "Fast Tremolo",
+          "path": "capsules/macros/tremolo-fast-v0-4c8651f37529/8",
+          "retired": false,
+          "tags": [
+            "dramatic",
+            "fast",
+            "strings",
+            "tremolo"
+          ]
+        },
+        "9": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:47:24.447619+00:00",
+          "kind": "MACRO",
+          "name": "Fast Tremolo",
+          "path": "capsules/macros/tremolo-fast-v0-4c8651f37529/9",
+          "retired": false,
+          "tags": [
+            "dramatic",
+            "fast",
+            "strings",
+            "tremolo"
+          ]
         }
       }
     },
     "vibrato-classic-v0-8cf548fcc398": {
-      "latest_revision": 7,
+      "latest_revision": 11,
       "revisions": {
         "1": {
           "compatible": true,
@@ -1946,6 +3873,36 @@
           "kind": "MACRO",
           "name": "Classic Vibrato",
           "path": "capsules/macros/vibrato-classic-v0-8cf548fcc398/1",
+          "retired": false,
+          "tags": [
+            "classic",
+            "expressive",
+            "strings",
+            "vibrato"
+          ]
+        },
+        "10": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:48:31.931819+00:00",
+          "kind": "MACRO",
+          "name": "Classic Vibrato",
+          "path": "capsules/macros/vibrato-classic-v0-8cf548fcc398/10",
+          "retired": false,
+          "tags": [
+            "classic",
+            "expressive",
+            "strings",
+            "vibrato"
+          ]
+        },
+        "11": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:50:53.268049+00:00",
+          "kind": "MACRO",
+          "name": "Classic Vibrato",
+          "path": "capsules/macros/vibrato-classic-v0-8cf548fcc398/11",
           "retired": false,
           "tags": [
             "classic",
@@ -2043,11 +4000,41 @@
             "strings",
             "vibrato"
           ]
+        },
+        "8": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-13T20:58:27.865651+00:00",
+          "kind": "MACRO",
+          "name": "Classic Vibrato",
+          "path": "capsules/macros/vibrato-classic-v0-8cf548fcc398/8",
+          "retired": false,
+          "tags": [
+            "classic",
+            "expressive",
+            "strings",
+            "vibrato"
+          ]
+        },
+        "9": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:47:24.497444+00:00",
+          "kind": "MACRO",
+          "name": "Classic Vibrato",
+          "path": "capsules/macros/vibrato-classic-v0-8cf548fcc398/9",
+          "retired": false,
+          "tags": [
+            "classic",
+            "expressive",
+            "strings",
+            "vibrato"
+          ]
         }
       }
     },
     "violin-ir-256819fd62e4": {
-      "latest_revision": 11,
+      "latest_revision": 18,
       "revisions": {
         "1": {
           "compatible": true,
@@ -2080,6 +4067,90 @@
           "kind": "INSTRUMENT",
           "name": "Violin IR",
           "path": "capsules/instruments/violin-ir-256819fd62e4/11",
+          "retired": false,
+          "tags": [
+            "partials"
+          ]
+        },
+        "12": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T20:02:18.801665+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Violin IR",
+          "path": "capsules/instruments/violin-ir-256819fd62e4/12",
+          "retired": false,
+          "tags": [
+            "partials"
+          ]
+        },
+        "13": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T21:14:34.965293+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Violin IR",
+          "path": "capsules/instruments/violin-ir-256819fd62e4/13",
+          "retired": false,
+          "tags": [
+            "partials"
+          ]
+        },
+        "14": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-13T20:33:31.564520+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Violin IR",
+          "path": "capsules/instruments/violin-ir-256819fd62e4/14",
+          "retired": false,
+          "tags": [
+            "partials"
+          ]
+        },
+        "15": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-13T20:58:27.650422+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Violin IR",
+          "path": "capsules/instruments/violin-ir-256819fd62e4/15",
+          "retired": false,
+          "tags": [
+            "partials"
+          ]
+        },
+        "16": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:47:24.188177+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Violin IR",
+          "path": "capsules/instruments/violin-ir-256819fd62e4/16",
+          "retired": false,
+          "tags": [
+            "partials"
+          ]
+        },
+        "17": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:48:31.625730+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Violin IR",
+          "path": "capsules/instruments/violin-ir-256819fd62e4/17",
+          "retired": false,
+          "tags": [
+            "partials"
+          ]
+        },
+        "18": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:50:52.968761+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Violin IR",
+          "path": "capsules/instruments/violin-ir-256819fd62e4/18",
           "retired": false,
           "tags": [
             "partials"
@@ -2184,7 +4255,7 @@
       }
     },
     "wobble-bass-daac9b2e27bf": {
-      "latest_revision": 7,
+      "latest_revision": 14,
       "revisions": {
         "1": {
           "compatible": true,
@@ -2193,6 +4264,66 @@
           "kind": "INSTRUMENT",
           "name": "Wobble Bass",
           "path": "capsules/instruments/wobble-bass-daac9b2e27bf/1",
+          "retired": false,
+          "tags": [
+            "square"
+          ]
+        },
+        "10": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-13T20:33:31.635612+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Wobble Bass",
+          "path": "capsules/instruments/wobble-bass-daac9b2e27bf/10",
+          "retired": false,
+          "tags": [
+            "square"
+          ]
+        },
+        "11": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-13T20:58:27.695755+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Wobble Bass",
+          "path": "capsules/instruments/wobble-bass-daac9b2e27bf/11",
+          "retired": false,
+          "tags": [
+            "square"
+          ]
+        },
+        "12": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:47:24.272542+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Wobble Bass",
+          "path": "capsules/instruments/wobble-bass-daac9b2e27bf/12",
+          "retired": false,
+          "tags": [
+            "square"
+          ]
+        },
+        "13": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:48:31.681144+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Wobble Bass",
+          "path": "capsules/instruments/wobble-bass-daac9b2e27bf/13",
+          "retired": false,
+          "tags": [
+            "square"
+          ]
+        },
+        "14": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-14T00:50:53.043363+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Wobble Bass",
+          "path": "capsules/instruments/wobble-bass-daac9b2e27bf/14",
           "retired": false,
           "tags": [
             "square"
@@ -2269,6 +4400,30 @@
           "tags": [
             "square"
           ]
+        },
+        "8": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T20:02:18.851223+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Wobble Bass",
+          "path": "capsules/instruments/wobble-bass-daac9b2e27bf/8",
+          "retired": false,
+          "tags": [
+            "square"
+          ]
+        },
+        "9": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-01-12T21:14:35.011772+00:00",
+          "kind": "INSTRUMENT",
+          "name": "Wobble Bass",
+          "path": "capsules/instruments/wobble-bass-daac9b2e27bf/9",
+          "retired": false,
+          "tags": [
+            "square"
+          ]
         }
       }
     }
@@ -2277,6 +4432,7 @@
     "1163238173": "sync-lead-4c877a255c52",
     "1163888049": "string-pad-5d9d74422451",
     "1254036454": "pwm-pad-1049070764bf",
+    "1320385619": "fm-trumpet-94498f8dfc67",
     "1476221186": "jump-brass-48258ae59583",
     "1629037344": "fm-brass-bc31e99ba956",
     "1632939335": "violin-ir-256819fd62e4",
@@ -2289,6 +4445,7 @@
     "642297337": "glitch-lead-424fa816d36b",
     "685195083": "pluck-1e1880eaa8e3",
     "879252156": "wobble-bass-daac9b2e27bf",
+    "918823927": "fm-french-horn-e0c3e2d95a02",
     "925367568": "fm-bell-147b22e38ba0"
   },
   "version": 0

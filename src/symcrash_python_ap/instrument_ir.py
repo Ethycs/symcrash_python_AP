@@ -168,21 +168,106 @@ class EventLane(IntEnum):
 # =============================================================================
 
 @dataclass
-class Macro:
-    """User-facing macro parameter."""
-    id: str
-    name: str
-    range: Tuple[float, float] = (0.0, 1.0)
-    default: float = 0.5
-
-
-@dataclass
 class ADSR:
     """Envelope parameters."""
     a_ms: float = 8.0
     d_ms: float = 80.0
     s: float = 0.7
     r_ms: float = 180.0
+
+
+@dataclass
+class EnvelopeBinding:
+    """
+    Named envelope with routing to targets.
+
+    Part of the Matrix Envelope System - allows one envelope to control
+    multiple targets (e.g., carrier envelope → FM_OP1-4).
+
+    See envelope_targets.py for valid target names:
+    - FM_OP1-FM_OP6: FM operator envelope values
+    - GAIN: Voice gain multiplier
+    - FILTER_CUTOFF, FILTER_RESO: Filter parameters (future)
+    - PITCH, VIBRATO_DEPTH: Pitch modulation (future)
+    """
+    id: str                          # e.g., "carrier_env"
+    adsr: ADSR = field(default_factory=ADSR)  # Envelope shape
+    targets: List[str] = field(default_factory=list)  # Target names
+
+
+@dataclass
+class ControlConfig:
+    """
+    Control axis defaults for cockpit integration.
+
+    Defines default values for semantic control axes that presets can specify.
+    These values are pushed to MacroRuntime at preset load time via ControlProgram.
+
+    All values are Q15 unsigned (0-32767) representing 0.0-1.0 normalized.
+
+    Semantic meanings (per WSE-STD-MACRO v0):
+    - energy_intent: Playing intensity / attack character
+    - motion: Movement / modulation amount (gesture tracking)
+    - focus: Attention / emphasis (spectral concentration)
+    - brightness: Timbral brightness (harmonic content)
+    - density: Body / thickness (low-mid presence)
+    - risk: Chaos / instability (stochastic behavior)
+    - space: Spatial / reverb character
+    - material: Surface texture (wood=low, metal=mid, glass=high)
+    - unity: Coherence / blend (how much voices blend together)
+
+    YAML example:
+        control:
+          brightness: 0.75    # High brightness for brass
+          density: 0.5        # Neutral body
+          energy_intent: 0.6  # Slightly aggressive
+          risk: 0.1           # Some instability
+
+    Or using Q15 directly:
+        control:
+          brightness_q15: 24576
+          density_q15: 16384
+    """
+    # Controller → CMMM axes (normalized 0.0-1.0 or Q15 0-32767)
+    energy_intent: float = 0.5        # 0.5 = neutral intensity
+    motion: float = 0.0               # 0.0 = no modulation
+    focus: float = 0.5                # 0.5 = balanced emphasis
+    brightness: float = 0.5           # 0.5 = neutral brightness
+    density: float = 0.5              # 0.5 = neutral body
+    risk: float = 0.0                 # 0.0 = stable, no chaos
+    space: float = 0.25               # 0.25 = subtle spatial
+    material: float = 0.5             # 0.5 = neutral (neither wood nor glass)
+    unity: float = 0.5                # 0.5 = balanced blend
+
+    def to_control_program(self) -> 'ControlProgram':
+        """
+        Convert to ControlProgram for capsule compilation.
+
+        Returns:
+            ControlProgram with Q15 values
+        """
+        from .library.capsule import ControlProgram
+
+        return ControlProgram(
+            energy_intent_q15=int(self.energy_intent * 32767),
+            motion_q15=int(self.motion * 32767),
+            focus_q15=int(self.focus * 32767),
+            brightness_q15=int(self.brightness * 32767),
+            density_q15=int(self.density * 32767),
+            risk_q15=int(self.risk * 32767),
+            space_q15=int(self.space * 32767),
+            material_q15=int(self.material * 32767),
+            unity_q15=int(self.unity * 32767),
+        )
+
+
+@dataclass
+class Macro:
+    """User-facing macro parameter."""
+    id: str
+    name: str
+    range: Tuple[float, float] = (0.0, 1.0)
+    default: float = 0.5
 
 
 @dataclass
@@ -655,6 +740,14 @@ class InstrumentIR:
     layers: Layers = field(default_factory=Layers)
     compile: CompileConfig = field(default_factory=CompileConfig)
 
+    # Matrix Envelope System - named envelopes with target routing
+    # Each envelope can route to multiple targets (FM operators, gain, filter, etc.)
+    envelopes: List[EnvelopeBinding] = field(default_factory=list)
+
+    # Control axis defaults for cockpit integration
+    # These define semantic control axis defaults that MacroRuntime applies at load
+    control: Optional[ControlConfig] = None
+
     def validate(self) -> Tuple[bool, str]:
         """
         Validate the IR structure.
@@ -958,6 +1051,61 @@ def _parse_adsr(data: dict) -> ADSR:
         d_ms=data.get('d_ms', 80.0),
         s=data.get('s', 0.7),
         r_ms=data.get('r_ms', 180.0),
+    )
+
+
+def _parse_envelope_binding(data: dict) -> EnvelopeBinding:
+    """
+    Parse envelope binding from dict.
+
+    Example YAML:
+        - id: "carrier_env"
+          adsr: { a_ms: 8, d_ms: 150, s: 0.7, r_ms: 100 }
+          targets: [FM_OP1, FM_OP2, FM_OP3, FM_OP4]
+    """
+    return EnvelopeBinding(
+        id=data.get('id', ''),
+        adsr=_parse_adsr(data.get('adsr', {})),
+        targets=data.get('targets', []),
+    )
+
+
+def _parse_control_config(data: dict) -> ControlConfig:
+    """
+    Parse control config from dict.
+
+    Supports both normalized (0.0-1.0) and Q15 (0-32767) values.
+    Q15 values take precedence if both are specified.
+
+    Example YAML:
+        control:
+          brightness: 0.75      # High brightness for brass
+          density: 0.5          # Neutral body
+          energy_intent: 0.6    # Slightly aggressive
+          risk: 0.1             # Some instability
+
+    Or using Q15 directly:
+        control:
+          brightness_q15: 24576
+          density_q15: 16384
+    """
+    def get_value(name: str, default: float) -> float:
+        """Get value, preferring Q15 over normalized."""
+        q15_key = f'{name}_q15'
+        if q15_key in data:
+            return data[q15_key] / 32767.0
+        return data.get(name, default)
+
+    return ControlConfig(
+        energy_intent=get_value('energy_intent', 0.5),
+        motion=get_value('motion', 0.0),
+        focus=get_value('focus', 0.5),
+        brightness=get_value('brightness', 0.5),
+        density=get_value('density', 0.5),
+        risk=get_value('risk', 0.0),
+        space=get_value('space', 0.25),
+        material=get_value('material', 0.5),
+        unity=get_value('unity', 0.5),
     )
 
 
@@ -1491,11 +1639,24 @@ def load_instrument_from_dict(data: dict) -> InstrumentIR:
             "See PRESET-AUTHORING-GUIDE.md for the canonical format."
         )
 
+    # Parse envelope bindings (Matrix Envelope System)
+    envelopes = [
+        _parse_envelope_binding(env)
+        for env in data.get('envelopes', [])
+    ]
+
+    # Parse control config (system macro defaults)
+    control = None
+    if 'control' in data:
+        control = _parse_control_config(data['control'])
+
     return InstrumentIR(
         meta=_parse_instrument_meta(data.get('meta', {})),
         io=_parse_io_config(data.get('io', {})),
         layers=_parse_layers(data.get('layers', {})),
         compile=_parse_compile_config(data.get('compile', {})),
+        envelopes=envelopes,
+        control=control,
     )
 
 
@@ -1673,7 +1834,7 @@ __all__ = [
     'NodeType', 'WaveformType', 'NoiseColor', 'FilterMode',
     'RegimeKind', 'TransitionType', 'OverlayKind', 'EventLane',
     # L0 types
-    'Macro', 'ADSR', 'NodeParams', 'L0Node', 'L0Edge', 'L0Graph',
+    'Macro', 'ADSR', 'EnvelopeBinding', 'ControlConfig', 'NodeParams', 'L0Node', 'L0Edge', 'L0Graph',
     # L1 types
     'GestureSource', 'MacroAffect', 'MacroSemantic', 'L1Lift',
     # L2 types

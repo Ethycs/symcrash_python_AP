@@ -202,13 +202,15 @@ def render_process_main(
                 f0_hz = 440.0 * (2.0 ** ((current_note - 69 + detune_cents / 100.0) / 12.0))
                 eta_q15 = voice_state.eta_q15 if voice_state else 32767
                 master_gain = voice_state.master_gain_q15 if voice_state else 32767
-                scaled_gain = (active_frame.gain_q15 * master_gain) >> 15
+                # Q15 multiply with rounding: (a * b + 16384) >> 15
+                scaled_gain = (active_frame.gain_q15 * master_gain + 16384) >> 15
 
                 harmonics_q15 = voice_state.harmonics_q15 if voice_state else 0  # 0 = pure sine
                 base_amps = [32767, 16384, 10923, 8192, 6554, 5461, 4681, 4096]
                 partial_amps = [base_amps[0]]
                 for amp in base_amps[1:]:
-                    partial_amps.append((amp * harmonics_q15) >> 15)
+                    # Q15 multiply with rounding
+                    partial_amps.append((amp * harmonics_q15 + 16384) >> 15)
 
                 frame = VoiceFrame(
                     voice_id=active_frame.voice_id,

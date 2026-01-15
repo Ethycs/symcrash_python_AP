@@ -203,7 +203,7 @@ class StreamingCoeffLUT:
             val = (a3 * frac_64 + half) >> frac_bits
             val = ((val + a2) * frac_64 + half) >> frac_bits
             val = ((val + a1) * frac_64 + half) >> frac_bits
-            val = (val + a0) >> 1  # Final division by 2
+            val = (val + a0 + 1) >> 1  # Final division by 2 with rounding
 
         else:
             # Linear interpolation (default, fastest)

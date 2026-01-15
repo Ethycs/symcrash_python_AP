@@ -248,7 +248,15 @@ def vm_step_block(
             # -----------------------------------------------------------------
             # MODE FM6: 6-Operator FM Synthesis (WSE-STD-FM-TOPOLOGY-v0)
             # -----------------------------------------------------------------
-            from .fm6_engine import fm6_generate_coeffs
+            # FM6 uses direct sample-rate audio generation.
+            # FWPT is an "adapter" to re-enter coefficient domain ONLY when
+            # effects processing is needed.
+            #
+            # Pipeline options:
+            # A) NO effects: audio -> gain -> output (bypass coefficients)
+            # B) WITH effects: audio -> FWPT -> coeff_ops -> IDWPT -> output
+            #
+            from .fm6_engine import fm6_generate_block_full
 
             # Get or create FM6 state
             fm6_state = state.fm6_state
@@ -282,10 +290,73 @@ def vm_step_block(
                 if alg.feedback_op >= 0:
                     fm6_state.operators[alg.feedback_op].feedback_q15 = feedback_q15
 
-            # Generate FM6 coefficients
-            # base_phase_inc is the Q32 phase increment for the fundamental
+            # Apply matrix envelope targets to FM6 operators
+            # env_targets_q15 maps EnvelopeTarget ID -> Q15 value
+            # FM_OP1-FM_OP6 = 0-5
+            env_targets = getattr(frame, 'env_targets_q15', None)
+            if env_targets:
+                from .fm6_state import Q15_ONE as FM6_Q15_ONE
+                for target_id, value in env_targets.items():
+                    if 0 <= target_id <= 5:  # FM_OP1 through FM_OP6
+                        fm6_state.operators[target_id].env_value_q15 = value
+            else:
+                # No envelope targets: set all operators to full output
+                from .fm6_state import Q15_ONE as FM6_Q15_ONE
+                for op in fm6_state.operators:
+                    op.env_value_q15 = FM6_Q15_ONE
+
+            # FM6 generates audio directly at sample rate
             base_phase_inc = params.phase_inc
-            fm6_generate_coeffs(fm6_state, carrier_512, base_phase_inc)
+            fm6_audio = fm6_generate_block_full(fm6_state, base_phase_inc)
+
+            # Check if we have coefficient-domain effects to apply
+            # Effects are requested via backbone_instrs (non-empty = has effects)
+            has_coeff_effects = len(cfg.backbone_instrs) > 0
+
+            if has_coeff_effects:
+                # ---------------------------------------------------------
+                # PATH B: FM6 audio -> FWPT -> coeff ops -> IDWPT -> output
+                # ---------------------------------------------------------
+                # Use FWPT as adapter to re-enter coefficient domain for effects
+                from ..wavelet.fast_lifting import fwpt_jit
+
+                # FWPT analysis: 64 audio samples -> 64 wavelet coefficients
+                coeffs_64 = fwpt_jit(fm6_audio.tolist(), headroom_bits=1)
+
+                # Replicate across K time slots for CCS processing
+                # Layout: coeff_state[leaf * K + k] for each leaf and k-slot
+                from .tables import VM_K
+                for k in range(VM_K):
+                    for leaf in range(64):
+                        state.coeff_state[leaf * VM_K + k] = int(np.clip(coeffs_64[leaf], -32768, 32767))
+
+                # Apply coefficient-domain operators
+                lane_inject(state, cfg)
+                for instr in cfg.backbone_instrs:
+                    dispatch_coeff_op(state, instr, cfg.mask_u32)
+                lane_tail(state, cfg)
+
+                # IDWPT reconstruction back to audio
+                output = lane_ccs_render(state, cfg)
+            else:
+                # ---------------------------------------------------------
+                # PATH A: Direct audio output (no effects, bypass FWPT/IDWPT)
+                # ---------------------------------------------------------
+                output = fm6_audio.copy()
+
+            # Apply gain interpolation
+            gain_curr = cfg.gain_curr_q15
+            gain_prev = cfg.gain_prev_q15
+            if gain_curr != 32767 or gain_prev != 32767:
+                for i in range(BLOCK_SAMPLES):
+                    alpha = (i * 32767 + (BLOCK_SAMPLES >> 1)) // BLOCK_SAMPLES
+                    gain = gain_prev + RSHIFT_RNE((gain_curr - gain_prev) * alpha, 15)
+                    output[i] = RSHIFT_RNE(int(output[i]) * gain, 15)
+
+            # Update state and return
+            state.eta_prev_q15 = cfg.eta_curr_q15
+            state.gain_prev_q15 = cfg.gain_curr_q15
+            return state, output
         else:
             # -----------------------------------------------------------------
             # MODE A: LUT-based (existing path)

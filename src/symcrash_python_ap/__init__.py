@@ -21,6 +21,9 @@ from .material import MaterialEngine
 from .safety import SafetyEngine, UnifiedRenderer
 from .voice import VoiceEngine, VoiceBank, BlockScheduler, BlockOrchestrator
 
+# Unified pipeline
+from .synth_master import SynthMaster, SynthConfig
+
 # Foundation modules
 from .fixed import (
     sat16, mul_q15_sat, slew_q15,
@@ -47,6 +50,9 @@ __all__ = [
     'SafetyEngine',
     'VoiceEngine',
     'VoiceBank',
+    # Unified pipeline
+    'SynthMaster',
+    'SynthConfig',
     # Rendering
     'PacketTreeSet',
     'HarmonicTargetGenerator',

@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Dict, Optional
 
 # Add src to path
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from symcrash_python_ap.instrument_ir import load_instrument
 from symcrash_python_ap.macro_ir import load_macro, is_macro_preset
@@ -42,8 +42,8 @@ from symcrash_python_ap.library.compiler import CapsuleCompiler
 from symcrash_python_ap.library.preset_library import PresetLibraryV0
 from symcrash_python_ap.library.capsule_codec import capsule_to_bytes
 
-PRESETS_DIR = Path(__file__).parent.parent / "presets"
-LIBRARY_DIR = Path(__file__).parent.parent / "preset_library"
+PRESETS_DIR = Path(__file__).parent.parent.parent / "presets"
+LIBRARY_DIR = Path(__file__).parent.parent.parent / "preset_library"
 CACHE_FILE = LIBRARY_DIR / ".compile_cache.json"
 
 

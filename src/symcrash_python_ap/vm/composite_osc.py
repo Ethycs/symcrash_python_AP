@@ -16,7 +16,7 @@ Combines Mode A (LUT-based) and Mode B (Harmonic Bank) for optimal synthesis:
   - Best for: expressive timbres, modulation-heavy patches
 
 Composite Blending:
-    c_mix = blend_q15 * c_B + (32767 - blend_q15) * c_A >> 15
+    c_mix = (blend_q15 * c_B + (32767 - blend_q15) * c_A + 16384) >> 15
 
 Benefits:
     - Mode A provides stable reference (no accumulated errors)

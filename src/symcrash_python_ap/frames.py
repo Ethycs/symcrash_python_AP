@@ -189,6 +189,21 @@ class VoiceFrame:
     # When set, loads exact DX7 algorithm and maps to closest archetype
     fm_dx7_compat_id: Optional[int] = None
 
+    # =========================================================================
+    # Matrix Envelope System (WSE-STD-ENVELOPE-MATRIX-v0)
+    # =========================================================================
+
+    # Envelope routing targets: EnvelopeTarget ID → Q15 envelope value
+    # Populated by VoiceFrameEmitter from preset envelope bindings
+    # Applied by Executor to FM6 operators, gain, filter, etc.
+    #
+    # Target IDs:
+    #   0-5: FM_OP1-FM_OP6 (FM operator envelope values)
+    #   10: GAIN (voice gain multiplier)
+    #   20-21: FILTER_CUTOFF, FILTER_RESO (future)
+    #   30-31: PITCH, VIBRATO_DEPTH (future)
+    env_targets_q15: Optional[dict] = None
+
     # Legacy compatibility: convert float betas to IDs
     @property
     def tree_a(self) -> float:

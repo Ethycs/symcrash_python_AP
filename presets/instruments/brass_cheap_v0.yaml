@@ -1,0 +1,178 @@
+# Brass Cheap v0 - Cheap-First Preset Design
+# ===========================================
+#
+# Synth brass designed for degradation-resilient playback.
+# Uses cheap Tier A operators only for core identity.
+#
+# Operator Philosophy (cheap-first):
+# - Core identity: Tilt + IntraMix + DiffuseDown (K-scaling)
+# - Garnish (optional): Impulse, GlobalPulse (events - dropped first)
+# - Tail: MIN (FineClamp only) for K=16 testing
+#
+# Acceptance Criteria:
+# - STABLE_TONE: K=32 FULL tail = best version
+# - TRANSIENT: K=16 MIN tail = still slaps
+# - RESIDUAL: emergency = doesn't explode
+#
+# Algorithm 19 (DX7 Split to 3 Carriers):
+#   [6] -> [5] -> [4*]
+#              -> [3*]
+#              -> [2*]
+#          [1*]
+# Carriers: Op1-4, Modulators: Op5-6
+
+instrument_ir_v0:
+  meta:
+    instrument_id: "brass-cheap-v0"
+    name: "Brass Cheap"
+    version: 0
+    author: "symcrash"
+    seed_u32: 0x42524348  # "BRCH"
+
+  # Control axis defaults (WSE-STD-MACRO v0)
+  control:
+    brightness: 0.7        # Bright for brass
+    density: 0.5           # Medium body
+    energy_intent: 0.55    # Slightly aggressive
+    risk: 0.02             # Very stable (cheap preset)
+    material: 0.6          # Toward metallic
+
+  # Matrix Envelope System (WSE-STD-ENVELOPE-MATRIX-v0)
+  # Modulator decays faster than carrier for brightness transient
+  envelopes:
+    - id: "carrier_env"
+      adsr:
+        a_ms: 6.0          # Fast attack
+        d_ms: 120.0        # Medium decay
+        s: 0.75            # Strong sustain
+        r_ms: 80.0         # Quick release
+      targets:
+        - FM_OP1
+        - FM_OP2
+        - FM_OP3
+        - FM_OP4
+
+    - id: "mod_env"
+      adsr:
+        a_ms: 6.0          # Same fast attack
+        d_ms: 40.0         # Faster decay (brightness fades)
+        s: 0.35            # Lower sustain (less modulation)
+        r_ms: 80.0
+      targets:
+        - FM_OP5
+        - FM_OP6
+
+  io:
+    sample_rate_hz: 48000
+    block_size: 64
+
+  layers:
+    L0_graph:
+      nodes:
+        - id: "fm6"
+          type: "FM6"
+          params:
+            algorithm: 19       # Split to 3 carriers
+            feedback: 1         # Light feedback
+
+            # Operator frequency ratios (Q16: 65536 = 1.0x)
+            # Tight unison for brass section feel
+            op_ratios:
+              - 65536           # Op1: 1.0x (anchor)
+              - 65631           # Op2: +2.5 cents
+              - 65441           # Op3: -2.5 cents
+              - 65726           # Op4: +5 cents
+              - 65536           # Op5: 1.0x (modulator)
+              - 65536           # Op6: 1.0x (modulator)
+
+            # Operator output levels (Q15)
+            # Full carriers, reduced modulators for warmth
+            op_levels:
+              - 32767           # Op1: Full
+              - 32767           # Op2: Full
+              - 32767           # Op3: Full
+              - 28671           # Op4: 0.875
+              - 12288           # Op5: 0.375 (warm mod)
+              - 8192            # Op6: 0.25 (gentle feedback)
+
+        - id: "amp1"
+          type: "Amp"
+          params:
+            adsr:
+              a_ms: 6.0
+              d_ms: 100.0
+              s: 0.7
+              r_ms: 80.0
+
+      edges:
+        - src: "fm6"
+          dst: "amp1"
+
+      macros:
+        - id: "M_BRIGHT"
+          name: "Brightness"
+          default: 0.7
+        - id: "M_BODY"
+          name: "Body"
+          default: 0.5
+
+    # CMMM Configuration - Cheap-First Operator Design
+    # Core operators are Tier A (DIAG/BANDED, K-scaling)
+    L3_cmmm:
+      emit_templates:
+        # IDLE: Minimal processing
+        T_IDLE:
+          families:
+            CONSTRAINT: 1.0
+            CALM: 1.0
+          ops_enable: ["FineClamp"]  # Tail MIN only
+          trees:
+            A: "T1"
+            B: "T1"
+            beta: 0.0
+
+        # ATTACK: Core cheap operators for transient
+        # Tilt + IntraMix = spectral shaping + body
+        T_ATTACK:
+          families:
+            COLOR: 0.7
+            LOCAL: 0.6
+            CONSTRAINT: 1.0
+            CALM: 0.2
+          ops_enable: ["Tilt", "IntraMix", "FineClamp"]
+          trees:
+            A: "T1"
+            B: "T1"
+            beta: 0.1
+
+        # STABLE: Add DiffuseDown for warmth
+        # Still cheap: all Tier A operators
+        T_STABLE:
+          families:
+            COLOR: 0.6
+            TRANSPORT: 0.4
+            LOCAL: 0.5
+            CONSTRAINT: 1.0
+            CALM: 0.5
+          ops_enable: ["Tilt", "DiffuseDown", "IntraMix", "FineClamp"]
+          trees:
+            A: "T1"
+            B: "T1"
+            beta: 0.15
+
+        # RECOVERY: Gentle return to idle
+        T_RECOVERY:
+          families:
+            CONSTRAINT: 1.0
+            CALM: 0.8
+          ops_enable: ["IntraMix", "FineClamp"]
+          trees:
+            A: "T1"
+            B: "T1"
+            beta: 0.0
+
+  compile:
+    material:
+      beta_start_q15: 0
+      beta_target_q15: 4096    # Light material blend
+      beta_ramp_blocks: 8

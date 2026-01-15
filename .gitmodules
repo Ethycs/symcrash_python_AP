@@ -1,0 +1,3 @@
+[submodule "symcrash_docs"]
+	path = symcrash_docs
+	url = https://github.com/Ethycs/symcrash_docs.git

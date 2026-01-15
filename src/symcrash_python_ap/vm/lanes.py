@@ -80,7 +80,8 @@ def cos_q15(eta_q15: int) -> int:
     """
     # Map eta (0 to 32767) to phase (0 to 0x40000000 for 0° to 90°)
     # 0x40000000 = 90° in sine_core's 32-bit phase format
-    phase = (eta_q15 * 0x40000000) >> 15
+    # Mask to uint32 range for deterministic behavior
+    phase = ((eta_q15 * 0x40000000) >> 15) & 0xFFFFFFFF
     return _cosine_q15(phase)
 
 
@@ -94,7 +95,8 @@ def sin_q15(eta_q15: int) -> int:
     Uses the canonical 1024-entry quarter-wave LUT with interpolation.
     """
     # Map eta (0 to 32767) to phase (0 to 0x40000000 for 0° to 90°)
-    phase = (eta_q15 * 0x40000000) >> 15
+    # Mask to uint32 range for deterministic behavior
+    phase = ((eta_q15 * 0x40000000) >> 15) & 0xFFFFFFFF
     return _sine_q15(phase)
 
 

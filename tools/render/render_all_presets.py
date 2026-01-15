@@ -36,6 +36,7 @@ from symcrash_python_ap.vm.harmonic_bank import clear_basis_atlas
 from symcrash_python_ap.vm.state import VMState, OSC_MODE_B, OSC_MODE_FM6
 from symcrash_python_ap.frames import VoiceFrame
 from symcrash_python_ap.audio_io import AudioWriter
+from symcrash_python_ap.envelope_targets import EnvelopeTarget
 
 FS = 48000
 BLOCK_SIZE = 64
@@ -115,6 +116,61 @@ def ms_to_blocks(ms):
     return max(1, int(ms / 1000.0 * BLOCKS_PER_SEC))
 
 
+def compute_envelope_value(block_idx, attack_blocks, decay_blocks, sustain, release_blocks,
+                          sustain_blocks, attack_level_q15=32767):
+    """
+    Compute ADSR envelope value at a given block.
+
+    Returns Q15 envelope value.
+    """
+    sustain_level_q15 = int(sustain * 32767)
+
+    if block_idx < attack_blocks:
+        t = block_idx / attack_blocks if attack_blocks > 0 else 1
+        return int(attack_level_q15 * t)
+    elif block_idx < attack_blocks + decay_blocks:
+        t = (block_idx - attack_blocks) / decay_blocks if decay_blocks > 0 else 1
+        return int(attack_level_q15 - (attack_level_q15 - sustain_level_q15) * t)
+    elif block_idx < attack_blocks + sustain_blocks:
+        return sustain_level_q15
+    else:
+        release_idx = block_idx - (attack_blocks + sustain_blocks)
+        t = release_idx / release_blocks if release_blocks > 0 else 1
+        return int(sustain_level_q15 * (1.0 - t))
+
+
+class EnvelopeState:
+    """Tracks envelope state for a single envelope binding."""
+
+    def __init__(self, binding):
+        self.binding = binding
+        adsr = binding.adsr
+        self.attack_blocks = ms_to_blocks(adsr.a_ms)
+        self.decay_blocks = ms_to_blocks(adsr.d_ms)
+        self.sustain = adsr.s
+        self.release_blocks = ms_to_blocks(adsr.r_ms)
+
+        # Parse target names to IDs
+        self.target_ids = []
+        for name in binding.targets:
+            try:
+                self.target_ids.append(int(EnvelopeTarget[name]))
+            except KeyError:
+                pass
+
+    def get_value(self, block_idx, sustain_blocks):
+        """Get Q15 envelope value at block_idx."""
+        value = compute_envelope_value(
+            block_idx,
+            self.attack_blocks,
+            self.decay_blocks,
+            self.sustain,
+            self.release_blocks,
+            sustain_blocks
+        )
+        return max(0, min(32767, value))
+
+
 def render_preset(preset_path, note, duration_sec):
     """Render a single preset to audio."""
     clear_basis_atlas()
@@ -148,6 +204,12 @@ def render_preset(preset_path, note, duration_sec):
                 'op_levels': getattr(node.params, 'op_levels', [32767, 0, 0, 0, 0, 0]),
             }
 
+    # Extract envelope bindings from InstrumentIR (Matrix Envelope System)
+    envelope_states = []
+    if hasattr(ir, 'envelopes') and ir.envelopes:
+        for binding in ir.envelopes:
+            envelope_states.append(EnvelopeState(binding))
+
     attack_blocks = env['attack_blocks']
     decay_blocks = env['decay_blocks']
     sustain = env['sustain']
@@ -170,6 +232,7 @@ def render_preset(preset_path, note, duration_sec):
     samples = []
 
     for block_idx in range(total_blocks):
+        # Compute global gain envelope (for non-matrix targets like GAIN)
         if block_idx < attack_blocks:
             t = block_idx / attack_blocks if attack_blocks > 0 else 1
             gain_q15 = int(attack_level_q15 * t)
@@ -185,6 +248,15 @@ def render_preset(preset_path, note, duration_sec):
 
         gain_q15 = max(0, min(32767, gain_q15))
 
+        # Compute envelope target values from matrix system
+        env_targets_q15 = None
+        if envelope_states:
+            env_targets_q15 = {}
+            for env_state in envelope_states:
+                value = env_state.get_value(block_idx, sustain_blocks)
+                for target_id in env_state.target_ids:
+                    env_targets_q15[target_id] = value
+
         if use_fm6 and fm6_params:
             # FM6 synthesis mode
             # Note: fm_feedback_depth expects DX7 level 0-7 (executor converts to Q15)
@@ -199,6 +271,7 @@ def render_preset(preset_path, note, duration_sec):
                 fm_op_ratios=fm6_params['op_ratios'],
                 fm_op_levels=fm6_params['op_levels'],
                 fm_feedback_depth=feedback_level,  # DX7 level 0-7, not Q15
+                env_targets_q15=env_targets_q15,   # Matrix envelope targets
             )
         else:
             # Standard Mode B synthesis
@@ -210,6 +283,7 @@ def render_preset(preset_path, note, duration_sec):
                 beta_target_q15=0,
                 partial_amps_q15=harmonic_amps,
                 waveform_type=waveform,
+                env_targets_q15=env_targets_q15,   # Matrix envelope targets
             )
 
         state, output = vm_step_block(state, frame)

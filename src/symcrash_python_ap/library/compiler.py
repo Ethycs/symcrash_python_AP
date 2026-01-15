@@ -37,6 +37,7 @@ from .capsule import (
     SeedConfig,
     AssetRef,
     AssetType,
+    ControlProgram,
     create_instrument_capsule,
     create_synth_capsule,
 )
@@ -46,6 +47,7 @@ from ..voice.voice_engine_registry import VoiceEngineRegistry, VoiceParamID, get
 
 if TYPE_CHECKING:
     from ..instrument_ir import InstrumentIR
+    from ..macro_ir import MacroIR
 
 
 # =============================================================================
@@ -114,6 +116,7 @@ class CapsuleCompiler:
         master_seed: int = 0x12345678,
         assets: List[AssetRef] = None,
         capsule_id: str = None,
+        control_program: 'ControlProgram' = None,
     ) -> CompileResult:
         """
         Compile inputs to CapsuleInstrument.
@@ -131,6 +134,7 @@ class CapsuleCompiler:
             master_seed: PRNG seed for determinism
             assets: Optional asset references
             capsule_id: Optional explicit capsule_id (generated if None)
+            control_program: Optional ControlProgram with system macro defaults
 
         Returns:
             CompileResult with capsule in COMPILED state
@@ -197,6 +201,7 @@ class CapsuleCompiler:
                 master_seed=master_seed,
                 derivation_rule_id=0,  # deterministic
             ),
+            control=control_program,  # System macro defaults for cockpit
         )
 
         # Validate capsule structure
@@ -494,6 +499,11 @@ class CapsuleCompiler:
         # Build asset references from compile.map_library
         assets = self._extract_assets_from_ir(ir)
 
+        # Extract control program from IR (system macro defaults)
+        control_program = None
+        if ir.control is not None:
+            control_program = ir.control.to_control_program()
+
         # Use standard compile_instrument with extracted values
         return self.compile_instrument(
             program_id=program_id,
@@ -508,7 +518,44 @@ class CapsuleCompiler:
             master_seed=master_seed,
             assets=assets,
             capsule_id=capsule_id,
+            control_program=control_program,
         )
+
+    def compile_from_macro(
+        self,
+        macro_ir: 'MacroIR',
+        capsule_id: str = None,
+    ) -> CompileResult:
+        """
+        Compile MacroIR to CapsuleV0 with CapsuleKind.MACRO.
+
+        Args:
+            macro_ir: Complete MacroIR v0
+            capsule_id: Override capsule_id (generated from IR if None)
+
+        Returns:
+            CompileResult with macro capsule
+        """
+        result = CompileResult(success=True)
+
+        # Validate macro structure
+        valid, error_msg = macro_ir.validate()
+        if not valid:
+            result.errors.append(f"Macro validation failed: {error_msg}")
+            result.success = False
+            return result
+
+        try:
+            # Delegate to MacroIR.to_capsule()
+            capsule = macro_ir.to_capsule(capsule_id)
+            result.capsule = capsule
+            result.capsule_id = capsule.identity.capsule_id
+            result.record = create_compiled_record(capsule)
+        except Exception as e:
+            result.errors.append(f"Macro compilation failed: {e}")
+            result.success = False
+
+        return result
 
     def _extract_control_defaults_from_ir(
         self,

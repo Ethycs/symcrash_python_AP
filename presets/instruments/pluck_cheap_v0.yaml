@@ -1,0 +1,174 @@
+# Pluck Cheap v0 - Cheap-First Preset Design
+# ===========================================
+#
+# Percussive pluck designed for degradation-resilient playback.
+# Uses cheap Tier A operators only for core identity.
+#
+# Operator Philosophy (cheap-first):
+# - Core identity lives in envelope + spectral setup
+# - Minimal operators - pluck character from ADSR
+# - Optional Impulse as garnish (dropped first under budget)
+# - Tail: MIN (FineClamp only) for K=16 testing
+#
+# Pluck Strategy:
+# - Instant attack, long decay to zero sustain
+# - Brightness decay via mod envelope (faster than carrier)
+# - Core must "pluck" even without operators
+# - Light Tilt for spectral character
+#
+# Algorithm 22 (DX7 Rhodes-like):
+#   [6] -> [5] -> [4*]
+#          [3] -> [2*]
+#                 [1*]
+# Multiple carriers for rich harmonic decay
+
+instrument_ir_v0:
+  meta:
+    instrument_id: "pluck-cheap-v0"
+    name: "Pluck Cheap"
+    version: 0
+    author: "symcrash"
+    seed_u32: 0x504C4348  # "PLCH"
+
+  # Control axis defaults (WSE-STD-MACRO v0)
+  control:
+    brightness: 0.6        # Bright attack
+    density: 0.4           # Light body
+    energy_intent: 0.7     # Percussive character
+    risk: 0.01             # Very stable
+    material: 0.55         # Slightly metallic
+
+  # Matrix Envelope System
+  # Fast attack, mod decays faster for brightness transient
+  envelopes:
+    - id: "carrier_env"
+      adsr:
+        a_ms: 1.0          # Instant attack
+        d_ms: 300.0        # Long decay
+        s: 0.0             # No sustain (pluck)
+        r_ms: 100.0        # Quick release
+      targets:
+        - FM_OP1
+        - FM_OP2
+        - FM_OP4
+
+    - id: "mod_env"
+      adsr:
+        a_ms: 1.0          # Instant attack
+        d_ms: 80.0         # Fast decay (brightness fades quickly)
+        s: 0.0             # No sustain
+        r_ms: 50.0
+      targets:
+        - FM_OP3
+        - FM_OP5
+        - FM_OP6
+
+  io:
+    sample_rate_hz: 48000
+    block_size: 64
+
+  layers:
+    L0_graph:
+      nodes:
+        - id: "fm6"
+          type: "FM6"
+          params:
+            algorithm: 22       # Rhodes-like: 3 carriers
+            feedback: 0         # No feedback (clean pluck)
+
+            # Operator frequency ratios (Q16: 65536 = 1.0x)
+            # Bell-like harmonic ratios
+            op_ratios:
+              - 65536           # Op1: 1.0x (carrier)
+              - 65536           # Op2: 1.0x (carrier)
+              - 131072          # Op3: 2.0x (brightness mod)
+              - 65536           # Op4: 1.0x (carrier)
+              - 196608          # Op5: 3.0x (bell mod)
+              - 262144          # Op6: 4.0x (shimmer)
+
+            # Operator output levels (Q15)
+            # Carriers full, mods for bell character
+            op_levels:
+              - 32767           # Op1: Full
+              - 24576           # Op2: 0.75
+              - 16384           # Op3: 0.5 (brightness)
+              - 20480           # Op4: 0.625
+              - 12288           # Op5: 0.375 (bell)
+              - 8192            # Op6: 0.25 (shimmer)
+
+        - id: "amp1"
+          type: "Amp"
+          params:
+            adsr:
+              a_ms: 1.0
+              d_ms: 300.0
+              s: 0.0
+              r_ms: 100.0
+
+      edges:
+        - src: "fm6"
+          dst: "amp1"
+
+      macros:
+        - id: "M_BRIGHT"
+          name: "Brightness"
+          default: 0.6
+        - id: "M_DECAY"
+          name: "Decay"
+          default: 0.5
+
+    # CMMM Configuration - Cheap-First Operator Design
+    # Minimal operators - character from envelope
+    L3_cmmm:
+      emit_templates:
+        # IDLE: Nothing (pluck doesn't sustain)
+        T_IDLE:
+          families:
+            CONSTRAINT: 1.0
+            CALM: 1.0
+          ops_enable: ["FineClamp"]
+          trees:
+            A: "T1"
+            B: "T1"
+            beta: 0.0
+
+        # ATTACK: Light spectral shaping
+        T_ATTACK:
+          families:
+            COLOR: 0.5        # Light Tilt
+            CONSTRAINT: 1.0
+            CALM: 0.3
+          ops_enable: ["Tilt", "FineClamp"]
+          trees:
+            A: "T1"
+            B: "T1"
+            beta: 0.05
+
+        # STABLE: Minimal - let envelope do the work
+        T_STABLE:
+          families:
+            COLOR: 0.3        # Conservative Tilt
+            CONSTRAINT: 1.0
+            CALM: 0.6
+          ops_enable: ["Tilt", "FineClamp"]
+          trees:
+            A: "T1"
+            B: "T1"
+            beta: 0.0
+
+        # RECOVERY: Clean fadeout
+        T_RECOVERY:
+          families:
+            CONSTRAINT: 1.0
+            CALM: 1.0
+          ops_enable: ["FineClamp"]
+          trees:
+            A: "T1"
+            B: "T1"
+            beta: 0.0
+
+  compile:
+    material:
+      beta_start_q15: 0
+      beta_target_q15: 3072    # Light material
+      beta_ramp_blocks: 4      # Fast ramp for pluck

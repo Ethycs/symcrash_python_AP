@@ -1,0 +1,108 @@
+# FM French Horn v0 - InstrumentIR v0
+# ====================================
+#
+# Warm, mellow horn using Algorithm 22 with darker settings.
+# Sub-harmonic modulator adds body, low feedback for smoothness.
+#
+# Algorithm 22: Brass (Split 3) - 4 carriers, 2 modulators
+#   [6] -> [5] -+-> [4*]
+#               +-> [3*]
+#               +-> [2*]
+#               [1*]
+#
+# French horn character:
+# - Darker than trumpet (lower mod ratios)
+# - Sub-harmonic (0.5x) adds warmth
+# - Minimal feedback for smooth tone
+# - Slight detune for ensemble feel
+
+instrument_ir_v0:
+  meta:
+    instrument_id: "fm-horn-v0"
+    name: "FM French Horn"
+    version: 0
+    author: "symcrash"
+    seed_u32: 0x484F524E
+
+  io:
+    sample_rate_hz: 48000
+    block_size: 64
+
+  layers:
+    L0_graph:
+      nodes:
+        - id: "fm6"
+          type: "FM6"
+          params:
+            algorithm: 22         # Classic brass (4 carriers + 2 mods)
+            feedback: 1           # Very light feedback (smooth)
+
+            # Operator frequency ratios (Q16: 65536 = 1.0x)
+            # Sub-harmonic on Op5 adds warmth, 1:1 mod on Op6
+            op_ratios:
+              - 65536             # Op1: 1.0x (anchor carrier)
+              - 65602             # Op2: +1.7 cents (slight detune)
+              - 65470             # Op3: -1.7 cents
+              - 65668             # Op4: +3.4 cents
+              - 32768             # Op5: 0.5x (sub-harmonic mod!)
+              - 65536             # Op6: 1.0x (with feedback)
+
+            # Operator output levels (Q15: 32767 = 1.0)
+            # Lower mod levels for darker, smoother tone
+            op_levels:
+              - 32767             # Op1: Full (anchor)
+              - 22937             # Op2: 0.7
+              - 22937             # Op3: 0.7
+              - 16384             # Op4: 0.5
+              - 16384             # Op5: 0.5 (sub mod)
+              - 9830              # Op6: 0.3 (low feedback mod)
+
+        - id: "amp1"
+          type: "Amp"
+          params:
+            adsr:
+              a_ms: 25.0          # Slower attack (horn character)
+              d_ms: 200.0         # Long decay
+              s: 0.6              # Moderate sustain
+              r_ms: 250.0         # Smooth release
+
+      edges:
+        - src: "fm6"
+          dst: "amp1"
+
+      macros:
+        - id: "M_WARMTH"
+          name: "Warmth"
+          default: 0.7
+        - id: "M_BODY"
+          name: "Body"
+          default: 0.6
+
+    L3_cmmm:
+      emit_templates:
+        T_IDLE:
+          families:
+            CONSTRAINT: 1.0
+            CALM: 1.0
+          ops_enable: ["NormalizeScale", "FineClamp"]
+          trees:
+            A: "T1"
+            B: "T1"
+            beta: 0.0
+
+        T_STABLE:
+          families:
+            COLOR: 0.3
+            CONSTRAINT: 1.0
+            CALM: 0.7
+          ops_enable: ["Tilt", "NormalizeScale", "FineClamp"]
+          trees:
+            A: "T1"
+            B: "T1"
+            beta: 0.15
+
+  compile:
+    material:
+      beta_start_q15: 0
+      beta_target_q15: 4096       # Less material processing
+      beta_ramp_blocks: 24

@@ -1,18 +1,25 @@
 # FM Brass v0 - InstrumentIR v0
 # ==============================
 #
-# FM6 brass stab using DX7 Algorithm 22 (classic brass algorithm).
+# FM6 brass stab using DX7 Algorithm 19 (Split to 3 Carriers).
 #
-# Algorithm 22: Brass (Split 3) - 4 carriers, 2 modulators
-#   [6] -> [5] -+-> [4*]
-#               +-> [3*]
-#               +-> [2*]
-#               [1*]
+# Algorithm 19:
+#   [6↺] → [5] → [4*]
+#              → [3*]
+#              → [2*]
+#          [1*]
+#
+# Carriers: Op1-4 (sum to output)
+# Modulators: Op5-6 (create harmonic content)
 #
 # Target sound: thick brass section stab / horn hit
 # - Fast attack with "blat" (~8ms)
 # - Quick decay to warm sustain
-# - Rich harmonic content with brass edge
+# - Brightness decay (modulator envelope decays faster than carrier)
+#
+# Matrix envelope system enables proper FM brass voicing:
+# - Carrier envelope: standard ADSR for amplitude
+# - Modulator envelope: faster decay for brightness transient
 
 instrument_ir_v0:
   meta:
@@ -21,6 +28,46 @@ instrument_ir_v0:
     version: 0
     author: "symcrash"
     seed_u32: 0x464D4252
+
+  # Control axis defaults for cockpit integration (WSE-STD-MACRO v0)
+  # These define semantic control axis defaults that MacroRuntime applies at load
+  control:
+    brightness: 0.75         # High brightness for brass blat
+    density: 0.55            # Medium-high body for brass section
+    energy_intent: 0.6       # Slightly aggressive character
+    risk: 0.05               # Subtle instability for organic feel
+    material: 0.65           # Toward metallic (metal = high)
+
+  # Matrix Envelope System (WSE-STD-ENVELOPE-MATRIX-v0)
+  # Named envelopes routed to multiple targets
+  envelopes:
+    # Carrier envelope: standard brass ADSR for amplitude
+    # Applies to all 4 carriers (Op1-4)
+    - id: "carrier_env"
+      adsr:
+        a_ms: 8.0           # Fast attack for brass "blat"
+        d_ms: 150.0         # Medium decay to sustain
+        s: 0.7              # Strong sustain level
+        r_ms: 100.0         # Quick release
+      targets:
+        - FM_OP1
+        - FM_OP2
+        - FM_OP3
+        - FM_OP4
+
+    # Modulator envelope: fast decay for brightness transient
+    # Modulators decay much faster than carriers (50ms vs 150ms)
+    # This creates the characteristic brass "blat" where attack is bright
+    # but sustain is warmer
+    - id: "mod_env"
+      adsr:
+        a_ms: 8.0           # Same fast attack
+        d_ms: 50.0          # Much faster decay (brightness fades quickly)
+        s: 0.3              # Lower sustain (less modulation = less brightness)
+        r_ms: 100.0         # Same release
+      targets:
+        - FM_OP5
+        - FM_OP6
 
   io:
     sample_rate_hz: 48000
@@ -33,37 +80,38 @@ instrument_ir_v0:
         - id: "fm6"
           type: "FM6"
           params:
-            algorithm: 22         # Classic DX7 brass algorithm
-            feedback: 4           # Moderate feedback for brass edge
+            algorithm: 19         # Jump brass algorithm (4 carriers + 2 mods)
+            feedback: 1           # Very light feedback (Q15_ONE // 16 equivalent)
 
             # Operator frequency ratios (Q16: 65536 = 1.0x)
-            # Carriers mostly 1:1 with slight detune, modulator at 2:1
+            # Reduced carrier detune to eliminate beating/electric shaver sound
+            # +/-5 cents provides warmth without audible AM artifacts
             op_ratios:
-              - 65536             # Op1: 1.0x (carrier, anchor)
-              - 65602             # Op2: 1.001x (carrier, +1.7 cents)
-              - 65470             # Op3: 0.999x (carrier, -1.7 cents)
-              - 65668             # Op4: 1.002x (carrier, +3.4 cents)
-              - 65536             # Op5: 1.0x (modulator)
-              - 131072            # Op6: 2.0x (modulator, brass edge)
+              - 65536             # Op1: 1.0x (anchor)
+              - 65726             # Op2: +5 cents (65536 + 190)
+              - 65346             # Op3: -5 cents (65536 - 190)
+              - 65916             # Op4: +10 cents (65536 + 380)
+              - 65536             # Op5: 1.0x (warm modulator)
+              - 65536             # Op6: 1.0x (warm modulator)
 
             # Operator output levels (Q15: 32767 = 1.0)
-            # Balanced carriers, modulator levels for brass bite
+            # Based on configure_jump_brass: full carriers, reduced mod depth
             op_levels:
               - 32767             # Op1: Full (anchor)
-              - 24576             # Op2: 0.75 (modulated carrier)
-              - 24576             # Op3: 0.75 (modulated carrier)
-              - 20480             # Op4: 0.625 (modulated carrier)
-              - 20480             # Op5: 0.625 (modulator depth)
-              - 16384             # Op6: 0.5 (modulator w/feedback)
+              - 32767             # Op2: Full (+detune)
+              - 32767             # Op3: Full (-detune)
+              - 28671             # Op4: 0.875 (wide detune)
+              - 10922             # Op5: 0.33 (subtle warmth)
+              - 8191              # Op6: 0.25 (gentle feedback)
 
         - id: "amp1"
           type: "Amp"
           params:
             adsr:
-              a_ms: 8.0           # Fast "blat" onset
-              d_ms: 85.0          # Decay to warm sustain
-              s: 0.55             # Warm sustain level
-              r_ms: 95.0          # Natural brass release
+              a_ms: 2.0           # Fast attack (Jump style)
+              d_ms: 140.0         # Slow decay
+              s: 0.5              # Sustain level
+              r_ms: 100.0         # Release
 
       edges:
         - src: "fm6"
