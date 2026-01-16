@@ -9,13 +9,17 @@ Executes one block for one voice with fixed lane schedule.
 from typing import Tuple, Optional, TYPE_CHECKING
 import numpy as np
 
-from .state import VMState, OSC_MODE_A, OSC_MODE_B, OSC_MODE_SAMPLE, OSC_MODE_FM6
+from .state import (
+    VMState, OSC_MODE_A, OSC_MODE_B, OSC_MODE_SAMPLE, OSC_MODE_FM6,
+    PAYLOAD_TYPE_NODEMASK_SET, PAYLOAD_TYPE_TAILMODE_SET,
+)
 from .decode import DecodedPlan, CarrierRole, decode_frame, FM_SOURCE_FEEDBACK
 from .tables import Tables, DEFAULT_TABLES, BLOCK_SAMPLES
 from .lanes import (
     lane_carrier_render,
     lane_inject,
     dispatch_coeff_op,
+    dispatch_coeff_op_crossfade,  # WSE-STD-070: crossfade-aware dispatch
     lane_tail,
     lane_idwpt_render,
     lane_ccs_render,
@@ -32,6 +36,40 @@ if TYPE_CHECKING:
 # =============================================================================
 
 IDWPT_LATENCY_BLOCKS = 5  # Blocks until wet signal is ready
+
+
+# =============================================================================
+# CMMM EVENT PROCESSING
+# =============================================================================
+
+def _process_cmmm_events(state: VMState, frame: 'VoiceFrame') -> None:
+    """
+    Process CMMM event payloads from VoiceFrame.
+
+    Updates the ExecutorLatch based on CMMM events:
+    - 0x30 (NODEMASK_SET): Changes node mask with optional ramp
+    - 0x31 (TAILMODE_SET): Changes tail mode with traction
+
+    Args:
+        state: Per-voice VM state (modified in place)
+        frame: VoiceFrame containing CMMM event fields
+    """
+    latch = state.executor_latch
+
+    # Step 1: Advance mask ramp (must happen every block)
+    latch.step_mask_ramp()
+
+    # Step 2: Process node mask event (payload_type 0x30)
+    node_mask = getattr(frame, 'cmmm_node_mask', None)
+    if node_mask is not None:
+        ramp_blocks = getattr(frame, 'cmmm_mask_ramp_blocks', 5)
+        latch.apply_nodemask_event(node_mask, ramp_blocks)
+
+    # Step 3: Process tail mode event (payload_type 0x31)
+    tail_mode = getattr(frame, 'cmmm_tail_mode', None)
+    if tail_mode is not None:
+        traction = getattr(frame, 'cmmm_traction_q15', 32767)
+        latch.apply_tailmode_event(tail_mode, traction)
 
 
 # =============================================================================
@@ -60,7 +98,12 @@ def vm_step_block(
             output_block: int16 array of BLOCK_SAMPLES
     """
     # -------------------------------------------------------------------------
-    # Step 0: Decode configuration
+    # Step 0: Process CMMM events (before decode)
+    # -------------------------------------------------------------------------
+    _process_cmmm_events(state, frame)
+
+    # -------------------------------------------------------------------------
+    # Step 1: Decode configuration
     # -------------------------------------------------------------------------
     cfg = decode_frame(
         frame,
@@ -331,9 +374,10 @@ def vm_step_block(
                         state.coeff_state[leaf * VM_K + k] = int(np.clip(coeffs_64[leaf], -32768, 32767))
 
                 # Apply coefficient-domain operators
+                # Use crossfade-aware dispatch for smooth mask transitions (WSE-STD-070)
                 lane_inject(state, cfg)
                 for instr in cfg.backbone_instrs:
-                    dispatch_coeff_op(state, instr, cfg.mask_u32)
+                    dispatch_coeff_op_crossfade(state, instr)
                 lane_tail(state, cfg)
 
                 # IDWPT reconstruction back to audio
@@ -393,8 +437,9 @@ def vm_step_block(
         lane_inject(state, cfg)
 
         # Steps 2-5: Backbone lanes (operators modify carrier)
+        # Use crossfade-aware dispatch for smooth mask transitions (WSE-STD-070)
         for instr in cfg.backbone_instrs:
-            dispatch_coeff_op(state, instr, cfg.mask_u32)
+            dispatch_coeff_op_crossfade(state, instr)
 
         # === FM MODULATOR EXTRACTION (Phase 3 - WSE-STD-210 Section 8.3) ===
         # Extract modulator from operator output for NEXT block's FM.
@@ -443,8 +488,9 @@ def vm_step_block(
         lane_inject(state, cfg)
 
         # Steps 3-6: Backbone lanes (in order)
+        # Use crossfade-aware dispatch for smooth mask transitions (WSE-STD-070)
         for instr in cfg.backbone_instrs:
-            dispatch_coeff_op(state, instr, cfg.mask_u32)
+            dispatch_coeff_op_crossfade(state, instr)
 
         # Step 7: LANE_TAIL
         lane_tail(state, cfg)
@@ -510,8 +556,9 @@ def vm_step_block_raw(
 
         lane_inject(state, cfg)
 
+        # Use crossfade-aware dispatch for smooth mask transitions (WSE-STD-070)
         for instr in cfg.backbone_instrs:
-            dispatch_coeff_op(state, instr, cfg.mask_u32)
+            dispatch_coeff_op_crossfade(state, instr)
 
         lane_tail(state, cfg)
 
@@ -537,8 +584,9 @@ def vm_step_block_raw(
 
         lane_inject(state, cfg)
 
+        # Use crossfade-aware dispatch for smooth mask transitions (WSE-STD-070)
         for instr in cfg.backbone_instrs:
-            dispatch_coeff_op(state, instr, cfg.mask_u32)
+            dispatch_coeff_op_crossfade(state, instr)
 
         lane_tail(state, cfg)
 
@@ -633,4 +681,5 @@ __all__ = [
     'vm_step_block_raw',
     'VMExecutor',
     'IDWPT_LATENCY_BLOCKS',
+    '_process_cmmm_events',
 ]

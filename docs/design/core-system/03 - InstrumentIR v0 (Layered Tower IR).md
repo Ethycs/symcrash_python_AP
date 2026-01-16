@@ -512,6 +512,11 @@ L3_cmmm:
       - event_mask_u8
       - event_strength_q15[8]
       - event_payload_u64[8]
+      # CMMM Runtime Control (WSE-STD-070)
+      - cmmm_node_mask_u32        # Target node mask for K ladder
+      - cmmm_mask_ramp_blocks     # Crossfade duration in blocks
+      - cmmm_tail_mode_u8         # Tail operator set selection
+      - cmmm_traction_q15         # Projection hardness
 ```
 
 ### 4.2 Emission templates (the "Mealy outputs")
@@ -1063,7 +1068,122 @@ frame_emitter_policy:
     EVT_CLOUD_PUSH: 6
 ```
 
-### A.5 Compiler Rules
+### A.5 CMMM Runtime Control Fields (WSE-STD-070)
+
+Emit templates can include CMMM runtime control fields that get emitted to VoiceFrame for executor latch updates.
+
+#### New VoiceFrame Fields
+
+```yaml
+outputs:
+  frame_fields:
+    # ... existing fields ...
+    # CMMM Runtime Control (NEW - WSE-STD-070)
+    - cmmm_node_mask_u32      # Target node mask for K ladder
+    - cmmm_mask_ramp_blocks   # Crossfade duration in blocks
+    - cmmm_tail_mode_u8       # Tail operator set selection
+    - cmmm_traction_q15       # Projection hardness
+```
+
+#### Emit Template CMMM Fields
+
+Templates can specify CMMM runtime control:
+
+```yaml
+emit_templates:
+  T_STABLE:
+    families:
+      mode: "intent_plus_boost"
+      boost: {F_COLOR: 8192, F_LOCAL: 8192}
+    ops_enable: [Tilt, LowRankMorph, NormalizeScale, FineClamp, SheafProject]
+    trees: {A: 1, B: 1, beta: 0}
+    # CMMM Runtime Control (NEW)
+    cmmm:
+      node_mask: 0xFFFFFFFF     # Full K=32 mask
+      mask_ramp_blocks: 8       # Smooth crossfade
+      tail_mode: FULL           # All tail operators
+      traction_q15: 32767       # Hard projection
+
+  T_GLITCH:
+    families:
+      mode: "intent_plus_boost"
+      boost: {F_TOPOLOGY: 16384, F_EVENTS: 16384}
+    ops_enable: [RotateNodes, BandShear, IntraMix, NormalizeScale, FineClamp]
+    trees: {A: 1, B: 0, beta: "intent.warp_q15"}
+    # CMMM Runtime Control (NEW)
+    cmmm:
+      node_mask: 0x00FFFFFF     # K=24 degraded mask
+      mask_ramp_blocks: 4       # Fast transition
+      tail_mode: MID            # Reduced tail ops
+      traction_q15: 16384       # Medium projection
+
+  T_CATASTROPHE:
+    families:
+      mode: "intent_plus_boost"
+      boost: {F_CATASTROPHE: 32767}
+    ops_enable: [SwapBands, RotateNodes, FoldPressure, EmergencySimplify, FineClamp]
+    trees: {A: 2, B: 0, beta: "intent.warp_q15"}
+    # CMMM Runtime Control (NEW)
+    cmmm:
+      node_mask: 0x0000FFFF     # K=16 emergency mask
+      mask_ramp_blocks: 2       # Rapid degradation
+      tail_mode: EMERGENCY      # EmergencySimplify enabled
+      traction_q15: 8192        # Soft projection
+```
+
+#### Tail Mode Values
+
+| TailMode | ID | Operators Enabled |
+|----------|----|--------------------|
+| FULL | 0 | FineClamp, NormalizeScale, SheafProject |
+| MID | 1 | FineClamp, NormalizeScale |
+| MIN | 2 | FineClamp only |
+| EMERGENCY | 3 | FineClamp, EmergencySimplify |
+
+#### Pattern Table Integration
+
+Canonical masks from the K ladder can be referenced by pattern_id:
+
+```yaml
+cmmm:
+  node_mask: "pattern:4"        # K=16 from pattern table
+  # Equivalent to: node_mask: 0x0000FFFF
+```
+
+| Pattern ID | K | Hex Mask |
+|------------|---|----------|
+| 0 | 32 | 0xFFFFFFFF |
+| 1 | 24 | 0x00FFFFFF |
+| 2 | 20 | 0x000FFFFF |
+| 3 | 16 | 0x0000FFFF |
+| 4 | 12 | 0x00000FFF |
+| 5 | 8 | 0x000000FF |
+| 6 | 4 | 0x0000000F |
+| 7 | 1 | 0x00000001 |
+
+#### Executor Latch State
+
+The executor maintains per-voice CMMM state that persists across blocks:
+
+```python
+@dataclass
+class ExecutorLatch:
+    node_mask_u32: int = 0xFFFFFFFF     # Current active mask
+    mask_target_u32: int = 0xFFFFFFFF   # Target for ramping
+    mask_ramp_remaining: int = 0         # Blocks left in crossfade
+    tail_mode: int = 0                   # Current tail operator set
+    traction_q15: int = 32767            # Projection hardness
+```
+
+When VoiceFrame contains non-zero `cmmm_node_mask`, the executor:
+1. Sets `mask_target_u32` to the new mask
+2. Sets `mask_ramp_remaining` to `cmmm_mask_ramp_blocks`
+3. Updates `tail_mode` and `traction_q15`
+4. Uses `dispatch_coeff_op_crossfade()` for smooth transitions
+
+---
+
+### A.6 Compiler Rules
 
 #### TransitionKind Selection
 

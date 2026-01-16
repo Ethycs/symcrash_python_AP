@@ -26,6 +26,130 @@ OSC_MODE_FM6 = 3     # 6-operator FM synthesis (WSE-STD-FM-TOPOLOGY-v0)
 
 
 # =============================================================================
+# EXECUTOR LATCH (CMMM Runtime State)
+# =============================================================================
+# The executor latch holds runtime state that is updated by CMMM event payloads.
+# This enables dynamic control of node masks, tail modes, and other CMMM features.
+
+# Tail mode enum (imported from tables at runtime to avoid circular import)
+# TailMode: FULL=0, MID=1, MIN=2, EMERGENCY=3
+
+# Event payload types for CMMM control
+PAYLOAD_TYPE_NODEMASK_SET = 0x30   # Sets node mask with optional ramp
+PAYLOAD_TYPE_TAILMODE_SET = 0x31   # Sets tail mode with traction
+
+
+@dataclass
+class ExecutorLatch:
+    """
+    CMMM executor latch state.
+
+    Holds latched values that control operator execution, updated by
+    event payloads during the CMMM step.
+
+    Attributes:
+        node_mask_u32: Current node mask (32-bit, one bit per node)
+        mask_target_u32: Target mask for ramping
+        mask_ramp_remaining: Blocks remaining in mask ramp
+        tail_mode: Current tail mode (0=FULL, 1=MID, 2=MIN, 3=EMERGENCY)
+        traction_q15: Projection hardness (0-32767)
+    """
+    # Node mask control (payload_type 0x30)
+    node_mask_u32: int = 0xFFFFFFFF      # Current active node mask
+    mask_target_u32: int = 0xFFFFFFFF    # Target mask for ramping
+    mask_ramp_remaining: int = 0          # Blocks remaining in crossfade
+
+    # Tail mode control (payload_type 0x31)
+    tail_mode: int = 0                    # TailMode enum value (0=FULL)
+    traction_q15: int = 32767             # Projection hardness
+
+    # Ramp tracking for crossfade
+    _mask_ramp_total: int = 0             # Total blocks for current ramp
+    _mask_start_u32: int = 0xFFFFFFFF     # Mask at ramp start
+
+    def apply_nodemask_event(self, new_mask: int, ramp_blocks: int = 5) -> None:
+        """
+        Apply a node mask change event (payload_type 0x30).
+
+        Args:
+            new_mask: New target node mask
+            ramp_blocks: Number of blocks to crossfade (0 = immediate)
+        """
+        if ramp_blocks <= 0:
+            # Immediate change
+            self.node_mask_u32 = new_mask
+            self.mask_target_u32 = new_mask
+            self.mask_ramp_remaining = 0
+            self._mask_ramp_total = 0
+        else:
+            # Start ramping - save current mask as start
+            self._mask_start_u32 = self.node_mask_u32
+            self.mask_target_u32 = new_mask
+            self.mask_ramp_remaining = ramp_blocks
+            self._mask_ramp_total = ramp_blocks
+
+    def apply_tailmode_event(self, tail_mode: int, traction_q15: int = 32767) -> None:
+        """
+        Apply a tail mode change event (payload_type 0x31).
+
+        Args:
+            tail_mode: New tail mode (0=FULL, 1=MID, 2=MIN, 3=EMERGENCY)
+            traction_q15: Projection hardness (0-32767)
+        """
+        self.tail_mode = tail_mode
+        self.traction_q15 = traction_q15
+
+    def step_mask_ramp(self) -> None:
+        """
+        Advance mask ramp by one block.
+
+        Call this at the start of each block to update the current mask
+        based on the ramp progress.
+        """
+        if self.mask_ramp_remaining > 0:
+            self.mask_ramp_remaining -= 1
+            if self.mask_ramp_remaining <= 0:
+                # Ramp complete: snap to target
+                self.node_mask_u32 = self.mask_target_u32
+            # Note: Intermediate mask blending happens in the operator dispatcher
+
+    def get_effective_k(self) -> int:
+        """Get active node count (K) from current mask."""
+        return (self.node_mask_u32 & 0xFFFFFFFF).bit_count()
+
+    def get_crossfade_weights(self) -> tuple:
+        """
+        Get crossfade weights for smooth mask transitions.
+
+        During a mask ramp, returns (start_weight_q15, target_weight_q15, start_mask, target_mask)
+        where weights sum to ~32767.
+
+        If not ramping, returns (0, 32767, 0, current_mask).
+
+        Returns:
+            (start_weight_q15, target_weight_q15, start_mask, target_mask)
+        """
+        if self._mask_ramp_total <= 0 or self.mask_ramp_remaining <= 0:
+            # Not ramping - use target mask at full weight
+            return (0, 32767, 0, self.node_mask_u32)
+
+        # Compute blend factor: how far through the ramp
+        # ramp_remaining=total → progress=0 (all start)
+        # ramp_remaining=0 → progress=1 (all target)
+        progress_blocks = self._mask_ramp_total - self.mask_ramp_remaining
+        alpha_q15 = (progress_blocks * 32767) // self._mask_ramp_total
+
+        start_weight = 32767 - alpha_q15
+        target_weight = alpha_q15
+
+        return (start_weight, target_weight, self._mask_start_u32, self.mask_target_u32)
+
+    def is_ramping(self) -> bool:
+        """Check if currently in a mask ramp transition."""
+        return self.mask_ramp_remaining > 0
+
+
+# =============================================================================
 # ENVELOPE STATE
 # =============================================================================
 
@@ -177,6 +301,12 @@ class VMState:
     # -------------------------------------------------------------------------
     # Lazy-initialized to avoid import overhead when not using FM6 mode
     _fm6_state: Optional['FM6State'] = None  # type: ignore
+
+    # -------------------------------------------------------------------------
+    # CMMM Executor Latch (WSE-STD-070 Tower Runtime State)
+    # -------------------------------------------------------------------------
+    # Holds latched values for node mask and tail mode, updated by CMMM events
+    executor_latch: ExecutorLatch = field(default_factory=ExecutorLatch)
 
     @property
     def fm6_state(self) -> 'FM6State':
@@ -332,6 +462,9 @@ class VMState:
         # Reset FM feedback buffer (Phase 3)
         self.prev_fm_mod_buffer.fill(0)
 
+        # Reset CMMM Executor Latch (WSE-STD-070)
+        self.executor_latch = ExecutorLatch()
+
     def trigger_release(self) -> None:
         """Trigger note release (enter release phase)."""
         if self.envelope.phase in (EnvelopePhase.ATTACK, EnvelopePhase.DECAY, EnvelopePhase.SUSTAIN):
@@ -387,6 +520,14 @@ class VMState:
             'use_coeff_osc': self.use_coeff_osc,
             # FM feedback buffer (Phase 3)
             'prev_fm_mod_buffer': self.prev_fm_mod_buffer.tolist(),
+            # CMMM Executor Latch (WSE-STD-070)
+            'executor_latch_node_mask': self.executor_latch.node_mask_u32,
+            'executor_latch_mask_target': self.executor_latch.mask_target_u32,
+            'executor_latch_mask_ramp': self.executor_latch.mask_ramp_remaining,
+            'executor_latch_tail_mode': self.executor_latch.tail_mode,
+            'executor_latch_traction': self.executor_latch.traction_q15,
+            'executor_latch_mask_ramp_total': self.executor_latch._mask_ramp_total,
+            'executor_latch_mask_start': self.executor_latch._mask_start_u32,
         }
 
     @classmethod
@@ -441,6 +582,15 @@ class VMState:
         # Restore FM feedback buffer (Phase 3)
         if 'prev_fm_mod_buffer' in snapshot:
             state.prev_fm_mod_buffer = np.array(snapshot['prev_fm_mod_buffer'], dtype=np.int16)
+        # Restore CMMM Executor Latch (WSE-STD-070)
+        if 'executor_latch_node_mask' in snapshot:
+            state.executor_latch.node_mask_u32 = snapshot['executor_latch_node_mask']
+            state.executor_latch.mask_target_u32 = snapshot['executor_latch_mask_target']
+            state.executor_latch.mask_ramp_remaining = snapshot['executor_latch_mask_ramp']
+            state.executor_latch.tail_mode = snapshot['executor_latch_tail_mode']
+            state.executor_latch.traction_q15 = snapshot['executor_latch_traction']
+            state.executor_latch._mask_ramp_total = snapshot.get('executor_latch_mask_ramp_total', 0)
+            state.executor_latch._mask_start_u32 = snapshot.get('executor_latch_mask_start', 0xFFFFFFFF)
         return state
 
 
@@ -492,4 +642,8 @@ __all__ = [
     'OSC_MODE_B',
     'OSC_MODE_SAMPLE',
     'OSC_MODE_FM6',
+    # CMMM Executor Latch (WSE-STD-070)
+    'ExecutorLatch',
+    'PAYLOAD_TYPE_NODEMASK_SET',
+    'PAYLOAD_TYPE_TAILMODE_SET',
 ]

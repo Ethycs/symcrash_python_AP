@@ -150,6 +150,34 @@ from .preset_model import (
     EditorOp,
 )
 
+# Regime Registry (WSE-STD-070 Tower Runtime)
+from .regime_registry import (
+    EdgeTransitionType,
+    Hysteresis,
+    EdgeSpec,
+    RegimeNodeSpec,
+    RegimeGraphSpec,
+    RegimeRegistry,
+    create_minimal_regime_graph,
+    create_standard_regime_graph,
+    create_expressive_regime_graph,
+    get_regime_registry,
+)
+
+# Tree Registry (WSE-STD-070 Tower Runtime)
+from .tree_registry import (
+    TreeID,
+    TreeCoeffProfile,
+    TreeFamily,
+    TreeRegistry,
+    create_balanced_tree,
+    create_harmonic_tree,
+    create_texture_tree,
+    create_impact_tree,
+    create_drone_tree,
+    get_tree_registry,
+)
+
 
 __all__ = [
     # Capsule model
@@ -249,4 +277,28 @@ __all__ = [
     'PresetBody',
     'EditorOpType',
     'EditorOp',
+
+    # Regime Registry (WSE-STD-070 Tower Runtime)
+    'EdgeTransitionType',
+    'Hysteresis',
+    'EdgeSpec',
+    'RegimeNodeSpec',
+    'RegimeGraphSpec',
+    'RegimeRegistry',
+    'create_minimal_regime_graph',
+    'create_standard_regime_graph',
+    'create_expressive_regime_graph',
+    'get_regime_registry',
+
+    # Tree Registry (WSE-STD-070 Tower Runtime)
+    'TreeID',
+    'TreeCoeffProfile',
+    'TreeFamily',
+    'TreeRegistry',
+    'create_balanced_tree',
+    'create_harmonic_tree',
+    'create_texture_tree',
+    'create_impact_tree',
+    'create_drone_tree',
+    'get_tree_registry',
 ]

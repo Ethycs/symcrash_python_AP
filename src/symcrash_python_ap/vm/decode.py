@@ -102,6 +102,8 @@ class CoeffOscParams:
     drone_mode: bool = False      # Drone/Pad mode (reduces base_mix for slow evolution)
     legato_mode: bool = False     # Legato mode (preserve phase/coefficients on pitch change)
     custom_harmonics: list = None # Custom harmonic amplitudes (Q15) - overrides waveform_type
+    oeis_sequence_id: int = -1    # OEIS sequence for partial selection (-1=disabled, 0-7=sequence)
+    oeis_rolloff_db: float = -3.0 # OEIS rolloff (dB/octave, negative = decay)
 
 
 # FM modulator source constants (Phase 3)
@@ -309,6 +311,10 @@ def decode_frame(
         # Use custom harmonics from frame
         custom_harmonics = list(frame.partial_amps_q15)
 
+    # OEIS sequence for partial selection (-1 = disabled)
+    oeis_sequence_id = getattr(frame, 'oeis_sequence_id', -1)
+    oeis_rolloff_db = getattr(frame, 'oeis_rolloff_db', -3.0)
+
     plan.coeff_osc_params = CoeffOscParams(
         table_id=coeff_table_id,
         base_mix_q15=base_mix,
@@ -329,6 +335,8 @@ def decode_frame(
         drone_mode=drone_mode,
         legato_mode=legato_mode,
         custom_harmonics=custom_harmonics,
+        oeis_sequence_id=oeis_sequence_id,
+        oeis_rolloff_db=oeis_rolloff_db,
     )
 
     # Check if we should use CCS path (using fast on-demand table generation)

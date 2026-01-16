@@ -618,6 +618,55 @@ capsule = ir.to_capsule()
 
 ---
 
+## Runtime Control (WSE-STD-070)
+
+Presets can specify runtime behavior via CMMM event payloads. These control how the executor processes each voice.
+
+### Node Mask Control
+
+Control the active node count (K) at runtime for dynamic degradation:
+
+```yaml
+layers:
+  L3_cmmm:
+    emit_templates:
+      T_ATTACK:
+        # Start with fewer nodes, ramp up
+        cmmm_node_mask: 0x000000FF   # K=8 (bands 0-1 only)
+        cmmm_mask_ramp_blocks: 10    # Ramp over 10 blocks
+
+      T_STABLE:
+        # Full resolution
+        cmmm_node_mask: 0xFFFFFFFF   # K=32 (all nodes)
+        cmmm_mask_ramp_blocks: 5
+```
+
+### Tail Mode Control
+
+Control safety tail operators per regime:
+
+```yaml
+emit_templates:
+  T_STABLE:
+    cmmm_tail_mode: 0       # FULL: FineClamp + NormalizeScale + SheafProject
+    cmmm_traction_q15: 32767  # Full projection strength
+
+  T_GLITCH:
+    cmmm_tail_mode: 2       # MIN: FineClamp only (cheaper)
+    cmmm_traction_q15: 16384  # Softer projection
+```
+
+### Tail Mode Reference
+
+| Mode | Value | Operators | Use Case |
+|------|-------|-----------|----------|
+| FULL | 0 | FineClamp, NormalizeScale, SheafProject | High quality |
+| MID | 1 | FineClamp, NormalizeScale | Moderate load |
+| MIN | 2 | FineClamp | Low budget |
+| EMERGENCY | 3 | FineClamp, EmergencySimplify | Overload |
+
+---
+
 ## Related Documentation
 
 - [WSE-STD-PRESET-v0.md](../control/WSE-STD-PRESET-v0.md) - Normative preset format spec + canonical examples
@@ -625,3 +674,4 @@ capsule = ir.to_capsule()
 - [OPERATORS.md](OPERATORS.md) - Complete operator reference
 - [MACROS-AND-CONTROLS.md](MACROS-AND-CONTROLS.md) - Control system details
 - [BUDGETS-AND-DEGRADATION.md](BUDGETS-AND-DEGRADATION.md) - Performance budgets
+- [../architecture/WSE-STD-070.md](../architecture/WSE-STD-070.md) - Tower completion and CMMM events

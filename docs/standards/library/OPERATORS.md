@@ -377,8 +377,55 @@ backbone:
 
 ---
 
+## Runtime Operator Control (WSE-STD-070)
+
+Operators are subject to runtime mask and tail mode control via CMMM events.
+
+### Node Masks and K
+
+Each operator respects the current node mask from the executor latch:
+
+- **K-scaling operators** (DIAG, BANDED, INJECT): Only process active nodes in the mask
+- **L-scaling operators** (PERMUTE, LOWRANK, PROJ): Touch all nodes but respect mask for energy calculations
+
+During mask transitions, `dispatch_coeff_op_crossfade()` blends operator outputs between start and target masks.
+
+### Operator Lane Assignment
+
+```python
+from symcrash_python_ap.vm.tables import Lane, get_operator_lane
+
+lane_info = get_operator_lane(op_id=7)  # LowRankMorph
+# → Lane.LOWRANK
+```
+
+| Lane | Operators | Scaling |
+|------|-----------|---------|
+| DIAG | 0, 1, 15, 16, 20, 22 | K |
+| BANDED | 3, 4, 5 | K |
+| PERMUTE | 6, 9, 10, 17 | L |
+| LOWRANK | 7 | L |
+| PROJ | 2, 11, 12, 19, 23 | L |
+| INJECT | 8, 13, 14, 21 | K |
+
+### Tail Operators
+
+Tail operators (IDs 2, 11, 19, 23) are controlled by the tail mode latch:
+
+| TailMode | Operators Enabled |
+|----------|-------------------|
+| FULL (0) | FineClamp, NormalizeScale, SheafProject |
+| MID (1) | FineClamp, NormalizeScale |
+| MIN (2) | FineClamp |
+| EMERGENCY (3) | FineClamp, EmergencySimplify |
+
+CMMM controls tail mode via the `0x31 TAILMODE_SET` event payload.
+
+---
+
 ## Related Documentation
 
 - [PRESET-AUTHORING-GUIDE.md](PRESET-AUTHORING-GUIDE.md) - Main authoring guide
 - [MACROS-AND-CONTROLS.md](MACROS-AND-CONTROLS.md) - Control system
 - [BUDGETS-AND-DEGRADATION.md](BUDGETS-AND-DEGRADATION.md) - Performance budgets
+- [../architecture/WSE-STD-070.md](../architecture/WSE-STD-070.md) - Tower completion and CMMM events

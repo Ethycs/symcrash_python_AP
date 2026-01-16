@@ -499,6 +499,57 @@ def dispatch_coeff_op(state: VMState, instr: BackboneEntry, mask: int) -> None:
         _inject_impulse(state, mask, instr.strength_q15, 0)
 
 
+def dispatch_coeff_op_crossfade(
+    state: VMState,
+    instr: BackboneEntry,
+) -> None:
+    """
+    Dispatch a backbone operator with crossfade support for smooth mask transitions.
+
+    Uses the executor latch's crossfade weights to blend between start and target
+    masks during a mask ramp. This prevents clicks when K changes.
+
+    Args:
+        state: VM state (modified in place)
+        instr: Backbone instruction
+    """
+    latch = state.executor_latch
+
+    if not latch.is_ramping():
+        # Not ramping - use current mask directly
+        dispatch_coeff_op(state, instr, latch.node_mask_u32)
+        return
+
+    # Get crossfade weights
+    start_weight, target_weight, start_mask, target_mask = latch.get_crossfade_weights()
+
+    # If masks are identical, just use one
+    if start_mask == target_mask:
+        dispatch_coeff_op(state, instr, start_mask)
+        return
+
+    # Save current coefficients
+    coeff_backup = state.coeff_state.copy()
+
+    # Apply operator with START mask
+    dispatch_coeff_op(state, instr, start_mask)
+    coeff_start = state.coeff_state.copy()
+
+    # Restore and apply operator with TARGET mask
+    state.coeff_state[:] = coeff_backup
+    dispatch_coeff_op(state, instr, target_mask)
+    coeff_target = state.coeff_state  # Current state has target result
+
+    # Blend: result = start * start_weight + target * target_weight
+    # Both weights sum to ~32767
+    for i in range(len(state.coeff_state)):
+        blended = (
+            (int(coeff_start[i]) * start_weight +
+             int(coeff_target[i]) * target_weight) >> 15
+        )
+        state.coeff_state[i] = max(-32768, min(32767, blended))
+
+
 def lane_diag(state: VMState, instr: BackboneEntry, mask: int) -> None:
     """Apply diagonal (elementwise) operator."""
     op_id = instr.op_id
@@ -1230,6 +1281,7 @@ __all__ = [
     'lane_carrier_render',
     'lane_inject',
     'dispatch_coeff_op',
+    'dispatch_coeff_op_crossfade',  # WSE-STD-070: crossfade-aware dispatch
     'lane_diag',
     'lane_banded',
     'lane_permute',

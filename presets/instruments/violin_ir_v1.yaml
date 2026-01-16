@@ -84,6 +84,10 @@ instrument_ir_v0:
             A: "T1"
             B: "T1"
             beta: 0.0
+          # CMMM Runtime Control (WSE-STD-070)
+          cmmm:
+            node_mask: 0x000000FF    # K=8 minimal for idle
+            tail_mode: "MIN"         # Only FineClamp
 
         T_STABLE:
           families:
@@ -94,6 +98,12 @@ instrument_ir_v0:
             A: "T1"
             B: "T1"
             beta: 0.0
+          # CMMM Runtime Control (WSE-STD-070)
+          cmmm:
+            node_mask: 0xFFFFFFFF    # K=32 full resolution for violin
+            mask_ramp_blocks: 15     # Smooth bow-like onset
+            tail_mode: "FULL"        # All tail ops for clean tone
+            traction_q15: 32767      # Hard projection
 
   compile:
     material:

@@ -207,6 +207,57 @@ class LatchDefaults:
 # =============================================================================
 
 @dataclass
+class CmmmDefaults:
+    """
+    CMMM runtime control defaults (WSE-STD-070 §10).
+
+    These values are emitted to VoiceFrame when the voice is active.
+    They control the executor latch for K degradation and tail operators.
+    """
+    node_mask_u32: int = 0xFFFFFFFF      # Target node mask (K=32 default)
+    mask_ramp_blocks: int = 5             # Crossfade duration
+    tail_mode: int = 0                    # 0=FULL, 1=MID, 2=MIN, 3=EMERGENCY
+    traction_q15: int = 32767             # Projection hardness
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> 'CmmmDefaults':
+        """Parse from dictionary."""
+        if d is None:
+            return cls()
+
+        # Pattern table for resolving pattern:N references
+        pattern_table = {
+            0: 0xFFFFFFFF, 1: 0x00FFFFFF, 2: 0x000FFFFF, 3: 0x0000FFFF,
+            4: 0x00000FFF, 5: 0x000000FF, 6: 0x0000000F, 7: 0x00000001,
+        }
+        tail_mode_map = {"FULL": 0, "MID": 1, "MIN": 2, "EMERGENCY": 3}
+
+        # Resolve node_mask (can be int, hex string, or "pattern:N")
+        node_mask = d.get('node_mask', 0xFFFFFFFF)
+        if isinstance(node_mask, str):
+            if node_mask.startswith("pattern:"):
+                pattern_id = int(node_mask.split(":")[1])
+                node_mask = pattern_table.get(pattern_id, 0xFFFFFFFF)
+            elif node_mask.startswith("0x"):
+                node_mask = int(node_mask, 16)
+            else:
+                node_mask = 0xFFFFFFFF
+        node_mask_u32 = int(node_mask) & 0xFFFFFFFF
+
+        # Resolve tail_mode (can be int or name)
+        tail_mode = d.get('tail_mode', 0)
+        if isinstance(tail_mode, str):
+            tail_mode = tail_mode_map.get(tail_mode.upper(), 0)
+
+        return cls(
+            node_mask_u32=node_mask_u32,
+            mask_ramp_blocks=d.get('mask_ramp_blocks', 5),
+            tail_mode=int(tail_mode),
+            traction_q15=d.get('traction_q15', 32767),
+        )
+
+
+@dataclass
 class CompiledPreset:
     """
     Output of preset compilation.
@@ -245,6 +296,9 @@ class CompiledPreset:
     # Oscillator mode (0=ModeA, 1=ModeB, 2=Sample, 3=FM6)
     # Auto-set to 3 when fm6 section is present
     osc_mode: int = 0
+
+    # CMMM runtime control defaults (WSE-STD-070 §10)
+    cmmm: CmmmDefaults = field(default_factory=CmmmDefaults)
 
     def backbone_ops(self) -> List[str]:
         """Get list of enabled operator names."""
@@ -360,6 +414,10 @@ class PresetCompiler:
             fm6_config = FM6Config.from_dict(fm6_section)
             osc_mode = 3  # OSC_MODE_FM6
 
+        # Parse CMMM runtime control (WSE-STD-070 §10)
+        cmmm_section = preset_dict.get('cmmm', None)
+        cmmm = CmmmDefaults.from_dict(cmmm_section)
+
         return CompiledPreset(
             preset_id=preset_id,
             preset_version=preset_version,
@@ -375,6 +433,7 @@ class PresetCompiler:
             harmonic_amps_q15=harmonic_amps,
             fm6=fm6_config,
             osc_mode=osc_mode,
+            cmmm=cmmm,
         )
 
     def compile_file(self, filepath: str) -> CompiledPreset:

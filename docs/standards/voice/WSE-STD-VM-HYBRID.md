@@ -99,7 +99,25 @@ VMState {
 }
 ```
 
-### 3.2 Block-Local Scratch (Not Persistent)
+### 3.2 Executor Latch (CMMM Runtime State)
+
+The VM maintains per-voice CMMM runtime state via the ExecutorLatch (WSE-STD-070):
+
+```
+ExecutorLatch {
+    node_mask_u32: u32        # Current active node mask
+    mask_target_u32: u32      # Target mask for ramping
+    mask_ramp_remaining: u16  # Blocks left in crossfade
+    _mask_ramp_total: u16     # Total ramp blocks (for weight calc)
+    _mask_start_u32: u32      # Mask at ramp start
+    tail_mode: u8             # Current tail mode (0=FULL, 1=MID, 2=MIN, 3=EMERGENCY)
+    traction_q15: i16         # Projection hardness
+}
+```
+
+**Purpose:** Allows CMMM to control K and tail mode dynamically via 0x30/0x31 event payloads.
+
+### 3.3 Block-Local Scratch (Not Persistent)
 
 ```
 carrier_buf: [i16; BLOCK_SAMPLES]   # Carrier output
@@ -254,19 +272,59 @@ Apply injections into `coeff_state` under `mask_u32`:
 
 **Determinism:** PRNG state advances ONLY if an op requiring PRNG executes.
 
-### Step 3 — Coefficient Backbone Lanes (In Order)
+### Step 2.5 — Process CMMM Events (WSE-STD-070)
 
-For each backbone entry:
+Before backbone execution, process CMMM event payloads:
 
 ```python
-match lane:
-    case DIAG:    lane_diag(state, instr, mask)
-    case BANDED:  lane_banded(state, instr, mask)
-    case PERMUTE: lane_permute(state, instr, mask)
-    case LOWRANK: lane_lowrank(state, instr, mask)
-    case PROJ:    lane_proj(state, instr, mask)
-    case MIX:     lane_mix(state, instr, mask)
+def _process_cmmm_events(state: VMState, frame: VoiceFrame):
+    latch = state.executor_latch
+
+    # Step 1: Advance mask ramp (must happen every block)
+    latch.step_mask_ramp()
+
+    # Step 2: Process node mask event (payload_type 0x30)
+    if frame.cmmm_node_mask is not None:
+        latch.apply_nodemask_event(frame.cmmm_node_mask, frame.cmmm_mask_ramp_blocks)
+
+    # Step 3: Process tail mode event (payload_type 0x31)
+    if frame.cmmm_tail_mode is not None:
+        latch.apply_tailmode_event(frame.cmmm_tail_mode, frame.cmmm_traction_q15)
 ```
+
+**Normative:** CMMM events are processed before frame decode to ensure mask/tail changes take effect for the current block.
+
+### Step 3 — Coefficient Backbone Lanes (In Order)
+
+For each backbone entry, use crossfade-aware dispatch during mask transitions:
+
+```python
+def dispatch_coeff_op_crossfade(state: VMState, instr: BackboneEntry):
+    latch = state.executor_latch
+
+    if not latch.is_ramping():
+        # Not ramping - use current mask directly
+        dispatch_coeff_op(state, instr, latch.node_mask_u32)
+        return
+
+    # Get crossfade weights
+    start_weight, target_weight, start_mask, target_mask = latch.get_crossfade_weights()
+
+    # Apply operator with START mask, save result
+    dispatch_coeff_op(state, instr, start_mask)
+    coeff_start = state.coeff_state.copy()
+
+    # Restore and apply operator with TARGET mask
+    state.coeff_state[:] = coeff_backup
+    dispatch_coeff_op(state, instr, target_mask)
+
+    # Blend: result = start * start_weight + target * target_weight
+    for i in range(len(state.coeff_state)):
+        blended = (coeff_start[i] * start_weight + state.coeff_state[i] * target_weight) >> 15
+        state.coeff_state[i] = clamp(blended, -32768, 32767)
+```
+
+This ensures K changes are click-free even during complex operator chains.
 
 **Normative:** Operations apply to coefficient state, not audio buffers.
 
@@ -355,6 +413,10 @@ ticks ≈ Σ lane_cost(op_id, K, L) + render_cost + tail_cost(tail_mode, K, L)
 ```python
 def vm_step_block(state: VMState, frame: VoiceFrame, tables: Tables) -> Tuple[VMState, np.ndarray]:
     """Execute one block for one voice."""
+
+    # Step 0: Process CMMM events (WSE-STD-070)
+    _process_cmmm_events(state, frame)
+
     cfg = decode_frame(frame, tables)
 
     # Lane 1: Carrier
@@ -366,9 +428,9 @@ def vm_step_block(state: VMState, frame: VoiceFrame, tables: Tables) -> Tuple[VM
     # Lane 2: Inject
     lane_inject(state, cfg)
 
-    # Lanes 3-6: Backbone (in order)
+    # Lanes 3-6: Backbone (in order) with crossfade-aware dispatch
     for instr in cfg.backbone_instrs:
-        dispatch_coeff_op(state, instr, cfg.mask_u32)
+        dispatch_coeff_op_crossfade(state, instr)
 
     # Lane 7: Tail
     lane_tail(state, cfg)
@@ -443,8 +505,17 @@ For CMMM budget prediction:
 
 ---
 
-## Appendix B: Revision History
+## Appendix B: Related Documentation
+
+- [WSE-STD-070](../architecture/WSE-STD-070.md) - Tower completion and CMMM events (0x30/0x31)
+- [BUDGETS-AND-DEGRADATION.md](../library/BUDGETS-AND-DEGRADATION.md) - K ladder and pattern table
+- [OPERATORS.md](../library/OPERATORS.md) - Operator reference with lane assignments
+
+---
+
+## Appendix C: Revision History
 
 | Version | Date | Changes |
 |---------|------|---------|
 | 0.1.0 | 2025-12-26 | Initial draft |
+| 0.2.0 | 2026-01-15 | Added ExecutorLatch (§3.2), CMMM event processing (§7 Step 2.5), crossfade-aware dispatch (§7 Step 3) per WSE-STD-070 |

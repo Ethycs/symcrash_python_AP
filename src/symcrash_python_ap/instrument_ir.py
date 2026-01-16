@@ -438,7 +438,11 @@ class MacroSemantic:
 
 @dataclass
 class L1Lift:
-    """L1 gesture basis and macro semantics."""
+    """
+    L1 gesture basis and macro semantics.
+
+    Defines how raw inputs are mapped to internal control signals.
+    """
     gesture_basis: Dict[str, GestureSource] = field(default_factory=dict)
     macro_semantics: Dict[str, MacroSemantic] = field(default_factory=dict)
 
@@ -454,6 +458,38 @@ class Hysteresis:
     exit: float
 
 
+class EdgeTransitionType(Enum):
+    """
+    Edge transition types per Voice Engine Tower spec.
+
+    Per symcrash_docs/03 - Audio Pipeline/00 - Voice Engine/Evolution/05:
+    These define how the transition between regimes behaves.
+    """
+    HARD = "hard"                  # Immediate switch, no crossfade
+    SOFT = "soft"                  # Smooth crossfade over duration_blocks
+    CHAOTIC = "chaotic"            # Stochastic switching with jitter
+    CORRIDOR_ENTRY = "corridor"    # Entry into degradation corridor
+    RECOVERY = "recovery"          # Return from instability to stable regime
+
+
+@dataclass
+class EdgeSpec:
+    """
+    Tower-conformant edge specification per Voice Engine Tower spec.
+
+    Per symcrash_docs/03 - Audio Pipeline/00 - Voice Engine/Evolution/05:
+    EdgeSpec defines transitions with typed behavior, guards, and overlays.
+    """
+    src_regime: str
+    dst_regime: str
+    transition_type: str = "soft"           # EdgeTransitionType value
+    guard: str = ""                          # Condition expression (ConditionSpec)
+    hysteresis: Optional[Hysteresis] = None
+    min_dwell_blocks: int = 0               # Minimum time before transition allowed
+    duration_blocks: int = 4                # Transition crossfade duration
+    overlay: Optional[str] = None           # Overlay to apply during transition
+
+
 @dataclass
 class RegimeNode:
     """L2 regime graph node."""
@@ -465,7 +501,7 @@ class RegimeNode:
 
 @dataclass
 class RegimeTransition:
-    """L2 regime transition."""
+    """L2 regime transition (legacy format, use EdgeSpec for tower-conformant)."""
     from_regime: str  # 'from' is reserved in Python
     to: str
     when: str
@@ -473,10 +509,29 @@ class RegimeTransition:
 
 
 @dataclass
+class RegimeGraphSpec:
+    """
+    Tower-conformant regime graph specification.
+
+    Per symcrash_docs/03 - Audio Pipeline/00 - Voice Engine/Evolution/05:
+    RegimeGraphSpec defines the full state machine topology.
+    """
+    start_regime: str = "R0_IDLE"
+    edges: List[EdgeSpec] = field(default_factory=list)
+
+
+@dataclass
 class L2Regimes:
-    """L2 regime graph."""
+    """
+    L2 regime graph - the graph-based state machine.
+
+    Supports both simple (regime_nodes + transitions) and
+    full graph spec (regime_graph_spec with typed EdgeSpecs) formats.
+    """
     regime_nodes: List[RegimeNode] = field(default_factory=list)
     transitions: List[RegimeTransition] = field(default_factory=list)
+    # Full graph spec with typed edges (optional, takes precedence if present)
+    regime_graph_spec: Optional[RegimeGraphSpec] = None
 
 
 # =============================================================================
@@ -512,7 +567,7 @@ class CmmmOutputs:
 
 @dataclass
 class TreeTarget:
-    """Tree blend target."""
+    """Tree blend target for topology morphing."""
     A: str = "T1"
     B: str = "T1"
     beta: Union[float, str] = 0.0
@@ -549,12 +604,83 @@ class EventPolicy:
 
 
 @dataclass
+class CmmmControl:
+    """
+    CMMM runtime control fields (WSE-STD-070 §10).
+
+    Controls executor latch state for K degradation and tail operator selection.
+
+    Attributes:
+        node_mask: Target node mask (32-bit) or pattern reference ("pattern:N")
+        mask_ramp_blocks: Crossfade duration in blocks (default 5)
+        tail_mode: Tail operator set (FULL=0, MID=1, MIN=2, EMERGENCY=3)
+        traction_q15: Projection hardness (0-32767, default full)
+    """
+    node_mask: Union[int, str] = 0xFFFFFFFF  # Can be int or "pattern:N"
+    mask_ramp_blocks: int = 5
+    tail_mode: Union[int, str] = 0  # Can be int or name (FULL, MID, MIN, EMERGENCY)
+    traction_q15: int = 32767
+
+    # Pattern table for K ladder (canonical masks)
+    PATTERN_TABLE = {
+        0: 0xFFFFFFFF,  # K=32
+        1: 0x00FFFFFF,  # K=24
+        2: 0x000FFFFF,  # K=20
+        3: 0x0000FFFF,  # K=16
+        4: 0x00000FFF,  # K=12
+        5: 0x000000FF,  # K=8
+        6: 0x0000000F,  # K=4
+        7: 0x00000001,  # K=1
+    }
+
+    # Tail mode name mapping
+    TAIL_MODE_MAP = {
+        "FULL": 0,
+        "MID": 1,
+        "MIN": 2,
+        "EMERGENCY": 3,
+    }
+
+    def get_node_mask_u32(self) -> int:
+        """Resolve node_mask to a 32-bit integer."""
+        if isinstance(self.node_mask, int):
+            return self.node_mask & 0xFFFFFFFF
+        if isinstance(self.node_mask, str):
+            # Pattern reference: "pattern:N"
+            if self.node_mask.startswith("pattern:"):
+                pattern_id = int(self.node_mask.split(":")[1])
+                return self.PATTERN_TABLE.get(pattern_id, 0xFFFFFFFF)
+            # Hex string
+            if self.node_mask.startswith("0x"):
+                return int(self.node_mask, 16) & 0xFFFFFFFF
+        return 0xFFFFFFFF
+
+    def get_tail_mode_int(self) -> int:
+        """Resolve tail_mode to an integer."""
+        if isinstance(self.tail_mode, int):
+            return self.tail_mode
+        if isinstance(self.tail_mode, str):
+            return self.TAIL_MODE_MAP.get(self.tail_mode.upper(), 0)
+        return 0
+
+
+@dataclass
 class EmitTemplate:
-    """Emission template for a regime."""
+    """
+    Emission template for a regime.
+
+    Defines what the CMMM outputs when in a given regime:
+    - families: Weight distribution across family operators
+    - ops_enable: Which operators are enabled
+    - trees: Tree blend target for topology morphing
+    - events: Conditional event emissions
+    - cmmm: CMMM runtime control (node mask, tail mode) per WSE-STD-070 §10
+    """
     families: Dict[str, Union[float, str]] = field(default_factory=dict)
     ops_enable: List[str] = field(default_factory=list)
     trees: TreeTarget = field(default_factory=TreeTarget)
     events: List[EventPolicy] = field(default_factory=list)
+    cmmm: Optional[CmmmControl] = None  # CMMM runtime control (WSE-STD-070)
 
 
 @dataclass
@@ -602,7 +728,21 @@ class Overlay:
 
 @dataclass
 class L3Cmmm:
-    """L3-L5 Controlled Markov Mealy Machine."""
+    """
+    L3-L5 Controlled Markov Mealy Machine (CMMM).
+
+    The CMMM is a graph-based state machine that controls voice synthesis:
+    - Regimes define states (Idle, Attack, Stable, etc.)
+    - Transitions define edges with typed behaviors
+    - Emit templates define what each regime outputs
+    - Overlays provide conditional modifications
+
+    Per CMMM spec, this drives:
+    - Operator selection and budgeting
+    - Family weight computation
+    - Tree topology morphing
+    - Event lane triggering
+    """
     state: CmmmState = field(default_factory=CmmmState)
     inputs: CmmmInputs = field(default_factory=CmmmInputs)
     outputs: CmmmOutputs = field(default_factory=CmmmOutputs)
@@ -1363,17 +1503,33 @@ def _parse_event_policy(data: dict) -> EventPolicy:
     )
 
 
+def _parse_cmmm_control(data: dict) -> CmmmControl:
+    """Parse CMMM control from dict."""
+    return CmmmControl(
+        node_mask=data.get('node_mask', 0xFFFFFFFF),
+        mask_ramp_blocks=data.get('mask_ramp_blocks', 5),
+        tail_mode=data.get('tail_mode', 0),
+        traction_q15=data.get('traction_q15', 32767),
+    )
+
+
 def _parse_emit_template(data: dict) -> EmitTemplate:
     """Parse emit template from dict."""
     trees = TreeTarget()
     if 'trees' in data:
         trees = _parse_tree_target(data['trees'])
 
+    # Parse CMMM control if present (WSE-STD-070)
+    cmmm = None
+    if 'cmmm' in data:
+        cmmm = _parse_cmmm_control(data['cmmm'])
+
     return EmitTemplate(
         families=data.get('families', {}),
         ops_enable=data.get('ops_enable', []),
         trees=trees,
         events=[_parse_event_policy(e) for e in data.get('events', [])],
+        cmmm=cmmm,
     )
 
 
@@ -1660,12 +1816,13 @@ def load_instrument_from_dict(data: dict) -> InstrumentIR:
     )
 
 
-def load_instrument(path: str) -> InstrumentIR:
+def load_instrument(path) -> InstrumentIR:
     """
     Load InstrumentIR from a YAML or JSON file.
 
     Args:
         path: Path to the instrument file (.yaml, .yml, or .json)
+              Can be string or Path object.
 
     Returns:
         InstrumentIR object
@@ -1673,8 +1830,12 @@ def load_instrument(path: str) -> InstrumentIR:
     Raises:
         ImportError: If trying to load YAML without pyyaml installed
     """
+    from pathlib import Path as PathLib
+    # Convert to string for extension checking
+    path_str = str(path)
+
     with open(path, 'r', encoding='utf-8') as f:
-        if path.endswith('.json'):
+        if path_str.endswith('.json'):
             data = json.load(f)
         else:
             if not HAS_YAML:
@@ -1686,14 +1847,15 @@ def load_instrument(path: str) -> InstrumentIR:
     return load_instrument_from_dict(data)
 
 
-def save_instrument(ir: InstrumentIR, path: str) -> None:
+def save_instrument(ir: InstrumentIR, path) -> None:
     """
     Save InstrumentIR to a YAML or JSON file.
 
     Args:
         ir: InstrumentIR object
-        path: Output path (.yaml, .yml, or .json)
+        path: Output path (.yaml, .yml, or .json). Can be string or Path object.
     """
+    path_str = str(path)
     # Convert to dict (simplified, for demonstration)
     data = {
         'instrument_ir_v0': {
@@ -1717,7 +1879,7 @@ def save_instrument(ir: InstrumentIR, path: str) -> None:
     }
 
     with open(path, 'w', encoding='utf-8') as f:
-        if path.endswith('.json'):
+        if path_str.endswith('.json'):
             json.dump(data, f, indent=2)
         else:
             if not HAS_YAML:
@@ -1824,6 +1986,226 @@ def complete_instrument(ir: InstrumentIR) -> InstrumentIR:
 
 
 # =============================================================================
+# TOWER OBJECT (WSE-STD-070 Tower Runtime)
+# =============================================================================
+
+class TowerLevel(IntEnum):
+    """
+    Tower levels per WSE-STD-070.
+
+    Each level represents a different depth of instrument specification:
+    - L0: Playable patch (always sounding)
+    - L1: Family (gesture/intent semantics)
+    - L2: Instrument (regime state machine)
+    - L3: Cockpit (CMMM emission templates)
+    - L4: Forge (graph editing, offline)
+    - L5: Lab (custom operators/trees, offline)
+    """
+    L0_PATCH = 0       # Sounding patch
+    L1_FAMILY = 1      # Gesture/intent semantics
+    L2_INSTRUMENT = 2  # Regime state machine
+    L3_COCKPIT = 3     # CMMM emission
+    L4_FORGE = 4       # Graph editing (offline)
+    L5_LAB = 5         # Custom ops/trees (offline)
+
+
+@dataclass
+class TowerBudget:
+    """
+    Budget configuration for Tower execution.
+
+    Controls operator execution limits and degradation behavior.
+    """
+    tick_budget: int = 4096       # Max ticks per block per voice
+    k_degradation: List[int] = field(default_factory=lambda: [32, 24, 16, 12, 8, 4, 1])
+    tail_mode: int = 0            # Default tail mode (0=FULL)
+    allow_nonlinear: bool = True  # Whether nonlinear ops are allowed
+
+
+@dataclass
+class Tower:
+    """
+    The Tower object wraps InstrumentIR layers with level tracking and
+    projection/completion capabilities.
+
+    Per WSE-STD-070:
+    - Tower level declares the highest explicitly authored level
+    - Missing layers are filled by Tower Completion (upward)
+    - Projection maps allow safe descent (downward)
+
+    This is the runtime-meaningful Tower abstraction that ensures:
+    1. Every layer compiles to runtime behavior
+    2. Deterministic completion and projection
+    3. Budget-aware degradation
+    """
+    tower_level: TowerLevel = TowerLevel.L2_INSTRUMENT
+    L0_graph: L0Graph = field(default_factory=L0Graph)
+    L1_lift: L1Lift = field(default_factory=L1Lift)
+    L2_regimes: L2Regimes = field(default_factory=L2Regimes)
+    L3_cmmm: L3Cmmm = field(default_factory=L3Cmmm)
+    envelopes: List[EnvelopeBinding] = field(default_factory=list)
+    budget: Optional[TowerBudget] = None
+
+    # Registry references (resolved at compile time)
+    regime_graph_id: Optional[int] = None
+    tree_family_id: Optional[int] = None
+
+    @classmethod
+    def from_instrument_ir(cls, ir: 'InstrumentIR') -> 'Tower':
+        """
+        Create a Tower from an InstrumentIR.
+
+        Infers tower_level from which layers are populated.
+        """
+        # Infer tower level from populated layers
+        level = TowerLevel.L0_PATCH
+        if ir.layers.L1_lift.gesture_basis:
+            level = TowerLevel.L1_FAMILY
+        if ir.layers.L2_regimes.regime_nodes:
+            level = TowerLevel.L2_INSTRUMENT
+        if ir.layers.L3_cmmm.emit_templates:
+            level = TowerLevel.L3_COCKPIT
+
+        return cls(
+            tower_level=level,
+            L0_graph=ir.layers.L0_graph,
+            L1_lift=ir.layers.L1_lift,
+            L2_regimes=ir.layers.L2_regimes,
+            L3_cmmm=ir.layers.L3_cmmm,
+            envelopes=ir.envelopes,
+        )
+
+    def to_layers(self) -> 'Layers':
+        """Convert Tower back to Layers for InstrumentIR compatibility."""
+        return Layers(
+            L0_graph=self.L0_graph,
+            L1_lift=self.L1_lift,
+            L2_regimes=self.L2_regimes,
+            L3_cmmm=self.L3_cmmm,
+        )
+
+    def complete(self) -> 'Tower':
+        """
+        Complete missing layers upward from current tower_level.
+
+        Per WSE-STD-070 Section 4.2, completion always proceeds upward:
+        Lk → Lk+1 → ... → L3
+
+        Returns:
+            New Tower with completed layers
+        """
+        result = Tower(
+            tower_level=self.tower_level,
+            L0_graph=self.L0_graph,
+            L1_lift=self.L1_lift,
+            L2_regimes=self.L2_regimes,
+            L3_cmmm=self.L3_cmmm,
+            envelopes=list(self.envelopes),
+            budget=self.budget,
+            regime_graph_id=self.regime_graph_id,
+            tree_family_id=self.tree_family_id,
+        )
+
+        # Complete L1 if missing
+        if not result.L1_lift.gesture_basis:
+            result.L1_lift = create_default_l1_lift()
+
+        # Complete L2 if missing
+        if not result.L2_regimes.regime_nodes:
+            result.L2_regimes = create_default_l2_regimes()
+
+        # Complete L3 if missing
+        if not result.L3_cmmm.emit_templates:
+            result.L3_cmmm.emit_templates = create_default_emit_templates()
+
+        return result
+
+    def project_to_level(self, target: TowerLevel) -> 'Tower':
+        """
+        Safely descend the tower to a lower level.
+
+        Per WSE-STD-070 Section 5.1, projection removes data above target_level
+        and re-applies completion rules. Must preserve playability.
+
+        Args:
+            target: Target level to project to
+
+        Returns:
+            New Tower at the target level
+        """
+        if target > self.tower_level:
+            raise ValueError(f"Cannot project upward from {self.tower_level.name} to {target.name}")
+
+        result = Tower(
+            tower_level=target,
+            L0_graph=self.L0_graph,
+            envelopes=list(self.envelopes),
+            budget=self.budget,
+        )
+
+        # Copy layers up to target level
+        if target >= TowerLevel.L1_FAMILY:
+            result.L1_lift = self.L1_lift
+        if target >= TowerLevel.L2_INSTRUMENT:
+            result.L2_regimes = self.L2_regimes
+        if target >= TowerLevel.L3_COCKPIT:
+            result.L3_cmmm = self.L3_cmmm
+
+        # Re-apply completion for playability
+        return result.complete()
+
+    def reset_to_safe(self) -> 'Tower':
+        """
+        Panic projection: drop to L2 with only safe operators.
+
+        Per WSE-STD-070 Section 5.2:
+        - Project to L2
+        - Enable only SAFE operator set
+        - Reset envelopes to neutral
+        - Clear all event policies
+        """
+        result = self.project_to_level(TowerLevel.L2_INSTRUMENT)
+
+        # Reset L3 to minimal safe configuration
+        result.L3_cmmm = L3Cmmm()
+        result.L3_cmmm.emit_templates = {
+            "T_SAFE": EmitTemplate(
+                families={"CONSTRAINT": 1.0, "CALM": 1.0},
+                ops_enable=["NormalizeScale", "FineClamp"],
+            )
+        }
+
+        # Update all regime nodes to use safe template
+        for node in result.L2_regimes.regime_nodes:
+            node.emit_template = "T_SAFE"
+
+        # Reset budget to conservative
+        if result.budget is None:
+            result.budget = TowerBudget()
+        result.budget.tail_mode = 2  # MIN
+
+        return result
+
+    def get_conformance_profile(self) -> str:
+        """
+        Get the conformance profile for this Tower.
+
+        Returns one of:
+        - "P0": L0 + envelopes (static synthesis)
+        - "P1": P0 + L2 regimes (state machine drives emit selection)
+        - "P2": P1 + L3 CMMM (full expressive synthesis)
+        - "P3": P2 + budgeting (deterministic degradation)
+        """
+        if self.budget is not None and self.budget.tick_budget > 0:
+            return "P3"
+        if self.L3_cmmm.emit_templates:
+            return "P2"
+        if self.L2_regimes.regime_nodes:
+            return "P1"
+        return "P0"
+
+
+# =============================================================================
 # EXPORTS
 # =============================================================================
 
@@ -1833,15 +2215,17 @@ __all__ = [
     # Enums
     'NodeType', 'WaveformType', 'NoiseColor', 'FilterMode',
     'RegimeKind', 'TransitionType', 'OverlayKind', 'EventLane',
+    'EdgeTransitionType',  # Graph-based state machine transition types
     # L0 types
     'Macro', 'ADSR', 'EnvelopeBinding', 'ControlConfig', 'NodeParams', 'L0Node', 'L0Edge', 'L0Graph',
     # L1 types
     'GestureSource', 'MacroAffect', 'MacroSemantic', 'L1Lift',
-    # L2 types
-    'Hysteresis', 'RegimeNode', 'RegimeTransition', 'L2Regimes',
-    # L3 types
+    # L2 types (regime graph - the graph-based state machine)
+    'Hysteresis', 'EdgeSpec', 'RegimeGraphSpec',
+    'RegimeNode', 'RegimeTransition', 'L2Regimes',
+    # L3 types (CMMM - Controlled Markov Mealy Machine)
     'StateVariable', 'CmmmState', 'CmmmInputs', 'CmmmOutputs',
-    'TreeTarget', 'EventPayloadTemplate', 'EventPolicy', 'EmitTemplate',
+    'TreeTarget', 'EventPayloadTemplate', 'EventPolicy', 'CmmmControl', 'EmitTemplate',
     'TransitionChoice', 'TransitionRule', 'SuppressionRule', 'OverlayAdd', 'Overlay',
     'L3Cmmm',
     # Compile types
@@ -1853,4 +2237,6 @@ __all__ = [
     'load_instrument', 'load_instrument_from_dict', 'save_instrument',
     'complete_instrument',
     'create_default_l1_lift', 'create_default_l2_regimes', 'create_default_emit_templates',
+    # Tower (WSE-STD-070)
+    'TowerLevel', 'TowerBudget', 'Tower',
 ]

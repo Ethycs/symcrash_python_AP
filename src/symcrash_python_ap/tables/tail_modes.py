@@ -1,0 +1,91 @@
+"""
+Tail Modes (Canonical Table v0)
+===============================
+
+Tail operators are the mandatory safety operators that must run
+to guarantee well-formed output. Different tail modes provide
+different quality/cost tradeoffs.
+
+Per CMMM-2 spec:
+- FULL: High quality [FineClamp, NormalizeScale, SheafProject]
+- MID:  Medium quality [FineClamp, NormalizeScale]
+- MIN:  Minimum safety [FineClamp]
+- EMERGENCY: Carrier-only [EmergencySimplify]
+"""
+
+from enum import IntEnum
+from typing import List, Dict
+
+
+class TailMode(IntEnum):
+    """
+    Tail mode determines which safety operators run.
+
+    Degradation ladder: FULL -> MID -> MIN -> EMERGENCY
+    """
+    FULL = 0       # Full quality tail
+    MID = 1        # Medium quality tail
+    MIN = 2        # Minimum safety tail
+    EMERGENCY = 3  # Emergency fallback
+
+
+# Operator IDs for tail operators (from operator library)
+OP_FINE_CLAMP = 2
+OP_NORMALIZE_SCALE = 11
+OP_SHEAF_PROJECT = 23
+OP_EMERGENCY_SIMPLIFY = 19
+
+
+# Canonical tail operator sets per mode
+TAIL_OPS: Dict[TailMode, List[int]] = {
+    TailMode.FULL: [OP_FINE_CLAMP, OP_NORMALIZE_SCALE, OP_SHEAF_PROJECT],
+    TailMode.MID: [OP_FINE_CLAMP, OP_NORMALIZE_SCALE],
+    TailMode.MIN: [OP_FINE_CLAMP],
+    TailMode.EMERGENCY: [OP_EMERGENCY_SIMPLIFY],
+}
+
+
+def get_tail_ops(mode: TailMode) -> List[int]:
+    """Get the tail operator list for a given mode."""
+    return TAIL_OPS[mode].copy()
+
+
+def can_use_tail_mode(mode: TailMode, allow_nonlinear: bool) -> bool:
+    """
+    Check if a tail mode is allowed given nonlinear constraints.
+
+    NormalizeScale (op 11) involves sqrt-ish operations (nonlinear).
+    If allow_nonlinear=False, only MIN and EMERGENCY are valid.
+    """
+    if allow_nonlinear:
+        return True
+    # Op 11 (NormalizeScale) is in FULL and MID
+    return mode in (TailMode.MIN, TailMode.EMERGENCY)
+
+
+def downgrade_tail_mode(mode: TailMode, allow_nonlinear: bool = True) -> TailMode:
+    """
+    Return the next lower tail mode in the degradation ladder.
+
+    Returns same mode if already at EMERGENCY.
+    """
+    if mode == TailMode.FULL:
+        return TailMode.MID if allow_nonlinear else TailMode.MIN
+    elif mode == TailMode.MID:
+        return TailMode.MIN
+    elif mode == TailMode.MIN:
+        return TailMode.EMERGENCY
+    else:
+        return TailMode.EMERGENCY
+
+
+# =============================================================================
+# TAIL MODE DESCRIPTIONS (for documentation/UI)
+# =============================================================================
+
+TAIL_MODE_DESCRIPTIONS = {
+    TailMode.FULL: "Full quality: FineClamp + NormalizeScale + SheafProject",
+    TailMode.MID: "Medium quality: FineClamp + NormalizeScale",
+    TailMode.MIN: "Minimum safety: FineClamp only",
+    TailMode.EMERGENCY: "Emergency fallback: EmergencySimplify (carrier-only)",
+}

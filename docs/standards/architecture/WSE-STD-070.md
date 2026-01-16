@@ -277,7 +277,85 @@ All of these can evolve **without breaking compatibility**.
 
 ---
 
-## 10. Closure Statement
+## 10. CMMM Event Bindings (Runtime)
+
+The L3 Cockpit layer (CMMM) emits events that control runtime behavior.
+
+### 10.1 Event Payload Types
+
+| Payload Type | Name | Description |
+|--------------|------|-------------|
+| `0x30` | NODEMASK_SET | Change active node mask with ramp |
+| `0x31` | TAILMODE_SET | Change tail mode with traction |
+
+### 10.2 Node Mask Events (0x30)
+
+```python
+@dataclass
+class NodeMaskPayload:
+    node_mask_u32: int      # Target mask (32 leaves)
+    ramp_blocks: int = 5    # Crossfade duration
+```
+
+Normative behavior:
+* Executor MUST crossfade between old and new masks
+* Crossfade uses Q15 linear interpolation
+* K (active node count) = popcount(mask)
+* Mask changes without ramp MUST still be click-free (minimum 1 block ramp)
+
+### 10.3 Tail Mode Events (0x31)
+
+```python
+@dataclass
+class TailModePayload:
+    tail_mode: int          # 0=FULL, 1=MID, 2=MIN, 3=EMERGENCY
+    traction_q15: int       # Projection hardness (0-32767)
+```
+
+Normative behavior:
+* Tail mode determines which tail operators are enabled
+* Traction scales enforcement strength
+* Mode changes MAY be instant (no crossfade required)
+
+### 10.4 Crossfade Implementation
+
+During mask ramp, the executor MUST:
+
+1. Track start mask and target mask
+2. Compute blend weights: `alpha = progress / total_blocks`
+3. Apply operators with BOTH masks
+4. Blend outputs: `result = start_output * (1-alpha) + target_output * alpha`
+5. Snap to target when ramp completes
+
+This prevents clicks during K degradation (32→24→16→12→8→4→1).
+
+---
+
+## 11. Implementation Status
+
+### 11.1 Completed (Python)
+
+| Component | Location | Status |
+|-----------|----------|--------|
+| ExecutorLatch | `vm/state.py` | ✓ Crossfade weights, ramp tracking |
+| CMMM Event Processing | `vm/executor.py` | ✓ 0x30/0x31 decode |
+| Crossfade Dispatch | `vm/lanes.py` | ✓ `dispatch_coeff_op_crossfade()` |
+| Regime Registry | `library/regime_registry.py` | ✓ Graph storage |
+| Tree Registry | `library/tree_registry.py` | ✓ Family storage |
+| Pattern Table | `tables/pattern_table.py` | ✓ Mask patterns |
+| Tail Modes | `tables/tail_modes.py` | ✓ Tail op sets |
+
+### 11.2 Test Coverage
+
+| Test File | Coverage |
+|-----------|----------|
+| `test_crossfade_dispatch.py` | ExecutorLatch weights, ramp behavior |
+| `test_cmmm_events.py` | 0x30/0x31 roundtrip, K computation |
+| `test_golden_voiceframe_stream.py` | Deterministic replay, snapshot restore |
+
+---
+
+## 12. Closure Statement
 
 > After WSE-STD-070, the system is **architecture complete**.
 
@@ -291,6 +369,6 @@ You are no longer inventing structure — you are **inhabiting it**.
 
 If you want next, I can:
 
-* Produce a **single PDF-style “WSE v0 Complete Spec”**
-* Or write **conformance tests** (“this preset must project to L2 and still play”)
+* Produce a **single PDF-style "WSE v0 Complete Spec"**
+* Or write **conformance tests** ("this preset must project to L2 and still play")
 * Or map this directly onto your **Python package + FPGA modules** so nothing is orphaned

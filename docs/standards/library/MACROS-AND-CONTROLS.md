@@ -439,8 +439,62 @@ current = slew_one_pole(
 
 ---
 
+## CMMM Event Integration (WSE-STD-070)
+
+The control system integrates with CMMM events for runtime mask and tail mode control.
+
+### VoiceFrame CMMM Fields
+
+When CMMM emits a VoiceFrame, it can include event payloads:
+
+```python
+# Node mask control (0x30 NODEMASK_SET)
+frame.cmmm_node_mask = 0x0000FFFF      # Target 16-node mask
+frame.cmmm_mask_ramp_blocks = 5         # Crossfade duration
+
+# Tail mode control (0x31 TAILMODE_SET)
+frame.cmmm_tail_mode = TailMode.MIN     # Tail operator set
+frame.cmmm_traction_q15 = 16384         # Projection hardness
+```
+
+### Control Flow
+
+```
+ControlFrame → VoiceFrameEmitter → VoiceFrame → Executor
+                     ↓                              ↓
+                CMMM emission                ExecutorLatch
+                     ↓                              ↓
+              cmmm_node_mask              mask crossfade
+              cmmm_tail_mode              tail op selection
+```
+
+### ExecutorLatch State
+
+The executor latch maintains per-voice CMMM state:
+
+| Field | Purpose |
+|-------|---------|
+| `node_mask_u32` | Current active node mask |
+| `mask_target_u32` | Target mask for ramping |
+| `mask_ramp_remaining` | Blocks left in crossfade |
+| `tail_mode` | Current tail operator set |
+| `traction_q15` | Projection hardness |
+
+### Macro → CMMM Mapping
+
+System macros can influence CMMM event emission:
+
+| Macro | Affects | Example |
+|-------|---------|---------|
+| RISK | tail_mode | High risk → MIN/EMERGENCY tail |
+| ENERGY_STATE | node_mask | Low energy → reduced K |
+| DENSITY | node_mask | High density → more nodes |
+
+---
+
 ## Related Documentation
 
 - [PRESET-AUTHORING-GUIDE.md](PRESET-AUTHORING-GUIDE.md) - Main authoring guide
 - [OPERATORS.md](OPERATORS.md) - Operator reference
 - [BUDGETS-AND-DEGRADATION.md](BUDGETS-AND-DEGRADATION.md) - Performance budgets
+- [../architecture/WSE-STD-070.md](../architecture/WSE-STD-070.md) - Tower completion and CMMM events

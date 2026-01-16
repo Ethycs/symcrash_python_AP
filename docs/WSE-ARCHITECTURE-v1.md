@@ -38,7 +38,7 @@ Current state of major subsystems (as of 2026-01-06):
 | **Control Plane** | ✅ **INTEGRATED** | Cockpit Engine operational. [WSE-STD-COCKPIT-ENGINE.md](standards/control/WSE-STD-COCKPIT-ENGINE.md) |
 | **Material Engine** | ✅ **SPECIFIED** | 6 material programs defined. [WSE-STD-MATERIAL-v0.md](standards/budget/WSE-STD-MATERIAL-v0.md) |
 | **CCS** | ❌ **NOT FUNCTIONAL** | Wrong frequencies (750 Hz vs target). [CCS-STATUS.md](status-reports/implementation/CCS-STATUS.md) |
-| **CMMM** | ⏳ **IN PROGRESS** | Phase 1 roadmap. [WSE-STD-CMM-ROADMAP-v0.md](standards/architecture/WSE-STD-CMM-ROADMAP-v0.md) |
+| **CMMM** | ✅ **PHASE 1 COMPLETE** | 0x30/0x31 events, ExecutorLatch, crossfade dispatch. [WSE-STD-070.md](standards/architecture/WSE-STD-070.md) |
 | **Wavelet Engine** | ✅ **OPERATIONAL** | Polyphase IDWPT working. [WSE-STD-120.md](standards/ccs/WSE-STD-120.md) |
 | **Symbol Engine** | ✅ **OPERATIONAL** | Operator execution working. [WSE-STD-030.md](standards/core/WSE-STD-030.md) |
 | **Voice Engine** | ✅ **OPERATIONAL** | Time ownership enforced. [WSE-STD-060.md](standards/runtime/WSE-STD-060.md) |

@@ -124,6 +124,21 @@ class VoiceFrame:
     # See vm/waveform_matrix.py WaveformType for constants
     waveform_type: int = 0          # Default sine
 
+    # OEIS sequence for partial selection (Mode B harmonic bank)
+    # -1 = disabled (use waveform_type or partial_amps_q15)
+    # 0 = PRIMES (A000040): metallic, bell-like
+    # 1 = FIBONACCI (A000045): organic, complex
+    # 2 = BEATTY_PHI (A001950): golden ratio partials
+    # 3 = TRIANGULAR (A000217): stepped, quantized
+    # 4 = LUCAS (A000032): similar to Fibonacci
+    # 5 = SQUARE_FREE (A005117): dense but irregular
+    # 6 = ODD_ONLY: hollow, clarinet-like
+    # 7 = MERSENNE (A000225): exponentially sparse
+    oeis_sequence_id: int = -1      # -1 = disabled
+
+    # OEIS rolloff (dB/octave, negative = decay)
+    oeis_rolloff_db: float = -3.0
+
     # PWM parameters
     pwm_width_q15: int = 16384      # Duty cycle (Q15: 0=0%, 32767≈100%, 16384=50%)
     pwm_enabled: bool = False       # Enable PWM modulation
@@ -203,6 +218,22 @@ class VoiceFrame:
     #   20-21: FILTER_CUTOFF, FILTER_RESO (future)
     #   30-31: PITCH, VIBRATO_DEPTH (future)
     env_targets_q15: Optional[dict] = None
+
+    # =========================================================================
+    # CMMM Event Payloads (WSE-STD-070 Tower Runtime)
+    # =========================================================================
+    # These fields are populated by the CMMM emission step and processed by
+    # the executor to update the ExecutorLatch.
+
+    # Node mask event (payload_type 0x30)
+    # When set, triggers a node mask change in the executor latch
+    cmmm_node_mask: Optional[int] = None          # Target mask (32-bit)
+    cmmm_mask_ramp_blocks: int = 5                # Crossfade duration
+
+    # Tail mode event (payload_type 0x31)
+    # When set, triggers a tail mode change in the executor latch
+    cmmm_tail_mode: Optional[int] = None          # TailMode enum value
+    cmmm_traction_q15: int = 32767                # Projection hardness
 
     # Legacy compatibility: convert float betas to IDs
     @property

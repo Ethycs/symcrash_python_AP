@@ -246,6 +246,67 @@ class HarmonicWeights:
             self.b_h_q15[:len(b_h)] = b_h
             self.H_active = min(H, len(self.a_h_q15))
 
+    def set_oeis(
+        self,
+        sequence_id: int,
+        H: int = 32,
+        rolloff_db_per_octave: float = -3.0,
+        base_amplitude_q15: int = 32767,
+    ) -> None:
+        """
+        Configure harmonics based on OEIS integer sequence.
+
+        Uses mathematical sequences to select which partials are active,
+        creating unique inharmonic timbres:
+
+        - PRIMES (0): Metallic, bell-like (partials 2, 3, 5, 7, 11, ...)
+        - FIBONACCI (1): Organic, complex (partials 1, 2, 3, 5, 8, 13, ...)
+        - BEATTY_PHI (2): Golden ratio spacing (partials 1, 3, 4, 6, 8, ...)
+        - TRIANGULAR (3): Stepped feel (partials 1, 3, 6, 10, 15, ...)
+        - LUCAS (4): Like Fibonacci, brighter (partials 2, 1, 3, 4, 7, ...)
+        - SQUARE_FREE (5): Dense but irregular (partials 1, 2, 3, 5, 6, 7, ...)
+        - ODD_ONLY (6): Hollow, clarinet-like (partials 1, 3, 5, 7, ...)
+        - MERSENNE (7): Exponentially sparse (partials 1, 3, 7, 15, 31, ...)
+
+        Args:
+            sequence_id: OEISSequenceID value (0-7)
+            H: Maximum harmonic count
+            rolloff_db_per_octave: Amplitude rolloff per octave (default -3dB)
+            base_amplitude_q15: Amplitude for lowest active partial
+        """
+        from .oeis_tables import OEISSequenceID, get_partial_amplitudes
+
+        # Get amplitudes for partials in the sequence
+        amps = get_partial_amplitudes(
+            OEISSequenceID(sequence_id),
+            H_max=min(H, len(self.a_h_q15)),
+            rolloff_db_per_octave=rolloff_db_per_octave,
+            base_amplitude_q15=base_amplitude_q15,
+        )
+
+        # Apply to sine weights (a_h)
+        self.dc_q15 = 0
+        self.a_h_q15.fill(0)
+        self.b_h_q15.fill(0)
+        self.a_h_q15[:len(amps)] = amps
+        self.H_active = min(H, len(self.a_h_q15))
+
+    def set_oeis_primes(self, H: int = 32, rolloff: float = -3.0) -> None:
+        """Shorthand for OEIS primes sequence - metallic, bell-like."""
+        self.set_oeis(0, H, rolloff)
+
+    def set_oeis_fibonacci(self, H: int = 32, rolloff: float = -3.0) -> None:
+        """Shorthand for OEIS Fibonacci sequence - organic, complex."""
+        self.set_oeis(1, H, rolloff)
+
+    def set_oeis_golden(self, H: int = 32, rolloff: float = -3.0) -> None:
+        """Shorthand for OEIS Beatty-phi sequence - golden ratio partials."""
+        self.set_oeis(2, H, rolloff)
+
+    def set_oeis_triangular(self, H: int = 32, rolloff: float = -3.0) -> None:
+        """Shorthand for OEIS triangular numbers - stepped, quantized."""
+        self.set_oeis(3, H, rolloff)
+
 
 # =============================================================================
 # MODE B STATE (WSE-STD-210)

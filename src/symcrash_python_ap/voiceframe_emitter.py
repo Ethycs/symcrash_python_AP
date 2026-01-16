@@ -344,6 +344,9 @@ class VoiceFrameEmitter:
                 for target_id in target_ids:
                     env_targets_q15[target_id] = value
 
+        # Get CMMM defaults from preset (WSE-STD-070 §10)
+        cmmm = getattr(self.preset, 'cmmm', None)
+
         # Build VoiceFrame
         frame = VoiceFrame(
             voice_id=self.voice_id,
@@ -368,6 +371,11 @@ class VoiceFrameEmitter:
             fm_feedback_depth=fm6_config.feedback_depth if fm6_config else None,
             # Matrix envelope targets
             env_targets_q15=env_targets_q15,
+            # CMMM runtime control fields (WSE-STD-070 §10)
+            cmmm_node_mask=cmmm.node_mask_u32 if cmmm else None,
+            cmmm_mask_ramp_blocks=cmmm.mask_ramp_blocks if cmmm else 5,
+            cmmm_tail_mode=cmmm.tail_mode if cmmm else None,
+            cmmm_traction_q15=cmmm.traction_q15 if cmmm else 32767,
         )
 
         # Advance block counter

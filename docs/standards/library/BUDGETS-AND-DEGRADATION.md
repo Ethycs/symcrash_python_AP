@@ -442,8 +442,77 @@ get_tail_cost(tail_mode) -> int
 
 ---
 
+## CMMM Runtime Integration (WSE-STD-070)
+
+The budget system integrates with the CMMM runtime via event payloads that control node masks and tail modes dynamically.
+
+### Node Mask Events (0x30 NODEMASK_SET)
+
+CMMM can change K at runtime using the `0x30` event payload:
+
+```python
+# VoiceFrame fields for node mask control
+frame.cmmm_node_mask = 0x0000FFFF    # Target mask (16 nodes)
+frame.cmmm_mask_ramp_blocks = 5      # Crossfade duration
+```
+
+The executor latch receives this and crossfades between masks over the specified blocks to prevent clicks.
+
+### Tail Mode Events (0x31 TAILMODE_SET)
+
+CMMM can change tail mode at runtime:
+
+```python
+# VoiceFrame fields for tail mode control
+frame.cmmm_tail_mode = TailMode.MIN  # New tail mode
+frame.cmmm_traction_q15 = 16384      # Projection hardness (0.5)
+```
+
+### Crossfade-Aware Operator Dispatch
+
+During mask transitions, operators are applied using `dispatch_coeff_op_crossfade()`:
+
+1. Save coefficient state
+2. Apply operator with **start** mask
+3. Restore and apply with **target** mask
+4. Blend outputs using crossfade weights
+
+This ensures K changes are click-free even during complex operator chains.
+
+### ExecutorLatch State
+
+The per-voice `ExecutorLatch` tracks:
+
+```python
+@dataclass
+class ExecutorLatch:
+    node_mask_u32: int = 0xFFFFFFFF    # Current mask
+    mask_target_u32: int = 0xFFFFFFFF  # Target for ramping
+    mask_ramp_remaining: int = 0        # Blocks left in ramp
+    tail_mode: int = 0                  # TailMode enum
+    traction_q15: int = 32767           # Projection hardness
+```
+
+### Integration with Pattern Table
+
+The pattern table provides canonical masks for the K ladder:
+
+```python
+from symcrash_python_ap.budgets import get_pattern_for_k, PATTERN_TABLE
+
+# Get mask for K=16
+pattern = get_pattern_for_k(16)
+frame.cmmm_node_mask = pattern.leaf_mask_u32
+frame.cmmm_mask_ramp_blocks = 5
+```
+
+Pattern IDs 0-6 correspond to the K ladder rungs. Pattern IDs 7+ are extended patterns for artistic control.
+
+---
+
 ## Related Documentation
 
 - [PRESET-AUTHORING-GUIDE.md](PRESET-AUTHORING-GUIDE.md) - Main authoring guide
 - [OPERATORS.md](OPERATORS.md) - Operator reference
 - [MACROS-AND-CONTROLS.md](MACROS-AND-CONTROLS.md) - Control system
+- [../architecture/WSE-STD-070.md](../architecture/WSE-STD-070.md) - Tower completion and CMMM events
