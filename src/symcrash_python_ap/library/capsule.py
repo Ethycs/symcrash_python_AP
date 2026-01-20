@@ -21,6 +21,9 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Dict, List, Optional
 
+# Import canonical SystemMacro from primitives (single source of truth)
+from ..primitives import SystemMacro as _SystemMacro
+
 
 # =============================================================================
 # ENUMS
@@ -51,36 +54,9 @@ class MacroType(IntEnum):
     PORTAMENTO = 3   # Pitch glide between notes
 
 
-class SystemMacroID(IntEnum):
-    """
-    System macro IDs per WSE-STD-MACRO v0 §2.
-
-    These are semantic control axes for CMMM (Controlled Markov Mealy Machine).
-    They represent expressive dimensions of instrument performance.
-
-    Ownership:
-    - ENERGY_STATE (0): Envelope-owned, NEVER set by controllers
-    - AGE (7): CMMM integrator, evolves deterministically
-    - All others: Controller → CMMM
-    """
-    # Envelope-owned state (macro 0)
-    ENERGY_STATE = 0     # Envelope phase (0=silent, 32767=peak)
-
-    # Controller → CMMM axes (macros 1-6, 8-10)
-    ENERGY_INTENT = 1    # Playing intensity / attack character
-    MOTION = 2           # Movement / modulation amount (gesture tracking)
-    FOCUS = 3            # Attention / emphasis (spectral concentration)
-    BRIGHTNESS = 4       # Timbral brightness (harmonic content)
-    DENSITY = 5          # Body / thickness (low-mid presence)
-    RISK = 6             # Chaos / instability (stochastic behavior)
-
-    # CMMM-owned integrator (macro 7)
-    AGE = 7              # Voice age (accumulates over note duration)
-
-    # Controller → CMMM axes continued (macros 8-10)
-    SPACE = 8            # Spatial / reverb character
-    MATERIAL = 9         # Surface texture (wood, metal, glass)
-    UNITY = 10           # Coherence / blend (how much voices blend)
+# SystemMacroID imported from primitives (single source of truth)
+# Re-export for backwards compatibility
+SystemMacroID = _SystemMacro
 
 
 # =============================================================================

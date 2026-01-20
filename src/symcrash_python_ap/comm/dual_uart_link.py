@@ -30,7 +30,8 @@ from ..fixed import Q15_ONE
 # CONSTANTS (per WSE-STD-100)
 # =============================================================================
 
-BLOCK_SAMPLES = 64
+# Import from primitives (single source of truth)
+from ..primitives import BLOCK_SIZE as BLOCK_SAMPLES
 FRAME_MAGIC = 0xDEC0  # 0xC0 0xDE in little-endian
 PROTOCOL_VERSION = 0x01
 COBS_DELIMITER = 0x00

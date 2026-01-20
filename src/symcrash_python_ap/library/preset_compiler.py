@@ -29,13 +29,18 @@ except ImportError:
 
 from ..envelope_scheduler import ADSRSpec
 from ..frames import CarrierModel, CarrierRole, TransitionKind
+from ..vm.harmonic_bank import LFOState, LFOWaveform, LFOSyncMode, LFOTarget, LFORouting
+
+# Import canonical primitives (single source of truth)
+from ..primitives import K_LADDER_MASKS, TailMode as _TailMode, Q15_ONE, Q15_HALF
+
+# Import central registry for validation
+from .central_registry import get_central_registry
 
 
 # =============================================================================
 # CONSTANTS
 # =============================================================================
-
-Q15_ONE = 32767
 
 # Supported standards
 SUPPORTED_VOICEFRAME_STD = ["WSE-STD-020 v1"]
@@ -225,12 +230,15 @@ class CmmmDefaults:
         if d is None:
             return cls()
 
-        # Pattern table for resolving pattern:N references
-        pattern_table = {
-            0: 0xFFFFFFFF, 1: 0x00FFFFFF, 2: 0x000FFFFF, 3: 0x0000FFFF,
-            4: 0x00000FFF, 5: 0x000000FF, 6: 0x0000000F, 7: 0x00000001,
+        # Pattern table for resolving pattern:N references - use primitives.K_LADDER_MASKS
+        pattern_table = K_LADDER_MASKS
+        # Tail mode map - use primitives.TailMode values
+        tail_mode_map = {
+            "FULL": _TailMode.FULL,
+            "MID": _TailMode.MID,
+            "MIN": _TailMode.MIN,
+            "EMERGENCY": _TailMode.EMERGENCY,
         }
-        tail_mode_map = {"FULL": 0, "MID": 1, "MIN": 2, "EMERGENCY": 3}
 
         # Resolve node_mask (can be int, hex string, or "pattern:N")
         node_mask = d.get('node_mask', 0xFFFFFFFF)
@@ -299,6 +307,12 @@ class CompiledPreset:
 
     # CMMM runtime control defaults (WSE-STD-070 §10)
     cmmm: CmmmDefaults = field(default_factory=CmmmDefaults)
+
+    # PWM width default (for Mode B pulse)
+    pwm_width_q15: int = 16384
+
+    # LFO modulation state (Phase 2 Mod Matrix)
+    lfos: List[LFOState] = field(default_factory=list)
 
     def backbone_ops(self) -> List[str]:
         """Get list of enabled operator names."""
@@ -418,6 +432,13 @@ class PresetCompiler:
         cmmm_section = preset_dict.get('cmmm', None)
         cmmm = CmmmDefaults.from_dict(cmmm_section)
 
+        # Parse PWM width from carrier section
+        carrier_section = preset_dict.get('carrier', {})
+        pwm_width_q15 = carrier_section.get('pwm_width_q15', 16384)
+
+        # Parse LFO modulators (Phase 2 Mod Matrix)
+        lfos = self._parse_lfos(preset_dict)
+
         return CompiledPreset(
             preset_id=preset_id,
             preset_version=preset_version,
@@ -434,7 +455,122 @@ class PresetCompiler:
             fm6=fm6_config,
             osc_mode=osc_mode,
             cmmm=cmmm,
+            pwm_width_q15=pwm_width_q15,
+            lfos=lfos,
         )
+
+    def _parse_lfos(self, preset_dict: Dict[str, Any]) -> List[LFOState]:
+        """
+        Parse LFO definitions from modulators section.
+
+        Expected YAML format:
+            modulators:
+              lfos:
+                - id: "vibrato"
+                  waveform: "sine"
+                  rate_hz: 5.5
+                  depth_q15: 8192
+                  delay_ms: 300
+                  ramp_ms: 200
+                  sync_mode: "free"
+                  targets:
+                    - type: "pitch"
+                      amount: 1.0
+
+        Returns:
+            List of LFOState instances
+        """
+        lfos = []
+        modulators_section = preset_dict.get('modulators', {})
+        lfos_list = modulators_section.get('lfos', [])
+
+        # Waveform name to enum mapping
+        waveform_map = {
+            'sine': LFOWaveform.SINE,
+            'triangle': LFOWaveform.TRIANGLE,
+            'saw_up': LFOWaveform.SAW_UP,
+            'saw': LFOWaveform.SAW_UP,
+            'square': LFOWaveform.SQUARE,
+        }
+
+        # Sync mode name to enum mapping
+        sync_mode_map = {
+            'free': LFOSyncMode.FREE,
+            'gate_reset': LFOSyncMode.GATE_RESET,
+            'legato_reset': LFOSyncMode.LEGATO_RESET,
+        }
+
+        # Target name to enum mapping
+        target_map = {
+            'pitch': LFOTarget.PITCH,
+            'gain': LFOTarget.GAIN,
+            'pwm_width': LFOTarget.PWM_WIDTH,
+            'pwm': LFOTarget.PWM_WIDTH,
+            'tilt': LFOTarget.TILT,
+            'brightness': LFOTarget.TILT,
+            'harmonic_rolloff': LFOTarget.TILT,  # Alias for tilt
+            'filter_cutoff': LFOTarget.FILTER_CUTOFF,
+            'cutoff': LFOTarget.FILTER_CUTOFF,
+            'filter_reso': LFOTarget.FILTER_RESO,
+            'resonance': LFOTarget.FILTER_RESO,
+            'band_scale': LFOTarget.BAND_SCALE,
+        }
+
+        # Assign arc slots sequentially (MAX_ARCS = 8)
+        arc_slot = 0
+
+        for lfo_def in lfos_list:
+            # Parse waveform
+            waveform_str = lfo_def.get('waveform', 'sine').lower()
+            waveform = waveform_map.get(waveform_str, LFOWaveform.SINE)
+
+            # Parse sync mode
+            sync_mode_str = lfo_def.get('sync_mode', 'free').lower()
+            sync_mode = sync_mode_map.get(sync_mode_str, LFOSyncMode.FREE)
+
+            # Parse targets
+            routings = []
+            for target_def in lfo_def.get('targets', []):
+                target_str = target_def.get('type', 'pitch').lower()
+                target = target_map.get(target_str, LFOTarget.PITCH)
+                amount = target_def.get('amount', 1.0)
+                amount_q15 = int(amount * Q15_ONE)
+                routings.append(LFORouting(
+                    target=target,
+                    amount_q15=amount_q15,
+                ))
+
+            # Create LFO state with arc_slot for unified phase storage
+            lfo = LFOState(
+                id=lfo_def.get('id', ''),
+                waveform=waveform,
+                sync_mode=sync_mode,
+                routings=routings,
+                depth_q15=lfo_def.get('depth_q15', 16384),
+                arc_slot=arc_slot,
+            )
+
+            # Configure timing (includes arc_slot)
+            lfo.configure_lfo(
+                rate_hz=lfo_def.get('rate_hz', 5.0),
+                depth_q15=lfo_def.get('depth_q15', 16384),
+                waveform=waveform,
+                sync_mode=sync_mode,
+                delay_ms=lfo_def.get('delay_ms', 0.0),
+                ramp_ms=lfo_def.get('ramp_ms', 0.0),
+                routings=routings,
+                arc_slot=arc_slot,
+            )
+
+            lfos.append(lfo)
+            arc_slot += 1
+
+            # Warn if exceeding MAX_ARCS (8 slots available)
+            if arc_slot > 8:
+                import warnings
+                warnings.warn(f"LFO '{lfo.id}' exceeds MAX_ARCS=8 slots, phase storage may conflict")
+
+        return lfos
 
     def compile_file(self, filepath: str) -> CompiledPreset:
         """
@@ -475,6 +611,8 @@ class PresetCompiler:
         """
         Validate preset dictionary structure.
 
+        Uses CentralRegistry to validate resource references.
+
         Returns:
             List of error messages (empty if valid)
         """
@@ -495,14 +633,38 @@ class PresetCompiler:
         if vm_std not in SUPPORTED_VM_STD:
             errors.append(f"Unsupported vm_std: {vm_std}")
 
-        # Validate backbone operators
+        # Validate backbone operators using registry
+        registry = get_central_registry()
         backbone = preset_dict.get('backbone', [])
         for i, op_entry in enumerate(backbone):
             if isinstance(op_entry, dict):
                 if 'op' not in op_entry:
                     errors.append(f"Backbone entry {i} missing 'op' field")
+                else:
+                    op_name = op_entry['op']
+                    if registry.operators.get_by_name(op_name) is None:
+                        # Not a hard error - custom operators may be defined elsewhere
+                        pass
             elif not isinstance(op_entry, str):
                 errors.append(f"Backbone entry {i} must be string or dict")
+
+        # Validate tree references using registry
+        latch = preset_dict.get('latch_defaults', {})
+        tree_a_id = latch.get('tree_a_id')
+        tree_b_id = latch.get('tree_b_id')
+
+        if tree_a_id is not None and registry.trees.get(tree_a_id) is None:
+            errors.append(f"Tree A ID {tree_a_id} not found in registry")
+
+        if tree_b_id is not None and registry.trees.get(tree_b_id) is None:
+            errors.append(f"Tree B ID {tree_b_id} not found in registry")
+
+        # Validate pattern references
+        pattern_id = latch.get('pattern_id')
+        if pattern_id is not None and registry.patterns.get(pattern_id) is None:
+            # Not a hard error - K ladder patterns are in primitives.K_LADDER_MASKS
+            if pattern_id not in K_LADDER_MASKS:
+                errors.append(f"Pattern ID {pattern_id} not found in registry or K ladder")
 
         return errors
 

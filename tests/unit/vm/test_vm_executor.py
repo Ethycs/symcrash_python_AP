@@ -13,7 +13,7 @@ from symcrash_python_ap.vm import (
     DecodedPlan,
     Tables,
 )
-from symcrash_python_ap.vm.executor import VMExecutor, vm_step_block_raw
+from symcrash_python_ap.vm.executor import VMExecutor
 from symcrash_python_ap.vm.decode import CarrierRole, CarrierParams, BackboneEntry
 from symcrash_python_ap.vm.tables import TailMode, BLOCK_SAMPLES, Lane
 

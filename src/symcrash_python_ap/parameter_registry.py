@@ -20,15 +20,17 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Any, Union
 from enum import Enum, IntEnum, auto
 
+# Import canonical Q15 constants from primitives (single source of truth)
+from .primitives import Q15_ONE, Q15_SCALE, Q15_NEG_ONE
+
 
 # =============================================================================
 # CONSTANTS
 # =============================================================================
 
-Q15_MIN = -32768
-Q15_MAX = 32767
-Q15_SCALE = 32768
-Q15_ONE = 32767
+Q15_MIN = Q15_NEG_ONE  # -32768
+Q15_MAX = Q15_ONE      # 32767
+# Q15_SCALE imported from primitives
 
 Q8_MIN = -128
 Q8_MAX = 127

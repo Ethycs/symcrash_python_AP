@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 from .capsule import CapsuleV0, CapsuleKind, EngineCompat
+from .central_registry import get_central_registry, CentralRegistry
 from ..control_registry import ControlRegistry, CONTROL_REGISTRY_V0
 from ..voice.voice_engine_registry import VoiceEngineRegistry, get_registry
 
@@ -210,12 +211,15 @@ class CapsuleLoader:
     Loader for applying capsules to engine state.
 
     Implements WSE-STD-CAPSULE-COMPAT v0 §6 "Capsule Apply" algorithm.
+
+    Uses CentralRegistry for unified access to all runtime registries.
     """
 
     def __init__(
         self,
         control_registry: ControlRegistry = None,
         voice_registry: VoiceEngineRegistry = None,
+        central_registry: CentralRegistry = None,
         sample_rate: int = 48000,
         block_size: int = 64,
     ):
@@ -223,12 +227,17 @@ class CapsuleLoader:
         Initialize loader with registries and engine config.
 
         Args:
-            control_registry: ControlRegistry instance (uses default if None)
+            control_registry: ControlRegistry instance (uses CentralRegistry if None)
             voice_registry: VoiceEngineRegistry instance (uses default if None)
+            central_registry: CentralRegistry instance (uses global if None)
             sample_rate: Engine sample rate
             block_size: Engine block size
         """
-        self.control_registry = control_registry or ControlRegistry()
+        # Use CentralRegistry for unified access
+        self.central_registry = central_registry or get_central_registry()
+
+        # Individual registries (can be overridden or accessed via CentralRegistry)
+        self.control_registry = control_registry or self.central_registry.controls
         self.voice_registry = voice_registry or get_registry()
         self.sample_rate = sample_rate
         self.block_size = block_size
@@ -388,6 +397,72 @@ class CapsuleLoader:
         if param_id in self._applied_voice_params:
             return self._applied_voice_params[param_id]
         return self.voice_registry.get_default(param_id)
+
+    # =========================================================================
+    # REGISTRY RESOURCE ACCESS (via CentralRegistry)
+    # =========================================================================
+
+    def get_regime_graph(self, regime_graph_id: int):
+        """
+        Get regime graph from CentralRegistry.
+
+        Args:
+            regime_graph_id: Regime graph ID
+
+        Returns:
+            RegimeGraphSpec or None if not found
+        """
+        return self.central_registry.regimes.get(regime_graph_id)
+
+    def get_tree_family(self, tree_family_id: int):
+        """
+        Get tree family from CentralRegistry.
+
+        Args:
+            tree_family_id: Tree family ID
+
+        Returns:
+            TreeFamily or None if not found
+        """
+        return self.central_registry.trees.get(tree_family_id)
+
+    def get_pattern(self, pattern_id: int):
+        """
+        Get node mask pattern from CentralRegistry.
+
+        Args:
+            pattern_id: Pattern ID
+
+        Returns:
+            PatternSpec or None if not found
+        """
+        return self.central_registry.patterns.get(pattern_id)
+
+    def validate_resource_references(
+        self,
+        regime_graph_id: Optional[int] = None,
+        tree_a_id: Optional[int] = None,
+        tree_b_id: Optional[int] = None,
+        pattern_id: Optional[int] = None,
+    ) -> List[str]:
+        """
+        Validate that resource references exist in CentralRegistry.
+
+        Args:
+            regime_graph_id: Optional regime graph ID to validate
+            tree_a_id: Optional tree A ID to validate
+            tree_b_id: Optional tree B ID to validate
+            pattern_id: Optional pattern ID to validate
+
+        Returns:
+            List of error messages (empty if all valid)
+        """
+        return self.central_registry.validate_preset_resources(
+            regime_graph_id=regime_graph_id,
+            tree_a_id=tree_a_id,
+            tree_b_id=tree_b_id,
+            pattern_id=pattern_id,
+        )
 
 
 # =============================================================================

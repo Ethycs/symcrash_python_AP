@@ -14,13 +14,15 @@ from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 from enum import Enum
 
+# Import canonical constants from primitives (single source of truth)
+from ..primitives import Q15_ONE, Q15_SCALE
+
 # =============================================================================
 # GLOBAL CONSTANTS
 # =============================================================================
 
 COEFF_LEN = 256  # Total coefficient vector length
-Q15_SCALE = 32768  # 2^15 for q15 fixed-point
-Q15_ONE = 32767  # Max positive q15 value
+# Q15_SCALE and Q15_ONE imported from primitives
 
 # Band structure: 6 bands with dyadic scaling
 # Band 0 (coarsest): 8 coeffs   - fundamental structure

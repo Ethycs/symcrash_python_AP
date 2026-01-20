@@ -15,20 +15,22 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Tuple
 import numpy as np
 
+# Import canonical constants from primitives (single source of truth)
+from ..primitives import Q15_ONE, Q15_HALF, FMArchetype as _FMArchetypeEnum
 
-# Archetype IDs
-ARCH_CHAIN = 0      # Serial 6-op chain
-ARCH_STACK = 1      # 5 modulators into 1 carrier
-ARCH_DUAL = 2       # Two parallel 3-op chains
-ARCH_SPLIT = 3      # Modulator tree to multiple carriers
-ARCH_YPAIR = 4      # Y-branch structure
-ARCH_CLOUD = 5      # Parallel modulators (thick)
-ARCH_ADDITIVE = 6   # All carriers, no modulation
-ARCH_FEEDBACK = 7   # Chain with enhanced feedback
+# Archetype IDs from primitives enum (single source of truth)
+ARCH_CHAIN = _FMArchetypeEnum.CHAIN          # Serial 6-op chain
+ARCH_STACK = _FMArchetypeEnum.STACK          # 5 modulators into 1 carrier
+ARCH_DUAL = _FMArchetypeEnum.DUAL            # Two parallel 3-op chains
+ARCH_SPLIT = _FMArchetypeEnum.SPLIT          # Modulator tree to multiple carriers
+ARCH_YPAIR = _FMArchetypeEnum.YPAIR          # Y-branch structure
+ARCH_CLOUD = _FMArchetypeEnum.CLOUD          # Parallel modulators (thick)
+ARCH_ADDITIVE = _FMArchetypeEnum.ADDITIVE    # All carriers, no modulation
+ARCH_FEEDBACK = _FMArchetypeEnum.FEEDBACK    # Chain with enhanced feedback
 
-Q15_ONE = 32767
+# Q15_ONE imported from primitives
 Q15_3_4 = 24576     # 0.75
-Q15_1_2 = 16384     # 0.5
+Q15_1_2 = Q15_HALF  # 0.5
 
 
 @dataclass

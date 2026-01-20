@@ -42,21 +42,19 @@ import logging
 from ..wavelet.fast_lifting import fwpt_jit, idwpt_jit
 from ..wavelet.sine_core import sine_q15
 from .tables import VM_K as TABLES_VM_K
+from ..primitives import BLOCK_SIZE, NUM_LEAVES, Q15_ONE, Q15_HALF, SAMPLE_RATE_HZ
 
 logger = logging.getLogger(__name__)
 
-# Constants
-BLOCK_SIZE = 64         # B = 64 audio samples per block
-NUM_LEAVES = 64         # L = 64 leaves (full WPT at depth 6)
+# Constants (derived from primitives)
 DEFAULT_K = TABLES_VM_K # K = polyphase slots (4 or 8), from tables.py
 DEFAULT_P = 64          # P = 64 phase steps per cycle (was 1024, reduced for memory)
                         # With cubic interpolation, P=64 gives excellent quality
                         # Table size: 64 leaves × 8 k-slots × 64 phases × 2 bytes = 64 KB/table
                         # vs P=1024: 1 MB/table (16× reduction)
 CYCLE_LENGTH = 8192     # C = 8192 samples for one complete waveform cycle
-Q15_ONE = 32767
-TARGET_RMS_Q15 = 16384  # Target RMS (-6 dBFS)
-SAMPLE_RATE = 48000
+TARGET_RMS_Q15 = Q15_HALF  # Target RMS (-6 dBFS)
+SAMPLE_RATE = SAMPLE_RATE_HZ
 
 # Interpolation mode for phase lookup
 INTERP_LINEAR = 0       # Simple linear (default, fastest)

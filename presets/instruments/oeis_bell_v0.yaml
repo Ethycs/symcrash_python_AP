@@ -1,0 +1,85 @@
+# OEIS Bell v0 - Prime Partials
+# ==============================
+#
+# Uses OEIS Prime sequence (A000040) for partial selection.
+# Creates metallic, bell-like timbre with sparse upper partials.
+#
+# Active partials: 2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31...
+# Character: Inharmonic, clangorous, metallic
+#
+# This demonstrates the OEIS partial selection feature from
+# THEORETICAL-TECHNIQUES-ROADMAP item 2.4.
+
+instrument_ir_v0:
+  meta:
+    instrument_id: "oeis-bell-v0"
+    name: "OEIS Bell (Primes)"
+    version: 0
+    author: "symcrash"
+    seed_u32: 0x4F454953  # "OEIS"
+
+  io:
+    sample_rate_hz: 48000
+    block_size: 64
+
+  layers:
+    L0_graph:
+      nodes:
+        # Mode B oscillator with OEIS prime partials
+        - id: "osc1"
+          type: "Osc"
+          params:
+            coeff_osc_mode: 1           # Mode B (Harmonic Bank)
+            oeis_sequence_id: 0         # PRIMES (A000040)
+            oeis_rolloff_db: -2.0       # Gentle rolloff for bell sustain
+            H_request: 32               # Request 32 harmonics
+
+        - id: "amp1"
+          type: "Amp"
+          params:
+            adsr:
+              a_ms: 1.0           # Instant attack (struck bell)
+              d_ms: 1500.0        # Very long decay
+              s: 0.0              # No sustain (bell-like)
+              r_ms: 800.0         # Long release
+
+      edges:
+        - src: "osc1"
+          dst: "amp1"
+
+      macros:
+        - id: "M_BRIGHT"
+          name: "Brightness"
+          default: 0.6
+        - id: "M_DECAY"
+          name: "Decay"
+          default: 0.7
+
+  # L3 CMMM: Minimal operators for clean bell
+  L3_cmmm:
+    regimes:
+      - name: "attack"
+        ops: []
+      - name: "sustain"
+        ops: ["TILT"]
+      - name: "release"
+        ops: []
+
+    transitions:
+      - from: "attack"
+        to: "sustain"
+        trigger: "time"
+        time_ms: 50
+
+    tail:
+      mode: "lite"
+      tree:
+        A: "T0"
+        B: "T1"
+        beta: 0.2
+
+  compile:
+    material:
+      beta_start_q15: 0
+      beta_target_q15: 24576
+      beta_ramp_blocks: 4

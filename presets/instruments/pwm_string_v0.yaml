@@ -1,0 +1,104 @@
+# PWM String v0 - LFO Modulation Demo
+# ====================================
+#
+# Demonstrates Phase 2 LFO modulation system:
+# - Vibrato LFO → pitch (delayed onset)
+# - PWM LFO → pulse width sweep
+# - Brightness LFO → tilt/harmonic content
+#
+# Character: Lush analog string pad with movement
+#
+# Per WSE-ARCHITECTURE-v1, LFO outputs modulate VoiceFrame fields
+# in Voice Engine before downstream processing.
+
+preset:
+  preset_id: "pwm-string-v0"
+  preset_version: "v0"
+  author: "symcrash"
+  description: "PWM String with vibrato, PWM sweep, and brightness modulation"
+
+compat:
+  voiceframe_std: "WSE-STD-020 v1"
+  vm_std: "WSE-STD-VM-HYBRID v0"
+  operator_lib_id: "WSE-OPLIB-24 v0"
+
+# Modulation sources (Phase 2 Mod Matrix)
+modulators:
+  lfos:
+    # Delayed vibrato - classic string behavior
+    - id: "vibrato"
+      waveform: "sine"
+      rate_hz: 5.5
+      depth_q15: 6553           # ~20 cents max deviation
+      delay_ms: 400             # Wait before vibrato starts
+      ramp_ms: 300              # Gradual onset
+      sync_mode: "free"         # Continuous across notes
+      targets:
+        - type: "pitch"
+          amount: 1.0
+
+    # PWM sweep - adds motion to the timbre
+    - id: "pwm_sweep"
+      waveform: "triangle"
+      rate_hz: 0.8              # Slow sweep
+      depth_q15: 8192           # ~25% width modulation
+      delay_ms: 0
+      ramp_ms: 0
+      sync_mode: "free"
+      targets:
+        - type: "pwm_width"
+          amount: 1.0
+
+    # Brightness sweep - subtle harmonic movement
+    - id: "brightness"
+      waveform: "sine"
+      rate_hz: 0.15             # Very slow
+      depth_q15: 4096           # Subtle
+      delay_ms: 0
+      ramp_ms: 0
+      sync_mode: "gate_reset"   # Restart on each note
+      targets:
+        - type: "tilt"
+          amount: 0.5
+
+# Carrier configuration
+carrier:
+  model: "PULSE"
+  role: "AUDIBLE"
+  pwm_width_q15: 16384          # 50% duty (modulated by pwm_sweep)
+  # Saw-like harmonic content for pulse wave
+  harmonic_amps_q15: [32767, 16383, 10922, 8191, 6553, 5461, 4681, 4096]
+
+latch_defaults:
+  tail_mode: "FULL"
+  tree_a_id: 0
+  tree_b_id: 1
+  tree_blend_q15: 0
+
+# Envelope - string-like attack with long sustain
+env:
+  amp:
+    attack_ms: 80.0             # Slower attack for strings
+    decay_ms: 200.0
+    sustain: 0.75
+    release_ms: 400.0           # Long release
+
+# Material blend
+material:
+  beta_start_q15: 0
+  beta_target_q15: 24576        # ~75% wet
+  beta_ramp_blocks: 8
+
+# Backbone operators - subtle coloring
+backbone:
+  - op: "TILT"
+    strength_q15: 16384
+  - op: "DIFFUSE_DOWN"
+    strength_q15: 8192
+
+# CMMM runtime control
+cmmm:
+  node_mask: 0xFFFFFFFF
+  mask_ramp_blocks: 5
+  tail_mode: "FULL"
+  traction_q15: 32767

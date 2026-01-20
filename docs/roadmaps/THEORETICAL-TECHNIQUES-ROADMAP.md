@@ -98,22 +98,34 @@ where C(α,k) = α*(α-1)*...*(α-k+1) / k!
 **Files:** `operators.py` (op 24) or `material_engine.py` (program 9)
 **Cost:** ~80 lines, L-scaling (64 samples)
 
-### 2.4 Integer/OEIS-Driven Partial Sets
+### 2.4 Integer/OEIS-Driven Partial Sets ✅ IMPLEMENTED
 **Math:** Beatty sequences, prime sequences for partials
 **WSE Fit:** Harmonic Bank (Mode B) partial selection
+**Status:** ✅ Complete
+
 **Implementation:**
-1. OEIS sequence lookup tables (precomputed)
-2. Map sequence to partial enable/disable mask
-3. Expose `oeis_sequence_id` parameter
+1. ✅ OEIS sequence lookup tables in `oeis_tables.py`
+2. ✅ `set_oeis()` method in `HarmonicWeights`
+3. ✅ `oeis_sequence_id` field in VoiceFrame and CoeffOscParams
+4. ✅ Executor integration for Mode B
 
-**Sequences to include:**
-- A000040 (primes) → metallic
-- A000045 (Fibonacci) → organic inharmonic
-- A001950 (Beatty φ) → golden partials
-- A002024 (triangular) → bell-like
+**Sequences implemented:**
+- A000040 (PRIMES) → metallic, bell-like
+- A000045 (FIBONACCI) → organic, complex
+- A001950 (BEATTY_PHI) → golden ratio partials
+- A000217 (TRIANGULAR) → stepped, quantized
+- A000032 (LUCAS) → similar to Fibonacci
+- A005117 (SQUARE_FREE) → dense but irregular
+- ODD_ONLY → hollow, clarinet-like
+- A000225 (MERSENNE) → exponentially sparse
 
-**Files:** `harmonic_bank.py`, new `oeis_tables.py`
-**Cost:** ~200 lines + 2KB lookup tables
+**Example presets:**
+- `oeis_bell_v0.yaml` - Prime partials bell
+- `oeis_pad_v0.yaml` - Golden ratio pad
+- `oeis_bass_v0.yaml` - Fibonacci bass
+
+**Files:** `vm/oeis_tables.py`, `vm/harmonic_bank.py`, `vm/executor.py`, `frames.py`
+**Cost:** ~250 lines + 2KB lookup tables
 
 ---
 
@@ -310,7 +322,7 @@ EFFORT     ├────────┼────────┼────
 ```
 
 **Recommended Order:**
-1. **2.4 OEIS Partials** - High impact, low effort, unique sound
+1. ~~**2.4 OEIS Partials** - High impact, low effort, unique sound~~ ✅ DONE
 2. **2.2 Fractional Filters** - Fills "viscous" texture gap
 3. **3.1 Sheaf Extension** - Builds on existing SheafProject
 4. **3.2 Jet-Space Control** - Adds gesture intelligence
@@ -328,10 +340,10 @@ EFFORT     ├────────┼────────┼────
 | Rank Stats | - | ✅ (2) | - | - | ✅ Done |
 | Sheaf/Topo | ✅ SheafProject (23) | - | - | - | ✅ Done |
 | Steel Hysteresis | - | 📋 (6,7) | - | - | 📋 Spec'd |
+| **OEIS Partials** | - | - | - | ✅ Harmonic Bank | ✅ Done |
 | Quasiperiodic | - | - | Scheduler | - | 🔲 Planned |
 | Fractional | - | (8) | - | - | 🔲 Planned |
 | Block Reorder | (24) | - | - | - | 🔲 Planned |
-| OEIS Partials | - | - | - | Harmonic Bank | 🔲 Planned |
 | Jet-Space | - | - | Gesture | - | 🔲 Planned |
 | Chord Geometry | - | - | - | Multi-voice | 🔲 Planned |
 | Hilbert Scan | - | - | - | Cockpit | 🔲 Planned |
@@ -351,24 +363,79 @@ EFFORT     ├────────┼────────┼────
 
 ---
 
-## Resource Estimates
+## Resource Estimates (Based on Git Velocity)
 
-| Phase | Techniques | Lines of Code | Dev Time | FPGA Impact |
-|-------|------------|---------------|----------|-------------|
-| Phase 1 | 2.1-2.4 | ~450 | 2 weeks | Minimal |
-| Phase 2 | 3.1-3.3 | ~850 | 4 weeks | Moderate |
-| Phase 3 | 3.4-3.5, 4.4 | ~950 | 6 weeks | Moderate |
-| Phase 4 | 4.1-4.3 | ~1900 | 8 weeks | Significant |
-| Research | 5.1-5.3 | ~3000+ | 3+ months | TBD |
+### Observed Development Velocity (Dec 2025 - Jan 2026)
+
+Analysis of 83 commits over 28 days shows actual implementation speeds:
+
+| Feature Size | Lines | Observed Time | Examples |
+|-------------|-------|---------------|----------|
+| Small (operator/table) | 50-100 | **1 day** | PWM, vibrato, OEIS partials |
+| Medium (new module) | 200-400 | **2-3 days** | CCS Mode B, chord geometry |
+| Large (subsystem) | 500-800 | **4-5 days** | FM6 engine, preset library |
+| Full standard + tests | 300-600 | **1-2 days** | WSE-STD-020 through 070 |
+
+**Key milestones achieved:**
+- 7 full WSE standards: 4 days (Dec 21-22)
+- CCS Mode A/B: 2 days (Jan 5-6)
+- FM6 + matrix envelopes: 3 days (Jan 7-10)
+- Violin preset with vibrato: 1 day (Jan 9)
+
+### Revised Technique Estimates
+
+| Technique | Lines | Est. Days | Complexity Notes |
+|-----------|-------|-----------|------------------|
+| **Tier 2** | | | |
+| 2.1 Quasiperiodic Rhythms | ~50 | **1 day** | Uses existing PRNG infrastructure |
+| 2.2 Fractional Filters | ~100 | **1-2 days** | Material program 8, fixed-point careful |
+| 2.3 Block Reorder | ~80 | **1 day** | New operator, reuses Sturmian |
+| ~~2.4 OEIS Partials~~ | ~~250~~ | ~~1 day~~ | ✅ Done |
+| **Tier 3** | | | |
+| 3.1 Sheaf Extension | ~150 | **2 days** | Builds on existing SheafProject |
+| 3.2 Jet-Space Control | ~150 | **2-3 days** | New GestureBasis module |
+| 3.3 Chord Geometry | ~400 | **3-4 days** | New module, math-heavy |
+| 3.4 Hilbert Scanner | ~200 | **2 days** | Lookup table + cockpit hook |
+| 3.5 Chaos+Filter | ~250 | **2-3 days** | New osc mode |
+| **Tier 4** | | | |
+| 4.1 Operadic Composer | ~800 | **5-7 days** | Architectural, regime graph changes |
+| 4.2 Noncommutative Mod | ~500 | **4-5 days** | Symbol Engine refactor |
+| 4.3 Knot Paths | ~600 | **4-5 days** | Math-heavy precomputation |
+| 4.4 Fuzzy Control | ~500 | **3-4 days** | Self-contained, rule parser |
+| 4.5 Texture Statistics | ~1000 | **7-10 days** | Offline, needs FWPT analysis |
+| **Tier 5** | | | |
+| 5.1 Wave-Terrain | ~1500 | **10-14 days** | New synthesis mode |
+| 5.2 Timbre Manifold | ~2000+ | **Research** | ML pipeline, offline |
+| 5.3 Sturmian Melodic | ~1000 | **7-10 days** | New sequencer layer |
+
+### Sprint Planning (Based on Actual Velocity)
+
+**Sprint 1 (3-4 days):** Complete Tier 2
+- 2.1 Quasiperiodic Rhythms (1 day)
+- 2.2 Fractional Filters (1-2 days)
+- 2.3 Block Reorder (1 day)
+
+**Sprint 2 (5-7 days):** Tier 3 Core
+- 3.1 Sheaf Extension (2 days)
+- 3.2 Jet-Space Control (2-3 days)
+- 3.4 Hilbert Scanner (2 days)
+
+**Sprint 3 (6-8 days):** Tier 3 Advanced
+- 3.3 Chord Geometry (3-4 days)
+- 3.5 Chaos+Filter (2-3 days)
+
+**Sprint 4+ (variable):** Tier 4
+- Pick based on musical needs
+- 4.4 Fuzzy Control is most self-contained
 
 ---
 
 ## Next Steps
 
-1. **Immediate:** Document existing catastrophe/Sturmian/tropical capabilities
-2. **This sprint:** Implement 2.4 (OEIS partials) - highest ROI
-3. **Next sprint:** Implement 2.2 (fractional filters)
-4. **Following:** Extend SheafProject for topological morphing
+1. ~~**This sprint:** Implement 2.4 (OEIS partials)~~ ✅ Done
+2. **Next:** Implement 2.2 (Fractional Filters) - ~100 lines, 1-2 days
+3. **Then:** Implement 2.1 (Quasiperiodic) + 2.3 (Block Reorder) - 2 days total
+4. **Following:** 3.1 Sheaf Extension - builds on existing infrastructure
 
 ---
 

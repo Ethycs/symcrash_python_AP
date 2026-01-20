@@ -7,7 +7,24 @@ Complete reference for the 24 operators in the symcrash wavelet synthesis engine
 - **Coefficient Vector:** 256 samples per voice
 - **Band Structure:** 6 dyadic bands (coarse to fine)
 - **Node Structure:** 32 nodes, 8 coefficients each
-- **Fixed-Point:** Q15 (int16) for all parameters
+- **Fixed-Point:** Q15 (int16) for operator parameters, Q16.16 for FM6 ratios
+
+### Synthesis Modes
+
+The CCS pipeline supports multiple synthesis modes via `osc_mode`:
+
+| Mode | Value | Description | Operators Used |
+|------|-------|-------------|----------------|
+| Mode A (LUT) | 0 | Wavetable lookup | Full operator set |
+| Mode B (Rotator) | 1 | Harmonic rotator | Full operator set |
+| Sample | 2 | Sample playback | Reduced set |
+| FM6 | 3 | 6-operator FM | FM6-specific + WPT projection |
+
+For FM6 mode (osc_mode=3), the pipeline uses:
+1. FM6 physics engine (differential equation kernel)
+2. WPT projection to coefficient space
+3. Standard operators for wavelet processing
+4. IDWPT reconstruction
 
 ### Band Layout
 

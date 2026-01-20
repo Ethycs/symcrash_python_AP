@@ -39,9 +39,8 @@ import numpy as np
 # Use sine_core for deterministic, bit-exact trig (no math.sin/cos in hot paths)
 from ..wavelet.sine_core import sine_q15, cosine_q15, PHASE_MASK
 
-# Q15 constants for fixed-point compatibility
-Q15_ONE = 32767
-Q15_SCALE = 32768
+# Import canonical Q15 constants from primitives (single source of truth)
+from ..primitives import Q15_ONE, Q15_SCALE
 
 # Phase constant for 90 degrees (pi/2)
 PHASE_90_DEG = 0x40000000

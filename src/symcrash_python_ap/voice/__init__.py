@@ -21,6 +21,7 @@ from .voice_engine import (
     ControlMap,
     TowerLevel,
     DegradationLevel,
+    EngineMode,  # NEW: Simple vs Full CMMM mode
     HysteresisSpec,
     OverlaySpec,
     EdgeType,
@@ -80,6 +81,13 @@ from .time_ownership import (
     ComplianceReport,
 )
 
+from .emitter_bridge import (
+    create_emitter_with_state,
+    create_standalone_emitter,
+    create_emitter_with_engine,
+    VoiceEngineAdapter,
+)
+
 __all__ = [
     # Main engine
     'VoiceEngine',
@@ -101,6 +109,7 @@ __all__ = [
     # Tower
     'TowerLevel',
     'DegradationLevel',
+    'EngineMode',  # Simple vs Full CMMM mode
     # Hysteresis & overlays
     'HysteresisSpec',
     'OverlaySpec',
@@ -152,4 +161,9 @@ __all__ = [
     'TimeOwnershipVoiceFrame',
     'DeterminismChecker',
     'ComplianceReport',
+    # Emitter bridge
+    'create_emitter_with_state',
+    'create_standalone_emitter',
+    'create_emitter_with_engine',
+    'VoiceEngineAdapter',
 ]

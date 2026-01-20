@@ -13,27 +13,16 @@ Per CMMM-2 spec:
 - EMERGENCY: Carrier-only [EmergencySimplify]
 """
 
-from enum import IntEnum
 from typing import List, Dict
 
+# Import canonical TailMode from primitives (single source of truth)
+from ..primitives import TailMode, Operator
 
-class TailMode(IntEnum):
-    """
-    Tail mode determines which safety operators run.
-
-    Degradation ladder: FULL -> MID -> MIN -> EMERGENCY
-    """
-    FULL = 0       # Full quality tail
-    MID = 1        # Medium quality tail
-    MIN = 2        # Minimum safety tail
-    EMERGENCY = 3  # Emergency fallback
-
-
-# Operator IDs for tail operators (from operator library)
-OP_FINE_CLAMP = 2
-OP_NORMALIZE_SCALE = 11
-OP_SHEAF_PROJECT = 23
-OP_EMERGENCY_SIMPLIFY = 19
+# Operator IDs for tail operators (from primitives)
+OP_FINE_CLAMP = Operator.FINE_CLAMP
+OP_NORMALIZE_SCALE = Operator.NORMALIZE_SCALE
+OP_SHEAF_PROJECT = Operator.SHEAF_PROJECT
+OP_EMERGENCY_SIMPLIFY = Operator.EMERGENCY_SIMPLIFY
 
 
 # Canonical tail operator sets per mode

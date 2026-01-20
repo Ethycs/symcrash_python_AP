@@ -2,70 +2,45 @@
 Tail Mode Definitions (WSE-STD-CMMM)
 ====================================
 
-Defines tail operator sets for different quality/budget levels.
-Tail operators guarantee "instrument-safe" output.
+Re-exports from tables/tail_modes.py (canonical source).
 
-Tail modes:
-    FULL: Maximum quality - [FineClamp, NormalizeScale, SheafProject]
-    MID:  Good quality    - [FineClamp, NormalizeScale]
-    MIN:  Basic safety    - [FineClamp]
-    EMERGENCY: Fallback   - [FineClamp, EmergencySimplify]
-
-Rules:
-    - MAIN voices: Start at FULL, can degrade to MID/MIN
-    - RESIDUAL voices: Start at MIN or EMERGENCY
-    - If nonlinear not allowed, skip NormalizeScale (FULL→MIN or MID→MIN)
+Provides additional budget-specific functions for tail mode management
+during degradation scenarios.
 """
 
-from dataclasses import dataclass
-from typing import Dict, List, Tuple
-from enum import IntEnum
+from typing import Tuple
 
+# Re-export canonical definitions from tables/tail_modes.py
+from ..tables.tail_modes import (
+    # TailMode enum (from primitives)
+    TailMode,
+    # Operator constants
+    OP_FINE_CLAMP, OP_NORMALIZE_SCALE, OP_SHEAF_PROJECT, OP_EMERGENCY_SIMPLIFY,
+    # Core table and functions
+    TAIL_OPS,
+    get_tail_ops,
+    can_use_tail_mode,
+    downgrade_tail_mode,
+    TAIL_MODE_DESCRIPTIONS,
+)
 
-class TailMode(IntEnum):
-    """Tail mode levels in degradation order."""
-    FULL = 0        # Full quality: [2, 11, 23]
-    MID = 1         # Good quality: [2, 11]
-    MIN = 2         # Basic safety: [2]
-    EMERGENCY = 3   # Fallback: [2, 19]
-
-
-# Operator IDs for tail operators
-OP_FINE_CLAMP = 2
-OP_NORMALIZE_SCALE = 11
-OP_SHEAF_PROJECT = 23
-OP_EMERGENCY_SIMPLIFY = 19
+# Import Operator for local use
+from ..primitives import Operator
 
 
 # =============================================================================
-# TAIL OPERATOR SETS
+# BUDGET-SPECIFIC EXTENSIONS
 # =============================================================================
-
-TAIL_OPS: Dict[TailMode, List[int]] = {
-    TailMode.FULL: [OP_FINE_CLAMP, OP_NORMALIZE_SCALE, OP_SHEAF_PROJECT],
-    TailMode.MID: [OP_FINE_CLAMP, OP_NORMALIZE_SCALE],
-    TailMode.MIN: [OP_FINE_CLAMP],
-    TailMode.EMERGENCY: [OP_FINE_CLAMP, OP_EMERGENCY_SIMPLIFY],  # v0: FineClamp always present
-}
 
 # Which tail modes require nonlinear budget class (projection-class ops)
 # Note: "nonlinear" here means budget category (expensive math/projection),
 # not necessarily platform float. VM uses integer isqrt for determinism.
-TAIL_USES_NONLINEAR: Dict[TailMode, bool] = {
+TAIL_USES_NONLINEAR = {
     TailMode.FULL: True,   # NormalizeScale (projection-class, extra math budget)
     TailMode.MID: True,    # NormalizeScale (projection-class, extra math budget)
     TailMode.MIN: False,
     TailMode.EMERGENCY: False,
 }
-
-
-# =============================================================================
-# TAIL MODE FUNCTIONS
-# =============================================================================
-
-def get_tail_ops(mode: TailMode) -> List[int]:
-    """Get operator IDs for a tail mode."""
-    return TAIL_OPS[mode].copy()
 
 
 def tail_uses_nonlinear(mode: TailMode) -> bool:
@@ -96,26 +71,6 @@ def get_allowed_tail_mode(requested: TailMode, allow_nonlinear: bool) -> TailMod
     return requested
 
 
-def downgrade_tail_mode(current: TailMode) -> TailMode:
-    """
-    Get the next lower tail mode in degradation order.
-
-    Args:
-        current: Current tail mode
-
-    Returns:
-        Next lower mode (or EMERGENCY if already at MIN)
-    """
-    if current == TailMode.FULL:
-        return TailMode.MID
-    elif current == TailMode.MID:
-        return TailMode.MIN
-    elif current == TailMode.MIN:
-        return TailMode.EMERGENCY
-    else:
-        return TailMode.EMERGENCY  # Already at bottom
-
-
 def get_tail_mode_for_voice_class(is_residual: bool) -> TailMode:
     """
     Get default tail mode for a voice class.
@@ -131,12 +86,14 @@ def get_tail_mode_for_voice_class(is_residual: bool) -> TailMode:
     return TailMode.FULL
 
 
-@dataclass(frozen=True)
 class TailConfig:
     """Configuration for tail execution."""
-    mode: TailMode
-    ops: Tuple[int, ...]
-    uses_nonlinear: bool
+    __slots__ = ('mode', 'ops', 'uses_nonlinear')
+
+    def __init__(self, mode: TailMode, ops: Tuple[int, ...], uses_nonlinear: bool):
+        self.mode = mode
+        self.ops = ops
+        self.uses_nonlinear = uses_nonlinear
 
     @classmethod
     def from_mode(cls, mode: TailMode) -> 'TailConfig':
@@ -149,10 +106,18 @@ class TailConfig:
 
 
 __all__ = [
+    # Re-exported from tables/tail_modes.py
     'TailMode',
     'OP_FINE_CLAMP', 'OP_NORMALIZE_SCALE', 'OP_SHEAF_PROJECT', 'OP_EMERGENCY_SIMPLIFY',
-    'TAIL_OPS', 'TAIL_USES_NONLINEAR',
-    'get_tail_ops', 'tail_uses_nonlinear',
-    'get_allowed_tail_mode', 'downgrade_tail_mode',
-    'get_tail_mode_for_voice_class', 'TailConfig',
+    'TAIL_OPS',
+    'get_tail_ops',
+    'can_use_tail_mode',
+    'downgrade_tail_mode',
+    'TAIL_MODE_DESCRIPTIONS',
+    # Budget-specific extensions
+    'TAIL_USES_NONLINEAR',
+    'tail_uses_nonlinear',
+    'get_allowed_tail_mode',
+    'get_tail_mode_for_voice_class',
+    'TailConfig',
 ]

@@ -14,6 +14,7 @@ from .l0_graph import L0GraphView
 from .l1_mapping import L1MappingView
 from .l2_regimes import L2RegimeView
 from .l3_cmmm import L3CmmmView
+from .mod_matrix import ModMatrixView
 from .preset_browser import PresetBrowser, render_preset_browser_popup
 
 __all__ = [
@@ -23,6 +24,7 @@ __all__ = [
     "L1MappingView",
     "L2RegimeView",
     "L3CmmmView",
+    "ModMatrixView",
     "PresetBrowser",
     "render_preset_browser_popup",
 ]

@@ -14,10 +14,12 @@ import numpy as np
 
 from .tables import VM_K
 
+# Import canonical constants from primitives (single source of truth)
+from ..primitives import Q15_ONE, Q16_ONE
+
 # Constants
 # VM_K imported from tables.py for consistency
-Q15_ONE = 32767   # Maximum Q15 value
-Q16_ONE = 65536   # Q16 unity (1.0)
+# Q15_ONE and Q16_ONE imported from primitives
 Q32_MASK = 0xFFFFFFFF
 
 

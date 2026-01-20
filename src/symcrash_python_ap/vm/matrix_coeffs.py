@@ -28,13 +28,7 @@ from .waveform_matrix import (
     WAVEFORM_PERIOD, PHASE_TO_WAVE_SHIFT
 )
 from .tables import VM_K
-
-# =============================================================================
-# CONSTANTS
-# =============================================================================
-
-NUM_LEAVES = 64
-BLOCK_SIZE = 64
+from ..primitives import BLOCK_SIZE, NUM_LEAVES
 
 # Number of phase bins for coefficient LUT
 DEFAULT_COEFF_BINS = 256

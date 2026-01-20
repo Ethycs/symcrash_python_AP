@@ -23,12 +23,14 @@ This implements the complex rotation identity from Section 3.2.1:
 """
 
 from dataclasses import dataclass, field
+from enum import IntEnum
 from typing import Dict, Tuple, Optional, List
 import numpy as np
 
 from ..fixed import RSHIFT_RNE, SAT16, Q15_ONE
 from ..wavelet.sine_core import sin_cos_q15, freq_to_phase_inc, PHASE_MASK
 from .tables import COEFF_LEN, VM_K
+from ..primitives import BLOCK_SIZE, NUM_LEAVES, SAMPLE_RATE_HZ
 
 # =============================================================================
 # CONSTANTS (WSE-STD-210 Section 1)
@@ -40,9 +42,7 @@ from .tables import COEFF_LEN, VM_K
 K_STRIDE = 1
 VM_K_RECONSTRUCT = VM_K  # For API compatibility
 
-NUM_LEAVES = 64             # Number of WPT leaves
-BLOCK_SIZE = 64             # Samples per block
-SAMPLE_RATE = 48000
+SAMPLE_RATE = SAMPLE_RATE_HZ  # Use canonical value
 
 # Oscillator modes
 OSC_MODE_A = 0              # LUT-based (existing coeff_lut_streaming)
@@ -309,6 +309,60 @@ class HarmonicWeights:
 
 
 # =============================================================================
+# LFO/MODULATION TYPES (Phase 2 Mod Matrix)
+# =============================================================================
+
+class LFOWaveform(IntEnum):
+    """LFO waveform shapes."""
+    SINE = 0
+    TRIANGLE = 1
+    SAW_UP = 2
+    SQUARE = 3
+
+
+class LFOSyncMode(IntEnum):
+    """LFO phase sync behavior on note events."""
+    FREE = 0           # Free-running, never resets
+    GATE_RESET = 1     # Reset phase on every note-on
+    LEGATO_RESET = 2   # Reset only on non-legato note-on
+
+
+class LFOTarget(IntEnum):
+    """CCS-native modulation targets (FPGA-efficient)."""
+    # Phase domain (very cheap)
+    PITCH = 0           # → cents field
+
+    # Amplitude (cheap)
+    GAIN = 1            # → gain_q15 multiplier
+
+    # Mode B harmonic bank (cheap)
+    PWM_WIDTH = 10      # → pwm_width_q15
+    TILT = 11           # → tilt_env_q15 (brightness)
+
+    # Filter (Material Engine SVF) - block rate, cheap
+    FILTER_CUTOFF = 15  # → filter_cutoff_q15 (log scale)
+    FILTER_RESO = 16    # → filter_reso_q15
+
+    # Coefficient domain (medium)
+    BAND_SCALE = 20     # → per-band coefficient scaling [6 bands]
+
+    # Audio rate (expensive - avoid on FPGA)
+    VFO_RING = 30       # → per-sample coefficient multiply
+
+
+@dataclass
+class LFORouting:
+    """
+    Where LFO output goes.
+
+    target: Which parameter to modulate
+    amount_q15: Scaling factor (32767 = 100%)
+    """
+    target: LFOTarget = LFOTarget.PITCH
+    amount_q15: int = 32767
+
+
+# =============================================================================
 # MODE B STATE (WSE-STD-210)
 # =============================================================================
 
@@ -512,6 +566,230 @@ class VibratoState:
 
 
 @dataclass
+class LFOState(VibratoState):
+    """
+    General LFO extending VibratoState with multi-waveform and routing.
+
+    Per WSE-ARCHITECTURE-v1, LFO state belongs in Voice Engine because:
+    - Voice Engine owns musical time (WSE-STD-060)
+    - LFO phase is per-voice state
+    - LFO outputs modulate VoiceFrame fields
+
+    Phase Storage (Unified with CMMM):
+    - LFO phase is stored in VoiceState.arc_phase_q16[arc_slot]
+    - This unifies LFO time with CMMM arc phase storage
+    - arc_slot indicates which slot in arc_phase_q16 this LFO uses
+
+    Extends VibratoState with:
+    - Multiple waveform shapes (sine, triangle, saw, square)
+    - Sync mode for gate reset behavior
+    - Routing to CCS-native targets
+    """
+    id: str = ""
+    waveform: LFOWaveform = LFOWaveform.SINE
+    sync_mode: LFOSyncMode = LFOSyncMode.FREE
+    routings: List[LFORouting] = field(default_factory=list)
+
+    # Depth in Q15 (unified for all targets)
+    depth_q15: int = 16384  # 50% default
+
+    # Arc slot index - which arc_phase_q16 slot stores this LFO's phase
+    # Phase is stored externally in VoiceState.arc_phase_q16[arc_slot]
+    arc_slot: int = 0
+
+    def on_gate(self, is_legato: bool = False) -> None:
+        """
+        Handle note-on event for sync modes.
+
+        Note: This resets the internal phase tracking. The caller must also
+        reset arc_phase_q16[arc_slot] to 0 for proper phase reset.
+        """
+        if self.sync_mode == LFOSyncMode.GATE_RESET:
+            self.phase = 0
+            self.elapsed_samples = 0
+            self.current_depth_scale = 0
+        elif self.sync_mode == LFOSyncMode.LEGATO_RESET and not is_legato:
+            self.phase = 0
+            self.elapsed_samples = 0
+            self.current_depth_scale = 0
+
+    def on_gate_with_arc(self, arc_phase_q16: List[int], is_legato: bool = False) -> None:
+        """
+        Handle note-on event for sync modes with unified arc phase storage.
+
+        Args:
+            arc_phase_q16: The VoiceState.arc_phase_q16 array
+            is_legato: True if this is a legato note transition
+        """
+        if self.sync_mode == LFOSyncMode.GATE_RESET:
+            arc_phase_q16[self.arc_slot] = 0
+            self.elapsed_samples = 0
+            self.current_depth_scale = 0
+        elif self.sync_mode == LFOSyncMode.LEGATO_RESET and not is_legato:
+            arc_phase_q16[self.arc_slot] = 0
+            self.elapsed_samples = 0
+            self.current_depth_scale = 0
+
+    def get_waveform_value(self, phase: Optional[int] = None) -> int:
+        """
+        Get raw waveform value (before envelope scaling).
+
+        Args:
+            phase: Phase value to use (Q32). If None, uses self.phase.
+
+        Returns:
+            Q15 value in range [-32767, 32767]
+        """
+        if phase is None:
+            phase = self.phase
+
+        if self.waveform == LFOWaveform.SINE:
+            sin_val, _ = sin_cos_q15(phase)
+            return sin_val
+
+        elif self.waveform == LFOWaveform.TRIANGLE:
+            # Triangle: linear ramp -1 to +1 to -1
+            # phase 0x00000000 → -32767
+            # phase 0x40000000 → +32767
+            # phase 0x80000000 → -32767
+            # phase 0xC0000000 → +32767
+            phase_q15 = (phase >> 17) & 0x7FFF  # Top 15 bits of lower half
+            half_cycle = (phase >> 31) & 1
+            if half_cycle == 0:
+                # First half: -32767 to +32767
+                return (phase_q15 * 2) - Q15_ONE
+            else:
+                # Second half: +32767 to -32767
+                return Q15_ONE - (phase_q15 * 2)
+
+        elif self.waveform == LFOWaveform.SAW_UP:
+            # Saw: -32767 at phase 0, +32767 at phase max
+            phase_q15 = (phase >> 17) & 0x7FFF
+            return (phase_q15 * 2) - Q15_ONE
+
+        elif self.waveform == LFOWaveform.SQUARE:
+            # Square: +32767 for first half, -32767 for second half
+            return Q15_ONE if phase < 0x80000000 else -Q15_ONE
+
+        return 0
+
+    def get_lfo_value(self, phase: Optional[int] = None) -> int:
+        """
+        Get current LFO value scaled by envelope and depth.
+
+        Args:
+            phase: Phase value to use (Q32). If None, uses self.phase.
+
+        Returns:
+            Q15 value in range [-32767, 32767]
+        """
+        if not self.enabled or self.current_depth_scale == 0:
+            return 0
+
+        # Get raw waveform value
+        raw = self.get_waveform_value(phase)
+
+        # Scale by envelope
+        env_scaled = RSHIFT_RNE(raw * self.current_depth_scale, 15)
+
+        # Scale by depth
+        return RSHIFT_RNE(env_scaled * self.depth_q15, 15)
+
+    def get_lfo_value_from_arc(self, arc_phase_q16: List[int]) -> int:
+        """
+        Get current LFO value using unified arc phase storage.
+
+        Args:
+            arc_phase_q16: The VoiceState.arc_phase_q16 array
+
+        Returns:
+            Q15 value in range [-32767, 32767]
+        """
+        phase = arc_phase_q16[self.arc_slot]
+        return self.get_lfo_value(phase)
+
+    def advance_block_with_arc(self, arc_phase_q16: List[int], block_samples: int = BLOCK_SIZE) -> None:
+        """
+        Advance LFO by one block using unified arc phase storage.
+
+        Updates both the arc_phase_q16 slot and the envelope state.
+
+        Args:
+            arc_phase_q16: The VoiceState.arc_phase_q16 array
+            block_samples: Number of samples in block
+        """
+        if not self.enabled:
+            return
+
+        # Advance elapsed time (for envelope)
+        self.elapsed_samples += block_samples
+
+        # Update envelope (delayed onset with ramp)
+        if self.elapsed_samples <= self.delay_samples:
+            # Still in delay period
+            self.current_depth_scale = 0
+        elif self.elapsed_samples <= self.delay_samples + self.ramp_samples:
+            # Ramping in
+            ramp_progress = self.elapsed_samples - self.delay_samples
+            self.current_depth_scale = (ramp_progress * Q15_ONE) // self.ramp_samples
+        else:
+            # Fully ramped in
+            self.current_depth_scale = Q15_ONE
+
+        # Advance LFO phase in arc storage
+        current_phase = arc_phase_q16[self.arc_slot]
+        arc_phase_q16[self.arc_slot] = (current_phase + self.phase_inc * block_samples) & PHASE_MASK
+
+    def configure_lfo(
+        self,
+        rate_hz: float = 5.0,
+        depth_q15: int = 16384,
+        waveform: LFOWaveform = LFOWaveform.SINE,
+        sync_mode: LFOSyncMode = LFOSyncMode.FREE,
+        delay_ms: float = 0.0,
+        ramp_ms: float = 0.0,
+        routings: Optional[List[LFORouting]] = None,
+        arc_slot: int = 0,
+        sample_rate: int = SAMPLE_RATE,
+    ) -> None:
+        """
+        Configure LFO parameters.
+
+        Args:
+            rate_hz: LFO frequency in Hz
+            depth_q15: Modulation depth in Q15 (32767 = 100%)
+            waveform: Waveform shape
+            sync_mode: Gate sync behavior
+            delay_ms: Delay before LFO starts
+            ramp_ms: Ramp-in time after delay
+            routings: List of LFORouting targets
+            arc_slot: Index into arc_phase_q16 for phase storage
+            sample_rate: Sample rate in Hz
+        """
+        self.enabled = True
+        self.rate_hz = rate_hz
+        self.depth_q15 = depth_q15
+        self.waveform = waveform
+        self.sync_mode = sync_mode
+        self.arc_slot = arc_slot
+
+        # Compute LFO phase increment
+        self.phase_inc = int((rate_hz * (1 << 32)) / sample_rate)
+
+        # Compute envelope timing
+        self.delay_samples = int(delay_ms * sample_rate / 1000.0)
+        self.ramp_samples = max(1, int(ramp_ms * sample_rate / 1000.0))
+
+        # Set routings
+        self.routings = routings if routings is not None else []
+
+        # Reset runtime state (phase will be in arc_phase_q16)
+        self.phase = 0
+        self.elapsed_samples = 0
+        self.current_depth_scale = 0
+
+
+@dataclass
 class ModeBState:
     """
     Per-voice Mode B oscillator state.
@@ -552,8 +830,9 @@ class ModeBState:
     unison_voices: int = 1
     unison_spread_cents: int = 0
 
-    # Vibrato state
-    vibrato: VibratoState = field(default_factory=VibratoState)
+    # NOTE: Vibrato/LFO is now handled via LFOState in VoiceState.lfos
+    # The VoiceEngine reads SystemMacro.VIBRATO to scale LFO depth globally.
+    # See voice_engine.py step_voice_simple() for implementation.
 
     def reset(self, note: int, phase_inc: int) -> None:
         """Reset state for a new note (hard reset - zeros phase)."""
@@ -1337,6 +1616,222 @@ def extract_modulator_signal(
 
 
 # =============================================================================
+# MODE B OPTIMIZED: FPGA-FRIENDLY AND VECTORIZED IMPLEMENTATIONS
+# =============================================================================
+
+# Fixed constants for HW implementation
+HW_H_MAX = 16       # Fixed harmonic count for FPGA (no conditionals)
+HW_K = 4            # Fixed K for FPGA SIMD width
+
+
+def mode_b_generate_coeffs_hw(
+    phase: int,
+    phase_inc: int,
+    a_h_q15: np.ndarray,
+    b_h_q15: np.ndarray,
+    dc_q15: int,
+    Usin_h: np.ndarray,
+    Ucos_h: np.ndarray,
+    DC_frame: np.ndarray,
+    output_coeffs: np.ndarray,
+    fm_mod_buffer: np.ndarray = None,
+    fm_depth_q15: int = 0,
+) -> None:
+    """
+    FPGA-friendly Mode B coefficient generator.
+
+    Key differences from mode_b_generate_coeffs:
+    1. Fixed H=16 (no variable harmonic count)
+    2. Loop order optimized for FPGA pipelining: h -> leaf -> k
+    3. All phases computed upfront (enables parallel sin/cos)
+    4. No conditionals in inner loops
+    5. Explicit int32 arithmetic matching HW
+
+    FPGA Implementation Notes:
+    - Outer h loop: pipeline stages, one harmonic per cycle
+    - Middle leaf loop: 64 parallel MAC units (one per leaf)
+    - Inner k loop: K=4 SIMD lanes
+
+    Memory Layout (matches FPGA BRAM):
+    - Usin_h[H, L, K]: row-major, stride-1 on K for SIMD
+    - output_coeffs[L*K]: interleaved for polyphase reconstruction
+
+    Args:
+        phase: Base oscillator phase (Q32)
+        phase_inc: Phase increment per sample (Q32)
+        a_h_q15: Sine harmonic weights [H_MAX] Q15
+        b_h_q15: Cosine harmonic weights [H_MAX] Q15
+        dc_q15: DC offset Q15
+        Usin_h: Sine basis frames [H, 64, K] Q15
+        Ucos_h: Cosine basis frames [H, 64, K] Q15
+        DC_frame: DC basis frame [64, K] Q15
+        output_coeffs: Output array [L*K] Q15
+        fm_mod_buffer: Optional FM modulator samples [K] Q15
+        fm_depth_q15: FM modulation depth Q15
+    """
+    K = HW_K
+    H = HW_H_MAX
+    L = NUM_LEAVES
+
+    # Phase 1: Compute K phases (parallel on FPGA)
+    # phi_k = base_phase + k * phase_inc + fm_mod
+    phi_k = np.zeros(K, dtype=np.int64)
+    for k in range(K):
+        phi_k[k] = phase
+        if fm_mod_buffer is not None and fm_depth_q15 != 0:
+            # FM: phase_mod = depth * mod >> 1 (Q30 -> Q29)
+            mod_sample = int(fm_mod_buffer[k]) if k < len(fm_mod_buffer) else 0
+            phase_mod = (fm_depth_q15 * mod_sample) >> 1
+            phi_k[k] = (phi_k[k] + phase_mod) & PHASE_MASK
+
+    # Phase 2: Compute sin/cos for all harmonics and k-slots
+    # On FPGA: H×K CORDIC units or sin/cos LUT with K parallel reads
+    sin_hphi = np.zeros((H, K), dtype=np.int32)
+    cos_hphi = np.zeros((H, K), dtype=np.int32)
+    for h in range(H):
+        for k in range(K):
+            h_phase = (phi_k[k] * (h + 1)) & PHASE_MASK
+            sin_hphi[h, k], cos_hphi[h, k] = sin_cos_q15(int(h_phase))
+
+    # Phase 3: Compute combined weights w_sin, w_cos for each harmonic
+    # w_sin = a_h*cos - b_h*sin, w_cos = a_h*sin + b_h*cos
+    # On FPGA: H parallel 2x2 matrix multiplies
+    w_sin = np.zeros((H, K), dtype=np.int32)
+    w_cos = np.zeros((H, K), dtype=np.int32)
+    for h in range(H):
+        a_h = int(a_h_q15[h]) if h < len(a_h_q15) else 0
+        b_h = int(b_h_q15[h]) if h < len(b_h_q15) else 0
+        for k in range(K):
+            # Q15 × Q15 >> 15 = Q15
+            w_sin[h, k] = RSHIFT_RNE(a_h * cos_hphi[h, k] - b_h * sin_hphi[h, k], 15)
+            w_cos[h, k] = RSHIFT_RNE(a_h * sin_hphi[h, k] + b_h * cos_hphi[h, k], 15)
+
+    # Phase 4: Accumulate into output coefficients
+    # On FPGA: 64 parallel accumulators, each with K SIMD MAC units
+    # Loop order: leaf (parallel) -> h (pipelined) -> k (SIMD)
+    for leaf in range(L):
+        for k in range(K):
+            idx = leaf * K + k
+            # Start with DC
+            acc = RSHIFT_RNE(dc_q15 * int(DC_frame[leaf, k]), 15)
+
+            # Accumulate harmonics (unrolled on FPGA)
+            for h in range(H):
+                sin_contrib = RSHIFT_RNE(w_sin[h, k] * int(Usin_h[h, leaf, k]), 15)
+                cos_contrib = RSHIFT_RNE(w_cos[h, k] * int(Ucos_h[h, leaf, k]), 15)
+                acc += sin_contrib + cos_contrib
+
+            output_coeffs[idx] = SAT16(acc)
+
+
+def mode_b_generate_coeffs_vectorized(
+    state: 'ModeBState',
+    basis: 'HarmonicBasisFrames',
+    output_coeffs: np.ndarray,
+) -> None:
+    """
+    NumPy-vectorized Mode B coefficient generator for Python performance.
+
+    Eliminates Python loops by using matrix operations:
+    1. Batch sin/cos computation for all H×K
+    2. Matrix multiply for weight rotation
+    3. Einstein summation for basis frame accumulation
+
+    ~10-20x faster than scalar mode_b_generate_coeffs in Python.
+
+    Args:
+        state: ModeBState with phase, weights, fm_depth_q15, fm_mod_buffer
+        basis: HarmonicBasisFrames for current pitch anchor
+        output_coeffs: Output array [512] to fill with coefficients
+    """
+    weights = state.weights
+    H = min(state.H_active, state.H_bandlimit, basis.H_max)
+    K = VM_K
+    L = NUM_LEAVES
+
+    if H == 0:
+        output_coeffs.fill(0)
+        return
+
+    # Get weights as numpy arrays
+    a_h = weights.a_h_q15[:H].astype(np.int32)
+    b_h = weights.b_h_q15[:H].astype(np.int32)
+    dc = int(weights.dc_q15)
+
+    # Compute scale shift for normalization
+    total_weight = np.maximum(np.abs(a_h), np.abs(b_h)).sum()
+    scale_shift = 0
+    while total_weight > 32767 and scale_shift < 15:
+        total_weight >>= 1
+        scale_shift += 1
+
+    if scale_shift > 0:
+        a_h = a_h >> scale_shift
+        b_h = b_h >> scale_shift
+
+    # Phase computation for K slots
+    base_phi = state.phase
+    fm_active = state.fm_depth_q15 != 0 and state.fm_mod_buffer is not None
+
+    phi_k = np.full(K, base_phi, dtype=np.int64)
+    if fm_active:
+        fm_mod = np.array(state.fm_mod_buffer[:K], dtype=np.int64)
+        phase_mod = (state.fm_depth_q15 * fm_mod) >> 1
+        phi_k = (phi_k + phase_mod) & PHASE_MASK
+
+    # Compute sin(hφ), cos(hφ) for all H harmonics and K slots
+    # Shape: [H, K]
+    h_indices = np.arange(1, H + 1, dtype=np.int64).reshape(-1, 1)
+    h_phases = (phi_k.reshape(1, -1) * h_indices) & PHASE_MASK
+
+    # Vectorized sin/cos (use LUT or numpy)
+    sin_hphi = np.zeros((H, K), dtype=np.int32)
+    cos_hphi = np.zeros((H, K), dtype=np.int32)
+    for h in range(H):
+        for k in range(K):
+            sin_hphi[h, k], cos_hphi[h, k] = sin_cos_q15(int(h_phases[h, k]))
+
+    # Compute rotation weights: w_sin[h,k], w_cos[h,k]
+    # w_sin = a_h*cos - b_h*sin, w_cos = a_h*sin + b_h*cos
+    a_h_2d = a_h.reshape(-1, 1)  # [H, 1]
+    b_h_2d = b_h.reshape(-1, 1)  # [H, 1]
+
+    w_sin = ((a_h_2d * cos_hphi - b_h_2d * sin_hphi) + (1 << 14)) >> 15
+    w_cos = ((a_h_2d * sin_hphi + b_h_2d * cos_hphi) + (1 << 14)) >> 15
+
+    # Basis frames: Usin_h[H, L, K], Ucos_h[H, L, K]
+    Usin = basis.Usin_h[:H, :, :K].astype(np.int32)
+    Ucos = basis.Ucos_h[:H, :, :K].astype(np.int32)
+
+    # Accumulate: output[l,k] = dc*DC[l,k] + sum_h(w_sin[h,k]*Usin[h,l,k] + w_cos[h,k]*Ucos[h,l,k])
+    # Using einsum for efficiency
+
+    # DC contribution: [L, K]
+    DC = basis.DC_frame[:, :K].astype(np.int32)
+    result = ((dc * DC) + (1 << 14)) >> 15
+
+    # Harmonic contributions using broadcasting
+    # w_sin[h, k] * Usin[h, l, k] -> sum over h -> [l, k]
+    # Reshape w_sin/w_cos to [H, 1, K] for broadcasting with [H, L, K]
+    w_sin_3d = w_sin.reshape(H, 1, K)
+    w_cos_3d = w_cos.reshape(H, 1, K)
+
+    sin_contrib = ((w_sin_3d * Usin) + (1 << 14)) >> 15
+    cos_contrib = ((w_cos_3d * Ucos) + (1 << 14)) >> 15
+
+    # Sum over harmonics
+    result += sin_contrib.sum(axis=0) + cos_contrib.sum(axis=0)
+
+    # Saturate and interleave into output
+    result = np.clip(result, -32768, 32767).astype(np.int16)
+
+    # Interleave: output[l*K + k] = result[l, k]
+    for l in range(L):
+        for k in range(K):
+            output_coeffs[l * K + k] = result[l, k]
+
+
+# =============================================================================
 # EXPORTS
 # =============================================================================
 
@@ -1358,12 +1853,21 @@ __all__ = [
     'BasisFrameAtlas',
     'WaveformCoeffLUT',
     'RatioBasisFrame',
+    # LFO/Modulation types (Phase 2)
+    'LFOWaveform',
+    'LFOSyncMode',
+    'LFOTarget',
+    'LFORouting',
+    'LFOState',
+    'VibratoState',
     # Functions
     'generate_basis_frames',
     'get_basis_atlas',
     'get_basis_for_note',
     'mode_b_generate_coeffs',
     'mode_b_generate_coeffs_matrix',
+    'mode_b_generate_coeffs_hw',
+    'mode_b_generate_coeffs_vectorized',
     'mode_b_advance_phase',
     'compute_pwm_weights',
     'compute_bandlimit_H',
@@ -1375,4 +1879,7 @@ __all__ = [
     'get_basis_for_ratio',
     'generate_ratio_basis_frame',
     'clear_ratio_basis_cache',
+    # HW constants
+    'HW_H_MAX',
+    'HW_K',
 ]

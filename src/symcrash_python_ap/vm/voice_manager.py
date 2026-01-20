@@ -19,6 +19,7 @@ from typing import List, Optional, Tuple
 import numpy as np
 
 from .state import VMState, EnvelopePhase
+from ..primitives import BLOCK_SIZE
 
 
 # =============================================================================
@@ -26,7 +27,6 @@ from .state import VMState, EnvelopePhase
 # =============================================================================
 
 MAX_VOICES = 32          # CCS polyphony target
-BLOCK_SIZE = 64          # Samples per block
 
 
 # =============================================================================

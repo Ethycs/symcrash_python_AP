@@ -22,7 +22,10 @@ from typing import List, Optional
 import numpy as np
 
 from ..wavelet.fast_lifting import fwpt_jit
-from .sample_source import SampleOscState, BLOCK_SIZE, VM_K, NUM_LEAVES, COEFF_LEN
+from .sample_source import SampleOscState, VM_K, NUM_LEAVES, COEFF_LEN
+
+# Import canonical constants from primitives (single source of truth)
+from ..primitives import Q15_ONE, Q15_HALF, BLOCK_SIZE
 
 
 # =============================================================================
@@ -32,10 +35,7 @@ from .sample_source import SampleOscState, BLOCK_SIZE, VM_K, NUM_LEAVES, COEFF_L
 MAX_GRAINS = 8           # Maximum simultaneous grains
 MIN_GRAIN_BLOCKS = 2     # Minimum grain size (2 blocks = 128 samples)
 MAX_GRAIN_BLOCKS = 64    # Maximum grain size (64 blocks = 4096 samples)
-
-# Q15 fixed-point
-Q15_ONE = 32767
-Q15_HALF = 16384
+# Q15_ONE and Q15_HALF imported from primitives
 
 
 # =============================================================================

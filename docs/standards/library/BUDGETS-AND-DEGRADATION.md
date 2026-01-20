@@ -339,6 +339,31 @@ class PredictedCost:
 - Allows degradation room for CPU spikes
 - Leaves tail reservation untouched
 
+### For FM6 Mode (osc_mode=3)
+
+FM6 synthesis has different budget characteristics:
+
+| Component | Cost (ticks) | Notes |
+|-----------|--------------|-------|
+| FM6 physics kernel | ~800-1200 | Differential equation per operator |
+| WPT projection | ~400 | Transform to coefficient space |
+| Standard operators | Variable | Same as other modes |
+| IDWPT reconstruction | ~400 | Transform back to time domain |
+
+**FM6 Budget Guidelines:**
+- MAIN voices: Use STABLE_TONE budget (8000 ticks)
+- Algorithm complexity matters: 32 (parallel) is cheaper than 1 (stacked)
+- Feedback level increases cost (more iterations)
+- Topology morphing adds ~200 ticks for blend computation
+- HQ mode (diff-eq kernel) costs ~50% more than LQ mode
+
+**FM6 Degradation Path:**
+1. Reduce operator count (disable ops 5, 6 first)
+2. Switch to LQ kernel mode
+3. Disable topology morphing
+4. Standard K-ladder degradation
+5. Emergency: Single carrier oscillator
+
 ---
 
 ## Authoring Workflow

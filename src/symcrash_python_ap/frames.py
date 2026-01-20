@@ -17,6 +17,9 @@ from typing import List, Optional, Tuple
 from enum import IntEnum
 import struct
 
+# Import Q15_ONE from primitives (single source of truth)
+from .primitives import Q15_ONE
+
 
 @dataclass
 class ParamFrame:
@@ -29,6 +32,12 @@ class ParamFrame:
     cut_q15: int = 0             # Tropical cut threshold
     morph_q15: int = 0           # Operator morph position
     gate_q15: int = 0x7FFF       # Gate/envelope
+
+    # Filter parameters (Material Engine SVF, material_id=9)
+    filter_cutoff_q15: int = Q15_ONE    # Cutoff (Q15 log: 0=20Hz, 32767=20kHz)
+    filter_reso_q15: int = 0            # Resonance (Q15: 0=flat, 32767=self-osc)
+    filter_mode: int = 0                # 0=LP, 1=HP, 2=BP, 3=Notch
+    filter_enabled: bool = False        # True to enable SVF filter
 
 
 @dataclass
@@ -235,6 +244,17 @@ class VoiceFrame:
     cmmm_tail_mode: Optional[int] = None          # TailMode enum value
     cmmm_traction_q15: int = 32767                # Projection hardness
 
+    # =========================================================================
+    # Filter Parameters (Material Engine SVF)
+    # =========================================================================
+    # Per-voice filter parameters, modulated by LFO/envelope/macro
+    # Aggregated across voices for Material Engine (post-mix filter)
+
+    filter_cutoff_q15: int = Q15_ONE    # Cutoff (Q15 log: 0=20Hz, 32767=20kHz)
+    filter_reso_q15: int = 0            # Resonance (Q15: 0=flat, 32767=self-osc)
+    filter_mode: int = 0                # 0=LP, 1=HP, 2=BP, 3=Notch
+    filter_env_depth_q15: int = 0       # Envelope modulation depth (signed Q15)
+
     # Legacy compatibility: convert float betas to IDs
     @property
     def tree_a(self) -> float:
@@ -314,7 +334,7 @@ VFP_MAGIC = 0x5646      # "VF" in ASCII
 VFP_VERSION = 1
 VFP_PACKET_LEN = 136
 NUM_TREES = 5
-Q15_ONE = 32767
+# Q15_ONE imported from primitives
 
 # VoiceFramePacketV1 constants (Addendum A: Carrier Header)
 VFP_V1_VERSION = 2

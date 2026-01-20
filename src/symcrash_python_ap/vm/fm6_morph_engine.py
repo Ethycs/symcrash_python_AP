@@ -36,7 +36,8 @@ except ImportError:
         return max(-32768, min(32767, sin_val)), max(-32768, min(32767, cos_val))
 
 
-NUM_LEAVES = 64
+# Import from primitives (single source of truth)
+from ..primitives import NUM_LEAVES
 
 
 def _sat16(x: int) -> int:

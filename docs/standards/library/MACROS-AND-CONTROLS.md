@@ -16,33 +16,61 @@ The control system has three layers:
 
 ## System Macros
 
-System macros are internal state variables managed by the CMMM (Controlled Markov Mealy Machine).
+System macros are internal state variables managed by the CMMM (Controlled Markov Mealy Machine). These are the semantic control axes that presets use to control synthesis behavior.
 
 ### Macro IDs (0-10)
 
 | ID | Name | Purpose | Set By | Default Slew |
 |----|------|---------|--------|--------------|
 | 0 | ENERGY_STATE | Envelope-owned state | Envelope only | NONE |
-| 1 | ENERGY_INTENT | Controller → CMMM | Controller | ONE_POLE (2048) |
-| 2 | MOTION | Movement/modulation | Controller | ONE_POLE (2048) |
-| 3 | FOCUS | Attention/emphasis | Controller | ONE_POLE (2048) |
-| 4 | BRIGHTNESS | Timbre brightness | Controller | ONE_POLE (2048) |
-| 5 | DENSITY | Body/thickness | Controller | ONE_POLE (2048) |
-| 6 | RISK | Chaos/instability | Controller | NBLOCK (16) |
+| 1 | ENERGY_INTENT | Controller → CMMM, attack character | Controller | ONE_POLE (2048) |
+| 2 | MOTION | Movement/modulation depth | Controller | ONE_POLE (2048) |
+| 3 | FOCUS | Spectral concentration | Controller | ONE_POLE (2048) |
+| 4 | BRIGHTNESS | Harmonic content (timbre) | Controller | ONE_POLE (2048) |
+| 5 | DENSITY | Low-mid presence (body) | Controller | ONE_POLE (2048) |
+| 6 | RISK | Stochastic behavior (chaos) | Controller | NBLOCK (16) |
 | 7 | AGE | CMMM integrator | CMMM only | NONE |
-| 8 | SPACE | Stereo/reverb | Controller | ONE_POLE (2048) |
-| 9 | MATERIAL | Surface texture | Controller | NBLOCK (32) |
-| 10 | UNITY | Coherence blend | Controller | NBLOCK (32) |
+| 8 | SPACE | Spatial/reverb character | Controller | ONE_POLE (2048) |
+| 9 | MATERIAL | Surface texture (wood=low, glass=high) | Controller | NBLOCK (32) |
+| 10 | UNITY | Voice coherence/blend | Controller | NBLOCK (32) |
+
+### Preset Control Config
+
+Presets can specify default values for system macros via the `control` section:
+
+```yaml
+instrument_ir_v0:
+  control:
+    energy_intent: 0.5      # 0.5 = neutral intensity
+    motion: 0.0             # 0.0 = no modulation
+    focus: 0.5              # 0.5 = balanced emphasis
+    brightness: 0.75        # High for brass/bright sounds
+    density: 0.5            # 0.5 = neutral body
+    risk: 0.1               # Some instability
+    space: 0.25             # Subtle spatial
+    material: 0.5           # Neutral texture
+    unity: 0.5              # Balanced blend
+```
+
+These values are pushed to MacroRuntime at preset load time via `ControlProgram`. The ControlConfig class in `instrument_ir.py` provides a `to_control_program()` method for capsule compilation.
 
 ### Preset Macro Mapping
 
-Preset macros map to system macros:
+Preset macros (defined in L0_graph.macros) map to system macros:
 
 | Preset Macro | System Macro | Purpose |
 |--------------|--------------|---------|
-| `BRIGHT` | BRIGHTNESS (4) | Harmonic content |
-| `BODY` | DENSITY (5) | Low-mid presence |
-| `IMPACT` | ENERGY_INTENT (1) | Attack character |
+| `M_BRIGHT` | BRIGHTNESS (4) | Harmonic content |
+| `M_BODY` | DENSITY (5) | Low-mid presence |
+| `M_IMPACT` | ENERGY_INTENT (1) | Attack character |
+| `M_GLITCH` | RISK (6) | Chaos/instability |
+| `M_MORPH` | MORPH (3) | Tree blend factor |
+| `M_TEXTURE` | MATERIAL (9) | Surface texture |
+| `M_ATTACK` | ATK_BLOCKS (16) | Attack time |
+| `M_DECAY` | DCY_BLOCKS (17) | Decay time |
+| `M_SUSTAIN` | SUS_Q15 (18) | Sustain level |
+| `M_RELEASE` | REL_BLOCKS (19) | Release time |
+| `M_DETUNE` | DETUNE (5) | Pitch detune |
 
 ### Performance Macros (11-12)
 
@@ -179,8 +207,23 @@ The control registry defines all external control inputs with ranges, defaults, 
 | 4 | **ENUM8** | 8-bit enumeration | 0 to 255 |
 | 5 | **U32** | Unsigned 32-bit integer | 0 to 4294967295 |
 | 6 | **Q15S** | Signed Q15 fixed-point | -32768 to 32767 |
+| 7 | **Q16.16** | Fixed-point ratio | 0 to 4294967295 |
 
-**Note:** U32 is used for FM6 operator frequency ratios in Q16.16 format (65536 = 1.0x).
+### Q16.16 Format (FM6 Ratios)
+
+FM6 operator frequency ratios use Q16.16 fixed-point where the integer part is the high 16 bits and the fractional part is the low 16 bits.
+
+| Ratio | Q16.16 Value | Hex | Musical Interval |
+|-------|--------------|-----|------------------|
+| 0.5x | 32768 | 0x00008000 | Octave down |
+| 1.0x | 65536 | 0x00010000 | Unison |
+| 1.5x | 98304 | 0x00018000 | Fifth |
+| 2.0x | 131072 | 0x00020000 | Octave up |
+| 3.0x | 196608 | 0x00030000 | Octave + fifth |
+| 4.0x | 262144 | 0x00040000 | Two octaves |
+| 5.0x | 327680 | 0x00050000 | Two octaves + third |
+
+**Note:** Ratios exceeding int16 range (values > 32767 or > 0.5x) require U32 storage.
 
 ---
 

@@ -33,8 +33,8 @@ except ImportError:
         return max(-32768, min(32767, sin_val)), max(-32768, min(32767, cos_val))
 
 
-# Constants
-NUM_LEAVES = 64      # CCS leaf count
+# Constants - import from primitives (single source of truth)
+from ..primitives import NUM_LEAVES
 # COEFF_LEN imported from tables.py (64 leaves × VM_K k-slots)
 
 

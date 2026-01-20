@@ -14,6 +14,7 @@ import numpy as np
 from .tables import COEFF_LEN, BLOCK_SAMPLES
 from ..fixed import midi_to_phase_inc_fixed
 from .coeff_lut_streaming import CCSState, midi_to_hz, SAMPLE_RATE
+from ..primitives import Q15_ONE
 
 # Defer import to avoid circular dependency - ModeBState imported when needed
 # from .harmonic_bank import ModeBState, OSC_MODE_A, OSC_MODE_B
@@ -61,7 +62,7 @@ class ExecutorLatch:
 
     # Tail mode control (payload_type 0x31)
     tail_mode: int = 0                    # TailMode enum value (0=FULL)
-    traction_q15: int = 32767             # Projection hardness
+    traction_q15: int = Q15_ONE            # Projection hardness
 
     # Ramp tracking for crossfade
     _mask_ramp_total: int = 0             # Total blocks for current ramp
@@ -88,7 +89,7 @@ class ExecutorLatch:
             self.mask_ramp_remaining = ramp_blocks
             self._mask_ramp_total = ramp_blocks
 
-    def apply_tailmode_event(self, tail_mode: int, traction_q15: int = 32767) -> None:
+    def apply_tailmode_event(self, tail_mode: int, traction_q15: int = Q15_ONE) -> None:
         """
         Apply a tail mode change event (payload_type 0x31).
 
@@ -139,7 +140,7 @@ class ExecutorLatch:
         progress_blocks = self._mask_ramp_total - self.mask_ramp_remaining
         alpha_q15 = (progress_blocks * 32767) // self._mask_ramp_total
 
-        start_weight = 32767 - alpha_q15
+        start_weight = Q15_ONE - alpha_q15
         target_weight = alpha_q15
 
         return (start_weight, target_weight, self._mask_start_u32, self.mask_target_u32)
@@ -302,6 +303,11 @@ class VMState:
     # Lazy-initialized to avoid import overhead when not using FM6 mode
     _fm6_state: Optional['FM6State'] = None  # type: ignore
 
+    # FM6 Morph State (WSE-STD-FM-TOPOLOGY-v0 Section 8 - Topology Morphing)
+    # -------------------------------------------------------------------------
+    # Used when L1Lift.fm6_morph is configured for blending between archetypes
+    _fm6_morph_state: Optional['FM6MorphState'] = None  # type: ignore
+
     # -------------------------------------------------------------------------
     # CMMM Executor Latch (WSE-STD-070 Tower Runtime State)
     # -------------------------------------------------------------------------
@@ -320,6 +326,19 @@ class VMState:
     def fm6_state(self, value: 'FM6State') -> None:
         """Set FM6 state."""
         self._fm6_state = value
+
+    @property
+    def fm6_morph_state(self) -> 'FM6MorphState':
+        """Get or create FM6 morph state (lazy init)."""
+        if self._fm6_morph_state is None:
+            from .fm6_morph_engine import FM6MorphState
+            self._fm6_morph_state = FM6MorphState()
+        return self._fm6_morph_state
+
+    @fm6_morph_state.setter
+    def fm6_morph_state(self, value: 'FM6MorphState') -> None:
+        """Set FM6 morph state."""
+        self._fm6_morph_state = value
 
     @property
     def sample_state(self) -> 'SampleOscState':
@@ -458,6 +477,10 @@ class VMState:
         # Reset FM6 state (WSE-STD-FM-TOPOLOGY-v0) if initialized
         if self._fm6_state is not None:
             self._fm6_state.reset()
+
+        # Reset FM6 morph state if initialized
+        if self._fm6_morph_state is not None:
+            self._fm6_morph_state.reset()
 
         # Reset FM feedback buffer (Phase 3)
         self.prev_fm_mod_buffer.fill(0)

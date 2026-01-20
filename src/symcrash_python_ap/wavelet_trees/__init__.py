@@ -9,16 +9,16 @@ Each tree_id has its own module.
 from dataclasses import dataclass, field
 from typing import List, Dict, Tuple
 
+from ..primitives import BLOCK_SIZE, NUM_LEAVES, COEFF_LEN
+
 # =============================================================================
 # GLOBAL CONSTANTS
 # =============================================================================
 
-BLOCK_SIZE = 64          # B = 64 samples
 MAX_DEPTH = 6            # J = 6
-LEAF_COUNT = 64          # L = 64 leaves per tree (D=6 master tree)
-COEFF_LEN = 256          # Total coefficient vector length
-NODE_SIZE = 4            # Coefficients per node (256 / 64 = 4)
-NODE_COUNT = 64          # COEFF_LEN / NODE_SIZE
+LEAF_COUNT = NUM_LEAVES  # L = 64 leaves per tree (D=6 master tree)
+NODE_SIZE = COEFF_LEN // LEAF_COUNT  # Coefficients per node (512 / 64 = 8)
+NODE_COUNT = LEAF_COUNT  # 64 nodes (one per leaf)
 
 
 # =============================================================================

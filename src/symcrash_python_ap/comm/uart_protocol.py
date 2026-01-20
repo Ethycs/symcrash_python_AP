@@ -29,7 +29,8 @@ from ..fixed import sat16, mul_q15_sat, Q15_ONE, Q15_HALF
 # CONSTANTS (per WSE-STD-020)
 # =============================================================================
 
-BLOCK_SAMPLES = 64
+# Import from primitives (single source of truth)
+from ..primitives import BLOCK_SIZE as BLOCK_SAMPLES
 SYNC_WORD = 0xA55A
 PROTOCOL_VERSION = 0
 

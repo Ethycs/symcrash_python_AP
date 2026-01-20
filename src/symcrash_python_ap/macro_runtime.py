@@ -25,37 +25,12 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 from enum import IntEnum
 
-
-# =============================================================================
-# CONSTANTS
-# =============================================================================
-
-Q15_ONE = 32767
+# Import canonical constants from primitives (single source of truth)
+from .primitives import SystemMacro, Q15_ONE
 
 def clamp_q15(x: int) -> int:
     """Clamp to valid Q15 range [0, 32767]."""
     return max(0, min(Q15_ONE, x))
-
-
-# =============================================================================
-# SYSTEM MACRO IDS (from WSE-STD-MACRO v0)
-# =============================================================================
-
-class SystemMacro(IntEnum):
-    """System macro IDs per WSE-STD-MACRO v0."""
-    ENERGY_STATE = 0     # Envelope-owned, never set by controllers
-    ENERGY_INTENT = 1    # Controller → CMMM
-    MOTION = 2           # Controller → CMMM
-    FOCUS = 3            # Controller → CMMM
-    BRIGHTNESS = 4       # Controller → CMMM (BRIGHT target)
-    DENSITY = 5          # Controller → CMMM (BODY target)
-    RISK = 6             # Controller → CMMM
-    AGE = 7              # CMMM integrator (not set directly)
-    SPACE = 8            # Controller → CMMM
-    MATERIAL = 9         # Controller → CMMM
-    UNITY = 10           # Controller → CMMM
-    VIBRATO = 11         # Controller → Mode B (pitch modulation depth, 0-32767)
-    LEGATO = 12          # Controller → Mode B (0=retrigger, >0=legato mode)
 
 
 # =============================================================================

@@ -10,6 +10,12 @@ from dataclasses import dataclass
 from enum import IntEnum
 from typing import Dict, List, Tuple, Optional
 
+# Import canonical TailMode and K ladder from primitives (single source of truth)
+from ..primitives import TailMode, K_LADDER_MASKS, get_k_mask, BLOCK_SIZE
+
+# Import TAIL_OPS from canonical source (tables/tail_modes.py)
+from ..tables.tail_modes import TAIL_OPS as _TAIL_OPS_CANONICAL, get_tail_ops as _get_tail_ops_canonical
+
 # =============================================================================
 # CONSTANTS
 # =============================================================================
@@ -23,7 +29,7 @@ VM_K = 4  # Change to 8 for higher quality, 4 for lower memory
 COEFF_LEN = 64 * VM_K  # 256 for K=4, 512 for K=8
 NODE_LEN = 8     # Coefficients per node (for operator compatibility)
 L_TOTAL_NODES = 32  # Total nodes for operator system (legacy view)
-BLOCK_SAMPLES = 64  # Samples per block
+BLOCK_SAMPLES = BLOCK_SIZE  # Samples per block (from primitives)
 
 TABLE_VERSION = "0.1.0"
 
@@ -100,28 +106,18 @@ def get_operator_lane(op_id: int) -> OperatorLane:
 
 
 # =============================================================================
-# TAIL MODE TABLE
+# TAIL MODE TABLE (re-exported from tables/tail_modes.py)
 # =============================================================================
+# TailMode enum imported from primitives.py (single source of truth)
+# TAIL_OPS imported from tables/tail_modes.py (canonical source)
 
-class TailMode(IntEnum):
-    """Tail mode selection."""
-    FULL = 0       # [2, 11, 23] - FineClamp, NormalizeScale, SheafProject
-    MID = 1        # [2, 11] - FineClamp, NormalizeScale
-    MIN = 2        # [2] - FineClamp only
-    EMERGENCY = 3  # [19] - EmergencySimplify only
-
-
-TAIL_OPS: Dict[TailMode, List[int]] = {
-    TailMode.FULL: [2, 11, 23],
-    TailMode.MID: [2, 11],
-    TailMode.MIN: [2],
-    TailMode.EMERGENCY: [19],
-}
+# Re-export for backward compatibility
+TAIL_OPS = _TAIL_OPS_CANONICAL
 
 
 def get_tail_ops(tail_mode: TailMode) -> List[int]:
     """Get operator IDs for a tail mode."""
-    return TAIL_OPS.get(tail_mode, [2])
+    return _get_tail_ops_canonical(tail_mode)
 
 
 # =============================================================================

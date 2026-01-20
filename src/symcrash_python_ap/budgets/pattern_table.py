@@ -2,8 +2,10 @@
 Pattern Table for Node Masks (WSE-STD-020 §3.3)
 ===============================================
 
-Defines canonical node mask patterns for the K degradation ladder.
-Pattern IDs map to leaf_mask_u32 values.
+Re-exports from tables/pattern_table.py (canonical source).
+
+Provides additional budget-specific patterns and utilities for degradation
+scenarios including extended patterns for artistic control.
 
 Node layout (32 nodes total, low-bands-first priority):
     Band 0: nodes 0      (1 node,  8 coeffs)
@@ -15,22 +17,42 @@ Node layout (32 nodes total, low-bands-first priority):
 
 K ladder (canonical degradation steps):
     K=32 → K=24 → K=16 → K=12 → K=8 → K=4 → K=1
-
-Priority ordering: Keep low-frequency nodes first (bands 0→5).
 """
 
-from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import Dict, List
+
+# Re-export canonical definitions from tables/pattern_table.py
+from ..tables.pattern_table import (
+    # Constants
+    COEFF_LEN, NODE_LEN, NUM_NODES,
+    BAND_NODE_RANGES,
+    K_STAIRCASE, K_TO_PATTERN,
+    # Pattern table entries
+    PatternEntry, PATTERN_TABLE,
+    # Pattern lookup functions
+    get_node_mask, get_k_count,
+    pattern_for_k, next_lower_k,
+    # Mask utilities
+    popcount32, nodes_to_mask, band_to_mask, bands_to_mask, first_k_nodes_mask,
+    # Pattern ID constants
+    PATTERN_FULL, PATTERN_K24, PATTERN_K16, PATTERN_K12, PATTERN_K8, PATTERN_K4, PATTERN_K1,
+    PATTERN_BANDS_0_1_2, PATTERN_BANDS_0_1, PATTERN_BAND_0,
+)
+
 
 # =============================================================================
-# CONSTANTS
+# BACKWARD COMPATIBILITY ALIASES
 # =============================================================================
 
-COEFF_LEN = 256
-NODE_LEN = 8
-L_TOTAL_NODES = 32  # COEFF_LEN // NODE_LEN
+# Alias for backward compatibility
+L_TOTAL_NODES = NUM_NODES  # 32
 
-# Band structure (from operator_library)
+# K ladder as tuple (tables uses list)
+K_LADDER = tuple(K_STAIRCASE)
+
+# Band structure as coefficient ranges (for backward compatibility)
+# BAND_NODE_RANGES is node-based: [(0, 1), (1, 3), ...]
+# BAND_SLICES is coefficient-based: [(0, 8), (8, 24), ...]
 BAND_SLICES = [
     (0, 8),      # Band 0: 8 coeffs, 1 node
     (8, 24),     # Band 1: 16 coeffs, 2 nodes
@@ -44,9 +66,6 @@ BAND_SLICES = [
 NODES_PER_BAND = [(end - start) // NODE_LEN for start, end in BAND_SLICES]
 # = [1, 2, 4, 6, 8, 11]
 
-# K ladder steps (canonical degradation)
-K_LADDER = (32, 24, 16, 12, 8, 4, 1)
-
 
 # =============================================================================
 # NODE PRIORITY ORDERING
@@ -56,79 +75,33 @@ def build_node_priority() -> List[int]:
     """
     Build canonical node priority ordering.
 
-    Returns node indices in band order (low→high frequency),
-    and within each band from left to right.
-
+    Returns node indices in band order (low→high frequency).
     This is the "keep low bands first" ordering for degradation.
     """
-    priority = []
-    node_idx = 0
-    for band_id, (start, end) in enumerate(BAND_SLICES):
-        num_nodes = (end - start) // NODE_LEN
-        for _ in range(num_nodes):
-            priority.append(node_idx)
-            node_idx += 1
-    return priority
+    return list(range(L_TOTAL_NODES))
 
 
-# Static priority ordering
+# Static priority ordering (sequential for contiguous bands)
 NODE_PRIORITY = build_node_priority()
-# = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
-# (happens to be sequential because bands are contiguous)
 
 
 # =============================================================================
-# BITMASK UTILITIES
+# BACKWARD COMPATIBILITY FUNCTIONS
 # =============================================================================
-
-def popcount32(x: int) -> int:
-    """Count set bits in a 32-bit value (FPGA-friendly)."""
-    return (x & 0xFFFFFFFF).bit_count()
-
 
 def build_mask_for_k(k: int) -> int:
-    """
-    Build a node mask with exactly K active nodes.
-
-    Uses NODE_PRIORITY to select which nodes to keep (low bands first).
-
-    Args:
-        k: Number of active nodes (1-32)
-
-    Returns:
-        32-bit mask with K bits set
-    """
-    if k <= 0:
-        return 0
-    if k >= L_TOTAL_NODES:
-        return (1 << L_TOTAL_NODES) - 1  # All ones
-
-    mask = 0
-    for i in range(min(k, len(NODE_PRIORITY))):
-        node = NODE_PRIORITY[i]
-        mask |= (1 << node)
-    return mask
+    """Build a node mask with exactly K active nodes (low bands first)."""
+    return first_k_nodes_mask(k)
 
 
 def shrink_mask_to_k(mask: int, k_target: int) -> int:
-    """
-    Shrink an existing mask to have at most K active nodes.
-
-    Keeps nodes according to NODE_PRIORITY order.
-
-    Args:
-        mask: Current node mask
-        k_target: Target number of active nodes
-
-    Returns:
-        New mask with at most k_target bits set
-    """
+    """Shrink an existing mask to have at most K active nodes."""
     if k_target <= 0:
         return 0
 
     current_k = popcount32(mask)
     if current_k <= k_target:
-        return mask  # Already at or below target
+        return mask
 
     # Build new mask keeping only first k_target nodes by priority
     out = 0
@@ -153,157 +126,27 @@ def mask_to_node_list(mask: int) -> List[int]:
 
 def node_list_to_mask(nodes: List[int]) -> int:
     """Convert list of node indices to bitmask."""
-    mask = 0
-    for node in nodes:
-        if 0 <= node < L_TOTAL_NODES:
-            mask |= (1 << node)
-    return mask
+    return nodes_to_mask(nodes)
 
-
-# =============================================================================
-# PATTERN TABLE ENTRIES
-# =============================================================================
-
-@dataclass(frozen=True)
-class PatternEntry:
-    """Pattern table entry for node mask configuration."""
-    pattern_id: int
-    name: str
-    leaf_mask_u32: int
-    k_value: int  # popcount of mask
-    description: str
-
-
-# Pre-computed patterns for K ladder
-PATTERN_TABLE: Dict[int, PatternEntry] = {}
-
-def _build_pattern_table():
-    """Build the canonical pattern table for K ladder."""
-    global PATTERN_TABLE
-
-    pattern_id = 0
-
-    # Full mask (K=32)
-    PATTERN_TABLE[pattern_id] = PatternEntry(
-        pattern_id=pattern_id,
-        name="FULL_32",
-        leaf_mask_u32=build_mask_for_k(32),
-        k_value=32,
-        description="All 32 nodes active",
-    )
-    pattern_id += 1
-
-    # K ladder patterns
-    for k in [24, 16, 12, 8, 4, 1]:
-        PATTERN_TABLE[pattern_id] = PatternEntry(
-            pattern_id=pattern_id,
-            name=f"K_{k}",
-            leaf_mask_u32=build_mask_for_k(k),
-            k_value=k,
-            description=f"Low-bands-first, {k} nodes",
-        )
-        pattern_id += 1
-
-    # =========================================================================
-    # EXTENDED PATTERNS (pattern_id 7+)
-    # =========================================================================
-    # These are sound-design patterns, NOT degradation rungs.
-    # apply_degradation() MUST only emit pattern_id 0-6 (the K ladder rungs).
-    # Extended patterns are for artistic control, not budget fitting.
-
-    # Band-specific patterns (for brightness control)
-    # Bands 0-2 only (low frequency)
-    low_freq_mask = 0
-    for band_id in range(3):
-        start, end = BAND_SLICES[band_id]
-        for coeff_idx in range(start, end, NODE_LEN):
-            node = coeff_idx // NODE_LEN
-            low_freq_mask |= (1 << node)
-
-    PATTERN_TABLE[pattern_id] = PatternEntry(
-        pattern_id=pattern_id,
-        name="LOW_FREQ",
-        leaf_mask_u32=low_freq_mask,
-        k_value=popcount32(low_freq_mask),
-        description="Bands 0-2 only (7 nodes)",
-    )
-    pattern_id += 1
-
-    # Bands 3-5 only (high frequency)
-    high_freq_mask = 0
-    for band_id in range(3, 6):
-        start, end = BAND_SLICES[band_id]
-        for coeff_idx in range(start, end, NODE_LEN):
-            node = coeff_idx // NODE_LEN
-            high_freq_mask |= (1 << node)
-
-    PATTERN_TABLE[pattern_id] = PatternEntry(
-        pattern_id=pattern_id,
-        name="HIGH_FREQ",
-        leaf_mask_u32=high_freq_mask,
-        k_value=popcount32(high_freq_mask),
-        description="Bands 3-5 only (25 nodes)",
-    )
-
-_build_pattern_table()
-
-
-# =============================================================================
-# PATTERN LOOKUP
-# =============================================================================
 
 def get_pattern_by_id(pattern_id: int) -> PatternEntry:
     """Get pattern entry by ID."""
-    if pattern_id in PATTERN_TABLE:
-        return PATTERN_TABLE[pattern_id]
-    # Default to full mask
-    return PATTERN_TABLE[0]
+    return PATTERN_TABLE.get(pattern_id, PATTERN_TABLE[PATTERN_FULL])
 
 
 def get_pattern_for_k(k: int) -> PatternEntry:
-    """
-    Get the best pattern for a target K value.
-
-    Returns the pattern with closest K <= target.
-    """
-    best = None
-    for entry in PATTERN_TABLE.values():
-        if entry.k_value <= k:
-            if best is None or entry.k_value > best.k_value:
-                best = entry
-    return best if best else PATTERN_TABLE[0]
+    """Get the best pattern for a target K value."""
+    pattern_id = pattern_for_k(k)
+    return PATTERN_TABLE[pattern_id]
 
 
 def get_next_lower_k(current_k: int) -> int:
-    """
-    Get the next lower K value in the degradation ladder.
+    """Get the next lower K value in the degradation ladder."""
+    return next_lower_k(current_k)
 
-    Args:
-        current_k: Current K value
-
-    Returns:
-        Next lower K from ladder, or 1 if at minimum
-    """
-    for k in K_LADDER:
-        if k < current_k:
-            return k
-    return 1
-
-
-# =============================================================================
-# COEFFICIENT MASK UTILITIES
-# =============================================================================
 
 def node_mask_to_coeff_mask(node_mask: int) -> List[bool]:
-    """
-    Expand node mask to coefficient-level mask.
-
-    Args:
-        node_mask: 32-bit node mask
-
-    Returns:
-        List of 256 booleans for coefficient activity
-    """
+    """Expand node mask to coefficient-level mask."""
     coeff_mask = [False] * COEFF_LEN
     for node in range(L_TOTAL_NODES):
         if (node_mask >> node) & 1:
@@ -324,12 +167,22 @@ def get_active_coeff_indices(node_mask: int) -> List[int]:
 
 
 __all__ = [
-    'COEFF_LEN', 'NODE_LEN', 'L_TOTAL_NODES',
-    'BAND_SLICES', 'NODES_PER_BAND', 'K_LADDER',
-    'NODE_PRIORITY', 'build_node_priority',
-    'popcount32', 'build_mask_for_k', 'shrink_mask_to_k',
-    'mask_to_node_list', 'node_list_to_mask',
+    # Re-exported from tables/pattern_table.py
+    'COEFF_LEN', 'NODE_LEN', 'L_TOTAL_NODES', 'NUM_NODES',
+    'K_LADDER', 'K_STAIRCASE', 'K_TO_PATTERN',
     'PatternEntry', 'PATTERN_TABLE',
+    'popcount32',
+    'PATTERN_FULL', 'PATTERN_K24', 'PATTERN_K16', 'PATTERN_K12',
+    'PATTERN_K8', 'PATTERN_K4', 'PATTERN_K1',
+    'PATTERN_BANDS_0_1_2', 'PATTERN_BANDS_0_1', 'PATTERN_BAND_0',
+    # Backward compatibility
+    'BAND_SLICES', 'BAND_NODE_RANGES', 'NODES_PER_BAND',
+    'NODE_PRIORITY', 'build_node_priority',
+    'build_mask_for_k', 'shrink_mask_to_k',
+    'mask_to_node_list', 'node_list_to_mask',
     'get_pattern_by_id', 'get_pattern_for_k', 'get_next_lower_k',
     'node_mask_to_coeff_mask', 'get_active_coeff_indices',
+    # Mask utilities
+    'get_node_mask', 'get_k_count', 'pattern_for_k', 'next_lower_k',
+    'nodes_to_mask', 'band_to_mask', 'bands_to_mask', 'first_k_nodes_mask',
 ]

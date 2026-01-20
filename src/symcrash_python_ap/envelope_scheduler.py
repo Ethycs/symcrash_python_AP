@@ -14,15 +14,15 @@ from dataclasses import dataclass
 from enum import IntEnum
 from typing import Optional
 
+from .primitives import BLOCK_SIZE, SAMPLE_RATE_HZ, Q15_ONE, BLOCK_RATE_HZ
+
 
 # =============================================================================
 # CONSTANTS
 # =============================================================================
 
-SAMPLE_RATE = 48000
-BLOCK_SIZE = 64
-BLOCKS_PER_SECOND = SAMPLE_RATE // BLOCK_SIZE  # 750 blocks/sec
-Q15_ONE = 32767
+SAMPLE_RATE = SAMPLE_RATE_HZ
+BLOCKS_PER_SECOND = BLOCK_RATE_HZ  # 750 blocks/sec
 
 
 # =============================================================================

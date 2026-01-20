@@ -20,6 +20,7 @@ from typing import List, Tuple, Optional, Set, TYPE_CHECKING
 from enum import IntEnum
 
 from ..frames import VoiceFramePacketV0b, VoiceFlags
+from ..primitives import BLOCK_SIZE, Q15_ONE, Q15_SCALE
 
 if TYPE_CHECKING:
     from ..budgets import RegimeBudget
@@ -29,14 +30,9 @@ if TYPE_CHECKING:
 # CONSTANTS (from Scheduler Spec v01)
 # =============================================================================
 
-BLOCK_SIZE = 64  # Samples per block
 V_MAX = 128      # Maximum voices
 TILE_SIZE = 16   # Voices per tile (power of 2)
 NUM_TILES = V_MAX // TILE_SIZE  # 8 tiles
-
-# Q15 fixed-point constants
-Q15_ONE = 32767
-Q15_SCALE = 32768
 
 # Eligibility threshold: activity > 0.05 in Q15
 THETA_ACTIVE_Q15 = int(0.05 * Q15_SCALE)  # ~1638

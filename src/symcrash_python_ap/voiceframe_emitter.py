@@ -2,44 +2,34 @@
 VoiceFrame Emitter
 ==================
 
-Emits VoiceFrames from compiled preset + ControlFrame.
+DEPRECATED: Use VoiceEngine directly with Simple mode.
 
-The emitter is the bridge between the preset (static configuration),
-ControlFrame (control intent), and the VM (which consumes VoiceFrames).
+This module provides a compatibility wrapper around VoiceEngine for code
+that still uses the VoiceFrameEmitter API. New code should use VoiceEngine
+directly:
 
-It handles:
-- Consuming ControlFrames from CockpitEngine
-- Envelope scheduling (block-rate ADSR)
-- Beta (dry/wet) ramping
-- Note-on/note-off transitions
-- MIDI note to Hz conversion
-- Applying control modifiers (family scales, pitch offset, gain, etc.)
+    # NEW WAY (recommended):
+    from symcrash_python_ap.voice import VoiceEngine, EngineMode
 
-Usage:
-    from preset_compiler import PresetCompiler
-    from voiceframe_emitter import VoiceFrameEmitter
-    from cockpit_engine import CockpitEngine
+    engine = VoiceEngine()
+    voice_id = engine.allocate_voice_from_preset(preset)
+    engine.note_on_simple(voice_id, note=60, velocity_q15=32767)
+    frame = engine.step_voice_simple(voice_id)
 
-    compiler = PresetCompiler()
-    preset = compiler.compile_file("brass_stab_v0.yaml")
-
-    cockpit = CockpitEngine()
+    # OLD WAY (deprecated):
     emitter = VoiceFrameEmitter(preset)
-
-    # Each block:
-    control_frame = cockpit.tick()
-    emitter.consume_control_frame(control_frame)
+    emitter.note_on(note=60, velocity_q15=32767)
     frame = emitter.emit_frame()
-    # Pass frame to VM
+
+The wrapper maintains full API compatibility while delegating all work
+to VoiceEngine's Simple mode implementation.
 """
 
+import warnings
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Tuple
-import math
 
 from .library.preset_compiler import CompiledPreset, Q15_ONE
-from .envelope_scheduler import EnvelopeScheduler, ADSRSpec
-from .envelope_targets import EnvelopeTarget, parse_envelope_target
 from .frames import VoiceFrame
 from .control_frame import ControlFrame, EventType
 from .control_registry import ControlID
@@ -69,106 +59,75 @@ def midi_to_hz(note: int, cents: int = 0) -> float:
 
 
 # =============================================================================
-# VOICEFRAME EMITTER
+# VOICEFRAME EMITTER (DEPRECATED - WRAPPER AROUND VOICEENGINE)
 # =============================================================================
 
 @dataclass
 class VoiceFrameEmitter:
     """
-    Emits VoiceFrames from compiled preset + ControlFrame.
+    DEPRECATED: Use VoiceEngine directly with Simple mode.
 
-    Manages per-voice state including:
-    - Envelope (ADSR)
-    - Beta ramp (dry/wet blend)
-    - Note state (pitch, velocity)
-    - Control modifiers (pitch offset, gain scale, family scales, etc.)
+    This class is a compatibility wrapper that creates a VoiceEngine
+    in Simple mode. All state and computation is delegated to VoiceEngine.
+
+    The wrapper will be removed in a future version. Migrate to:
+
+        engine = VoiceEngine()
+        voice_id = engine.allocate_voice_from_preset(preset)
+        engine.note_on_simple(voice_id, note, velocity_q15, cents)
+        frame = engine.step_voice_simple(voice_id)
     """
     preset: CompiledPreset
 
-    # Voice state
+    # Voice ID for this emitter
     voice_id: int = 0
+
+    # Current note state (for consume_control_frame compatibility)
     note: int = 60
     cents: int = 0
     velocity_q15: int = Q15_ONE
 
-    # Block counter
+    # Block counter (exposed for backward compatibility)
     block_index: int = 0
 
-    # Envelope state
-    _envelope: Optional[EnvelopeScheduler] = field(default=None, repr=False)
+    # Control modifiers from ControlFrame (for backward compatibility)
+    _pitch_offset_cents: int = 0
+    _gain_scale_q15: int = Q15_ONE
+    _tree_blend_q15: int = 0
+    _family_scale_q15: List[int] = field(default_factory=lambda: [Q15_ONE] * 8)
+    _master_gain_q15: int = Q15_ONE
 
-    # Beta ramp state
-    _beta_current_q15: int = 0
-
-    # Note state
-    _is_note_on: bool = False
-
-    # Control modifiers (from ControlFrame)
-    _pitch_offset_cents: int = 0       # DETUNE + PITCH_BEND
-    _gain_scale_q15: int = Q15_ONE     # DYNAMICS control
-    _tree_blend_q15: int = 0           # MORPH control
-    _family_scale_q15: List[int] = field(default_factory=lambda: [Q15_ONE] * 8)  # 8 families
-    _master_gain_q15: int = Q15_ONE    # Global master gain
-
-    # ADSR overrides (from ControlFrame)
+    # ADSR overrides from ControlFrame
     _attack_blocks: Optional[int] = None
     _decay_blocks: Optional[int] = None
     _sustain_level_q15: Optional[int] = None
     _release_blocks: Optional[int] = None
 
-    # Matrix envelope system: envelope_id → (scheduler, target_ids)
-    _envelope_matrix: Dict[str, Tuple[EnvelopeScheduler, List[int]]] = field(default_factory=dict, repr=False)
+    # Manual overrides (for set_eta, set_detune)
+    _eta_override: Optional[int] = None
+    _detune_override: Optional[int] = None
+
+    # Internal: wrapped VoiceEngine in Simple mode
+    _engine: 'VoiceEngine' = field(init=False, repr=False)
+    _voice_id_internal: int = field(init=False, repr=False)
+    _is_note_on: bool = field(default=False, init=False)
 
     def __post_init__(self):
-        """Initialize envelope from preset."""
-        if self.preset.amp_env:
-            self._envelope = EnvelopeScheduler(spec=self.preset.amp_env)
-        else:
-            # Default envelope if none specified
-            self._envelope = EnvelopeScheduler(spec=ADSRSpec())
+        """Initialize VoiceEngine wrapper."""
+        # Lazy import to avoid circular dependencies
+        from .voice import VoiceEngine
 
-        # Initialize beta to start value
-        self._beta_current_q15 = self.preset.material.beta_start_q15
+        # Create VoiceEngine (Simple mode is set per-voice, not engine-wide)
+        self._engine = VoiceEngine(max_voices=1)
 
-        # Initialize envelope matrix if preset has envelope_bindings
-        envelope_bindings = getattr(self.preset, 'envelope_bindings', None)
-        if envelope_bindings:
-            self._init_envelope_matrix(envelope_bindings)
+        # Allocate voice from preset (this sets Simple mode on the voice)
+        self._voice_id_internal = self._engine.allocate_voice_from_preset(
+            self.preset,
+            voice_id=0
+        )
 
-    def _init_envelope_matrix(self, bindings: List) -> None:
-        """
-        Initialize the matrix envelope system from EnvelopeBinding list.
-
-        Args:
-            bindings: List of EnvelopeBinding from InstrumentIR or CompiledPreset
-        """
-        from .instrument_ir import EnvelopeBinding, ADSR
-
-        for binding in bindings:
-            # Convert ADSR to ADSRSpec
-            adsr = binding.adsr
-            spec = ADSRSpec(
-                attack_ms=adsr.a_ms,
-                decay_ms=adsr.d_ms,
-                sustain=adsr.s,
-                release_ms=adsr.r_ms,
-            )
-
-            # Parse target names to EnvelopeTarget IDs
-            target_ids = []
-            for target_name in binding.targets:
-                try:
-                    target = parse_envelope_target(target_name)
-                    target_ids.append(int(target))
-                except KeyError:
-                    # Skip unknown targets
-                    pass
-
-            if target_ids:
-                self._envelope_matrix[binding.id] = (
-                    EnvelopeScheduler(spec=spec),
-                    target_ids
-                )
+        if self._voice_id_internal is None:
+            raise RuntimeError("Failed to allocate voice from preset")
 
     def note_on(self, note: int, velocity_q15: int = Q15_ONE, cents: int = 0) -> None:
         """
@@ -185,34 +144,28 @@ class VoiceFrameEmitter:
         self.block_index = 0
         self._is_note_on = True
 
-        # Reset beta ramp
-        self._beta_current_q15 = self.preset.material.beta_start_q15
-
-        # Trigger main envelope
-        if self._envelope:
-            self._envelope.trigger_note()
-
-        # Trigger all matrix envelopes
-        for scheduler, _ in self._envelope_matrix.values():
-            scheduler.trigger_note()
+        # Delegate to VoiceEngine
+        self._engine.note_on_simple(
+            self._voice_id_internal,
+            note=note,
+            velocity_q15=velocity_q15,
+            cents=cents
+        )
 
     def note_off(self) -> None:
         """Trigger note-off event (start release phase)."""
         self._is_note_on = False
 
-        # Release main envelope
-        if self._envelope:
-            self._envelope.release_note()
-
-        # Release all matrix envelopes
-        for scheduler, _ in self._envelope_matrix.values():
-            scheduler.release_note()
+        # Delegate to VoiceEngine
+        self._engine.note_off_simple(self._voice_id_internal)
 
     def consume_control_frame(self, frame: ControlFrame) -> None:
         """
         Consume a ControlFrame and update emitter state.
 
-        Extracts control modifiers and events for this voice.
+        Note: In Simple mode, control frame consumption is handled locally
+        since VoiceEngine doesn't expose gesture updates for Simple mode.
+        The control modifiers are applied during emit_frame().
 
         Args:
             frame: ControlFrame from CockpitEngine
@@ -263,120 +216,53 @@ class VoiceFrameEmitter:
         if frame.globals.master_gain_q15 is not None:
             self._master_gain_q15 = frame.globals.master_gain_q15
 
+        # Update VoiceState with pitch offset
+        state = self._engine.voices.get(self._voice_id_internal)
+        if state:
+            state.pitch_offset_cents = self._pitch_offset_cents
+
     def emit_frame(self) -> VoiceFrame:
         """
         Emit next VoiceFrame for this block.
 
         Call this once per block to get the VoiceFrame.
+        Delegates to VoiceEngine.step_voice_simple() and applies
+        control frame modifiers.
 
         Returns:
             VoiceFrame with all fields populated from preset + control modifiers
         """
-        # Update envelope ADSR if overridden by controls
-        if self._envelope and any([
-            self._attack_blocks is not None,
-            self._decay_blocks is not None,
-            self._sustain_level_q15 is not None,
-            self._release_blocks is not None,
-        ]):
-            # Create new ADSR spec with overrides
-            adsr = ADSRSpec(
-                attack_blocks=self._attack_blocks or self._envelope.spec.attack_blocks,
-                decay_blocks=self._decay_blocks or self._envelope.spec.decay_blocks,
-                sustain_level_q15=self._sustain_level_q15 or self._envelope.spec.sustain_level_q15,
-                release_blocks=self._release_blocks or self._envelope.spec.release_blocks,
+        # Get frame from VoiceEngine
+        frame = self._engine.step_voice_simple(self._voice_id_internal)
+
+        if frame is None:
+            # Voice is inactive, return a minimal frame
+            frame = VoiceFrame(
+                voice_id=self.voice_id,
+                f0_hz=midi_to_hz(self.note, self.cents),
+                note=self.note,
+                cents=self.cents,
+                gain_q15=0,
+                is_active=False,
             )
-            self._envelope.spec = adsr
-
-        # Get envelope gain
-        if self._envelope:
-            gain_q15 = self._envelope.tick()
         else:
-            gain_q15 = Q15_ONE if self._is_note_on else 0
+            # Apply control frame modifiers that VoiceEngine doesn't handle
+            # Apply DYNAMICS control (gain_scale_q15)
+            frame.gain_q15 = (frame.gain_q15 * self._gain_scale_q15) >> 15
 
-        # Apply velocity scaling
-        gain_q15 = (gain_q15 * self.velocity_q15) >> 15
+            # Apply master gain
+            frame.gain_q15 = (frame.gain_q15 * self._master_gain_q15) >> 15
 
-        # Apply DYNAMICS control (gain_scale_q15)
-        gain_q15 = (gain_q15 * self._gain_scale_q15) >> 15
+            # Apply MORPH control if set
+            if self._tree_blend_q15 != 0:
+                frame.tree_blend_q15 = self._tree_blend_q15
 
-        # Apply master gain
-        gain_q15 = (gain_q15 * self._master_gain_q15) >> 15
+            # Apply eta override if set
+            if self._eta_override is not None:
+                frame.beta_target_q15 = self._eta_override
 
-        # Compute beta ramp (preset-driven)
-        beta_target = self.preset.material.beta_target_q15
-        ramp_blocks = self.preset.material.beta_ramp_blocks
-
-        if self.block_index < ramp_blocks and ramp_blocks > 1:
-            # Linear ramp from start to target
-            beta_start = self.preset.material.beta_start_q15
-            t = self.block_index / (ramp_blocks - 1)
-            self._beta_current_q15 = int(beta_start + (beta_target - beta_start) * t)
-        else:
-            self._beta_current_q15 = beta_target
-
-        # Compute f0_hz from MIDI note + cents + pitch offset
-        total_cents = self.cents + self._pitch_offset_cents
-        f0_hz = midi_to_hz(self.note, total_cents)
-
-        # Apply family scales to preset families
-        scaled_families = []
-        for i, family_weight in enumerate(self.preset.backbone_families()):
-            if i < len(self._family_scale_q15):
-                scaled_weight = (family_weight * self._family_scale_q15[i]) >> 15
-                scaled_families.append(scaled_weight)
-            else:
-                scaled_families.append(family_weight)
-
-        # Use control-driven tree_blend_q15 if available
-        tree_blend = self._tree_blend_q15 if self._tree_blend_q15 != 0 else self.preset.latch.tree_blend_q15
-
-        # Determine oscillator mode and FM6 fields from preset
-        osc_mode = getattr(self.preset, 'osc_mode', 0)
-        fm6_config = getattr(self.preset, 'fm6', None)
-
-        # Tick all matrix envelopes and collect target values
-        env_targets_q15 = None
-        if self._envelope_matrix:
-            env_targets_q15 = {}
-            for env_id, (scheduler, target_ids) in self._envelope_matrix.items():
-                value = scheduler.tick()
-                for target_id in target_ids:
-                    env_targets_q15[target_id] = value
-
-        # Get CMMM defaults from preset (WSE-STD-070 §10)
-        cmmm = getattr(self.preset, 'cmmm', None)
-
-        # Build VoiceFrame
-        frame = VoiceFrame(
-            voice_id=self.voice_id,
-            f0_hz=f0_hz,
-            note=self.note,
-            cents=total_cents,
-            gain_q15=gain_q15,
-            beta_target_q15=self._beta_current_q15,
-            partial_amps_q15=list(self.preset.harmonic_amps_q15),
-            ops_enable=self.preset.backbone_ops(),
-            families=scaled_families,
-            tree_a_id=self.preset.latch.tree_a_id,
-            tree_b_id=self.preset.latch.tree_b_id,
-            tree_blend_q15=tree_blend,
-            is_starting=(self.block_index == 0),
-            is_active=self.is_active,
-            # FM6 fields (from preset if available)
-            coeff_osc_mode=osc_mode,
-            fm_algorithm_id=fm6_config.algorithm_id if fm6_config else None,
-            fm_op_ratios=list(fm6_config.op_ratios) if fm6_config else None,
-            fm_op_levels=list(fm6_config.op_levels) if fm6_config else None,
-            fm_feedback_depth=fm6_config.feedback_depth if fm6_config else None,
-            # Matrix envelope targets
-            env_targets_q15=env_targets_q15,
-            # CMMM runtime control fields (WSE-STD-070 §10)
-            cmmm_node_mask=cmmm.node_mask_u32 if cmmm else None,
-            cmmm_mask_ramp_blocks=cmmm.mask_ramp_blocks if cmmm else 5,
-            cmmm_tail_mode=cmmm.tail_mode if cmmm else None,
-            cmmm_traction_q15=cmmm.traction_q15 if cmmm else 32767,
-        )
+            # Update voice_id to match emitter's ID
+            frame.voice_id = self.voice_id
 
         # Advance block counter
         self.block_index += 1
@@ -386,22 +272,27 @@ class VoiceFrameEmitter:
     @property
     def is_active(self) -> bool:
         """True if voice should continue producing output."""
-        if self._envelope:
-            return self._envelope.is_active
-        return self._is_note_on
+        from .voice.voice_engine import VoicePhase
+
+        state = self._engine.voices.get(self._voice_id_internal)
+        if state:
+            return state.phase != VoicePhase.FREE
+        return False
 
     @property
     def is_releasing(self) -> bool:
         """True if in release phase."""
-        if self._envelope:
-            return self._envelope.is_releasing
-        return not self._is_note_on
+        from .voice.voice_engine import VoicePhase
+
+        state = self._engine.voices.get(self._voice_id_internal)
+        if state:
+            return state.phase == VoicePhase.RELEASE
+        return False
 
     def reset(self) -> None:
         """Reset emitter to initial state."""
         self.block_index = 0
         self._is_note_on = False
-        self._beta_current_q15 = self.preset.material.beta_start_q15
         self._pitch_offset_cents = 0
         self._gain_scale_q15 = Q15_ONE
         self._tree_blend_q15 = 0
@@ -411,48 +302,121 @@ class VoiceFrameEmitter:
         self._decay_blocks = None
         self._sustain_level_q15 = None
         self._release_blocks = None
-        if self._envelope:
-            self._envelope.reset()
-        # Reset all matrix envelopes
-        for scheduler, _ in self._envelope_matrix.values():
-            scheduler.reset()
+        self._eta_override = None
+        self._detune_override = None
+
+        # Re-allocate voice from preset to reset VoiceEngine state
+        self._voice_id_internal = self._engine.allocate_voice_from_preset(
+            self.preset,
+            voice_id=0
+        )
+
+    def set_eta(self, eta_q15: Optional[int]) -> None:
+        """
+        Override the beta (eta) value for dry/wet mixing.
+
+        Args:
+            eta_q15: Beta value in Q15 format (0-32767), or None to use preset default
+        """
+        self._eta_override = eta_q15
+        # Update VoiceState
+        state = self._engine.voices.get(self._voice_id_internal)
+        if state and eta_q15 is not None:
+            state.beta_current_q15 = eta_q15
+            state.beta_target_q15 = eta_q15
+
+    def set_detune(self, detune_cents: Optional[int]) -> None:
+        """
+        Override the detune in cents.
+
+        Args:
+            detune_cents: Detune in cents, or None to use preset default
+        """
+        self._detune_override = detune_cents
+        self._pitch_offset_cents = detune_cents if detune_cents is not None else 0
+        # Update VoiceState
+        state = self._engine.voices.get(self._voice_id_internal)
+        if state:
+            state.pitch_offset_cents = self._pitch_offset_cents
+
+    def get_eta(self) -> Optional[int]:
+        """
+        Get the current eta (beta) override value.
+
+        Returns:
+            Current eta override in Q15 format, or None if using preset default
+        """
+        return self._eta_override
+
+    def get_detune(self) -> Optional[int]:
+        """
+        Get the current detune override value.
+
+        Returns:
+            Current detune override in cents, or None if using preset default
+        """
+        return self._detune_override
+
+    # Legacy property for backward compatibility
+    @property
+    def arc_phase(self) -> List[int]:
+        """
+        Get arc_phase_q16 storage for LFO phases.
+
+        DEPRECATED: LFO phase is now managed by VoiceEngine.
+        """
+        state = self._engine.voices.get(self._voice_id_internal)
+        if state:
+            return state.arc_phase_q16
+        return [0] * 8
+
+    # Legacy property for backward compatibility
+    @property
+    def voice_state(self):
+        """
+        Get the underlying VoiceState.
+
+        DEPRECATED: Use VoiceEngine directly.
+        """
+        return self._engine.voices.get(self._voice_id_internal)
 
 
 # =============================================================================
-# MULTI-VOICE EMITTER
+# MULTI-VOICE EMITTER (DEPRECATED)
 # =============================================================================
 
 @dataclass
 class MultiVoiceEmitter:
     """
+    DEPRECATED: Use VoiceEngine directly with multiple voices.
+
     Manages multiple VoiceFrameEmitters for polyphonic playback.
-
-    Usage:
-        from cockpit_engine import CockpitEngine
-
-        cockpit = CockpitEngine()
-        multi = MultiVoiceEmitter(preset, max_voices=8)
-
-        # Each block:
-        control_frame = cockpit.tick()
-        multi.consume_control_frame(control_frame)
-        frames = multi.emit_frames()
-        for frame in frames:
-            # Process with VM
+    This is a compatibility wrapper; new code should use VoiceEngine directly.
     """
     preset: CompiledPreset
     max_voices: int = 8
 
-    # Voice pool
-    _voices: List[VoiceFrameEmitter] = field(default_factory=list, repr=False)
-    _next_voice_id: int = 0
+    # Voice pool (now uses VoiceEngine internally)
+    _engine: 'VoiceEngine' = field(init=False, repr=False)
+    _voice_ids: List[int] = field(default_factory=list, repr=False)
+    _note_to_voice: Dict[int, int] = field(default_factory=dict, repr=False)
+
+    # Control modifiers (shared across all voices)
+    _master_gain_q15: int = Q15_ONE
 
     def __post_init__(self):
-        """Initialize voice pool."""
-        self._voices = []
+        """Initialize voice pool using VoiceEngine."""
+        from .voice import VoiceEngine
+
+        # Create VoiceEngine with capacity for all voices
+        self._engine = VoiceEngine(max_voices=self.max_voices)
+
+        # Allocate all voices from preset
+        self._voice_ids = []
         for i in range(self.max_voices):
-            emitter = VoiceFrameEmitter(preset=self.preset, voice_id=i)
-            self._voices.append(emitter)
+            voice_id = self._engine.allocate_voice_from_preset(self.preset, voice_id=i)
+            if voice_id is not None:
+                self._voice_ids.append(voice_id)
 
     def consume_control_frame(self, frame: ControlFrame) -> None:
         """
@@ -461,8 +425,19 @@ class MultiVoiceEmitter:
         Args:
             frame: ControlFrame from CockpitEngine
         """
-        for voice in self._voices:
-            voice.consume_control_frame(frame)
+        # Process note-on/note-off events
+        for event in frame.events:
+            if event.type == EventType.NOTE_ON:
+                note = event.a & 0x7F
+                velocity_q15 = (event.a >> 8) & 0xFFFF
+                self.note_on(note, velocity_q15)
+            elif event.type == EventType.NOTE_OFF:
+                note = event.a & 0x7F
+                self.note_off(note)
+
+        # Update global controls
+        if frame.globals.master_gain_q15 is not None:
+            self._master_gain_q15 = frame.globals.master_gain_q15
 
     def note_on(self, note: int, velocity_q15: int = Q15_ONE, cents: int = 0) -> int:
         """
@@ -471,21 +446,29 @@ class MultiVoiceEmitter:
         Returns:
             Voice ID that was allocated, or -1 if no voice available
         """
+        from .voice.voice_engine import VoicePhase
+
         # Find free voice (prefer inactive, then oldest releasing)
-        voice = self._find_free_voice()
-        if voice is None:
+        voice_id = self._find_free_voice()
+        if voice_id is None:
             return -1
 
-        voice.note_on(note, velocity_q15, cents)
-        return voice.voice_id
+        # Note-on on the voice
+        self._engine.note_on_simple(voice_id, note, velocity_q15, cents)
+
+        # Track note-to-voice mapping
+        self._note_to_voice[note] = voice_id
+
+        return voice_id
 
     def note_off(self, note: int) -> None:
         """
-        Trigger note-off for all voices playing this note.
+        Trigger note-off for voices playing this note.
         """
-        for voice in self._voices:
-            if voice._is_note_on and voice.note == note:
-                voice.note_off()
+        if note in self._note_to_voice:
+            voice_id = self._note_to_voice[note]
+            self._engine.note_off_simple(voice_id)
+            del self._note_to_voice[note]
 
     def emit_frames(self) -> List[VoiceFrame]:
         """
@@ -494,23 +477,34 @@ class MultiVoiceEmitter:
         Returns:
             List of VoiceFrames (one per active voice)
         """
+        from .voice.voice_engine import VoicePhase
+
         frames = []
-        for voice in self._voices:
-            if voice.is_active:
-                frames.append(voice.emit_frame())
+        for voice_id in self._voice_ids:
+            state = self._engine.voices.get(voice_id)
+            if state and state.phase != VoicePhase.FREE:
+                frame = self._engine.step_voice_simple(voice_id)
+                if frame:
+                    # Apply master gain
+                    frame.gain_q15 = (frame.gain_q15 * self._master_gain_q15) >> 15
+                    frames.append(frame)
         return frames
 
-    def _find_free_voice(self) -> Optional[VoiceFrameEmitter]:
+    def _find_free_voice(self) -> Optional[int]:
         """Find a free voice for allocation."""
+        from .voice.voice_engine import VoicePhase
+
         # First pass: find inactive voice
-        for voice in self._voices:
-            if not voice.is_active:
-                return voice
+        for voice_id in self._voice_ids:
+            state = self._engine.voices.get(voice_id)
+            if state and state.phase == VoicePhase.FREE:
+                return voice_id
 
         # Second pass: find releasing voice (voice stealing)
-        for voice in self._voices:
-            if voice.is_releasing:
-                return voice
+        for voice_id in self._voice_ids:
+            state = self._engine.voices.get(voice_id)
+            if state and state.phase == VoicePhase.RELEASE:
+                return voice_id
 
         # No voice available
         return None
@@ -518,12 +512,21 @@ class MultiVoiceEmitter:
     @property
     def active_voice_count(self) -> int:
         """Number of currently active voices."""
-        return sum(1 for v in self._voices if v.is_active)
+        from .voice.voice_engine import VoicePhase
+
+        count = 0
+        for voice_id in self._voice_ids:
+            state = self._engine.voices.get(voice_id)
+            if state and state.phase != VoicePhase.FREE:
+                count += 1
+        return count
 
     def reset(self) -> None:
         """Reset all voices."""
-        for voice in self._voices:
-            voice.reset()
+        self._note_to_voice.clear()
+        # Re-allocate all voices
+        for i, voice_id in enumerate(self._voice_ids):
+            self._engine.allocate_voice_from_preset(self.preset, voice_id=voice_id)
 
 
 # =============================================================================

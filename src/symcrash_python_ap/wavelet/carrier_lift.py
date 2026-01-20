@@ -21,24 +21,21 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Dict
 from enum import IntEnum
 
+from ..primitives import (
+    Q15_ONE, Q15_HALF, Q15_SCALE, BLOCK_SIZE, SAMPLE_RATE_HZ, BLOCK_RATE_HZ, NUM_LEAVES
+)
+
 
 # =============================================================================
 # CONSTANTS
 # =============================================================================
 
-# Q15 fixed-point constants
-Q15_ONE = 32767
-Q15_HALF = 16384
-Q15_SCALE = 32768
-
 # Block/sample rate constants
-BLOCK_SIZE = 64
-SAMPLE_RATE = 48000
-BLOCKS_PER_SECOND = SAMPLE_RATE // BLOCK_SIZE  # 750 Hz
+SAMPLE_RATE = SAMPLE_RATE_HZ
+BLOCKS_PER_SECOND = BLOCK_RATE_HZ  # 750 Hz
 
 # D=6 master tree (64 leaves, fixed forever)
 MASTER_DEPTH = 6
-NUM_LEAVES = 1 << MASTER_DEPTH  # 64 leaves
 
 # Latency constants
 IDWPT_LATENCY_BLOCKS = 5  # 5-block wavelet latency (~6.7ms @ 48k/64)

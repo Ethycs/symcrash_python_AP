@@ -32,16 +32,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any, Tuple
 import numpy as np
 
-# Q15 constants
-Q15_ONE = 32767
-Q15_HALF = 16384
-Q15_SCALE = 32768
-
-# Default block size
-BLOCK_SIZE = 64
-
-# VM integration flag - set to True to use hybrid VM executor
-USE_VM_EXECUTOR = True
+from ..primitives import Q15_ONE, Q15_HALF, Q15_SCALE, BLOCK_SIZE
 
 
 # =============================================================================
@@ -62,8 +53,7 @@ from ..wavelet.sine_core import sine_q15, cosine_q15, PHASE_MASK
 from ..fixed import mul_q15_sat
 
 # VM Executor (WSE-STD-VM-HYBRID v0)
-if USE_VM_EXECUTOR:
-    from ..vm import vm_step_block, VMState, DecodedPlan, Tables
+from ..vm import vm_step_block, VMState, DecodedPlan, Tables
 
 
 # =============================================================================
@@ -174,9 +164,8 @@ class UnifiedOutputStage:
         self.ac_states: Dict[int, AntiClickState] = {}
 
         # VM executor state (WSE-STD-VM-HYBRID v0)
-        if USE_VM_EXECUTOR:
-            self.vm_states: Dict[int, VMState] = {}
-            self.vm_tables = Tables()
+        self.vm_states: Dict[int, VMState] = {}
+        self.vm_tables = Tables()
 
         # Initialize with harmonic tuning
         self.tuning.set_tuning_immediate(TUNING_HARMONIC)
@@ -222,10 +211,9 @@ class UnifiedOutputStage:
         self.safety.voice_on(voice_id)
 
         # Initialize VM state (WSE-STD-VM-HYBRID v0)
-        if USE_VM_EXECUTOR:
-            vm_state = VMState.create(voice_id)
-            vm_state.reset_for_note_on(note=note, cents=cents)
-            self.vm_states[voice_id] = vm_state
+        vm_state = VMState.create(voice_id)
+        vm_state.reset_for_note_on(note=note, cents=cents)
+        self.vm_states[voice_id] = vm_state
 
     def voice_off(self, voice_id: int) -> None:
         """Signal voice release."""
@@ -240,8 +228,7 @@ class UnifiedOutputStage:
         self.carrier.remove_state(voice_id)
         self.safety.voice_off(voice_id)
         # Clean up VM state
-        if USE_VM_EXECUTOR:
-            self.vm_states.pop(voice_id, None)
+        self.vm_states.pop(voice_id, None)
 
     def set_tuning(self, tuning_name: str, morph_time_sec: float = 2.0) -> None:
         """
@@ -272,167 +259,25 @@ class UnifiedOutputStage:
         # =====================================================================
         # VM EXECUTOR PATH (WSE-STD-VM-HYBRID v0)
         # =====================================================================
-        if USE_VM_EXECUTOR:
-            # Get or create VM state
-            if voice_id not in self.vm_states:
-                vm_state = VMState.create(voice_id)
-                vm_state.reset_for_note_on(note=frame.note, cents=frame.cents)
-                self.vm_states[voice_id] = vm_state
-
-            # Execute one block through VM
-            vm_state = self.vm_states[voice_id]
-            vm_state, output_block = vm_step_block(vm_state, frame, self.vm_tables)
+        # Get or create VM state
+        if voice_id not in self.vm_states:
+            vm_state = VMState.create(voice_id)
+            vm_state.reset_for_note_on(note=frame.note, cents=frame.cents)
             self.vm_states[voice_id] = vm_state
 
-            # VM output is int16 numpy array, convert to list
-            output = output_block.tolist()
+        # Execute one block through VM
+        vm_state = self.vm_states[voice_id]
+        vm_state, output_block = vm_step_block(vm_state, frame, self.vm_tables)
+        self.vm_states[voice_id] = vm_state
 
-            # Advance tuning morph (still needed for global state)
-            self.tuning.advance_block()
+        # VM output is int16 numpy array, convert to list
+        output = output_block.tolist()
 
-            # Mark first block done
-            state = self.voice_states[voice_id]
-            if state.is_starting:
-                state.after_first_block()
-
-            return output
-
-        # =====================================================================
-        # LEGACY PATH (original implementation)
-        # =====================================================================
-        state = self.voice_states[voice_id]
-        ac_state = self.ac_states[voice_id]
-
-        # Update pitch if changed (compare note/cents, not f0_hz vs phase_inc)
-        if frame.note != state.note or frame.cents != state.cents:
-            self.carrier.set_pitch(voice_id, frame.note, frame.cents)
-            state.note = frame.note
-            state.cents = frame.cents
-
-        # Update carrier harmonics from frame (waveform control)
-        if frame.partial_amps_q15:
-            self.carrier.set_harmonics(voice_id, frame.partial_amps_q15)
-
-        # Set wet target from frame (AntiClick handles ramping)
-        beta_target = frame.beta_target_q15 / 32767.0
-        self.anticlick.set_wet_target(ac_state, beta_target)
-
-        # === Step 1: Render carrier (phase-continuous, immediate) ===
-        x_carrier = self.carrier.render_block(voice_id, self.block_size)
-
-        # === Step 2: Generate wet path (FWPT -> mask -> IDWPT) ===
-        x_wet = None
-        if frame.beta_target_q15 > 0:
-            # Use fixed-point coefficient generation to avoid floating-point noise
-            from ..wavelet.harmonic_injector import create_harmonic_coeffs_fixed, WaveType
-
-            partial_amps = frame.partial_amps_q15 if frame.partial_amps_q15 else state.partial_amps_q15
-
-            if partial_amps and partial_amps[0] > 0 and all(a == 0 for a in partial_amps[1:]):
-                wave_type = WaveType.SINE
-            else:
-                wave_type = WaveType.SAW
-
-            # Use note/cents directly (fixed-point) instead of f0_hz (floating-point)
-            coeffs_256 = create_harmonic_coeffs_fixed(
-                note=frame.note,
-                cents=frame.cents,
-                amplitude=Q15_HALF,
-                wave_type=wave_type,
-                partials_n=8,
-                brightness_q15=Q15_ONE
-            )
-
-            # Apply global tuning gains
-            tuning_gains = self.tuning.get_current_gains()
-            from ..wavelet_trees import NODE_SIZE as WPT_NODE_SIZE
-            for i in range(256):
-                leaf_idx = i // WPT_NODE_SIZE
-                if leaf_idx < len(tuning_gains):
-                    coeffs_256[i] = (coeffs_256[i] * tuning_gains[leaf_idx]) >> 15
-
-            # === Apply operators from preset ===
-            if frame.ops_enable:
-                from ..operator_library import (
-                    build_operator_library, get_operator_id, apply_operator
-                )
-
-                if not hasattr(self, '_op_library'):
-                    self._op_library = build_operator_library()
-
-                coeffs_np = np.array(coeffs_256, dtype=np.int16)
-
-                for op_name in frame.ops_enable:
-                    op_id = get_operator_id(op_name)
-                    if op_id in self._op_library:
-                        op = self._op_library[op_id]
-                        strength = frame.families.get(op_name, 1.0)
-
-                        processed = apply_operator(coeffs_np, op)
-
-                        if strength < 1.0:
-                            coeffs_np = (
-                                (coeffs_np.astype(np.int32) * int((1.0 - strength) * 32768) +
-                                 processed.astype(np.int32) * int(strength * 32768)) >> 15
-                            ).astype(np.int16)
-                        else:
-                            coeffs_np = processed
-
-                coeffs_256 = coeffs_np.tolist()
-
-            # Effect mode: FWPT(carrier) -> mask -> IDWPT
-            from ..wavelet.wavelet_packet_trees import PacketTreeSet
-            if not hasattr(self, '_packet_tree_set'):
-                self._packet_tree_set = PacketTreeSet()
-
-            tree_id = frame.tree_a_id if frame.tree_blend_q15 < Q15_HALF else frame.tree_b_id
-
-            x_wet = self._packet_tree_set.effect_mode(
-                tree_id=tree_id,
-                carrier_audio=x_carrier,
-                mask_q15=None
-            )
-
-        # === Step 3: AntiClick operator does ALL mixing + click prevention ===
-        # Set BYPASS_ANTICLICK=True to test with safety off
-        BYPASS_ANTICLICK = True  # TESTING ONLY
-
-        if BYPASS_ANTICLICK:
-            # Direct Q15 mixing without anticlick (for testing)
-            # Use beta directly from frame without ramping
-            beta_q15 = frame.beta_target_q15
-
-            if x_wet is None or beta_q15 == 0:
-                output = x_carrier
-            elif beta_q15 >= 32767:
-                output = x_wet
-            else:
-                # Linear mix in Q15
-                inv_beta = 32767 - beta_q15
-                output = [
-                    ((c * inv_beta) + (w * beta_q15)) >> 15
-                    for c, w in zip(x_carrier, x_wet)
-                ]
-        else:
-            # Normal path: anticlick handles clipping internally
-            carrier_np = np.array(x_carrier, dtype=np.float32) / 32768.0
-            wet_np = None
-            if x_wet is not None:
-                wet_np = np.array(x_wet, dtype=np.float32) / 32768.0
-
-            output_np = self.anticlick.step(ac_state, carrier_np, wet_np)
-
-            # Convert back to Q15
-            output = (output_np * 32768.0).astype(np.int32)
-            output = np.clip(output, -32768, 32767).tolist()
-
-        # === Step 4: Apply voice gain ===
-        output = [(s * frame.gain_q15) >> 15 for s in output]
-
-        # Advance tuning morph
+        # Advance tuning morph (still needed for global state)
         self.tuning.advance_block()
 
         # Mark first block done
+        state = self.voice_states[voice_id]
         if state.is_starting:
             state.after_first_block()
 
@@ -473,20 +318,14 @@ class UnifiedOutputStage:
         # The carrier is phase-continuous and applying OLA to it corrupts the signal.
         # Master OLA is disabled here since wet path OLA is handled at the correct layer.
         #
-        # DC removal is DISABLED for VM path (USE_VM_EXECUTOR=True):
+        # DC removal is DISABLED for VM/CCS path:
         # - CCS path produces phase-continuous sine waves with zero inherent DC
         # - Block-based "DC offset" is just incomplete cycles, not true DC
         # - Removing it causes block boundary discontinuities
-        #
-        # DC removal is ENABLED for legacy path (USE_VM_EXECUTOR=False):
-        # - Legacy path may have true DC offset from wavelet processing
-        is_carrier_only = frame.beta_target_q15 == 0
-        # Disable DC removal for VM path (CCS) - it's phase-continuous with zero DC
-        apply_dc = (not USE_VM_EXECUTOR) and (not is_carrier_only)
         L, R = self.safety.step_block(
             L, R, self.params,
             apply_master_ola=False,  # OLA handled in VM lane_idwpt_render
-            apply_dc_removal=apply_dc
+            apply_dc_removal=False   # CCS path is phase-continuous with zero DC
         )
 
         return L, R

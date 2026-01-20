@@ -21,9 +21,8 @@ from ..wavelet.sine_core import (
     sine_q15_vectorized as _sine_vectorized,
 )
 
-# Q15 constants
-Q15_ONE = 32767
-Q15_HALF = 16384
+# Import canonical Q15 constants from primitives (single source of truth)
+from ..primitives import Q15_ONE, Q15_HALF
 
 
 # =============================================================================

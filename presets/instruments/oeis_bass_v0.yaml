@@ -1,0 +1,85 @@
+# OEIS Bass v0 - Fibonacci Partials
+# ==================================
+#
+# Uses OEIS Fibonacci sequence (A000045) for partial selection.
+# Creates organic, complex bass with increasingly sparse upper partials.
+#
+# Active partials: 1, 2, 3, 5, 8, 13, 21, ...
+# Character: Warm, organic, complex low-end with natural rolloff
+#
+# Fibonacci spacing creates partials that become progressively sparser,
+# resulting in a naturally warm sound with subtle complexity.
+
+instrument_ir_v0:
+  meta:
+    instrument_id: "oeis-bass-v0"
+    name: "OEIS Bass (Fibonacci)"
+    version: 0
+    author: "symcrash"
+    seed_u32: 0x46494253  # "FIBS"
+
+  io:
+    sample_rate_hz: 48000
+    block_size: 64
+
+  layers:
+    L0_graph:
+      nodes:
+        # Mode B oscillator with Fibonacci partials
+        - id: "osc1"
+          type: "Osc"
+          params:
+            coeff_osc_mode: 1           # Mode B (Harmonic Bank)
+            oeis_sequence_id: 1         # FIBONACCI (A000045)
+            oeis_rolloff_db: -6.0       # Strong rolloff for bass focus
+            H_request: 16               # Fewer harmonics for bass
+
+        - id: "amp1"
+          type: "Amp"
+          params:
+            adsr:
+              a_ms: 5.0           # Quick attack
+              d_ms: 200.0
+              s: 0.8              # Strong sustain
+              r_ms: 150.0         # Medium release
+
+      edges:
+        - src: "osc1"
+          dst: "amp1"
+
+      macros:
+        - id: "M_DRIVE"
+          name: "Drive"
+          default: 0.3
+        - id: "M_WEIGHT"
+          name: "Weight"
+          default: 0.7
+
+  # L3 CMMM: IntraMix for body
+  L3_cmmm:
+    regimes:
+      - name: "attack"
+        ops: []
+      - name: "sustain"
+        ops: ["INTRA_MIX"]
+      - name: "release"
+        ops: []
+
+    transitions:
+      - from: "attack"
+        to: "sustain"
+        trigger: "time"
+        time_ms: 30
+
+    tail:
+      mode: "lite"
+      tree:
+        A: "T0"
+        B: "T0"
+        beta: 0.0
+
+  compile:
+    material:
+      beta_start_q15: 0
+      beta_target_q15: 16384
+      beta_ramp_blocks: 4

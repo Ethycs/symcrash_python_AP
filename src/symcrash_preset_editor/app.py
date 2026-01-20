@@ -19,6 +19,7 @@ from .views.l0_graph import L0GraphView
 from .views.l1_mapping import L1MappingView
 from .views.l2_regimes import L2RegimeView
 from .views.l3_cmmm import L3CmmmView
+from .views.mod_matrix import ModMatrixView
 from .views.preset_browser import PresetBrowser, render_preset_browser_popup
 
 
@@ -43,6 +44,10 @@ class PresetEditorApp:
         self._l1_view: Optional[L1MappingView] = None
         self._l2_view: Optional[L2RegimeView] = None
         self._l3_view: Optional[L3CmmmView] = None
+        self._mod_matrix_view: Optional[ModMatrixView] = None
+
+        # L0 sub-tab selection (Graph vs Modulation)
+        self._l0_tab: str = "graph"  # "graph" or "modulation"
 
         # File dialog state
         self._file_dialog_open = False
@@ -101,6 +106,7 @@ class PresetEditorApp:
         self._l1_view = L1MappingView(self.session)
         self._l2_view = L2RegimeView(self.session)
         self._l3_view = L3CmmmView(self.session)
+        self._mod_matrix_view = ModMatrixView(self.session)
 
     def _set_status(self, message: str, duration: float = 3.0) -> None:
         """Set status bar message."""
@@ -279,8 +285,25 @@ class PresetEditorApp:
         avail = imgui.get_content_region_avail()
 
         if self.current_level == TowerLevel.L0_PATCH:
-            if self._l0_view:
-                self._l0_view.render(avail)
+            # L0 has sub-tabs: Graph and Modulation
+            if imgui.begin_tab_bar("L0SubTabs"):
+                if imgui.begin_tab_item("DSP Graph")[0]:
+                    self._l0_tab = "graph"
+                    imgui.end_tab_item()
+                if imgui.begin_tab_item("Modulation / Macros")[0]:
+                    self._l0_tab = "modulation"
+                    imgui.end_tab_item()
+                imgui.end_tab_bar()
+
+            # Render sub-view
+            sub_avail = imgui.get_content_region_avail()
+            if self._l0_tab == "graph":
+                if self._l0_view:
+                    self._l0_view.render(sub_avail)
+            else:
+                if self._mod_matrix_view:
+                    self._mod_matrix_view.render(sub_avail)
+
         elif self.current_level == TowerLevel.L1_LIFT:
             if self._l1_view:
                 self._l1_view.render(avail)

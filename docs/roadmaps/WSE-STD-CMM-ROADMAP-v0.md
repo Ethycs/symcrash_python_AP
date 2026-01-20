@@ -670,7 +670,9 @@ Full runtime event pipeline for K degradation and tail mode control:
 * `test_golden_voiceframe_stream.py` — Deterministic replay verification
 * `test_cmmm_template_emission.py` — Preset→VoiceFrame CMMM field flow
 
-**Cross-reference:** See [InstrumentIR Tower Conformance Spec](../../design/core-system/04%20-%20InstrumentIR%20Tower%20Conformance%20Spec.md) for the overall tower architecture.
+**Cross-reference:**
+- [Tower Conformance Master Roadmap](./TOWER-CONFORMANCE-ROADMAP.md) - Authoritative conformance status
+- [InstrumentIR Tower Conformance Spec](../../design/core-system/04%20-%20InstrumentIR%20Tower%20Conformance%20Spec.md) - Tower architecture details
 
 ---
 
@@ -693,3 +695,5 @@ The CMMM roadmap has reached the following conformance level:
 1. Filter audio operator (SVF)
 2. LFO generator + mod routing
 3. Golden trace packs (hash-frozen)
+4. Control plane wiring (ControlFrame → VoiceEngine) - see [TOWER-CONFORMANCE-ROADMAP](./TOWER-CONFORMANCE-ROADMAP.md)
+5. Material Engine audio implementation

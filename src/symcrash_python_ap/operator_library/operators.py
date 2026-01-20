@@ -14,6 +14,9 @@ from . import (
     Q15_ONE, to_q15, make_tridiag_kernel
 )
 
+# Import canonical operator name mapping from primitives (single source of truth)
+from ..primitives import OPERATOR_NAME_TO_ID as _OPERATOR_NAME_TO_ID
+
 
 # =============================================================================
 # OPERATOR IMPLEMENTATIONS
@@ -772,35 +775,10 @@ def build_operator_library() -> Dict[int, Operator]:
 # NAME TO ID MAPPING
 # =============================================================================
 
-# Map operator names (as used in presets) to operator IDs
-OP_NAME_TO_ID = {
-    "IDENTITY": 0,
-    "TILT": 1,
-    "FINE_CLAMP": 2,
-    "INTRA_MIX": 3,
-    "DIFFUSE_UP": 4,
-    "DIFFUSE_DOWN": 5,
-    "BAND_SHEAR": 6,
-    "LOWRANK_MORPH": 7,
-    "GLOBAL_PULSE": 8,
-    "SWAP_BANDS": 9,
-    "ROTATE_NODES": 10,
-    "NORMALIZE_SCALE": 11,
-    "GLUE_PAIR": 12,
-    "IMPULSE": 13,
-    "NOISE_BAND": 14,
-    "PRESSURE_RAMP": 15,
-    "GATE_MASK": 16,
-    "QUASI_ROTATE": 17,
-    "MORPH_MIX": 18,
-    "EMERGENCY_SIMPLIFY": 19,
-    "FOLD_PRESSURE": 20,
-    "CUSP_INJECTION": 21,
-    "SWALLOWTAIL_MASK": 22,
-    "SHEAF_PROJECT": 23,
-    # Aliases for common preset names
-    "COMPRESS_K": 2,  # FINE_CLAMP is the compression operator
-}
+# Use canonical mapping from primitives with local alias for backwards compatibility
+OP_NAME_TO_ID = dict(_OPERATOR_NAME_TO_ID)
+# Add local alias (FINE_CLAMP is the compression operator)
+OP_NAME_TO_ID["COMPRESS_K"] = 2
 
 
 def get_operator_id(name: str) -> int:

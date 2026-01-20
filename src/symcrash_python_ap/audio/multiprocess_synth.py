@@ -22,12 +22,13 @@ from multiprocessing import shared_memory, Process, Queue
 from typing import Optional
 import time
 
+# Import canonical constants from primitives (single source of truth)
+from ..primitives import BLOCK_SIZE, SAMPLE_RATE_HZ, Q15_ONE
+
 # Constants
-BLOCK_SIZE = 64
-SAMPLE_RATE = 48000
+SAMPLE_RATE = SAMPLE_RATE_HZ  # Alias for backward compatibility
 RING_BUFFER_BLOCKS = 128  # ~170ms buffer
 PRE_FILL_BLOCKS = 32      # Pre-fill with silence (matches pico2_live_synth)
-Q15_ONE = 32767
 
 
 class SharedRingBuffer:

@@ -12,12 +12,7 @@ All discontinuity handling lives in the AntiClickOperator, not here.
 from typing import List, Dict, Any, Optional, Protocol
 from dataclasses import dataclass
 
-# Q15 constants
-Q15_ONE = 32767
-Q15_HALF = 16384
-Q15_SCALE = 32768
-
-BLOCK_SIZE = 64
+from ..primitives import Q15_ONE, Q15_HALF, Q15_SCALE, BLOCK_SIZE
 
 
 # =============================================================================

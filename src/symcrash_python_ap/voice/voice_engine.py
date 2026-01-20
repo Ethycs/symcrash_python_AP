@@ -39,22 +39,40 @@ Tower Compliance (Levels 0-4):
 - L4 Events: Enable EventPolicy and Arc.EventPattern
 """
 
-from typing import List, Dict, Optional, Tuple, Callable
+from typing import List, Dict, Optional, Tuple, Callable, TYPE_CHECKING
 from dataclasses import dataclass, field
 from enum import IntEnum
 import numpy as np
 
+if TYPE_CHECKING:
+    from ..library.preset_compiler import CompiledPreset
+    from ..envelope_scheduler import EnvelopeScheduler
+    from ..control_frame import ControlFrame, EventType
+    from ..frames import ParamFrame, VoiceFrame
+
 from ..fixed import (
     sat16, mul_q15_sat, slew_q15,
     Q15_ONE, Q15_HALF, Q15_SHIFT
+)
+from ..vm.harmonic_bank import LFOState
+
+# Import canonical primitives from primitives.py (WSE-STD-PRIMITIVES v0)
+from ..primitives import (
+    Regime,                    # Voice regime states (R0_IDLE through R6_RECOVERY)
+    Intent,                    # Intent lane IDs (I_TONE through I_CALM)
+    Family,                    # Operator family IDs
+    Gesture,                   # Gesture input IDs
+    REGIME_TABLE,              # Regime metadata
+    INTENT_TABLE,              # Intent metadata
+    BLOCK_SIZE,                # Samples per block (canonical)
+    SAMPLE_RATE_HZ,            # Sample rate (canonical)
 )
 
 # =============================================================================
 # CONSTANTS
 # =============================================================================
 
-BLOCK_SIZE = 64
-SAMPLE_RATE = 48000.0
+SAMPLE_RATE = float(SAMPLE_RATE_HZ)
 BLOCK_TIME = BLOCK_SIZE / SAMPLE_RATE  # ~1.33ms
 
 NUM_INTENTS = 8
@@ -63,6 +81,61 @@ NUM_EVENTS = 8
 NUM_TREES = 5
 MAX_ARCS = 8          # Maximum arc modulators per voice
 MAX_VOICES = 128      # Maximum polyphony target
+
+
+# =============================================================================
+# VOICE ENGINE OUTPUT (step_block return types)
+# =============================================================================
+
+@dataclass
+class RenderBatchItem:
+    """
+    Single voice to render this block.
+
+    Emitted by VoiceEngine.step_block() for each serviced voice.
+    Consumed by the unified execution layer (Stages 3-10).
+    """
+    voice_id: int
+    frame: 'VoiceFrame'       # VoiceFrame with all parameters
+    mid_due: bool = True      # MID emission group due this block
+    top_due: bool = True      # TOP emission group due this block
+    degrade_level: int = 0    # Degradation level (0=none, 3=emergency)
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for serialization."""
+        return {
+            'voice_id': self.voice_id,
+            'mid_due': self.mid_due,
+            'top_due': self.top_due,
+            'degrade_level': self.degrade_level,
+        }
+
+
+@dataclass
+class VoiceEngineOutput:
+    """
+    Output from VoiceEngine.step_block().
+
+    Per WSE-ARCHITECTURE-v1: VoiceEngine emits what to render,
+    not audio. The unified execution layer handles rendering.
+    """
+    # Voices to render this block (only serviced voices)
+    render_batch: List[RenderBatchItem] = field(default_factory=list)
+
+    # Global parameters for Material/Safety (from ControlFrame.globals)
+    param_frame: 'ParamFrame' = None
+
+    # Scheduler telemetry (D state, drops, health bars)
+    telemetry: Optional['HealthTelemetry'] = None
+
+    # Block index
+    block_index: int = 0
+
+    def __post_init__(self):
+        if self.param_frame is None:
+            # Import here to avoid circular import at module load
+            from ..frames import ParamFrame
+            self.param_frame = ParamFrame()
 
 
 # =============================================================================
@@ -128,6 +201,23 @@ TOWER_DIMS = {
 
 
 # =============================================================================
+# ENGINE MODE (Simple vs Full CMMM)
+# =============================================================================
+
+class EngineMode(IntEnum):
+    """
+    Voice Engine operating mode.
+
+    SIMPLE: Preset-only synthesis (no regime transitions, intent vectors, etc.)
+            Uses CompiledPreset for sound definition.
+    FULL_CMMM: Full CMMM implementation with regime graph, intent mapping, etc.
+               Uses InstrumentProgram for behavior definition.
+    """
+    SIMPLE = 0        # Preset-only, no regime transitions
+    FULL_CMMM = 1     # Full regime graph with hysteresis
+
+
+# =============================================================================
 # DEGRADATION LEVELS
 # =============================================================================
 
@@ -144,18 +234,17 @@ class DegradationLevel(IntEnum):
 
 
 # =============================================================================
-# REGIME SYSTEM (R0-R6)
+# REGIME SYSTEM (R0-R6) - Imported from primitives.py
 # =============================================================================
-
-class Regime(IntEnum):
-    """Voice regime states."""
-    R0_IDLE = 0              # Voice silent, no processing
-    R1_ATTACK_IGNITION = 1   # Note-on transient burst
-    R2_STABLE_TONE = 2       # Sustained pitched tone
-    R3_GRAIN_AIR = 3         # Breathy, textured sustain
-    R4_GLITCH_CHATTER = 4    # Intentional artifacts
-    R5_CATASTROPHE = 5       # Extreme morphing/chaos
-    R6_RECOVERY_HEAL = 6     # Return to stability
+# Regime enum is now imported from ..primitives
+# Canonical names: R0_IDLE, R1_ATTACK, R2_STABLE, R3_AIR, R4_GLITCH, R5_CATASTROPHE, R6_RECOVERY
+#
+# Legacy name aliases for backward compatibility during migration:
+R1_ATTACK_IGNITION = Regime.R1_ATTACK
+R2_STABLE_TONE = Regime.R2_STABLE
+R3_GRAIN_AIR = Regime.R3_AIR
+R4_GLITCH_CHATTER = Regime.R4_GLITCH
+R6_RECOVERY_HEAL = Regime.R6_RECOVERY
 
 
 # =============================================================================
@@ -708,7 +797,7 @@ class RegimeSpec:
     tower_level: TowerLevel = TowerLevel.L0_FULL
 
 
-# Default regime specs
+# Default regime specs (using canonical names from primitives.py)
 REGIME_SPECS: Dict[Regime, RegimeSpec] = {
     Regime.R0_IDLE: RegimeSpec(
         regime=Regime.R0_IDLE,
@@ -717,8 +806,8 @@ REGIME_SPECS: Dict[Regime, RegimeSpec] = {
         event_enable_mask=0x00,
         tower_level=TowerLevel.L4_SCALAR,
     ),
-    Regime.R1_ATTACK_IGNITION: RegimeSpec(
-        regime=Regime.R1_ATTACK_IGNITION,
+    Regime.R1_ATTACK: RegimeSpec(
+        regime=Regime.R1_ATTACK,
         name="Attack",
         family_base=[0, Q15_HALF, 0, Q15_HALF // 2, 0, 0, Q15_HALF, 0],
         family_cap=[0, Q15_ONE, Q15_HALF, Q15_ONE, Q15_HALF, Q15_ONE, Q15_ONE, 0],
@@ -727,8 +816,8 @@ REGIME_SPECS: Dict[Regime, RegimeSpec] = {
         normalize_curve="bright",
         tower_level=TowerLevel.L1_COARSE,
     ),
-    Regime.R2_STABLE_TONE: RegimeSpec(
-        regime=Regime.R2_STABLE_TONE,
+    Regime.R2_STABLE: RegimeSpec(
+        regime=Regime.R2_STABLE,
         name="Stable Tone",
         family_base=[0, Q15_HALF, 0, Q15_HALF, 0, Q15_HALF, 0, 0],
         family_cap=[0, Q15_ONE, Q15_HALF, Q15_ONE, Q15_HALF, Q15_ONE, Q15_HALF, 0],
@@ -737,8 +826,8 @@ REGIME_SPECS: Dict[Regime, RegimeSpec] = {
         normalize_curve="pink",
         tower_level=TowerLevel.L0_FULL,
     ),
-    Regime.R3_GRAIN_AIR: RegimeSpec(
-        regime=Regime.R3_GRAIN_AIR,
+    Regime.R3_AIR: RegimeSpec(
+        regime=Regime.R3_AIR,
         name="Grain/Air",
         family_base=[0, Q15_HALF // 2, Q15_HALF, Q15_HALF // 2, 0, Q15_HALF // 2, Q15_HALF // 2, 0],
         family_cap=[0, Q15_ONE, Q15_ONE, Q15_ONE, Q15_HALF, Q15_ONE, Q15_ONE, 0],
@@ -747,8 +836,8 @@ REGIME_SPECS: Dict[Regime, RegimeSpec] = {
         normalize_curve="flat",
         tower_level=TowerLevel.L1_COARSE,
     ),
-    Regime.R4_GLITCH_CHATTER: RegimeSpec(
-        regime=Regime.R4_GLITCH_CHATTER,
+    Regime.R4_GLITCH: RegimeSpec(
+        regime=Regime.R4_GLITCH,
         name="Glitch/Chatter",
         family_base=[0, 0, Q15_HALF, Q15_HALF // 2, Q15_HALF, 0, Q15_HALF, 0],
         family_cap=[0, Q15_ONE, Q15_ONE, Q15_ONE, Q15_ONE, Q15_ONE, Q15_ONE, Q15_HALF],
@@ -771,8 +860,8 @@ REGIME_SPECS: Dict[Regime, RegimeSpec] = {
         fineclamp_cap_ratio=0.3,
         tower_level=TowerLevel.L2_SPARSE,
     ),
-    Regime.R6_RECOVERY_HEAL: RegimeSpec(
-        regime=Regime.R6_RECOVERY_HEAL,
+    Regime.R6_RECOVERY: RegimeSpec(
+        regime=Regime.R6_RECOVERY,
         name="Recovery",
         family_base=[0, Q15_HALF // 2, 0, Q15_HALF // 2, 0, Q15_ONE, 0, 0],
         family_cap=[0, Q15_HALF, Q15_HALF // 2, Q15_HALF, 0, Q15_ONE, Q15_HALF // 2, 0],
@@ -833,7 +922,7 @@ def build_default_regime_graph() -> RegimeGraph:
         # From R0_IDLE
         EdgeSpec(
             from_regime=Regime.R0_IDLE,
-            to_regime=Regime.R1_ATTACK_IGNITION,
+            to_regime=Regime.R1_ATTACK,
             intent_thresholds={},  # Triggered by note_on
             priority=10,
             arc_id=1,  # Attack burst
@@ -841,22 +930,22 @@ def build_default_regime_graph() -> RegimeGraph:
 
         # From R1_ATTACK_IGNITION
         EdgeSpec(
-            from_regime=Regime.R1_ATTACK_IGNITION,
-            to_regime=Regime.R2_STABLE_TONE,
+            from_regime=Regime.R1_ATTACK,
+            to_regime=Regime.R2_STABLE,
             intent_thresholds={I_TONE: Q15_HALF},
             min_dwell_blocks=4,
             priority=10,
         ),
         EdgeSpec(
-            from_regime=Regime.R1_ATTACK_IGNITION,
-            to_regime=Regime.R3_GRAIN_AIR,
+            from_regime=Regime.R1_ATTACK,
+            to_regime=Regime.R3_AIR,
             intent_thresholds={I_AIR: int(Q15_ONE * 0.6)},
             min_dwell_blocks=4,
             priority=8,
         ),
         EdgeSpec(
-            from_regime=Regime.R1_ATTACK_IGNITION,
-            to_regime=Regime.R4_GLITCH_CHATTER,
+            from_regime=Regime.R1_ATTACK,
+            to_regime=Regime.R4_GLITCH,
             intent_thresholds={I_GLITCH: int(Q15_ONE * 0.7)},
             min_dwell_blocks=4,
             priority=6,
@@ -866,21 +955,21 @@ def build_default_regime_graph() -> RegimeGraph:
         # Note: R2->R0 is triggered by note_off(), not by intent conditions
         # So we don't include it here (it's handled explicitly)
         EdgeSpec(
-            from_regime=Regime.R2_STABLE_TONE,
-            to_regime=Regime.R3_GRAIN_AIR,
+            from_regime=Regime.R2_STABLE,
+            to_regime=Regime.R3_AIR,
             intent_thresholds={I_AIR: int(Q15_ONE * 0.6)},
             min_dwell_blocks=8,
             priority=5,
         ),
         EdgeSpec(
-            from_regime=Regime.R2_STABLE_TONE,
-            to_regime=Regime.R4_GLITCH_CHATTER,
+            from_regime=Regime.R2_STABLE,
+            to_regime=Regime.R4_GLITCH,
             intent_thresholds={I_GLITCH: int(Q15_ONE * 0.6)},
             min_dwell_blocks=8,
             priority=5,
         ),
         EdgeSpec(
-            from_regime=Regime.R2_STABLE_TONE,
+            from_regime=Regime.R2_STABLE,
             to_regime=Regime.R5_CATASTROPHE,
             intent_thresholds={I_GLITCH: int(Q15_ONE * 0.8), I_WARP: int(Q15_ONE * 0.6)},
             min_dwell_blocks=16,
@@ -891,21 +980,21 @@ def build_default_regime_graph() -> RegimeGraph:
         # From R3_GRAIN_AIR
         # Note: R3->R0 is triggered by note_off(), not by intent conditions
         EdgeSpec(
-            from_regime=Regime.R3_GRAIN_AIR,
-            to_regime=Regime.R2_STABLE_TONE,
+            from_regime=Regime.R3_AIR,
+            to_regime=Regime.R2_STABLE,
             intent_thresholds={I_TONE: int(Q15_ONE * 0.7), I_AIR: 0},
             min_dwell_blocks=8,
             priority=5,
         ),
         EdgeSpec(
-            from_regime=Regime.R3_GRAIN_AIR,
-            to_regime=Regime.R4_GLITCH_CHATTER,
+            from_regime=Regime.R3_AIR,
+            to_regime=Regime.R4_GLITCH,
             intent_thresholds={I_GLITCH: int(Q15_ONE * 0.6)},
             min_dwell_blocks=8,
             priority=5,
         ),
         EdgeSpec(
-            from_regime=Regime.R3_GRAIN_AIR,
+            from_regime=Regime.R3_AIR,
             to_regime=Regime.R5_CATASTROPHE,
             intent_thresholds={I_GLITCH: int(Q15_ONE * 0.8), I_WARP: int(Q15_ONE * 0.6)},
             min_dwell_blocks=16,
@@ -916,21 +1005,21 @@ def build_default_regime_graph() -> RegimeGraph:
         # From R4_GLITCH_CHATTER
         # Note: R4->R0 is triggered by note_off(), not by intent conditions
         EdgeSpec(
-            from_regime=Regime.R4_GLITCH_CHATTER,
-            to_regime=Regime.R2_STABLE_TONE,
+            from_regime=Regime.R4_GLITCH,
+            to_regime=Regime.R2_STABLE,
             intent_thresholds={I_CALM: int(Q15_ONE * 0.6)},
             min_dwell_blocks=8,
             priority=5,
         ),
         EdgeSpec(
-            from_regime=Regime.R4_GLITCH_CHATTER,
-            to_regime=Regime.R3_GRAIN_AIR,
+            from_regime=Regime.R4_GLITCH,
+            to_regime=Regime.R3_AIR,
             intent_thresholds={I_AIR: int(Q15_ONE * 0.7)},
             min_dwell_blocks=8,
             priority=5,
         ),
         EdgeSpec(
-            from_regime=Regime.R4_GLITCH_CHATTER,
+            from_regime=Regime.R4_GLITCH,
             to_regime=Regime.R5_CATASTROPHE,
             intent_thresholds={I_GLITCH: int(Q15_ONE * 0.9)},
             min_dwell_blocks=16,
@@ -941,7 +1030,7 @@ def build_default_regime_graph() -> RegimeGraph:
         # From R5_CATASTROPHE
         EdgeSpec(
             from_regime=Regime.R5_CATASTROPHE,
-            to_regime=Regime.R6_RECOVERY_HEAL,
+            to_regime=Regime.R6_RECOVERY,
             intent_thresholds={},  # Automatic after duration
             min_dwell_blocks=64,
             priority=10,
@@ -951,15 +1040,15 @@ def build_default_regime_graph() -> RegimeGraph:
         # From R6_RECOVERY_HEAL
         # Note: R6->R0 is triggered by note_off(), not by intent conditions
         EdgeSpec(
-            from_regime=Regime.R6_RECOVERY_HEAL,
-            to_regime=Regime.R2_STABLE_TONE,
+            from_regime=Regime.R6_RECOVERY,
+            to_regime=Regime.R2_STABLE,
             intent_thresholds={I_CALM: int(Q15_ONE * 0.5)},
             min_dwell_blocks=32,
             priority=5,
         ),
         EdgeSpec(
-            from_regime=Regime.R6_RECOVERY_HEAL,
-            to_regime=Regime.R3_GRAIN_AIR,
+            from_regime=Regime.R6_RECOVERY,
+            to_regime=Regime.R3_AIR,
             intent_thresholds={I_AIR: int(Q15_ONE * 0.5)},
             min_dwell_blocks=32,
             priority=5,
@@ -969,15 +1058,15 @@ def build_default_regime_graph() -> RegimeGraph:
     return graph
 
 
-# Regime transition matrix: from_regime -> valid_to_regimes
+# Regime transition matrix: from_regime -> valid_to_regimes (using canonical names)
 REGIME_TRANSITIONS = {
-    Regime.R0_IDLE: {Regime.R1_ATTACK_IGNITION},
-    Regime.R1_ATTACK_IGNITION: {Regime.R2_STABLE_TONE, Regime.R3_GRAIN_AIR, Regime.R4_GLITCH_CHATTER},
-    Regime.R2_STABLE_TONE: {Regime.R0_IDLE, Regime.R3_GRAIN_AIR, Regime.R4_GLITCH_CHATTER, Regime.R5_CATASTROPHE},
-    Regime.R3_GRAIN_AIR: {Regime.R0_IDLE, Regime.R2_STABLE_TONE, Regime.R4_GLITCH_CHATTER, Regime.R5_CATASTROPHE},
-    Regime.R4_GLITCH_CHATTER: {Regime.R0_IDLE, Regime.R2_STABLE_TONE, Regime.R3_GRAIN_AIR, Regime.R5_CATASTROPHE},
-    Regime.R5_CATASTROPHE: {Regime.R6_RECOVERY_HEAL},
-    Regime.R6_RECOVERY_HEAL: {Regime.R0_IDLE, Regime.R2_STABLE_TONE, Regime.R3_GRAIN_AIR},
+    Regime.R0_IDLE: {Regime.R1_ATTACK},
+    Regime.R1_ATTACK: {Regime.R2_STABLE, Regime.R3_AIR, Regime.R4_GLITCH},
+    Regime.R2_STABLE: {Regime.R0_IDLE, Regime.R3_AIR, Regime.R4_GLITCH, Regime.R5_CATASTROPHE},
+    Regime.R3_AIR: {Regime.R0_IDLE, Regime.R2_STABLE, Regime.R4_GLITCH, Regime.R5_CATASTROPHE},
+    Regime.R4_GLITCH: {Regime.R0_IDLE, Regime.R2_STABLE, Regime.R3_AIR, Regime.R5_CATASTROPHE},
+    Regime.R5_CATASTROPHE: {Regime.R6_RECOVERY},
+    Regime.R6_RECOVERY: {Regime.R0_IDLE, Regime.R2_STABLE, Regime.R3_AIR},
 }
 
 
@@ -1022,15 +1111,16 @@ class GestureBasis:
 # INTENT VECTOR (8 lanes)
 # =============================================================================
 
-# Intent lane indices
-I_TONE = 0     # Pitched tone strength
-I_BOW = 1      # Bowing/sustain pressure
-I_AIR = 2      # Breathiness/noise
-I_GLITCH = 3   # Glitch/artifact desire
-I_WARP = 4     # Time/pitch warping
-I_SNAP = 5     # Transient snap
-I_GLUE = 6     # Coherence/binding
-I_CALM = 7     # Recovery/simplification
+# Intent lane indices (use Intent enum from primitives.py)
+# These aliases are for backward compatibility with code using bare I_* names
+I_TONE = Intent.I_TONE
+I_BOW = Intent.I_BOW
+I_AIR = Intent.I_AIR
+I_GLITCH = Intent.I_GLITCH
+I_WARP = Intent.I_WARP
+I_SNAP = Intent.I_SNAP
+I_GLUE = Intent.I_GLUE
+I_CALM = Intent.I_CALM
 
 
 @dataclass
@@ -1116,15 +1206,16 @@ def default_gesture_to_intent(g: GestureBasis) -> IntentVector:
 # FAMILY WEIGHTS (F0-F7)
 # =============================================================================
 
-# Family indices (match symbol_engine.py)
-F_RESERVED = 0   # Reserved / identity
-F_COLOR = 1      # Timbral color (Tilt, FineClamp)
-F_TRANSPORT = 2  # Energy transport (DiffuseUp/Down, BandShear)
-F_LOCAL = 3      # Local mixing (IntraMix, LowRankMorph)
-F_TOPOLOGY = 4   # Structural (SwapBands, RotateNodes, Permute)
-F_GLUE = 5       # Coherence (GluePair, NormalizeScale)
-F_EVENTS = 6     # Impulses, noise (Impulse, NoiseBand, etc.)
-F_CATASTROPHE = 7  # Emergency (EmergencySimplify, FoldPressure)
+# Family indices (use Family enum from primitives.py)
+# These aliases are for backward compatibility with code using bare F_* names
+F_RESERVED = Family.F_RESERVED
+F_COLOR = Family.F_COLOR
+F_TRANSPORT = Family.F_TRANSPORT
+F_LOCAL = Family.F_LOCAL
+F_TOPOLOGY = Family.F_TOPOLOGY
+F_GLUE = Family.F_GLUE
+F_EVENTS = Family.F_EVENTS
+F_CATASTROPHE = Family.F_CATASTROPHE
 
 
 def softplus_q15(x: int, k: int = 8) -> int:
@@ -1181,29 +1272,29 @@ def compute_family_weights(intent: IntentVector, regime: Regime) -> List[int]:
         weights[F_CATASTROPHE] = 0
 
     # Regime modifiers
-    if regime == Regime.R1_ATTACK_IGNITION:
+    if regime == Regime.R1_ATTACK:
         # Boost snap/events during attack
         weights[F_EVENTS] = sat16(weights[F_EVENTS] + Q15_HALF)
         weights[F_COLOR] = sat16(weights[F_COLOR] + Q15_HALF // 2)
 
-    elif regime == Regime.R2_STABLE_TONE:
+    elif regime == Regime.R2_STABLE:
         # Boost tone families, reduce chaos
         weights[F_COLOR] = sat16(weights[F_COLOR] + Q15_HALF // 2)
         weights[F_LOCAL] = sat16(weights[F_LOCAL] + Q15_HALF // 2)
         weights[F_GLUE] = sat16(weights[F_GLUE] + Q15_HALF // 2)
         weights[F_TOPOLOGY] = weights[F_TOPOLOGY] >> 1
 
-    elif regime == Regime.R3_GRAIN_AIR:
+    elif regime == Regime.R3_AIR:
         # Boost air/transport
         weights[F_TRANSPORT] = sat16(weights[F_TRANSPORT] + Q15_HALF)
         weights[F_EVENTS] = sat16(weights[F_EVENTS] + Q15_HALF // 2)
 
-    elif regime == Regime.R4_GLITCH_CHATTER:
+    elif regime == Regime.R4_GLITCH:
         # Boost topology and events
         weights[F_TOPOLOGY] = sat16(weights[F_TOPOLOGY] + Q15_HALF)
         weights[F_EVENTS] = sat16(weights[F_EVENTS] + Q15_HALF)
 
-    elif regime == Regime.R6_RECOVERY_HEAL:
+    elif regime == Regime.R6_RECOVERY:
         # Boost calm, reduce chaos
         weights[F_GLUE] = sat16(weights[F_GLUE] + Q15_HALF)
         weights[F_CATASTROPHE] = 0
@@ -1285,7 +1376,7 @@ def compute_events(intent: IntentVector, regime: Regime, block_count: int) -> Ev
         events.active_mask |= (1 << E_NOISE)
 
     # Pulse: during attack regime
-    if regime == Regime.R1_ATTACK_IGNITION:
+    if regime == Regime.R1_ATTACK:
         events.pulse_pressure_q15 = Q15_HALF
         events.active_mask |= (1 << E_PULSE)
 
@@ -1301,7 +1392,7 @@ def compute_events(intent: IntentVector, regime: Regime, block_count: int) -> Ev
         events.active_mask |= (1 << E_CUSP)
 
     # Swallowtail: during glitch regime
-    if regime == Regime.R4_GLITCH_CHATTER:
+    if regime == Regime.R4_GLITCH:
         events.swallowtail_bands = 0x3C  # Mid bands
         events.active_mask |= (1 << E_SWALLOWTAIL)
 
@@ -1311,7 +1402,7 @@ def compute_events(intent: IntentVector, regime: Regime, block_count: int) -> Ev
         events.active_mask |= (1 << E_FOLD)
 
     # Sheaf: during recovery
-    if regime == Regime.R6_RECOVERY_HEAL:
+    if regime == Regime.R6_RECOVERY:
         events.sheaf_threshold_q15 = Q15_HALF
         events.active_mask |= (1 << E_SHEAF)
 
@@ -1369,18 +1460,18 @@ def select_tree_from_intent(intent: IntentVector, regime: Regime) -> int:
     scores[4] = intent.calm
 
     # Regime biases
-    if regime == Regime.R1_ATTACK_IGNITION:
+    if regime == Regime.R1_ATTACK:
         scores[3] += Q15_HALF  # Transient
-    elif regime == Regime.R2_STABLE_TONE:
+    elif regime == Regime.R2_STABLE:
         scores[1] += Q15_HALF  # Harmonic
-    elif regime == Regime.R3_GRAIN_AIR:
+    elif regime == Regime.R3_AIR:
         scores[2] += Q15_HALF  # Texture
-    elif regime == Regime.R4_GLITCH_CHATTER:
+    elif regime == Regime.R4_GLITCH:
         scores[2] += Q15_HALF // 2
         scores[3] += Q15_HALF // 2
     elif regime == Regime.R5_CATASTROPHE:
         scores[2] += Q15_HALF  # Texture for chaos
-    elif regime == Regime.R6_RECOVERY_HEAL:
+    elif regime == Regime.R6_RECOVERY:
         scores[4] += Q15_HALF  # Drone for stability
 
     return int(np.argmax(scores))
@@ -1538,8 +1629,8 @@ class InstrumentProgram:
     regime_graph: Optional[RegimeGraph] = None
 
     # Legacy: simple regime transitions (used if regime_graph is None)
-    attack_regime: Regime = Regime.R1_ATTACK_IGNITION
-    sustain_regime: Regime = Regime.R2_STABLE_TONE
+    attack_regime: Regime = Regime.R1_ATTACK
+    sustain_regime: Regime = Regime.R2_STABLE
     release_regime: Regime = Regime.R0_IDLE
 
     # ==========================================================================
@@ -1597,8 +1688,8 @@ def make_glitch_violin_program() -> InstrumentProgram:
         program_id=1001,
         name="Glitch Violin",
         gesture_to_intent=glitch_violin_intent,
-        attack_regime=Regime.R1_ATTACK_IGNITION,
-        sustain_regime=Regime.R2_STABLE_TONE,
+        attack_regime=Regime.R1_ATTACK,
+        sustain_regime=Regime.R2_STABLE,
         family_mods=[Q15_ONE, Q15_ONE, Q15_HALF, Q15_ONE, Q15_HALF, Q15_ONE, Q15_HALF, Q15_ONE],
         preferred_tree=1,  # Harmonic
         attack_blocks=4,
@@ -1627,8 +1718,8 @@ def make_shepard_random_program() -> InstrumentProgram:
         program_id=1002,
         name="Shepard Random",
         gesture_to_intent=shepard_intent,
-        attack_regime=Regime.R3_GRAIN_AIR,  # Start textured
-        sustain_regime=Regime.R3_GRAIN_AIR,
+        attack_regime=Regime.R3_AIR,  # Start textured
+        sustain_regime=Regime.R3_AIR,
         family_mods=[Q15_ONE, Q15_HALF, Q15_ONE, Q15_HALF, Q15_ONE, Q15_HALF, Q15_ONE, Q15_HALF],
         preferred_tree=2,  # Texture
         tree_morph_rate=256,  # Slow morphs
@@ -1660,8 +1751,8 @@ def make_turbulent_choir_program() -> InstrumentProgram:
         program_id=1003,
         name="Turbulent Choir",
         gesture_to_intent=choir_intent,
-        attack_regime=Regime.R1_ATTACK_IGNITION,
-        sustain_regime=Regime.R3_GRAIN_AIR,  # Sustain is textured
+        attack_regime=Regime.R1_ATTACK,
+        sustain_regime=Regime.R3_AIR,  # Sustain is textured
         family_mods=[Q15_ONE, Q15_ONE, Q15_ONE, Q15_ONE, Q15_HALF, Q15_ONE, Q15_ONE, Q15_HALF],
         preferred_tree=2,  # Texture
         attack_blocks=24,
@@ -1694,8 +1785,8 @@ def make_static_organ_program() -> InstrumentProgram:
         program_id=1004,
         name="Static Organ",
         gesture_to_intent=organ_intent,
-        attack_regime=Regime.R1_ATTACK_IGNITION,
-        sustain_regime=Regime.R2_STABLE_TONE,
+        attack_regime=Regime.R1_ATTACK,
+        sustain_regime=Regime.R2_STABLE,
         family_mods=[Q15_ONE, Q15_ONE, Q15_HALF // 2, Q15_HALF, 0, Q15_ONE, 0, Q15_ONE],
         preferred_tree=4,  # Drone
         tree_morph_rate=1024,  # Fast morph (instant)
@@ -1851,6 +1942,72 @@ class VoiceState:
     overlay_active: bool = False
     overlay_blocks_remaining: int = 0
     overlay_spec: Optional[OverlaySpec] = None
+
+    # LFO definitions (from preset, set when voice is allocated)
+    # When populated, tick_lfos() is called automatically in step_voice()
+    lfos: List[LFOState] = field(default_factory=list)
+
+    # ==========================================================================
+    # Simple Mode fields (for preset-only synthesis without full CMMM)
+    # ==========================================================================
+
+    # Engine mode: SIMPLE uses preset, FULL_CMMM uses InstrumentProgram
+    engine_mode: int = 1  # Default to FULL_CMMM (EngineMode.FULL_CMMM)
+
+    # CompiledPreset reference (for Simple mode)
+    # In Simple mode, sound parameters come from preset instead of InstrumentProgram
+    compiled_preset: Optional['CompiledPreset'] = None
+
+    # Beta ramping (from VoiceFrameEmitter, used in Simple mode)
+    beta_current_q15: int = 0
+    beta_start_q15: int = 0
+    beta_target_q15: int = 24576
+    beta_ramp_blocks: int = 10
+
+    # Pitch offset from control (in cents)
+    pitch_offset_cents: int = 0
+
+    # Velocity (Q15)
+    velocity_q15: int = Q15_ONE
+
+    # Matrix envelope system (envelope_id → (scheduler, target_ids))
+    # Initialized from CompiledPreset.envelope_bindings in Simple mode
+    envelope_matrix: Dict[str, Tuple['EnvelopeScheduler', List[int]]] = field(
+        default_factory=dict
+    )
+
+    # Main amplitude envelope
+    amp_envelope: Optional['EnvelopeScheduler'] = None
+
+    # LFO Phase Storage:
+    # LFO phases are stored in arc_phase_q16[arc_slot] for unified time ownership.
+    # LFO definitions (LFOState objects) come from the preset and are stored in
+    # the lfos field above. Phase accumulators are in arc_phase_q16.
+    # This aligns with WSE-ARCHITECTURE-v1: Voice Engine owns musical time.
+    #
+    # Helper methods for LFO phase management:
+
+    def tick_lfos(self, lfos: List[LFOState], block_samples: int = BLOCK_SIZE) -> None:
+        """
+        Advance all LFOs by one block using arc_phase_q16 storage.
+
+        Args:
+            lfos: List of LFOState objects (from preset)
+            block_samples: Number of samples in block
+        """
+        for lfo in lfos:
+            lfo.advance_block_with_arc(self.arc_phase_q16, block_samples)
+
+    def handle_note_on_lfos(self, lfos: List[LFOState], is_legato: bool = False) -> None:
+        """
+        Handle note-on event for LFO sync modes.
+
+        Args:
+            lfos: List of LFOState objects (from preset)
+            is_legato: True if this is a legato note transition
+        """
+        for lfo in lfos:
+            lfo.on_gate_with_arc(self.arc_phase_q16, is_legato)
 
     # Snapshot/replay support
     def snapshot(self) -> Dict:
@@ -2276,6 +2433,177 @@ class VoiceEngine:
         self.voices[voice_id] = state
         return voice_id
 
+    def allocate_voice_from_preset(
+        self,
+        preset: 'CompiledPreset',
+        voice_id: Optional[int] = None,
+    ) -> Optional[int]:
+        """
+        Allocate a voice in Simple mode using a CompiledPreset.
+
+        Simple mode bypasses the full CMMM regime system and uses the preset's
+        sound parameters directly. LFOs, envelopes, and matrix routing are
+        initialized from the preset.
+
+        Args:
+            preset: CompiledPreset containing sound definition
+            voice_id: Optional voice slot ID (auto-allocate if None)
+
+        Returns:
+            Allocated voice ID, or None if pool exhausted
+        """
+        # Import here to avoid circular imports
+        from ..envelope_scheduler import EnvelopeScheduler, ADSRSpec
+        from ..envelope_targets import parse_envelope_target
+
+        if voice_id is None:
+            # Find free slot
+            for i in range(self.max_voices):
+                if i not in self.voices or self.voices[i].phase == VoicePhase.FREE:
+                    voice_id = i
+                    break
+            if voice_id is None:
+                return None  # Pool exhausted
+
+        # Create voice state in Simple mode (use default program as placeholder)
+        state = VoiceStateWithProgram(
+            voice_id=voice_id,
+            program=self.default_program,
+            program_id=0
+        )
+
+        # Set Simple mode flag
+        state.engine_mode = int(EngineMode.SIMPLE)
+        state.compiled_preset = preset
+
+        # Initialize beta ramp from preset
+        state.beta_start_q15 = preset.material.beta_start_q15
+        state.beta_target_q15 = preset.material.beta_target_q15
+        state.beta_ramp_blocks = preset.material.beta_ramp_blocks
+        state.beta_current_q15 = state.beta_start_q15
+
+        # Initialize main amplitude envelope from preset
+        if preset.amp_env:
+            state.amp_envelope = EnvelopeScheduler(spec=preset.amp_env)
+        else:
+            state.amp_envelope = EnvelopeScheduler(spec=ADSRSpec())
+
+        # Initialize LFOs from preset
+        lfos = getattr(preset, 'lfos', None)
+        if lfos:
+            state.lfos = list(lfos)  # Copy to avoid sharing
+
+        # Initialize matrix envelopes from preset
+        envelope_bindings = getattr(preset, 'envelope_bindings', None)
+        if envelope_bindings:
+            state.envelope_matrix = {}
+            from ..instrument_ir import EnvelopeBinding, ADSR
+            for binding in envelope_bindings:
+                adsr = binding.adsr
+                spec = ADSRSpec(
+                    attack_ms=adsr.a_ms,
+                    decay_ms=adsr.d_ms,
+                    sustain=adsr.s,
+                    release_ms=adsr.r_ms,
+                )
+                target_ids = []
+                for target_name in binding.targets:
+                    try:
+                        target = parse_envelope_target(target_name)
+                        target_ids.append(int(target))
+                    except (KeyError, ValueError):
+                        pass
+                if target_ids:
+                    state.envelope_matrix[binding.id] = (
+                        EnvelopeScheduler(spec=spec),
+                        target_ids
+                    )
+
+        # Initialize tree morph from preset
+        state.tree_morph.tree_a_id = preset.latch.tree_a_id
+        state.tree_morph.tree_b_id = preset.latch.tree_b_id
+        state.tree_morph.blend_q15 = preset.latch.tree_blend_q15
+
+        self.voices[voice_id] = state
+        return voice_id
+
+    def note_on_simple(
+        self,
+        voice_id: int,
+        note: int = 60,
+        velocity_q15: int = Q15_ONE,
+        cents: int = 0,
+    ) -> None:
+        """
+        Trigger note-on for a Simple mode voice.
+
+        Args:
+            voice_id: Voice ID (must be allocated with allocate_voice_from_preset)
+            note: MIDI note number (0-127)
+            velocity_q15: Velocity (0-32767)
+            cents: Fine tuning in cents
+        """
+        if voice_id not in self.voices:
+            return
+
+        state = self.voices[voice_id]
+
+        # Store note info
+        state.note_u8 = note
+        state.cents_i16 = cents
+        state.velocity_q15 = velocity_q15
+
+        # Reset beta ramp
+        if state.compiled_preset:
+            state.beta_current_q15 = state.compiled_preset.material.beta_start_q15
+
+        # Reset block counter
+        state.block_count = 0
+
+        # Start attack phase
+        state.phase = VoicePhase.ATTACK
+        state.phase_block = 0
+
+        # Trigger main envelope
+        if state.amp_envelope:
+            state.amp_envelope.trigger_note()
+
+        # Trigger all matrix envelopes
+        for scheduler, _ in state.envelope_matrix.values():
+            scheduler.trigger_note()
+
+        # Handle LFO sync modes on note-on
+        if state.lfos:
+            state.handle_note_on_lfos(state.lfos, is_legato=False)
+
+        # Set regime to stable (Simple mode doesn't use regime transitions)
+        state.regime = Regime.R2_STABLE
+
+    def note_off_simple(self, voice_id: int) -> None:
+        """
+        Trigger note-off for a Simple mode voice.
+
+        Args:
+            voice_id: Voice ID
+        """
+        if voice_id not in self.voices:
+            return
+
+        state = self.voices[voice_id]
+
+        # Start release phase
+        if state.phase != VoicePhase.FREE:
+            state.phase = VoicePhase.RELEASE
+            state.phase_block = 0
+
+        # Release main envelope
+        if state.amp_envelope:
+            state.amp_envelope.release_note()
+
+        # Release all matrix envelopes
+        for scheduler, _ in state.envelope_matrix.values():
+            scheduler.release_note()
+
     def note_on(self, voice_id: int, gesture: Optional[GestureBasis] = None,
                 velocity_q15: int = Q15_HALF, pitch_q15: int = 0, pan_q15: int = 0):
         """
@@ -2295,6 +2623,13 @@ class VoiceEngine:
         # Start attack phase
         state.phase = VoicePhase.ATTACK
         state.phase_block = 0
+
+        # Handle LFO sync modes on note-on (if LFOs are present)
+        # Per WSE-ARCHITECTURE-v1, Voice Engine owns musical time including LFO phases
+        if state.lfos:
+            # TODO: Detect legato for proper sync behavior
+            is_legato = False
+            state.handle_note_on_lfos(state.lfos, is_legato)
 
         # Transition to attack regime with arc
         self._transition_regime(state, state.program.attack_regime, use_arc=True)
@@ -2371,7 +2706,7 @@ class VoiceEngine:
             return target
 
         # Legacy fallback for attack->sustain transition
-        if state.regime == Regime.R1_ATTACK_IGNITION:
+        if state.regime == Regime.R1_ATTACK:
             if state.phase_block > state.program.attack_blocks:
                 return state.program.sustain_regime
 
@@ -2514,7 +2849,7 @@ class VoiceEngine:
             strengths[E_NOISE] = intent.air >> 1
 
         # E2: Pulse - attack regime
-        if (enable_mask & (1 << E_PULSE)) and regime == Regime.R1_ATTACK_IGNITION:
+        if (enable_mask & (1 << E_PULSE)) and regime == Regime.R1_ATTACK:
             mask |= (1 << E_PULSE)
             strengths[E_PULSE] = Q15_HALF
 
@@ -2529,7 +2864,7 @@ class VoiceEngine:
             strengths[E_CUSP] = Q15_HALF
 
         # E5: Swallowtail - glitch regime
-        if (enable_mask & (1 << E_SWALLOWTAIL)) and regime == Regime.R4_GLITCH_CHATTER:
+        if (enable_mask & (1 << E_SWALLOWTAIL)) and regime == Regime.R4_GLITCH:
             mask |= (1 << E_SWALLOWTAIL)
             strengths[E_SWALLOWTAIL] = 0x3C  # Mid bands
 
@@ -2539,7 +2874,7 @@ class VoiceEngine:
             strengths[E_FOLD] = Q15_ONE
 
         # E7: Sheaf - recovery
-        if (enable_mask & (1 << E_SHEAF)) and regime == Regime.R6_RECOVERY_HEAL:
+        if (enable_mask & (1 << E_SHEAF)) and regime == Regime.R6_RECOVERY:
             mask |= (1 << E_SHEAF)
             strengths[E_SHEAF] = Q15_HALF
 
@@ -2673,6 +3008,11 @@ class VoiceEngine:
         # 7. Step envelope (Semi-Markov duration)
         state.gain_q15 = self._step_envelope(state)
 
+        # 7b. Tick LFOs if present (uses arc_phase_q16 for phase storage)
+        # Per WSE-ARCHITECTURE-v1, Voice Engine owns musical time including LFO phases
+        if state.lfos:
+            state.tick_lfos(state.lfos)
+
         # 8. Update block counter
         state.block_count += 1
 
@@ -2722,6 +3062,175 @@ class VoiceEngine:
             arc_progress_q15=state.arc.get_progress_q15(),
         )
 
+    def step_voice_simple(self, voice_id: int) -> Optional['VoiceFrame']:
+        """
+        Step a Simple mode voice by one block.
+
+        Returns a VoiceFrame (not VoiceFrameABI) for compatibility with
+        existing render paths that use VoiceFrameEmitter.
+
+        Pipeline:
+        1. Tick amplitude envelope
+        2. Tick LFOs and apply modulation
+        3. Update beta ramp
+        4. Tick matrix envelopes
+        5. Emit VoiceFrame
+
+        Returns:
+            VoiceFrame if voice is active, None otherwise
+        """
+        from ..frames import VoiceFrame
+        from ..fixed import RSHIFT_RNE
+        from ..vm.harmonic_bank import LFOTarget
+
+        if voice_id not in self.voices:
+            return None
+
+        state = self.voices[voice_id]
+
+        if state.phase == VoicePhase.FREE:
+            return None
+
+        if state.engine_mode != int(EngineMode.SIMPLE):
+            # Not in Simple mode - caller should use step_voice()
+            return None
+
+        preset = state.compiled_preset
+        if preset is None:
+            return None
+
+        # Track for is_starting
+        is_starting = (state.block_count == 0)
+
+        # Step amplitude envelope
+        if state.amp_envelope:
+            gain_q15 = state.amp_envelope.tick()
+            # Check if envelope is done
+            if not state.amp_envelope.is_active:
+                state.phase = VoicePhase.FREE
+                return None
+        else:
+            gain_q15 = Q15_ONE if state.phase != VoicePhase.RELEASE else 0
+
+        # Apply velocity scaling
+        gain_q15 = (gain_q15 * state.velocity_q15) >> 15
+
+        # Compute beta ramp
+        if state.block_count < state.beta_ramp_blocks and state.beta_ramp_blocks > 1:
+            t = state.block_count / (state.beta_ramp_blocks - 1)
+            state.beta_current_q15 = int(
+                state.beta_start_q15 + (state.beta_target_q15 - state.beta_start_q15) * t
+            )
+        else:
+            state.beta_current_q15 = state.beta_target_q15
+
+        # Compute f0_hz from MIDI note + cents + pitch offset
+        total_cents = state.cents_i16 + state.pitch_offset_cents
+        f0_hz = 440.0 * (2.0 ** ((state.note_u8 - 69 + total_cents / 100.0) / 12.0))
+
+        # Get preset PWM width default
+        pwm_width_q15 = getattr(preset, 'pwm_width_q15', 16384)
+
+        # Tick LFOs and apply modulation
+        for lfo in state.lfos:
+            lfo.advance_block_with_arc(state.arc_phase_q16)
+
+        # Get vibrato macro depth scale (Q15: 32767 = 100%)
+        # SystemMacro.VIBRATO controls global LFO depth modulation
+        vibrato_depth_scale = Q15_ONE  # Default: full depth
+        brightness_q15 = Q15_ONE  # Default: full brightness (filter open)
+        if self.macro_runtime is not None:
+            from ..macro_runtime import SystemMacro
+            vibrato_depth_scale = self.macro_runtime.get_system_macro(SystemMacro.VIBRATO)
+            brightness_q15 = self.macro_runtime.get_system_macro(SystemMacro.BRIGHTNESS)
+
+        # Initialize filter parameters from preset defaults
+        filter_cutoff_q15 = getattr(preset, 'filter_cutoff_q15', Q15_ONE)
+        filter_reso_q15 = getattr(preset, 'filter_reso_q15', 0)
+        filter_mode = getattr(preset, 'filter_mode', 0)
+
+        # Apply BRIGHTNESS macro to filter cutoff
+        # BRIGHTNESS scales the cutoff: 0 = closed, 32767 = fully open
+        # This gives the classic "brightness knob opens the filter" behavior
+        filter_cutoff_q15 = RSHIFT_RNE(filter_cutoff_q15 * brightness_q15, 15)
+
+        for lfo in state.lfos:
+            lfo_val = lfo.get_lfo_value_from_arc(state.arc_phase_q16)
+            # Scale LFO output by vibrato macro
+            lfo_val = RSHIFT_RNE(lfo_val * vibrato_depth_scale, 15)
+            for routing in lfo.routings:
+                scaled = RSHIFT_RNE(lfo_val * routing.amount_q15, 15)
+
+                if routing.target == LFOTarget.PITCH:
+                    total_cents += scaled
+                elif routing.target == LFOTarget.GAIN:
+                    gain_q15 = mul_q15_sat(gain_q15, Q15_ONE + scaled)
+                elif routing.target == LFOTarget.PWM_WIDTH:
+                    pwm_width_q15 = max(0, min(32767, pwm_width_q15 + scaled))
+                elif routing.target == LFOTarget.FILTER_CUTOFF:
+                    # Modulate filter cutoff (additive on log scale)
+                    filter_cutoff_q15 = max(0, min(Q15_ONE, filter_cutoff_q15 + scaled))
+                elif routing.target == LFOTarget.FILTER_RESO:
+                    # Modulate filter resonance
+                    filter_reso_q15 = max(0, min(Q15_ONE, filter_reso_q15 + scaled))
+
+        # Recompute f0_hz if pitch was modulated
+        f0_hz = 440.0 * (2.0 ** ((state.note_u8 - 69 + total_cents / 100.0) / 12.0))
+
+        # Tick matrix envelopes and collect target values
+        env_targets_q15 = None
+        if state.envelope_matrix:
+            env_targets_q15 = {}
+            for env_id, (scheduler, target_ids) in state.envelope_matrix.items():
+                value = scheduler.tick()
+                for target_id in target_ids:
+                    env_targets_q15[target_id] = value
+
+        # Get CMMM defaults from preset
+        cmmm = getattr(preset, 'cmmm', None)
+
+        # Determine oscillator mode and FM6 fields
+        osc_mode = getattr(preset, 'osc_mode', 0)
+        fm6_config = getattr(preset, 'fm6', None)
+
+        # Build VoiceFrame
+        frame = VoiceFrame(
+            voice_id=voice_id,
+            f0_hz=f0_hz,
+            note=state.note_u8,
+            cents=total_cents,
+            gain_q15=gain_q15,
+            beta_target_q15=state.beta_current_q15,
+            partial_amps_q15=list(preset.harmonic_amps_q15),
+            ops_enable=preset.backbone_ops(),
+            families=list(preset.backbone_families().values()),
+            tree_a_id=preset.latch.tree_a_id,
+            tree_b_id=preset.latch.tree_b_id,
+            tree_blend_q15=preset.latch.tree_blend_q15,
+            is_starting=is_starting,
+            is_active=state.phase != VoicePhase.FREE,
+            pwm_width_q15=pwm_width_q15,
+            coeff_osc_mode=osc_mode,
+            fm_algorithm_id=fm6_config.algorithm_id if fm6_config else None,
+            fm_op_ratios=list(fm6_config.op_ratios) if fm6_config else None,
+            fm_op_levels=list(fm6_config.op_levels) if fm6_config else None,
+            fm_feedback_depth=fm6_config.feedback_depth if fm6_config else None,
+            env_targets_q15=env_targets_q15,
+            cmmm_node_mask=cmmm.node_mask_u32 if cmmm else None,
+            cmmm_mask_ramp_blocks=cmmm.mask_ramp_blocks if cmmm else 5,
+            cmmm_tail_mode=cmmm.tail_mode if cmmm else None,
+            cmmm_traction_q15=cmmm.traction_q15 if cmmm else 32767,
+            # Filter parameters (modulated by LFO/macro)
+            filter_cutoff_q15=filter_cutoff_q15,
+            filter_reso_q15=filter_reso_q15,
+            filter_mode=filter_mode,
+        )
+
+        # Advance block counter
+        state.block_count += 1
+
+        return frame
+
     def step_all(self) -> List[VoiceFrameABI]:
         """
         Step all active voices by one block.
@@ -2765,6 +3274,194 @@ class VoiceEngine:
         if voice_id not in self.voices:
             return None
         return self.voices[voice_id].intent
+
+    # =========================================================================
+    # CONTROL PLANE INTEGRATION (Phase 1: API Unification)
+    # =========================================================================
+
+    def step_block(self, control_frame: Optional['ControlFrame'] = None) -> VoiceEngineOutput:
+        """
+        Process one block with ControlFrame input.
+
+        This is the canonical entry point per WSE-ARCHITECTURE-v1:
+        - VoiceEngine is the sole owner of musical time
+        - Consumes ControlFrame from CockpitEngine
+        - Returns render_batch + ParamFrame + telemetry
+
+        The unified execution layer (Stages 3-10) consumes the output
+        to produce audio. VoiceEngine does NOT own rendering.
+
+        Args:
+            control_frame: ControlFrame from CockpitEngine (optional for backward compat)
+
+        Returns:
+            VoiceEngineOutput with:
+            - render_batch: List of (voice_id, VoiceFrame, service_flags) for serviced voices
+            - param_frame: Globals for Material/Safety
+            - telemetry: Scheduler health metrics
+        """
+        from ..frames import ParamFrame, VoiceFrame
+        from ..control_frame import ControlFrame, EventType
+        from .scheduler import HealthTelemetry
+
+        # 1. Process ControlFrame events (NOTE_ON, NOTE_OFF, etc.)
+        if control_frame is not None:
+            self._process_control_events(control_frame)
+
+        # 2. Extract globals from ControlFrame → ParamFrame
+        param_frame = self._extract_param_frame(control_frame)
+
+        # 3. Increment block counter
+        self.block_count += 1
+
+        # 4. Step all active voices and collect VoiceFrames
+        render_batch: List[RenderBatchItem] = []
+
+        for voice_id in list(self.voices.keys()):
+            state = self.voices[voice_id]
+            if state.phase == VoicePhase.FREE:
+                continue
+
+            # Step the voice (CMMM or Simple mode)
+            if getattr(state, 'engine_mode', 0) == int(EngineMode.SIMPLE):
+                frame = self.step_voice_simple(voice_id)
+            else:
+                abi = self.step_voice(voice_id)
+                if abi is not None:
+                    # Convert VoiceFrameABI to VoiceFrame
+                    frame = self._abi_to_voice_frame(abi, voice_id)
+                else:
+                    frame = None
+
+            if frame is not None:
+                # Create render batch item
+                # For now, all voices get TOP/MID due (scheduler integration in Phase 2)
+                item = RenderBatchItem(
+                    voice_id=voice_id,
+                    frame=frame,
+                    mid_due=True,
+                    top_due=True,
+                    degrade_level=int(self.global_degradation),
+                )
+                render_batch.append(item)
+
+        # 5. Build telemetry (basic for Phase 1, full scheduler in Phase 2)
+        telemetry = HealthTelemetry(
+            voices_serviced=len(render_batch),
+            voices_eligible=len([v for v in self.voices.values() if v.phase != VoicePhase.FREE]),
+            gear=5 - int(self.global_degradation),
+        )
+
+        return VoiceEngineOutput(
+            render_batch=render_batch,
+            param_frame=param_frame,
+            telemetry=telemetry,
+            block_index=self.block_count,
+        )
+
+    def _process_control_events(self, control_frame: 'ControlFrame') -> None:
+        """
+        Process ControlFrame events (NOTE_ON, NOTE_OFF, etc.).
+
+        Routes events to voice lifecycle methods.
+        """
+        from ..control_frame import EventType
+
+        for event in control_frame.events:
+            if event.type == EventType.NOTE_ON:
+                # Extract note and velocity from packed format
+                note = event.a & 0x7F
+                velocity_q15 = (event.a >> 8) & 0xFFFF
+
+                # Allocate a voice if needed
+                voice_id = self._find_or_allocate_voice(note)
+                if voice_id is not None:
+                    # Create gesture from velocity
+                    gesture = GestureBasis(
+                        gate=True,
+                        pressure_q15=velocity_q15,
+                    )
+                    self.note_on(voice_id, gesture=gesture)
+                    # Store note for later lookup
+                    if voice_id in self.voices:
+                        self.voices[voice_id].note_u8 = note
+
+            elif event.type == EventType.NOTE_OFF:
+                note = event.a & 0x7F
+                # Find voice playing this note
+                voice_id = self._find_voice_by_note(note)
+                if voice_id is not None:
+                    self.note_off(voice_id)
+
+    def _find_or_allocate_voice(self, note: int) -> Optional[int]:
+        """Find existing voice for note or allocate new one."""
+        # First check if note is already playing
+        for vid, state in self.voices.items():
+            if state.phase != VoicePhase.FREE and getattr(state, 'note_u8', 0) == note:
+                return vid
+
+        # Allocate new voice
+        return self.allocate_voice()
+
+    def _find_voice_by_note(self, note: int) -> Optional[int]:
+        """Find voice playing given note."""
+        for vid, state in self.voices.items():
+            if state.phase != VoicePhase.FREE and getattr(state, 'note_u8', 0) == note:
+                return vid
+        return None
+
+    def _extract_param_frame(self, control_frame: Optional['ControlFrame']) -> 'ParamFrame':
+        """
+        Extract ParamFrame from ControlFrame globals.
+
+        Maps CockpitEngine controls to Material/Safety parameters.
+        """
+        from ..frames import ParamFrame
+
+        if control_frame is None:
+            return ParamFrame()
+
+        # Get globals from control frame
+        g = control_frame.globals
+
+        # Build ParamFrame from globals
+        # Note: Full mapping requires ControlRegistry integration (Phase 2)
+        param_frame = ParamFrame()
+
+        # Map master_gain if present
+        if g.master_gain_q15 is not None:
+            param_frame.gate_q15 = g.master_gain_q15
+
+        return param_frame
+
+    def _abi_to_voice_frame(self, abi: 'VoiceFrameABI', voice_id: int) -> 'VoiceFrame':
+        """
+        Convert VoiceFrameABI to VoiceFrame for render batch.
+
+        VoiceFrameABI is the internal CMMM output format.
+        VoiceFrame is the unified format for the execution layer.
+        """
+        from ..frames import VoiceFrame
+
+        state = self.voices.get(voice_id)
+
+        frame = VoiceFrame(
+            voice_id=voice_id,
+            gain_q15=abi.gain_q15,
+            tree_a_id=abi.tree_a_id,
+            tree_b_id=abi.tree_b_id,
+            tree_blend_q15=abi.tree_blend_q15,
+            is_active=abi.is_active,
+        )
+
+        # Copy additional fields from state if available
+        if state is not None:
+            frame.note = getattr(state, 'note_u8', 60)
+            if hasattr(state, 'compiled_preset') and state.compiled_preset:
+                frame.beta_target_q15 = state.compiled_preset.material.beta_target_q15
+                frame.partial_amps_q15 = list(state.compiled_preset.latch.leaf_amps_q15)
+
+        return frame
 
 
 # =============================================================================

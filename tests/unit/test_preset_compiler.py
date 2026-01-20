@@ -368,8 +368,8 @@ class TestVoiceFrameEmitter:
         emitter.reset()
 
         # Overrides should be cleared
-        assert emitter._eta_override_q15 is None
-        assert emitter._detune_cents == 0
+        assert emitter.get_eta() is None
+        assert emitter.get_detune() is None
 
 
 # =============================================================================

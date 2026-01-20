@@ -26,6 +26,7 @@ from enum import Enum, IntEnum
 import math
 
 from ..prng import PCG32, VoicePRNG
+from ..primitives import Q15_ONE, Q15_HALF, Q15_SCALE, BLOCK_SIZE, SAMPLE_RATE_HZ
 
 
 # =============================================================================
@@ -38,16 +39,8 @@ PHASE_FRAC_BITS = 16
 PHASE_ONE = 1 << PHASE_FRAC_BITS  # 1.0 in fixed-point
 PHASE_MASK = (1 << PHASE_BITS) - 1
 
-# Block size
-BLOCK_SIZE = 64
-
 # Sample rate (for frequency calculations)
-SAMPLE_RATE = 48000
-
-# Q15 constants
-Q15_ONE = 32767
-Q15_HALF = 16384
-Q15_SCALE = 32768
+SAMPLE_RATE = SAMPLE_RATE_HZ
 
 # BLEP kernel size
 BLEP_KERNEL_SIZE = 64

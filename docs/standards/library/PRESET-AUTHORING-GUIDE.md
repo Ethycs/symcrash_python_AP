@@ -75,19 +75,59 @@ The L0 layer defines the signal flow using nodes and edges.
 ### Node Types
 
 #### Oscillator (Osc)
+
+The oscillator supports multiple synthesis modes:
+
 ```python
 L0Node(
     id="osc1",
     type="Osc",
     params=NodeParams(
+        # Basic parameters
         waveform="saw",           # "sine" | "saw" | "pulse" | "tri"
         detune_cents=0.0,         # Fine tuning in cents
-        pw=0.5,                   # Pulse width (pulse only)
+        pw=0.5,                   # Pulse width (legacy, use pwm_width_q15)
         role="audible",           # "off" | "audible" | "exciter_only"
-        archetype="harmonic"      # "harmonic" | "bright" | "hollow" | "noisy" | "transient"
+        archetype="harmonic",     # "harmonic" | "bright" | "hollow" | "noisy" | "transient"
+
+        # Oscillator mode (osc_mode)
+        osc_mode=0,               # 0=A/LUT, 1=B/Rotator, 2=Sample, 3=FM6
+
+        # Waveform type (waveform_type)
+        waveform_type=0,          # 0=sine, 1=square, 2=pulse, 3=saw, 4=saw_down, 5=tri
+
+        # PWM parameters (Q0.15)
+        pwm_enable=False,
+        pwm_width_q15=16384,      # Duty cycle Q0.15 (16384=50%)
+
+        # Hard sync parameters
+        sync_enable=False,
+        sync_ratio_q16=65536,     # Master/slave ratio Q16.16 (65536=1.0)
+
+        # Mode B FM parameters
+        fm_enable=False,
+        fm_depth_q15=0,           # FM depth Q0.15
+        fm_source=0,              # 0=off, 1=feedback, 2=LFO
+
+        # Unison parameters
+        unison_voices=1,          # Voice count (1-8)
+        unison_spread=10,         # Detune spread in cents
+
+        # Mode flags
+        drone_mode=False,         # Sustained coefficient mode
+        legato_mode=False,        # Smooth pitch transitions
     )
 )
 ```
+
+##### Oscillator Modes
+
+| Mode | Value | Description | Use Case |
+|------|-------|-------------|----------|
+| Mode A (LUT) | 0 | Wavetable lookup | Classic waveforms, low CPU |
+| Mode B (Rotator) | 1 | Harmonic rotator synthesis | Rich timbres, harmonic profiles |
+| Sample | 2 | Sample playback | Acoustic samples |
+| FM6 | 3 | 6-operator FM synthesis | DX7-style FM sounds |
 
 #### Noise Generator (Noise)
 ```python
@@ -101,15 +141,46 @@ L0Node(
 ```
 
 #### Filter (Filter)
+
+The filter supports extended parameters for subtractive synthesis:
+
 ```python
 L0Node(
     id="filter1",
     type="Filter",
     params=NodeParams(
-        mode="lp"                 # "lp" | "hp" | "bp" | "notch"
+        # Legacy mode string
+        mode="lp",                     # "lp" | "hp" | "bp" | "notch"
+
+        # Extended filter parameters (Q0.15)
+        filter_enable=True,
+        filter_type=0,                 # 0=LP, 1=HP, 2=BP, 3=Notch
+        filter_cutoff_q15=32767,       # Cutoff Q0.15 (log scale 20Hz-20kHz)
+        filter_resonance_q15=0,        # Resonance Q0.15 (0=flat, 32767=self-osc)
+        filter_env_depth_q15=0,        # Envelope mod Q1.15 (signed)
+        filter_key_track_q15=0,        # Key tracking Q0.15 (16384=50%)
+        filter_drive_q15=0,            # Pre-filter saturation Q0.15
+        filter_slope=1,                # 0=12dB/oct, 1=24dB/oct, 2=6dB/oct
     )
 )
 ```
+
+##### Filter Types
+
+| Type | Value | Description |
+|------|-------|-------------|
+| Low Pass | 0 | Removes high frequencies |
+| High Pass | 1 | Removes low frequencies |
+| Band Pass | 2 | Passes a frequency band |
+| Notch | 3 | Removes a frequency band |
+
+##### Filter Slopes
+
+| Slope | Value | Character |
+|-------|-------|-----------|
+| 6dB/oct | 2 | Gentle, subtle |
+| 12dB/oct | 0 | Standard |
+| 24dB/oct | 1 | Aggressive |
 
 #### Amplifier with Envelope (Amp)
 ```python
@@ -144,6 +215,72 @@ L0Node(
 )
 ```
 
+#### FM6 Synthesis (Osc with osc_mode=3)
+
+6-operator FM synthesis in the style of the Yamaha DX7. Uses NodeParams FM6 fields:
+
+```python
+L0Node(
+    id="fm1",
+    type="Osc",
+    params=NodeParams(
+        osc_mode=3,                        # FM6 mode
+
+        # FM6 parameters
+        algorithm=1,                       # DX7 algorithm 1-32
+        feedback=3,                        # Feedback level 0-7
+        op_ratios=[65536, 131072, 65536, 65536, 65536, 65536],  # Q16.16 ratios
+        op_levels=[32767, 24576, 16384, 8192, 0, 0],           # Q0.15 levels
+
+        # Topology morphing
+        fm6_topo_a=0,                      # Source archetype 0-7
+        fm6_topo_b=1,                      # Target archetype 0-7
+        fm6_topo_blend_q15=0,              # Topology morph Q0.15
+    )
+)
+```
+
+##### DX7 Algorithms
+
+The system supports all 32 original DX7 algorithms. Common starting points:
+
+| Algorithm | Character | Description |
+|-----------|-----------|-------------|
+| 1 | Brass | Classic brass, stacked carriers |
+| 2 | Bright brass | More harmonic content |
+| 5 | Electric piano | Classic EP sound |
+| 7 | Pads | Lush, evolving pads |
+| 11 | Organ | Complex organ tones |
+| 21 | Bass | Punchy bass sounds |
+| 32 | All parallel | Each op is an independent carrier |
+
+##### Operator Ratios (Q16.16)
+
+Ratios are in Q16.16 fixed-point where 65536 = 1.0x:
+
+| Ratio | Q16.16 Value | Musical Interval |
+|-------|--------------|------------------|
+| 0.5x | 32768 | Octave down |
+| 1.0x | 65536 | Unison |
+| 2.0x | 131072 | Octave up |
+| 3.0x | 196608 | Octave + fifth |
+| 4.0x | 262144 | Two octaves |
+
+##### Topology Archetypes
+
+FM6 supports smooth morphing between 8 canonical topologies:
+
+| ID | Name | Character |
+|----|------|-----------|
+| 0 | Stack | Vertical carrier stack |
+| 1 | Parallel | All carriers parallel |
+| 2 | Feedback | Heavy feedback loop |
+| 3 | Modulator | Deep modulation |
+| 4 | Complex | Multi-carrier complex |
+| 5 | Simple | Minimal 2-op |
+| 6 | Ring | Ring modulation-like |
+| 7 | Hybrid | Balanced hybrid |
+
 ### Connections (Edges)
 
 Connect nodes using edges:
@@ -170,15 +307,125 @@ ir.layers.L0_graph.macros = [
 
 | Macro ID | Maps To | Purpose |
 |----------|---------|---------|
-| `M_BRIGHT` | TIMBRE | Harmonic brightness |
+| `M_BRIGHT` | BRIGHTNESS | Harmonic brightness |
 | `M_ATTACK` | ATK_BLOCKS | Attack time |
 | `M_DECAY` | DCY_BLOCKS | Decay time |
 | `M_SUSTAIN` | SUS_Q15 | Sustain level |
 | `M_RELEASE` | REL_BLOCKS | Release time |
-| `M_GLITCH` | CHAOS | Glitch/chaos amount |
+| `M_GLITCH` | RISK | Glitch/chaos amount |
 | `M_MORPH` | MORPH | Tree blend |
-| `M_TEXTURE` | TEXTURE | Surface texture |
+| `M_TEXTURE` | MATERIAL | Surface texture |
 | `M_DETUNE` | DETUNE | Pitch detune |
+
+### Control Config (Semantic Axes)
+
+Presets can specify default values for CMMM semantic control axes:
+
+```yaml
+instrument_ir_v0:
+  # ... meta, layers ...
+
+  control:
+    energy_intent: 0.5      # Playing intensity / attack character
+    motion: 0.0             # Movement / modulation amount
+    focus: 0.5              # Attention / emphasis
+    brightness: 0.75        # Timbral brightness (high for brass)
+    density: 0.5            # Body / thickness
+    risk: 0.1               # Chaos / instability
+    space: 0.25             # Spatial / reverb character
+    material: 0.5           # Surface texture (wood=low, glass=high)
+    unity: 0.5              # Coherence / voice blend
+```
+
+These values are pushed to MacroRuntime at preset load time. All values are normalized 0.0-1.0.
+
+#### Semantic Control Axes
+
+| Axis | Default | Description |
+|------|---------|-------------|
+| `energy_intent` | 0.5 | Playing intensity, attack character |
+| `motion` | 0.0 | Movement, modulation depth |
+| `focus` | 0.5 | Spectral concentration |
+| `brightness` | 0.5 | Harmonic content (timbre) |
+| `density` | 0.5 | Low-mid presence (body) |
+| `risk` | 0.0 | Stochastic behavior (chaos) |
+| `space` | 0.25 | Spatial/reverb character |
+| `material` | 0.5 | Surface texture |
+| `unity` | 0.5 | Voice coherence/blend |
+
+### Matrix Envelope System
+
+The Matrix Envelope System allows named envelopes to route to multiple targets. This is particularly useful for FM6 synthesis where multiple operators share envelope shapes.
+
+```yaml
+instrument_ir_v0:
+  envelopes:
+    - id: "carrier_env"
+      adsr:
+        a_ms: 8
+        d_ms: 150
+        s: 0.7
+        r_ms: 100
+      targets: [FM_OP1, FM_OP2, FM_OP3, FM_OP4]
+
+    - id: "modulator_env"
+      adsr:
+        a_ms: 2
+        d_ms: 300
+        s: 0.3
+        r_ms: 200
+      targets: [FM_OP5, FM_OP6]
+
+    - id: "filter_env"
+      adsr:
+        a_ms: 10
+        d_ms: 200
+        s: 0.5
+        r_ms: 150
+      targets: [FILTER_CUTOFF]
+```
+
+#### Envelope Targets
+
+| Target | Description |
+|--------|-------------|
+| `FM_OP1` - `FM_OP6` | FM operator envelope values |
+| `GAIN` | Voice gain multiplier |
+| `FILTER_CUTOFF` | Filter cutoff modulation |
+| `FILTER_RESO` | Filter resonance modulation |
+| `PITCH` | Pitch modulation |
+| `VIBRATO_DEPTH` | Vibrato depth modulation |
+
+### Modulation Parameters
+
+For expressive presets, NodeParams supports vibrato, body warble, and attack texture:
+
+```python
+NodeParams(
+    # Vibrato/LFO modulation
+    vibrato=VibratoParams(
+        rate_hz=5.5,            # LFO rate in Hz
+        depth_amp=0.06,         # Amplitude modulation depth (0-1)
+        depth_timbre=0.08,      # Timbre modulation depth (0-1)
+        delay_ms=40.0,          # Delay before vibrato onset
+        ramp_ms=30.0,           # Ramp-in time
+    ),
+
+    # Body resonance warble (slow formant drift)
+    body_warble=BodyWarbleParams(
+        rate_hz=1.2,            # Slow LFO rate (0.5-2 Hz)
+        depth=0.1,              # Warble depth (0-1)
+        target_harmonic=4,      # Which harmonic to modulate
+    ),
+
+    # Attack texture (brightness settling)
+    attack_texture=AttackTextureParams(
+        bright_ms=60.0,         # Time for brightness to settle
+        bright_amount=0.3,      # Extra brightness on attack
+        harmonics=[5, 6],       # Which harmonics to boost
+    ),
+)
+```
 
 ---
 

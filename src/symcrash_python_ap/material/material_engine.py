@@ -46,6 +46,29 @@ class RankState:
 
 
 @dataclass
+class SVFState:
+    """
+    State for TPT (Topology-Preserving Transform) SVF filter.
+
+    The TPT SVF is derived from the analog SVF using the trapezoidal rule,
+    giving excellent frequency response and stability at all frequencies.
+
+    State variables:
+    - ic1eq: First integrator state (Q15)
+    - ic2eq: Second integrator state (Q15)
+
+    Reference: Vadim Zavalishin, "The Art of VA Filter Design"
+    """
+    ic1eq: int = 0  # First integrator state (Q15)
+    ic2eq: int = 0  # Second integrator state (Q15)
+
+    def reset(self):
+        """Reset filter state."""
+        self.ic1eq = 0
+        self.ic2eq = 0
+
+
+@dataclass
 class DelayState:
     """State for delay line effect (MONO)."""
     buffer: List[int] = None
@@ -147,6 +170,10 @@ class MaterialEngine:
         self.reverb_L = ReverbState()
         self.reverb_R = ReverbState()
 
+        # SVF filter state (material_id=9)
+        self.svf_L = SVFState()
+        self.svf_R = SVFState()
+
         # Slewed parameters
         self.params = MaterialParams()
         
@@ -155,10 +182,13 @@ class MaterialEngine:
         self.lp_zR = 0
     
     def step_block(self, L: List[int], R: List[int], params: ParamFrame,
-                   material_id: int, cat_id: int = 0) -> Tuple[List[int], List[int]]:
+                   material_id: int, cat_id: int = 0,
+                   filter_cutoff_q15: int = Q15_ONE,
+                   filter_reso_q15: int = 0,
+                   filter_mode: int = 0) -> Tuple[List[int], List[int]]:
         """
         Apply selected material program to stereo block.
-        
+
         material_id:
             0 = clean (transparent)
             1 = tape bus
@@ -166,10 +196,19 @@ class MaterialEngine:
             3 = tropical cut
             4 = catastrophe snap (fold)
             5 = catastrophe A4 (cusp)
+            6 = delay line
+            7 = chorus/flanger
+            8 = reverb
+            9 = SVF filter (TPT)
+
+        Filter parameters (used when material_id=9):
+            filter_cutoff_q15: Cutoff frequency (Q15: 0=20Hz, 32767=20kHz, log scale)
+            filter_reso_q15: Resonance (Q15: 0=flat, 32767=self-oscillation)
+            filter_mode: 0=LP, 1=HP, 2=BP, 3=Notch
         """
         # Slew parameters
         self.params.slew_from(params)
-        
+
         if material_id == 1:
             return self._tape_bus(L, R)
         elif material_id == 2:
@@ -186,6 +225,8 @@ class MaterialEngine:
             return self._chorus(L, R)
         elif material_id == 8:
             return self._reverb(L, R)
+        elif material_id == 9:
+            return self._svf_filter(L, R, filter_cutoff_q15, filter_reso_q15, filter_mode)
         else:
             return self._clean_glue(L, R)
     
@@ -785,5 +826,164 @@ class MaterialEngine:
 
             outL.append(sat16(dryL + wetL))
             outR.append(sat16(dryR + wetR))
+
+        return outL, outR
+
+    # =========================================================================
+    # TPT SVF FILTER (material_id=9)
+    # =========================================================================
+    #
+    # Topology-Preserving Transform State Variable Filter
+    #
+    # Based on Vadim Zavalishin's "The Art of VA Filter Design"
+    # This is the standard TPT SVF used in modern synths (Serum, Vital, etc.)
+    #
+    # Benefits:
+    # - Stable at all frequencies up to Nyquist
+    # - Correct frequency response (no cramping)
+    # - Self-oscillation at high resonance
+    # - Clean, musical sound
+    #
+    # FPGA NOTES:
+    # - 2 state variables per channel (4 total for stereo)
+    # - Requires tan() lookup or polynomial approximation
+    # - ~10 multiplies per sample per channel
+    # - Can be pipelined for high throughput
+
+    def _svf_coefficients(self, cutoff_q15: int, reso_q15: int, sample_rate: int = 48000):
+        """
+        Compute TPT SVF coefficients from cutoff and resonance.
+
+        Args:
+            cutoff_q15: Cutoff frequency (Q15: 0=20Hz, 32767=20kHz log scale)
+            reso_q15: Resonance (Q15: 0=flat, 32767=near self-oscillation)
+            sample_rate: Sample rate in Hz
+
+        Returns:
+            (g, k) where:
+            - g: Frequency coefficient (tan(pi * fc / fs))
+            - k: Damping coefficient (2 - 2*Q, where Q = 0.5 to 25)
+        """
+        import math
+
+        # Map cutoff_q15 to frequency (log scale: 20Hz to 20kHz)
+        # log2(20) ≈ 4.32, log2(20000) ≈ 14.29
+        # Range: ~10 octaves
+        log_min = math.log2(20)
+        log_max = math.log2(20000)
+        log_freq = log_min + (cutoff_q15 / 32767) * (log_max - log_min)
+        fc = 2 ** log_freq
+
+        # Clamp to valid range
+        fc = max(20, min(fc, sample_rate * 0.49))
+
+        # TPT coefficient: g = tan(pi * fc / fs)
+        g = math.tan(math.pi * fc / sample_rate)
+
+        # Map resonance to Q factor
+        # reso_q15 = 0 -> Q = 0.5 (no resonance)
+        # reso_q15 = 32767 -> Q = 25 (near self-oscillation)
+        # k = 2 - 2*Q = 2 - 1/Q (damping)
+        # Q = 0.5 + (reso/32767) * 24.5
+        Q = 0.5 + (reso_q15 / 32767) * 24.5
+        k = 2.0 - 1.0 / Q
+
+        # Clamp k to prevent instability (k must be > 0 for stability)
+        k = max(0.01, k)
+
+        return g, k
+
+    def _svf_sample(self, x: int, state: SVFState, g: float, k: float,
+                    mode: int) -> int:
+        """
+        Process single sample through TPT SVF.
+
+        TPT SVF equations:
+            v1 = (x - ic2eq) * g / (1 + g*(g + k))
+            v2 = ic2eq + g * v1
+
+            lp = v2 + ic2eq
+            bp = v1 + ic1eq
+            hp = x - k*bp - lp
+
+            ic1eq = 2*v1 - ic1eq
+            ic2eq = 2*v2 - ic2eq
+
+        Args:
+            x: Input sample (Q15)
+            state: SVFState with integrator states
+            g: Frequency coefficient
+            k: Damping coefficient
+            mode: 0=LP, 1=HP, 2=BP, 3=Notch
+
+        Returns:
+            Filtered output (Q15)
+        """
+        # Convert input to float for processing
+        x_f = x / 32767.0
+
+        # Convert state to float
+        ic1eq = state.ic1eq / 32767.0
+        ic2eq = state.ic2eq / 32767.0
+
+        # TPT SVF core
+        # v1 = g * (x - ic2eq) / (1 + g*(g + k))
+        denom = 1.0 + g * (g + k)
+        v1 = g * (x_f - ic2eq) / denom
+        v2 = ic2eq + g * v1
+
+        # Compute outputs
+        lp = v2 + ic2eq
+        bp = v1 + ic1eq
+        hp = x_f - k * bp - lp
+        notch = lp + hp  # Notch = LP + HP
+
+        # Update state
+        state.ic1eq = int((2.0 * v1 - ic1eq) * 32767)
+        state.ic2eq = int((2.0 * v2 - ic2eq) * 32767)
+
+        # Clamp state to prevent runaway
+        state.ic1eq = max(-32767, min(32767, state.ic1eq))
+        state.ic2eq = max(-32767, min(32767, state.ic2eq))
+
+        # Select output based on mode
+        if mode == 0:
+            out = lp
+        elif mode == 1:
+            out = hp
+        elif mode == 2:
+            out = bp
+        else:  # mode == 3
+            out = notch
+
+        # Convert back to Q15
+        return sat16(int(out * 32767))
+
+    def _svf_filter(self, L: List[int], R: List[int],
+                    cutoff_q15: int, reso_q15: int, mode: int) -> Tuple[List[int], List[int]]:
+        """
+        TPT SVF filter processing.
+
+        Args:
+            L, R: Input stereo block (Q15)
+            cutoff_q15: Cutoff frequency (Q15 log scale)
+            reso_q15: Resonance (Q15)
+            mode: 0=LP, 1=HP, 2=BP, 3=Notch
+
+        Returns:
+            Filtered stereo block (Q15)
+        """
+        outL = []
+        outR = []
+
+        # Compute coefficients (constant for block)
+        g, k = self._svf_coefficients(cutoff_q15, reso_q15)
+
+        for i in range(self.B):
+            yL = self._svf_sample(L[i], self.svf_L, g, k, mode)
+            yR = self._svf_sample(R[i], self.svf_R, g, k, mode)
+
+            outL.append(yL)
+            outR.append(yR)
 
         return outL, outR

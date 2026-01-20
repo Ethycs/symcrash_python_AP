@@ -178,6 +178,20 @@ from .tree_registry import (
     get_tree_registry,
 )
 
+# Central Registry (WSE-STD-REGISTRY v0)
+from .central_registry import (
+    CentralRegistry,
+    get_central_registry,
+    reset_central_registry,
+    OperatorID,
+    OperatorSpec,
+    OperatorRegistry,
+    OPERATOR_SPECS,
+    PatternSpec,
+    PatternRegistry,
+    DEFAULT_PATTERNS,
+)
+
 
 __all__ = [
     # Capsule model
@@ -301,4 +315,16 @@ __all__ = [
     'create_impact_tree',
     'create_drone_tree',
     'get_tree_registry',
+
+    # Central Registry (WSE-STD-REGISTRY v0)
+    'CentralRegistry',
+    'get_central_registry',
+    'reset_central_registry',
+    'OperatorID',
+    'OperatorSpec',
+    'OperatorRegistry',
+    'OPERATOR_SPECS',
+    'PatternSpec',
+    'PatternRegistry',
+    'DEFAULT_PATTERNS',
 ]

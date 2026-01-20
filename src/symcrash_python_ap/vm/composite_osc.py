@@ -43,7 +43,8 @@ from .coeff_lut_streaming import (
 )
 from .harmonic_bank import (
     ModeBState, HarmonicBasisFrames, BasisFrameAtlas,
-    mode_b_generate_coeffs, DEFAULT_H_MAX,
+    mode_b_generate_coeffs, mode_b_generate_coeffs_vectorized,
+    DEFAULT_H_MAX,
 )
 
 # =============================================================================
@@ -313,7 +314,7 @@ def composite_generate_coeffs(
             ccs_generate_coeffs_polyphase(state.mode_a, output_coeffs)
             return
         basis = basis_atlas.get_frames(state.mode_b.note)
-        mode_b_generate_coeffs(state.mode_b, basis, output_coeffs)
+        mode_b_generate_coeffs_vectorized(state.mode_b, basis, output_coeffs)
         return
 
     # Composite path: blend A + B
@@ -325,7 +326,7 @@ def composite_generate_coeffs(
     # Generate Mode B coefficients
     if basis_atlas is not None:
         basis = basis_atlas.get_frames(state.mode_b.note)
-        mode_b_generate_coeffs(state.mode_b, basis, state._coeff_b)
+        mode_b_generate_coeffs_vectorized(state.mode_b, basis, state._coeff_b)
     else:
         # No basis atlas - use A for B too
         state._coeff_b[:] = state._coeff_a
@@ -360,7 +361,7 @@ def composite_generate_coeffs_with_fallback(
     if not mode_a_available and basis_atlas is not None:
         # Force pure Mode B
         basis = basis_atlas.get_frames(state.mode_b.note)
-        mode_b_generate_coeffs(state.mode_b, basis, output_coeffs)
+        mode_b_generate_coeffs_vectorized(state.mode_b, basis, output_coeffs)
     else:
         # Normal composite generation
         composite_generate_coeffs(state, output_coeffs, basis_atlas)

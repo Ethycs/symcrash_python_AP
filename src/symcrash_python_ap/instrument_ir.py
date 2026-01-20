@@ -28,6 +28,20 @@ except ImportError:
     HAS_YAML = False
     yaml = None
 
+# Import canonical primitives (single source of truth)
+from .primitives import (
+    EventLane as _EventLane,
+    TailMode as _TailMode,
+    K_LADDER_MASKS,
+    get_k_mask,
+)
+
+# Lazy import for central registry (avoid circular imports)
+def _get_central_registry():
+    """Lazy import of CentralRegistry to avoid circular imports."""
+    from .library.central_registry import get_central_registry
+    return get_central_registry()
+
 
 # =============================================================================
 # UNIT CONVERSION HELPERS
@@ -148,19 +162,9 @@ class OverlayKind(Enum):
     ALWAYS = "always"
 
 
-class EventLane(IntEnum):
-    """Fixed event lane assignments (v1 with carrier-first semantics)."""
-    EVT_OP_PULSE = 0
-    EVT_OP_TOGGLE = 1
-    EVT_TREE_MORPH = 2
-    EVT_K_MODE = 3
-    EVT_CARRIER_CFG = 4     # Was EVT_INJECT_NOTE in v0
-    EVT_MATERIAL_HIT = 5
-    EVT_CLOUD_PUSH = 6
-    EVT_RESERVED = 7
-
-    # Backwards compatibility alias
-    EVT_INJECT_NOTE = EVT_CARRIER_CFG
+# EventLane imported from primitives (single source of truth)
+# Re-export for backwards compatibility
+EventLane = _EventLane
 
 
 # =============================================================================
@@ -327,10 +331,11 @@ class NodeParams:
     # Harmonic profile (for Mode B synthesis)
     harmonics: Optional[HarmonicProfile] = None
 
-    # Modulation parameters
-    vibrato: Optional[VibratoParams] = None
-    body_warble: Optional[BodyWarbleParams] = None
-    attack_texture: Optional[AttackTextureParams] = None
+    # Modulation parameters (DEPRECATED: moved to L1Lift for Tower conformance)
+    # Keep for backwards compatibility with existing presets
+    vibrato: Optional[VibratoParams] = None           # Prefer L1Lift.vibrato
+    body_warble: Optional[BodyWarbleParams] = None    # Prefer L1Lift.body_warble
+    attack_texture: Optional[AttackTextureParams] = None  # Prefer L1Lift.attack_texture
 
     # PWM parameters (Q0.15 per WSE-STD-001)
     pwm_enable: bool = False
@@ -380,13 +385,16 @@ class NodeParams:
     send_b: float = 0.0
 
     # FM6 parameters (6-operator FM synthesis, OSC_MODE=3)
+    # Static algorithm/feedback/ratios/levels are L0 (patch-level, fixed)
+    # Topology morphing (topo_a, topo_b, blend) moved to L1Lift.fm6_morph
     algorithm: Optional[int] = None          # DX7 algorithm 1-32
     feedback: Optional[int] = None           # Feedback level 0-7
     op_ratios: Optional[List[int]] = None    # 6 Q16.16 frequency ratios
     op_levels: Optional[List[int]] = None    # 6 Q0.15 output levels
-    fm6_topo_a: int = 0                      # Source archetype 0-7
-    fm6_topo_b: int = 0                      # Target archetype 0-7
-    fm6_topo_blend_q15: int = 0              # Topology morph Q0.15
+    # Legacy fields for backwards compatibility (prefer L1Lift.fm6_morph)
+    fm6_topo_a: int = 0                      # Source archetype 0-7 (DEPRECATED: use L1Lift.fm6_morph)
+    fm6_topo_b: int = 0                      # Target archetype 0-7 (DEPRECATED: use L1Lift.fm6_morph)
+    fm6_topo_blend_q15: int = 0              # Topology morph Q0.15 (DEPRECATED: use L1Lift.fm6_morph)
 
 
 @dataclass
@@ -437,14 +445,102 @@ class MacroSemantic:
 
 
 @dataclass
+class FM6MorphConfig:
+    """
+    FM6 topology morphing configuration (L1 family primitive).
+
+    Defines interpolation between two FM topologies for dynamic timbral morphing.
+    Static algorithm/feedback/ratios/levels stay in L0 NodeParams, but morphing
+    between archetypes is an L1 family behavior controlled by gesture/macro.
+
+    Per Full Tower v0: L1 defines "family template" including morph pairs.
+    """
+    topo_a: int = 0                   # Source archetype 0-7
+    topo_b: int = 0                   # Target archetype 0-7
+    blend_q15: int = 0                # Initial blend Q0.15 (gesture can modulate)
+    blend_source: str = "static"      # "static" | "gesture:motion" | "macro:M_BODY"
+
+
+@dataclass
+class IntentMappingConfig:
+    """
+    Gesture → Intent mapping configuration (L1 primitive).
+
+    Per InstrumentIR v0 §2.3:
+    - mode="default" uses WSE-STD-GESTURE default_gesture_to_intent()
+    - mode="custom" uses the custom_map expressions
+
+    Gesture Basis (8 raw inputs):
+        Gate, Pressure, Position, Speed, Tilt, Chaos, Pitch, Pan
+
+    Intent Vector (8 semantic outputs):
+        I_TONE=0, I_BOW=1, I_AIR=2, I_GLITCH=3,
+        I_WARP=4, I_SNAP=5, I_GLUE=6, I_CALM=7
+    """
+    mode: str = "default"             # "default" | "custom"
+    custom_map: Dict[str, str] = field(default_factory=dict)  # e.g. {"I_TONE": "expr..."}
+
+
+@dataclass
+class FamilyMappingConfig:
+    """
+    Intent → Family weight mapping configuration (L1 primitive).
+
+    Per InstrumentIR v0 §2.4:
+    - mode="default" uses WSE-STD-GESTURE default family mapping
+    - mode="custom" uses the custom_map expressions
+
+    Intent lanes (input):
+        I_TONE, I_BOW, I_AIR, I_GLITCH, I_WARP, I_SNAP, I_GLUE, I_CALM
+
+    Family indices (output):
+        F_RESERVED=0, F_COLOR=1, F_TRANSPORT=2, F_LOCAL=3,
+        F_TOPOLOGY=4, F_GLUE=5, F_EVENTS=6, F_CATASTROPHE=7
+    """
+    mode: str = "default"             # "default" | "custom"
+    custom_map: Dict[str, str] = field(default_factory=dict)  # e.g. {"F_COLOR": "expr..."}
+
+
+@dataclass
 class L1Lift:
     """
-    L1 gesture basis and macro semantics.
+    L1 gesture basis, macro semantics, and control manifold.
 
-    Defines how raw inputs are mapped to internal control signals.
+    Per Full Tower v0 Section L1 — Instrument Family:
+    - Gesture basis: raw inputs (MIDI, MPE, etc.) → normalized control signals
+    - Macro semantics: how L0 macros map to internal primitives
+    - Control manifold: semantic axes defining the family's character space
+
+    The control manifold (ControlConfig) IS the L1 primitive - it defines
+    the 9 semantic axes that characterize the instrument family:
+    energy_intent, motion, focus, brightness, density, risk, space, material, unity
+
+    Additionally L1 holds:
+    - FM6 topology morphing config (morph between FM archetypes)
+    - Modulation parameters (vibrato, body_warble, attack_texture)
+
+    These are family-level because they define gesture→sound relationships,
+    not per-regime behavior (which is L2).
     """
     gesture_basis: Dict[str, GestureSource] = field(default_factory=dict)
     macro_semantics: Dict[str, MacroSemantic] = field(default_factory=dict)
+
+    # Control manifold axes (the L1 semantic space)
+    control: Optional[ControlConfig] = None
+
+    # Gesture → Intent mapping (how raw gesture becomes semantic intent)
+    intent_mapping: Optional[IntentMappingConfig] = None
+
+    # Intent → Family weight mapping (how intent becomes operator weights)
+    family_mapping: Optional[FamilyMappingConfig] = None
+
+    # FM6 topology morphing (L1 family morph pairs)
+    fm6_morph: Optional[FM6MorphConfig] = None
+
+    # Modulation parameters (gesture-based, family-level behavior)
+    vibrato: Optional[VibratoParams] = None
+    body_warble: Optional[BodyWarbleParams] = None
+    attack_texture: Optional[AttackTextureParams] = None
 
 
 # =============================================================================
@@ -521,9 +617,31 @@ class RegimeGraphSpec:
 
 
 @dataclass
+class RegimeEnvelopeOverride:
+    """
+    Per-regime envelope override.
+
+    Allows regimes to modify envelope behavior (e.g., faster release in recovery).
+    References envelope by id and provides override ADSR values.
+    """
+    envelope_id: str                  # Reference to EnvelopeBinding.id
+    adsr_override: Optional[ADSR] = None  # Override ADSR for this regime
+    scale_q15: int = 32767            # Output scaling Q0.15 (32767 = 1.0)
+
+
+@dataclass
 class L2Regimes:
     """
     L2 regime graph - the graph-based state machine.
+
+    Per Full Tower v0 Section L2 — Instrument Instance:
+    - Regime graph with numeric thresholds
+    - Policy tables mapping regime → operator program template
+    - Per-regime envelope overrides (Matrix Envelope System policy)
+
+    The Matrix Envelope System bindings live here because envelope routing
+    is a per-regime policy decision. Different regimes may route envelopes
+    to different targets or modify their ADSR shapes.
 
     Supports both simple (regime_nodes + transitions) and
     full graph spec (regime_graph_spec with typed EdgeSpecs) formats.
@@ -532,6 +650,13 @@ class L2Regimes:
     transitions: List[RegimeTransition] = field(default_factory=list)
     # Full graph spec with typed edges (optional, takes precedence if present)
     regime_graph_spec: Optional[RegimeGraphSpec] = None
+
+    # Matrix Envelope System - envelope definitions with target routing
+    # These are L2 because envelope→target routing is regime-dependent policy
+    envelopes: List[EnvelopeBinding] = field(default_factory=list)
+
+    # Per-regime envelope overrides (e.g., faster release in R6_RECOVERY)
+    envelope_overrides: Dict[str, List[RegimeEnvelopeOverride]] = field(default_factory=dict)
 
 
 # =============================================================================
@@ -621,24 +746,16 @@ class CmmmControl:
     tail_mode: Union[int, str] = 0  # Can be int or name (FULL, MID, MIN, EMERGENCY)
     traction_q15: int = 32767
 
-    # Pattern table for K ladder (canonical masks)
-    PATTERN_TABLE = {
-        0: 0xFFFFFFFF,  # K=32
-        1: 0x00FFFFFF,  # K=24
-        2: 0x000FFFFF,  # K=20
-        3: 0x0000FFFF,  # K=16
-        4: 0x00000FFF,  # K=12
-        5: 0x000000FF,  # K=8
-        6: 0x0000000F,  # K=4
-        7: 0x00000001,  # K=1
-    }
+    # Pattern table for K ladder - use primitives.K_LADDER_MASKS (single source of truth)
+    # Kept as class attr for backwards compatibility
+    PATTERN_TABLE = K_LADDER_MASKS
 
-    # Tail mode name mapping
+    # Tail mode name mapping - use primitives.TailMode values
     TAIL_MODE_MAP = {
-        "FULL": 0,
-        "MID": 1,
-        "MIN": 2,
-        "EMERGENCY": 3,
+        "FULL": _TailMode.FULL,
+        "MID": _TailMode.MID,
+        "MIN": _TailMode.MIN,
+        "EMERGENCY": _TailMode.EMERGENCY,
     }
 
     def get_node_mask_u32(self) -> int:
@@ -649,7 +766,7 @@ class CmmmControl:
             # Pattern reference: "pattern:N"
             if self.node_mask.startswith("pattern:"):
                 pattern_id = int(self.node_mask.split(":")[1])
-                return self.PATTERN_TABLE.get(pattern_id, 0xFFFFFFFF)
+                return get_k_mask(pattern_id)
             # Hex string
             if self.node_mask.startswith("0x"):
                 return int(self.node_mask, 16) & 0xFFFFFFFF
@@ -801,14 +918,55 @@ class FrameEmitterPolicy:
 @dataclass
 class MaterialConfig:
     """
-    Material (dry/wet blend) configuration.
+    Material engine configuration (WSE-STD-MATERIAL-v0).
 
-    Controls the blend between dry carrier signal and wet CMMM-processed material.
-    Beta ramps from start to target over ramp_blocks after note-on.
+    Controls the Material Engine analog processing layer.
+    The 6 material programs provide different coloration:
+    - 0: CLEAN (pass-through)
+    - 1: TAPE (hysteresis saturation)
+    - 2: CATASTROPHE (bifurcation maps)
+    - 3: RANK (nonlinear filtering)
+    - 4: TROPICAL (max operations)
+    - 5: RESERVED
+
+    Beta controls the blend between dry carrier and wet CMMM-processed material.
     """
+    # Material program selection
+    material_id: int = 0             # Material program (0-5)
+
+    # Dry/wet blend
     beta_start_q15: int = 0          # Starting blend (0 = fully dry)
     beta_target_q15: int = 16384     # Target blend (0.5 default)
     beta_ramp_blocks: int = 8        # Blocks to ramp from start to target
+
+    # Per-program parameters (Q15)
+    tape_saturation_q15: int = 8192      # Tape hysteresis amount
+    catastrophe_threshold_q15: int = 24576  # Bifurcation trigger point
+    rank_filter_order: int = 3           # Nonlinear filter order (1-8)
+    tropical_blend_q15: int = 16384      # Max operation blend
+
+
+@dataclass
+class SafetyConfig:
+    """
+    Safety engine configuration (WSE-STD-SAFETY).
+
+    Controls the Safety Engine audio-space tail processing:
+    - OLA (overlap-add) for wet path smoothing
+    - DC removal (disabled for CCS path)
+    - Limiter for amplitude safety
+    - Slew limiting for click prevention
+
+    Note: CCS path produces phase-continuous sine waves with zero inherent DC,
+    so dc_removal and master_ola are disabled by default.
+    """
+    enabled: bool = True                    # Enable safety processing
+    dc_removal: bool = False                # DC offset removal (disabled for CCS)
+    master_ola: bool = False                # Master OLA (handled in lane_idwpt_render)
+    limiter_threshold_q15: int = 32000      # Hard limiter threshold
+    slew_limit_q15: int = 2000              # Maximum sample-to-sample change
+    energy_cap_soft_q32: int = 0x30000000   # Soft energy cap (warning)
+    energy_cap_hard_q32: int = 0x40000000   # Hard energy cap (enforce)
 
 
 @dataclass
@@ -819,6 +977,7 @@ class CompileConfig:
     degrade_profile: DegradeProfile = field(default_factory=DegradeProfile)
     frame_emitter_policy: FrameEmitterPolicy = field(default_factory=FrameEmitterPolicy)
     material: MaterialConfig = field(default_factory=MaterialConfig)
+    safety: SafetyConfig = field(default_factory=SafetyConfig)
 
 
 # =============================================================================
@@ -866,6 +1025,18 @@ class InstrumentIR:
 
     A layered IR that compiles down to VoiceFramePacket v0b emissions.
 
+    Tower Layer Placement (per Full Tower v0):
+    - L0 (Patch): layers.L0_graph - static DSP graph, fixed params
+    - L1 (Family): layers.L1_lift - control manifold, gesture semantics, FM6 morph
+    - L2 (Instance): layers.L2_regimes - regime graph, envelope bindings
+    - L3 (Cockpit): layers.L3_cmmm - CMMM emission, overlays
+
+    Access patterns:
+    - Control axes: ir.layers.L1_lift.control (or ir.control for backwards compat)
+    - Envelopes: ir.layers.L2_regimes.envelopes (or ir.envelopes for backwards compat)
+    - FM6 morph: ir.layers.L1_lift.fm6_morph
+    - Modulation: ir.layers.L1_lift.vibrato, .body_warble, .attack_texture
+
     Natural compilation to CapsuleV0:
         ir = load_instrument("my_synth.yaml")
         capsule = ir.to_capsule()  # Returns CapsuleV0
@@ -880,13 +1051,35 @@ class InstrumentIR:
     layers: Layers = field(default_factory=Layers)
     compile: CompileConfig = field(default_factory=CompileConfig)
 
-    # Matrix Envelope System - named envelopes with target routing
-    # Each envelope can route to multiple targets (FM operators, gain, filter, etc.)
-    envelopes: List[EnvelopeBinding] = field(default_factory=list)
+    # DEPRECATED: These are now in their proper Tower layers
+    # Kept for backwards compatibility - will be migrated to layers on load
+    # Access via ir.control or ir.envelopes properties instead
+    _envelopes_compat: List[EnvelopeBinding] = field(default_factory=list)
+    _control_compat: Optional[ControlConfig] = None
 
-    # Control axis defaults for cockpit integration
-    # These define semantic control axis defaults that MacroRuntime applies at load
-    control: Optional[ControlConfig] = None
+    @property
+    def envelopes(self) -> List[EnvelopeBinding]:
+        """Get envelopes from L2 layer (or backwards-compat field)."""
+        if self.layers.L2_regimes.envelopes:
+            return self.layers.L2_regimes.envelopes
+        return self._envelopes_compat
+
+    @envelopes.setter
+    def envelopes(self, value: List[EnvelopeBinding]):
+        """Set envelopes - stores in L2 layer."""
+        self.layers.L2_regimes.envelopes = value
+
+    @property
+    def control(self) -> Optional[ControlConfig]:
+        """Get control config from L1 layer (or backwards-compat field)."""
+        if self.layers.L1_lift.control is not None:
+            return self.layers.L1_lift.control
+        return self._control_compat
+
+    @control.setter
+    def control(self, value: Optional[ControlConfig]):
+        """Set control config - stores in L1 layer."""
+        self.layers.L1_lift.control = value
 
     def validate(self) -> Tuple[bool, str]:
         """
@@ -1407,8 +1600,74 @@ def _parse_macro_semantic(data: dict) -> MacroSemantic:
     )
 
 
+def _parse_vibrato_params(data: dict) -> VibratoParams:
+    """Parse vibrato params from dict."""
+    return VibratoParams(
+        rate_hz=data.get('rate_hz', 5.5),
+        depth_amp=data.get('depth_amp', 0.0),
+        depth_timbre=data.get('depth_timbre', 0.0),
+        delay_ms=data.get('delay_ms', 40.0),
+        ramp_ms=data.get('ramp_ms', 30.0),
+    )
+
+
+def _parse_body_warble_params(data: dict) -> BodyWarbleParams:
+    """Parse body warble params from dict."""
+    return BodyWarbleParams(
+        rate_hz=data.get('rate_hz', 1.2),
+        depth=data.get('depth', 0.0),
+        target_harmonic=data.get('target_harmonic', 4),
+    )
+
+
+def _parse_attack_texture_params(data: dict) -> AttackTextureParams:
+    """Parse attack texture params from dict."""
+    return AttackTextureParams(
+        bright_ms=data.get('bright_ms', 60.0),
+        bright_amount=data.get('bright_amount', 0.0),
+        harmonics=data.get('harmonics', [5, 6]),
+    )
+
+
+def _parse_fm6_morph_config(data: dict) -> FM6MorphConfig:
+    """Parse FM6 morph config from dict."""
+    return FM6MorphConfig(
+        topo_a=data.get('topo_a', 0),
+        topo_b=data.get('topo_b', 0),
+        blend_q15=data.get('blend_q15', 0),
+        blend_source=data.get('blend_source', 'static'),
+    )
+
+
+def _parse_intent_mapping_config(data: dict) -> IntentMappingConfig:
+    """Parse intent mapping config from dict."""
+    return IntentMappingConfig(
+        mode=data.get('mode', 'default'),
+        custom_map=data.get('custom_map', {}),
+    )
+
+
+def _parse_family_mapping_config(data: dict) -> FamilyMappingConfig:
+    """Parse family mapping config from dict."""
+    return FamilyMappingConfig(
+        mode=data.get('mode', 'default'),
+        custom_map=data.get('custom_map', {}),
+    )
+
+
 def _parse_l1_lift(data: dict) -> L1Lift:
-    """Parse L1 lift from dict."""
+    """
+    Parse L1 lift from dict.
+
+    L1 contains:
+    - gesture_basis: raw input → normalized control signals
+    - macro_semantics: L0 macro → internal primitive mappings
+    - control: semantic control axes (the L1 manifold)
+    - intent_mapping: gesture → intent mapping config
+    - family_mapping: intent → family weight mapping config
+    - fm6_morph: FM topology morphing config
+    - vibrato, body_warble, attack_texture: modulation params
+    """
     gesture_basis = {}
     for name, gdata in data.get('gesture_basis', {}).items():
         gesture_basis[name] = _parse_gesture_source(gdata)
@@ -1417,9 +1676,49 @@ def _parse_l1_lift(data: dict) -> L1Lift:
     for name, mdata in data.get('macro_semantics', {}).items():
         macro_semantics[name] = _parse_macro_semantic(mdata)
 
+    # Parse control config (L1 manifold axes)
+    control = None
+    if 'control' in data:
+        control = _parse_control_config(data['control'])
+
+    # Parse intent mapping (gesture → intent)
+    intent_mapping = None
+    if 'intent_mapping' in data:
+        intent_mapping = _parse_intent_mapping_config(data['intent_mapping'])
+
+    # Parse family mapping (intent → family weights)
+    family_mapping = None
+    if 'family_mapping' in data:
+        family_mapping = _parse_family_mapping_config(data['family_mapping'])
+
+    # Parse FM6 morph config
+    fm6_morph = None
+    if 'fm6_morph' in data:
+        fm6_morph = _parse_fm6_morph_config(data['fm6_morph'])
+
+    # Parse modulation params
+    vibrato = None
+    if 'vibrato' in data:
+        vibrato = _parse_vibrato_params(data['vibrato'])
+
+    body_warble = None
+    if 'body_warble' in data:
+        body_warble = _parse_body_warble_params(data['body_warble'])
+
+    attack_texture = None
+    if 'attack_texture' in data:
+        attack_texture = _parse_attack_texture_params(data['attack_texture'])
+
     return L1Lift(
         gesture_basis=gesture_basis,
         macro_semantics=macro_semantics,
+        control=control,
+        intent_mapping=intent_mapping,
+        family_mapping=family_mapping,
+        fm6_morph=fm6_morph,
+        vibrato=vibrato,
+        body_warble=body_warble,
+        attack_texture=attack_texture,
     )
 
 
@@ -1455,11 +1754,48 @@ def _parse_regime_transition(data: dict) -> RegimeTransition:
     )
 
 
+def _parse_regime_envelope_override(data: dict) -> RegimeEnvelopeOverride:
+    """Parse regime envelope override from dict."""
+    adsr_override = None
+    if 'adsr_override' in data:
+        adsr_override = _parse_adsr(data['adsr_override'])
+
+    return RegimeEnvelopeOverride(
+        envelope_id=data.get('envelope_id', ''),
+        adsr_override=adsr_override,
+        scale_q15=data.get('scale_q15', 32767),
+    )
+
+
 def _parse_l2_regimes(data: dict) -> L2Regimes:
-    """Parse L2 regimes from dict."""
+    """
+    Parse L2 regimes from dict.
+
+    L2 contains:
+    - regime_nodes: state machine nodes
+    - transitions: state machine edges
+    - regime_graph_spec: typed edge spec (optional)
+    - envelopes: Matrix Envelope System bindings (L2 policy)
+    - envelope_overrides: per-regime envelope modifications
+    """
+    # Parse envelope bindings (Matrix Envelope System)
+    envelopes = [
+        _parse_envelope_binding(env)
+        for env in data.get('envelopes', [])
+    ]
+
+    # Parse per-regime envelope overrides
+    envelope_overrides = {}
+    for regime_id, overrides in data.get('envelope_overrides', {}).items():
+        envelope_overrides[regime_id] = [
+            _parse_regime_envelope_override(o) for o in overrides
+        ]
+
     return L2Regimes(
         regime_nodes=[_parse_regime_node(n) for n in data.get('regime_nodes', [])],
         transitions=[_parse_regime_transition(t) for t in data.get('transitions', [])],
+        envelopes=envelopes,
+        envelope_overrides=envelope_overrides,
     )
 
 
@@ -2203,6 +2539,96 @@ class Tower:
         if self.L2_regimes.regime_nodes:
             return "P1"
         return "P0"
+
+    def validate_registry_references(self) -> List[str]:
+        """
+        Validate that registry references exist in CentralRegistry.
+
+        Checks:
+        - regime_graph_id exists in RegimeRegistry
+        - tree_family_id exists in TreeRegistry
+        - Any pattern_id references in emit templates exist
+
+        Returns:
+            List of error messages (empty if all valid)
+        """
+        errors = []
+        registry = _get_central_registry()
+
+        # Validate regime_graph_id
+        if self.regime_graph_id is not None:
+            if registry.regimes.get(self.regime_graph_id) is None:
+                errors.append(f"Regime graph ID {self.regime_graph_id} not found in registry")
+
+        # Validate tree_family_id
+        if self.tree_family_id is not None:
+            if registry.trees.get(self.tree_family_id) is None:
+                errors.append(f"Tree family ID {self.tree_family_id} not found in registry")
+
+        # Validate pattern references in emit templates
+        for template_id, template in self.L3_cmmm.emit_templates.items():
+            if hasattr(template, 'pattern_id') and template.pattern_id is not None:
+                if registry.patterns.get(template.pattern_id) is None:
+                    # Check K ladder as fallback
+                    if template.pattern_id not in K_LADDER_MASKS:
+                        errors.append(
+                            f"Pattern ID {template.pattern_id} in template '{template_id}' "
+                            f"not found in registry or K ladder"
+                        )
+
+        return errors
+
+    def resolve_registry_references(self) -> 'Tower':
+        """
+        Resolve registry IDs to actual objects from CentralRegistry.
+
+        This populates:
+        - L2_regimes from regime_graph_id (if set)
+        - Tree family info (stored in metadata)
+
+        Returns:
+            New Tower with resolved references
+        """
+        registry = _get_central_registry()
+        result = Tower(
+            tower_level=self.tower_level,
+            L0_graph=self.L0_graph,
+            L1_lift=self.L1_lift,
+            L2_regimes=self.L2_regimes,
+            L3_cmmm=self.L3_cmmm,
+            envelopes=list(self.envelopes),
+            budget=self.budget,
+            regime_graph_id=self.regime_graph_id,
+            tree_family_id=self.tree_family_id,
+        )
+
+        # Resolve regime graph if ID is set but L2 is empty
+        if self.regime_graph_id is not None and not self.L2_regimes.regime_nodes:
+            regime_graph = registry.regimes.get(self.regime_graph_id)
+            if regime_graph is not None:
+                # Convert RegimeGraphSpec to L2Regimes
+                result.L2_regimes = L2Regimes(
+                    regime_nodes=[
+                        RegimeNode(
+                            id=node.id,
+                            kind=RegimeKind.STABLE if node.kind == "StableTone" else RegimeKind.ONSET,
+                            emit_template=node.emit_template,
+                        )
+                        for node in regime_graph.nodes
+                    ],
+                    transitions=[
+                        RegimeTransition(
+                            from_regime=edge.src_regime,
+                            to_regime=edge.dst_regime,
+                            condition=edge.guard or "auto",
+                            priority=1,
+                        )
+                        for edge in regime_graph.edges
+                    ],
+                    regime_graph_spec=regime_graph,
+                )
+
+        return result
 
 
 # =============================================================================

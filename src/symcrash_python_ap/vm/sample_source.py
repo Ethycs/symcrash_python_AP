@@ -21,9 +21,8 @@ import numpy as np
 from ..wavelet.fast_lifting import fwpt_jit
 from .tables import VM_K, COEFF_LEN
 
-# Constants
-NUM_LEAVES = 64   # Leaves in wavelet tree
-BLOCK_SIZE = 64   # Audio samples per block
+# Import canonical constants from primitives (single source of truth)
+from ..primitives import NUM_LEAVES, BLOCK_SIZE
 
 
 @dataclass

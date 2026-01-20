@@ -136,14 +136,17 @@ from ..fixed import (
 )
 from ..frames import ParamFrame, Metrics
 
+# Import from primitives (single source of truth)
+from ..primitives import NUM_LEAVES
+
 
 # =============================================================================
 # SYMBOL TAIL CONSTANTS (coefficient-space)
 # =============================================================================
 
-LEAF_COUNT = 64           # L = 64 leaves per tree (D=6 master tree)
+LEAF_COUNT = NUM_LEAVES   # L = 64 leaves per tree (D=6 master tree)
 COEFF_PER_LEAF = 4        # 4 coefficients per leaf (256 / 64 = 4)
-COEFF_LEN = 256           # Total coefficient vector length
+COEFF_LEN = LEAF_COUNT * COEFF_PER_LEAF  # Total coefficient vector length (256)
 
 # Fine band set (highest frequency leaves, prone to ultrafine blowup)
 FINE_BAND_SET = {60, 61, 62, 63}  # Default: last 4 leaves (updated for 64 leaves)
