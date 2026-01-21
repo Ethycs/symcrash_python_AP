@@ -20,11 +20,12 @@ from ..primitives import Q15_ONE
 # from .harmonic_bank import ModeBState, OSC_MODE_A, OSC_MODE_B
 
 # Oscillator mode constants (WSE-STD-210)
-OSC_MODE_A = 0       # LUT-based (CCSState)
-OSC_MODE_B = 1       # Rotator/Harmonic Bank (ModeBState)
-OSC_MODE_SAMPLE = 2  # Sample playback via FWPT gateway (Phase 3)
-OSC_MODE_FM6 = 3     # 6-operator FM synthesis (WSE-STD-FM-TOPOLOGY-v0)
-
+OSC_MODE_A = 0           # LUT-based (CCSState)
+OSC_MODE_B = 1           # Rotator/Harmonic Bank (ModeBState)
+OSC_MODE_SAMPLE = 2      # Sample playback via FWPT gateway (Phase 3)
+OSC_MODE_FM6 = 3         # 6-operator FM synthesis (WSE-STD-FM-TOPOLOGY-v0)
+OSC_MODE_WAVETABLE = 4   # Wavetable synthesis with 2D interpolation (Phase 4)
+OSC_MODE_GRANULAR = 5    # Granular synthesis (coefficient-domain)
 
 # =============================================================================
 # EXECUTOR LATCH (CMMM Runtime State)
@@ -309,6 +310,18 @@ class VMState:
     _fm6_morph_state: Optional['FM6MorphState'] = None  # type: ignore
 
     # -------------------------------------------------------------------------
+    # Wavetable State (Phase 4 - WSE-STD-210 Section 10.2)
+    # -------------------------------------------------------------------------
+    # Lazy-initialized like other oscillator modes to avoid import overhead
+    _wavetable_state: Optional['WavetableState'] = None  # type: ignore
+
+    # -------------------------------------------------------------------------
+    # Granular State (Phase 5 - Coefficient-Domain Granular Synthesis)
+    # -------------------------------------------------------------------------
+    # Lazy-initialized to avoid import overhead when not using granular mode
+    _granular_state: Optional['GranularState'] = None  # type: ignore
+
+    # -------------------------------------------------------------------------
     # CMMM Executor Latch (WSE-STD-070 Tower Runtime State)
     # -------------------------------------------------------------------------
     # Holds latched values for node mask and tail mode, updated by CMMM events
@@ -352,6 +365,32 @@ class VMState:
     def sample_state(self, value: 'SampleOscState') -> None:
         """Set Sample state."""
         self._sample_state = value
+
+    @property
+    def wavetable_state(self) -> 'WavetableState':
+        """Get or create Wavetable state (lazy init)."""
+        if self._wavetable_state is None:
+            from .wavetable_engine import WavetableState
+            self._wavetable_state = WavetableState()
+        return self._wavetable_state
+
+    @wavetable_state.setter
+    def wavetable_state(self, value: 'WavetableState') -> None:
+        """Set Wavetable state."""
+        self._wavetable_state = value
+
+    @property
+    def granular_state(self) -> 'GranularState':
+        """Get or create Granular state (lazy init)."""
+        if self._granular_state is None:
+            from .granular_engine import GranularState
+            self._granular_state = GranularState()
+        return self._granular_state
+
+    @granular_state.setter
+    def granular_state(self, value: 'GranularState') -> None:
+        """Set Granular state."""
+        self._granular_state = value
 
     @property
     def mode_b_state(self) -> 'ModeBState':
@@ -665,6 +704,8 @@ __all__ = [
     'OSC_MODE_B',
     'OSC_MODE_SAMPLE',
     'OSC_MODE_FM6',
+    'OSC_MODE_WAVETABLE',
+    'OSC_MODE_GRANULAR',
     # CMMM Executor Latch (WSE-STD-070)
     'ExecutorLatch',
     'PAYLOAD_TYPE_NODEMASK_SET',

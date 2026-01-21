@@ -31,6 +31,7 @@ class ValueType(IntEnum):
     ENUM8 = 4  # Enumerated value (0 to 255)
     U32 = 5    # Unsigned int32 (0 to 4294967295) - for Q16.16 ratios etc.
     Q15S = 6   # Signed Q0.15 (-32768 to 32767)
+    I32 = 7    # Signed int32 (-2147483648 to 2147483647)
 
 
 class UpdateMode(IntEnum):

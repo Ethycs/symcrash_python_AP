@@ -116,8 +116,8 @@ IntentFrame (GestureTime - async)
          │
          ▼
 ┌─────────────────────────────────┐
-│   Stage 9: MATERIAL ENGINE      │  🟡 TPT SVF Filter
-│   7 programs specified          │  ✅ Filter audio operational
+│   Stage 9: MATERIAL ENGINE      │  ✅ Complete (6 programs)
+│   7 programs specified          │  ✅ All P1-P7 building blocks
 └─────────────────────────────────┘
          │
          ▼
@@ -143,7 +143,7 @@ IntentFrame (GestureTime - async)
 
 | Gap | Severity | Spec Location | Description |
 |-----|----------|---------------|-------------|
-| **Material Engine** | 🟡 MEDIUM | symcrash_docs Material Engine v0 | TPT SVF filter implemented; 6 programs remaining |
+| ~~**Material Engine**~~ | ✅ FIXED | symcrash_docs Material Engine v0 | All 6 programs + P1-P7 building blocks implemented |
 | ~~**SVF Filter**~~ | ✅ FIXED | WSE-STD-CMM-ROADMAP Phase 2 | TPT SVF in Material Engine (material_id=9) |
 | ~~**LFO Generator**~~ | ✅ FIXED | WSE-STD-CMM-ROADMAP Phase 2 | `LFOState` + `arc_phase_q16` wired in voice_engine |
 
@@ -172,25 +172,26 @@ Per `symcrash_docs/03 - Audio Pipeline/03 - Material Engine/00 - Operation.md`:
 
 | ID | Program | Building Blocks | Status |
 |----|---------|-----------------|--------|
-| 0 | Clean Glue | P1 tilt, P2 saturator, P4 LP | 🔲 Not implemented |
-| 1 | Tape Bus | P1 tilt, P3 tape hysteresis, P4 LP | 🔲 Not implemented |
-| 2 | Rank Grit | P2 saturator, P5 rank window | 🔲 Not implemented |
-| 3 | Tropical Cut Mix | P6 tropical, P2 saturator, P4 LP | 🔲 Not implemented |
-| 4 | Catastrophe Snap (A2/A3) | P7 catastrophe, P4 LP | 🔲 Not implemented |
-| 5 | Catastrophe Swallowtail (A4) | P7 catastrophe, P3 tape, P4 LP | 🔲 Not implemented |
+| 0 | Clean Glue | P1 tilt, P2 saturator, P4 LP | ✅ Implemented |
+| 1 | Tape Bus | P1 tilt, P3 tape hysteresis, P4 LP | ✅ Implemented |
+| 2 | Rank Grit | P2 saturator, P5 rank window | ✅ Implemented |
+| 3 | Tropical Cut Mix | P6 tropical, P2 saturator, P4 LP | ✅ Implemented |
+| 4 | Catastrophe Snap (A2/A3) | P7 catastrophe, P4 LP | ✅ Implemented |
+| 5 | Catastrophe Swallowtail (A4) | P7 catastrophe, P3 tape, P4 LP | ✅ Implemented |
 | 6 | Terrain Crackle | Waveshaper, P2 saturator, P4 LP | 🔲 Optional v0 |
+| 9 | TPT SVF Filter | N/A | ✅ Implemented |
 
 ### Building Blocks Required
 
-| ID | Primitive | Description | State |
-|----|-----------|-------------|-------|
-| P1 | Pre-emphasis/tilt | 1st-order shelving EQ | 1 pole/channel |
-| P2 | Soft saturator | tanh/rational/cubic | Memoryless |
-| P3 | Tape hysteresis | Lightweight magnetization model | m per channel |
-| P4 | One-pole LP/HP | IIR filter | z per channel |
-| P5 | Rank nonlinearity | Median/trimmed mean window | Ring buffer |
-| P6 | Tropical min/max | min-plus mixer | Optional short delay |
-| P7 | Catastrophe shaper | A2/A3/A4 polynomial maps | Latch variable |
+| ID | Primitive | Description | Status |
+|----|-----------|-------------|--------|
+| P1 | Pre-emphasis/tilt | 1st-order shelving EQ | ✅ Implemented |
+| P2 | Soft saturator | tanh/rational/cubic | ✅ Implemented |
+| P3 | Tape hysteresis | Lightweight magnetization model | ✅ Implemented |
+| P4 | One-pole LP/HP | IIR filter | ✅ Implemented |
+| P5 | Rank nonlinearity | Median/trimmed mean window | ✅ Implemented |
+| P6 | Tropical min/max | min-plus mixer | ✅ Implemented |
+| P7 | Catastrophe shaper | A2/A3/A4 polynomial maps | ✅ Implemented |
 
 ---
 
@@ -249,7 +250,7 @@ Per WSE-STD-CMM-ROADMAP:
 | 2 | SUBTRACTIVE | ✅ | ✅ 90% | 🔲 | 🔲 |
 | 3 | FM/PM | ✅ | ✅ 85% | 🔲 | 🟡 |
 | 4 | WAVETABLE | 🔲 | 🔲 | 🔲 | 🔲 |
-| 5 | SAMPLER | 🔲 | 🔲 | 🔲 | 🔲 |
+| 5 | SAMPLER | ✅ | ✅ 95% | 🔲 | ✅ |
 | 6 | GRANULAR | 🔲 | 🔲 | 🔲 | 🔲 |
 | 7 | MODAL/RESON | 🔲 | 🔲 | 🔲 | 🔲 |
 
@@ -265,6 +266,19 @@ Per WSE-STD-CMM-ROADMAP:
 - [ ] Fix 5 FM6 presets (int16 overflow on operator ratios)
 - [ ] Post-filter implementation
 - [ ] Golden trace pack
+
+### SAMPLER ✅ Complete (2026-01-20)
+- [x] `OSC_MODE_SAMPLE = 2` defined in `vm/state.py`
+- [x] `SampleOscState` coefficient-native playback (`vm/sample_source.py`)
+- [x] Executor dispatch for MODE_SAMPLE (`vm/executor.py`)
+- [x] Pre-computed coefficient mode (FWPT at load, no hot-path transform)
+- [x] Audio mode fallback (FWPT gateway)
+- [x] Pitch shifting via root_note metadata + `compute_playback_rate()`
+- [x] Loop mode (configurable start/end)
+- [x] Q16 fixed-point sub-block interpolation
+- [x] `sample_rate_q16` VoiceFrame parameter
+- [x] Test coverage: `test_sample_playback.py`, `test_sample_mode_integration.py`, `test_sample_morphing.py`
+- [ ] Formal WSE-STD-SAMPLER-PROFILE spec
 
 ---
 
@@ -322,21 +336,30 @@ Per WSE-STD-CMM-ROADMAP:
 - Wired `SystemMacro.BRIGHTNESS` to filter cutoff
 - Filter params flow through VoiceFrame → SynthMaster → MaterialEngine
 
-### Phase C: Material Engine v0
+### Phase C: Material Engine v0 ✅ COMPLETE
 
 **Goal:** Analog coloration path operational
 
-| Task | Priority |
-|------|----------|
-| Implement P1-P4 building blocks (tilt, saturator, tape, one-pole) | 🟡 MEDIUM |
-| Implement material_id 0 (Clean Glue) | 🟡 MEDIUM |
-| Implement material_id 1 (Tape Bus) | 🟡 MEDIUM |
-| Wire ParamFrame → material controls | 🟡 MEDIUM |
+| Task | Priority | Status |
+|------|----------|--------|
+| Implement P1-P4 building blocks (tilt, saturator, tape, one-pole) | 🟡 MEDIUM | ✅ Done |
+| Implement P5-P7 building blocks (rank, tropical, catastrophe) | 🟡 MEDIUM | ✅ Done |
+| Implement material_id 0 (Clean Glue) | 🟡 MEDIUM | ✅ Done |
+| Implement material_id 1 (Tape Bus) | 🟡 MEDIUM | ✅ Done |
+| Implement material_id 2-5 (Rank Grit, Tropical, Catastrophe) | 🟡 MEDIUM | ✅ Done |
+| Wire ParamFrame → material controls | 🟡 MEDIUM | ✅ Done |
 
 **Exit Criteria:**
-- [ ] Clean Glue applies gentle saturation
-- [ ] Tape Bus adds weight/memory
-- [ ] `material_id` selectable from preset
+- [x] Clean Glue applies gentle saturation
+- [x] Tape Bus adds weight/memory
+- [x] `material_id` selectable from preset
+- [x] All 6 core programs operational (0-5)
+
+**Completed:** 2026-01-20
+**Key Changes:**
+- All P1-P7 building blocks implemented in `material/` module
+- Programs 0-5 fully operational with Q1.15 fixed-point arithmetic
+- Full test coverage in `test_material_building_blocks.py`, `test_material_programs.py`
 
 ### Phase D: L1 Family Templates
 
@@ -398,12 +421,26 @@ Each profile MUST have:
 
 ### Existing Test Coverage
 
+**Total: 103 test files, 129+ test functions, 36,211 lines**
+
+| Category | Files | Key Coverage |
+|----------|-------|--------------|
+| Unit tests | 70+ | Oscillator, FM wiring, matrix ops, wavelet, preset compilation |
+| Integration tests | 9+ | Voice engine, orchestrator, symbol engine, wavelet engine |
+| Conformance tests | 25+ | Standards validation (UART, scheduler, FM topology, preset library) |
+| Quality/Spectral | 5+ | Carrier purity, combing artifacts, discontinuity analysis |
+| Golden traces | 2+ | Stress testing, deterministic replay |
+
+Key test files:
 | Test | Coverage |
 |------|----------|
 | `test_crossfade_dispatch.py` | ExecutorLatch weights, ramp behavior |
 | `test_cmmm_events.py` | Event roundtrip, K computation |
 | `test_golden_voiceframe_stream.py` | Deterministic replay |
 | `test_fm6_pipeline.py` | FM6 → coefficients → audio |
+| `test_envelope_suite.py` | 34 tests for all 6 envelope types |
+| `test_material_programs.py` | Material engine programs 0-5 |
+| `test_wavetable_engine.py` | Wavetable atlas, 2D bilinear interpolation |
 
 ---
 
@@ -472,6 +509,31 @@ This matrix clarifies which document is authoritative for each Tower concept.
 ---
 
 ## Changelog
+
+### v1.4 (2026-01-20)
+- **Phase C Complete:** Material Engine v0 fully operational
+  - All P1-P7 building blocks implemented (tilt, saturator, tape hysteresis, one-pole, rank, tropical, catastrophe)
+  - Programs 0-5 fully operational (Clean Glue, Tape Bus, Rank Grit, Tropical Cut, Catastrophe Snap/Swallowtail)
+  - Program 9 (TPT SVF) already complete from Phase B
+  - All Q1.15 fixed-point arithmetic with full test coverage
+- **Envelope Suite Complete:** 6 envelope types (ADSR, AR, Decay, EnvelopeFollower, Slew, LFO)
+  - 34 tests in `test_envelope_suite.py`
+  - Covers all modulation needs for SUBTRACTIVE and FM profiles
+- **Wavetable Engine Complete:** 2D bilinear atlas with morphing
+  - `WavetableAtlas`, `WavetableBank`, `WavetableState` implemented
+  - Phase 4 readiness: ~75%
+- Updated Tier 1 gaps: Material Engine marked FIXED
+- Updated test coverage section with comprehensive counts (103 files, 129+ functions, 36K lines)
+- Updated pipeline diagram: Material Engine now shows complete status
+
+### v1.3 (2026-01-20)
+- **SAMPLER Profile Complete:** OSC_MODE_SAMPLE fully implemented
+  - `SampleOscState` with coefficient-native playback
+  - Pre-computed coefficient mode (FWPT at load, no hot-path transform)
+  - Audio mode fallback via FWPT gateway
+  - Pitch shifting, looping, Q16 sub-block interpolation
+  - Full test coverage (16 tests pass)
+- Updated Synth Profile Status table: SAMPLER ✅ 95%
 
 ### v1.2 (2026-01-20)
 - **Phase B Complete:** SUBTRACTIVE profile audio operational

@@ -50,6 +50,47 @@ Q8_ONE = 256              # 2^8
 # Q32 format: for extended precision accumulators
 Q32_SCALE = 0x80000000    # 2^31
 
+# Additional Q16 constants
+Q16_SCALE = 65536         # 2^16 - Q16 scaling factor (alias for Q16_ONE)
+
+# Drone mode constants (vm/executor.py)
+DRONE_MODE_CARRIER_MIX = 1638  # ~5% carrier blend in drone mode (Q15_ONE * 0.05)
+
+
+# =============================================================================
+# FIXED-POINT UTILITY FUNCTIONS
+# =============================================================================
+
+def clamp_q15(value: int) -> int:
+    """
+    Clamp value to Q15 signed range [-32768, 32767].
+
+    This is the canonical clamping function for coefficient-domain operations.
+    Use this instead of inline min(32767, max(-32768, x)) patterns.
+
+    Args:
+        value: Integer value to clamp
+
+    Returns:
+        Value clamped to Q15 range
+    """
+    return max(-32768, min(32767, value))
+
+
+def clamp_q15u(value: int) -> int:
+    """
+    Clamp value to Q15 unsigned range [0, 32767].
+
+    For gain, envelope, and other non-negative Q15 values.
+
+    Args:
+        value: Integer value to clamp
+
+    Returns:
+        Value clamped to [0, 32767]
+    """
+    return max(0, min(32767, value))
+
 
 # =============================================================================
 # BLOCK AND TILE CONSTANTS
@@ -64,10 +105,39 @@ BLOCKS_PER_TILE = 8       # Blocks in a tile
 COEFF_LEN = 512           # 64 leaves × 8 k-slots (coefficient vector length)
 NUM_LEAVES = 64           # Wavelet packet tree leaves
 VM_K = 8                  # K time slots per block
+NODE_LEN = 8              # Coefficients per node (sub-block)
+L_TOTAL_NODES = COEFF_LEN // NODE_LEN  # 64 total nodes (for mask operations)
 
 # Sample rates
 SAMPLE_RATE_HZ = 48000    # Default sample rate
 BLOCK_RATE_HZ = SAMPLE_RATE_HZ // BLOCK_SIZE  # ~750 Hz block rate
+
+
+# =============================================================================
+# NODE ITERATION HELPERS
+# =============================================================================
+
+def iter_active_nodes(mask: int):
+    """
+    Iterate over active node indices based on a bitmask.
+
+    This is the canonical iterator for operator dispatch loops that check
+    node masks. Use this instead of inline for-loop + mask check patterns.
+
+    Args:
+        mask: 32-bit node mask (1 = node active)
+
+    Yields:
+        int: Index of each active node (0 to L_TOTAL_NODES-1)
+
+    Example:
+        for node in iter_active_nodes(mask):
+            coeff_idx = node * NODE_LEN
+            # process node...
+    """
+    for node in range(L_TOTAL_NODES):
+        if mask & (1 << node):
+            yield node
 
 
 # =============================================================================
@@ -391,6 +461,20 @@ class RegimeKind(Enum):
     RECOVERY = "Recovery"
 
 
+class EdgeTransitionType(Enum):
+    """
+    Edge transition types per Voice Engine Tower spec.
+
+    Defines how the transition between regimes behaves.
+    Canonical source: primitives.py (import from here)
+    """
+    HARD = "hard"                  # Immediate switch, no crossfade
+    SOFT = "soft"                  # Smooth crossfade over duration_blocks
+    CHAOTIC = "chaotic"            # Stochastic switching with jitter
+    CORRIDOR_ENTRY = "corridor"    # Entry into degradation corridor
+    RECOVERY = "recovery"          # Return from instability to stable
+
+
 class RegimeInfo(NamedTuple):
     """Regime metadata."""
     id: int
@@ -559,6 +643,43 @@ TREE_ARCHETYPE_TABLE: Dict[int, TreeArchetypeInfo] = {
 
 
 # =============================================================================
+# OSCILLATOR MODES (6 synthesis modes)
+# =============================================================================
+
+class OscMode(IntEnum):
+    """
+    Oscillator mode IDs (WSE-STD-210).
+
+    6 synthesis modes that generate coefficient vectors.
+    Each mode has its own state structure and generation function.
+    """
+    MODE_A = 0            # LUT-based coefficient streaming (CCSState)
+    MODE_B = 1            # Rotator/Harmonic Bank (ModeBState)
+    MODE_SAMPLE = 2       # Sample playback via FWPT gateway (Phase 3)
+    MODE_FM6 = 3          # 6-operator FM synthesis (WSE-STD-FM-TOPOLOGY-v0)
+    MODE_WAVETABLE = 4    # Wavetable synthesis with 2D interpolation (Phase 4)
+    MODE_GRANULAR = 5     # Granular synthesis (coefficient-domain)
+
+
+class OscModeInfo(NamedTuple):
+    """Oscillator mode metadata."""
+    id: int
+    name: str
+    description: str
+    state_class: str       # Name of state class
+
+
+OSC_MODE_TABLE: Dict[int, OscModeInfo] = {
+    0: OscModeInfo(0, "MODE_A", "LUT-based coefficient streaming", "CCSState"),
+    1: OscModeInfo(1, "MODE_B", "Rotator/Harmonic Bank", "ModeBState"),
+    2: OscModeInfo(2, "MODE_SAMPLE", "Sample playback via FWPT gateway", "SampleOscState"),
+    3: OscModeInfo(3, "MODE_FM6", "6-operator FM synthesis", "FM6State"),
+    4: OscModeInfo(4, "MODE_WAVETABLE", "Wavetable synthesis with 2D interpolation", "WavetableState"),
+    5: OscModeInfo(5, "MODE_GRANULAR", "Granular synthesis (coefficient-domain)", "GranularState"),
+}
+
+
+# =============================================================================
 # K LADDER (degradation masks)
 # =============================================================================
 
@@ -608,11 +729,16 @@ def get_k_from_mask(mask: int) -> int:
 __all__ = [
     # Fixed-point constants
     'Q15_ONE', 'Q15_HALF', 'Q15_QUARTER', 'Q15_SCALE', 'Q15_NEG_ONE',
-    'Q16_ONE', 'Q16_HALF', 'Q8_ONE', 'Q32_SCALE',
+    'Q16_ONE', 'Q16_HALF', 'Q16_SCALE', 'Q8_ONE', 'Q32_SCALE',
+    'DRONE_MODE_CARRIER_MIX',
+    # Fixed-point utility functions
+    'clamp_q15', 'clamp_q15u',
     # Block/tile constants
     'BLOCK_SIZE', 'BLOCK_SAMPLES', 'TILE_SIZE', 'BLOCKS_PER_TILE',
-    'COEFF_LEN', 'NUM_LEAVES', 'VM_K',
+    'COEFF_LEN', 'NUM_LEAVES', 'VM_K', 'NODE_LEN', 'L_TOTAL_NODES',
     'SAMPLE_RATE_HZ', 'BLOCK_RATE_HZ',
+    # Node iteration helpers
+    'iter_active_nodes',
     # Gesture
     'Gesture', 'GestureInfo', 'GESTURE_TABLE',
     # Intent
@@ -625,7 +751,7 @@ __all__ = [
     'Operator', 'OperatorType', 'OperatorGroup', 'OperatorInfo',
     'OPERATOR_TABLE', 'OPERATOR_NAME_TO_ID',
     # Regime
-    'Regime', 'RegimeKind', 'RegimeInfo', 'REGIME_TABLE',
+    'Regime', 'RegimeKind', 'EdgeTransitionType', 'RegimeInfo', 'REGIME_TABLE',
     # Event Lane
     'EventLane', 'EventLaneInfo', 'EVENT_LANE_TABLE',
     # Tail Mode
@@ -634,6 +760,8 @@ __all__ = [
     'FMArchetype', 'FMArchetypeInfo', 'FM_ARCHETYPE_TABLE',
     # Tree Archetype
     'TreeArchetype', 'TreeArchetypeInfo', 'TREE_ARCHETYPE_TABLE',
+    # Oscillator Mode
+    'OscMode', 'OscModeInfo', 'OSC_MODE_TABLE',
     # K Ladder
     'KLadder', 'K_LADDER_MASKS', 'get_k_mask', 'get_k_from_mask',
 ]

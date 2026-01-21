@@ -347,6 +347,9 @@ class VoiceFrame:
     fm_topo_b_id: Optional[int] = None
     fm_topo_blend_q15: int = 0
 
+    # Sample Playback Parameters (Mode 2)
+    sample_rate_q16: int = 65536    # Playback rate (Q16: 65536 = 1.0x)
+
     # Matrix Envelope Targets
     env_targets_q15: Optional[dict] = None
 
@@ -1156,6 +1159,104 @@ MaterialEngine._svf_filter() [material_id=9]
 
 ---
 
+## 15.4 Sample Playback Mode (OSC_MODE_SAMPLE)
+
+Sample playback (Mode 2) uses the **FWPT gateway** architecture, identical to FM6, to bring audio-domain samples into the coefficient-domain pipeline.
+
+### 15.4.1 Architecture
+
+```
+Sample Buffer (int16)
+         │
+         ▼
+┌─────────────────────────────────────┐
+│    FWPT Transform (at load time)    │  Pre-computed coefficient mode
+│    OR FWPT Gateway (per block)      │  Audio mode fallback
+└──────────────────┬──────────────────┘
+                   │
+                   ▼
+┌─────────────────────────────────────┐
+│    Coefficient Buffer [L=64]        │  64 leaves per block
+│    Replicate to 512 (8 k-slots)     │
+└──────────────────┬──────────────────┘
+                   │
+                   ▼
+┌─────────────────────────────────────┐
+│    Standard CCS Pipeline            │  Operators, IDWPT, mixing
+│    (identical to Mode A/B/FM6)      │
+└─────────────────────────────────────┘
+```
+
+### 15.4.2 SampleOscState
+
+```python
+@dataclass
+class SampleOscState:
+    """Sample playback state (coefficient-native)."""
+    buffer: Optional[np.ndarray] = None           # Raw int16 samples
+    coeff_buffer: Optional[np.ndarray] = None     # Pre-computed [blocks, 64]
+    use_coeff_buffer: bool = False                # Mode selector
+
+    position_q16: int = 0             # Audio mode: sample position (Q16)
+    block_position_q16: int = 0       # Coeff mode: block + fraction (Q16)
+    rate_q16: int = 65536             # Playback rate (65536 = 1.0x)
+
+    loop_start: int = 0               # Loop start (block index)
+    loop_end: int = 0                 # Loop end (0 = buffer length)
+    loop_enabled: bool = False
+
+    root_note: Optional[int] = None   # MIDI note for pitch shifting
+    is_playing: bool = False
+    is_finished: bool = False
+```
+
+### 15.4.3 Playback Modes
+
+| Mode | `use_coeff_buffer` | FWPT Timing | Pitch Shift | Use Case |
+|------|-------------------|-------------|-------------|----------|
+| Pre-computed | `True` | At load time | Via coefficient interpolation | Loops, wavetables |
+| Audio | `False` | Per block | Via sample rate | One-shots, variable pitch |
+
+### 15.4.4 Pitch Shifting
+
+**Automatic (root_note metadata):**
+```python
+def compute_playback_rate(root_note: int, target_note: int) -> int:
+    """Compute Q16 rate for pitch shifting."""
+    semitones = target_note - root_note
+    ratio = 2.0 ** (semitones / 12.0)
+    return int(ratio * 65536)
+```
+
+**Manual (VoiceFrame parameter):**
+- `VoiceFrame.sample_rate_q16` overrides computed rate
+- Default 65536 = 1.0x (no pitch change)
+
+### 15.4.5 Executor Dispatch
+
+```python
+# vm/executor.py
+elif osc_mode == OSC_MODE_SAMPLE:
+    sample_state = state.sample_state
+    if sample_state.buffer is not None:
+        sample_rate = getattr(frame, 'sample_rate_q16', 65536) or 65536
+        root_note = getattr(sample_state, 'root_note', None)
+        if root_note is not None and root_note != params.note:
+            sample_rate = compute_playback_rate(root_note, params.note)
+        sample_state.rate_q16 = sample_rate
+    sample_generate_coeffs(sample_state, carrier_512)
+```
+
+### 15.4.6 Integration with CCS Pipeline
+
+Sample mode outputs to `carrier_512` (512 coefficients = 64 leaves × 8 k-slots), identical to Mode A/B/FM6. All coefficient operators work unchanged:
+
+- TILT, COMPRESS_K, NoiseBand
+- NormalizeScale, FineClamp, SheafProject
+- Full CMMM event support (0x30/0x31)
+
+---
+
 ## 16. VoiceFrame Emission
 
 ### 16.1 Emission Function (Mealy Output)
@@ -1475,6 +1576,7 @@ def sat16(x: int) -> int:
 | EnvelopeScheduler | `envelope_scheduler.py` | ADSR |
 | MacroRuntime | `macro_runtime.py` | Macro state |
 | MaterialEngine | `safety/material_engine.py` | Filter processing |
+| SampleOscState | `vm/sample_source.py` | Sample playback (Mode 2) |
 | Primitives | `primitives.py` | Enums and constants |
 
 ---

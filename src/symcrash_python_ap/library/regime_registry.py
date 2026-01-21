@@ -20,20 +20,9 @@ Registry provides:
 import hashlib
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
-from enum import Enum
 
-
-# =============================================================================
-# EDGE TRANSITION TYPES
-# =============================================================================
-
-class EdgeTransitionType(Enum):
-    """Transition types between regimes (from InstrumentIR Tower Spec)."""
-    HARD = "hard"           # Immediate switch, no crossfade
-    SOFT = "soft"           # Smooth crossfade over duration_blocks
-    CHAOTIC = "chaotic"     # Stochastic switching with jitter
-    CORRIDOR = "corridor"   # Entry into degradation corridor
-    RECOVERY = "recovery"   # Return from instability to stable
+# Import canonical EdgeTransitionType from primitives (single source of truth)
+from ..primitives import EdgeTransitionType
 
 
 # =============================================================================

@@ -13,7 +13,7 @@ Includes:
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 from enum import IntEnum
 import struct
 
@@ -117,7 +117,7 @@ class VoiceFrame:
     # ops_enable: List of operator names to apply (e.g., ["TILT", "COMPRESS_K"])
     # families: Dict mapping operator name to strength (0.0-1.0)
     ops_enable: List[str] = field(default_factory=list)
-    families: dict = field(default_factory=dict)
+    families: Dict[str, float] = field(default_factory=dict)
 
     # =========================================================================
     # CCS Oscillator Mode B Parameters (WSE-STD-210 Section 10.2)
@@ -194,6 +194,11 @@ class VoiceFrame:
     # Maps to Q15 via DX7_FEEDBACK_TABLE
     fm_feedback_depth: Optional[int] = None
 
+    # Post-filter for FM6 output (optional per spec)
+    # Softens harsh FM harmonics like vintage DX7 DAC filter
+    fm_post_filter_enabled: Optional[bool] = None
+    fm_post_filter_cutoff_hz: Optional[float] = None  # Cutoff in Hz (e.g., 8000.0)
+
     # =========================================================================
     # FM Topology Morphing (WSE-STD-FM-TOPOLOGY-v0 Section 8)
     # =========================================================================
@@ -226,7 +231,7 @@ class VoiceFrame:
     #   10: GAIN (voice gain multiplier)
     #   20-21: FILTER_CUTOFF, FILTER_RESO (future)
     #   30-31: PITCH, VIBRATO_DEPTH (future)
-    env_targets_q15: Optional[dict] = None
+    env_targets_q15: Optional[Dict[int, int]] = None
 
     # =========================================================================
     # CMMM Event Payloads (WSE-STD-070 Tower Runtime)

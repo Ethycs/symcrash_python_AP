@@ -361,9 +361,100 @@ def sample_generate_coeffs_windowed(
 # =============================================================================
 
 def create_hann_window(size: int = BLOCK_SIZE) -> np.ndarray:
-    """Create a Hann window for sample transitions."""
+    """
+    Create a Hann window for sample transitions.
+
+    The Hann window (cosine-squared) provides good frequency resolution
+    with moderate sidelobe suppression (-31 dB).
+
+    Args:
+        size: Window length in samples (default: BLOCK_SIZE=64)
+
+    Returns:
+        Q15 window coefficients
+    """
     n = np.arange(size)
     window = 0.5 * (1 - np.cos(2 * np.pi * n / (size - 1)))
+    return (window * 32767).astype(np.int16)
+
+
+def create_hamming_window(size: int = BLOCK_SIZE) -> np.ndarray:
+    """
+    Create a Hamming window for sample transitions.
+
+    The Hamming window has better sidelobe suppression (-43 dB) than Hann
+    but a wider main lobe. Good for spectral analysis.
+
+    Args:
+        size: Window length in samples (default: BLOCK_SIZE=64)
+
+    Returns:
+        Q15 window coefficients
+    """
+    n = np.arange(size)
+    window = 0.54 - 0.46 * np.cos(2 * np.pi * n / (size - 1))
+    return (window * 32767).astype(np.int16)
+
+
+def create_blackman_window(size: int = BLOCK_SIZE) -> np.ndarray:
+    """
+    Create a Blackman window for sample transitions.
+
+    The Blackman window has excellent sidelobe suppression (-58 dB)
+    at the cost of a wider main lobe. Good for high dynamic range applications.
+
+    Args:
+        size: Window length in samples (default: BLOCK_SIZE=64)
+
+    Returns:
+        Q15 window coefficients
+    """
+    n = np.arange(size)
+    a0, a1, a2 = 0.42, 0.5, 0.08
+    window = a0 - a1 * np.cos(2 * np.pi * n / (size - 1)) + a2 * np.cos(4 * np.pi * n / (size - 1))
+    return (window * 32767).astype(np.int16)
+
+
+def create_kaiser_window(size: int = BLOCK_SIZE, beta: float = 5.0) -> np.ndarray:
+    """
+    Create a Kaiser window for sample transitions.
+
+    The Kaiser window provides tunable sidelobe attenuation via the beta parameter:
+    - beta=0: Rectangular window (no smoothing)
+    - beta=5: Similar to Hamming (~50 dB sidelobe suppression)
+    - beta=8.6: Similar to Blackman (~90 dB sidelobe suppression)
+    - beta=14: Very high sidelobe suppression (~120 dB)
+
+    Args:
+        size: Window length in samples (default: BLOCK_SIZE=64)
+        beta: Shape parameter controlling sidelobe suppression (default: 5.0)
+
+    Returns:
+        Q15 window coefficients
+    """
+    # Use numpy's kaiser function for numerical stability
+    window = np.kaiser(size, beta)
+    # Normalize to peak of 1.0, then scale to Q15
+    window = window / np.max(window)
+    return (window * 32767).astype(np.int16)
+
+
+def create_triangular_window(size: int = BLOCK_SIZE) -> np.ndarray:
+    """
+    Create a triangular (Bartlett) window for sample transitions.
+
+    The triangular window is simple and efficient, with moderate
+    frequency resolution and sidelobe suppression (-26 dB).
+
+    Args:
+        size: Window length in samples (default: BLOCK_SIZE=64)
+
+    Returns:
+        Q15 window coefficients
+    """
+    n = np.arange(size)
+    half = (size - 1) / 2
+    window = 1.0 - np.abs((n - half) / half)
     return (window * 32767).astype(np.int16)
 
 
@@ -393,7 +484,12 @@ __all__ = [
     'read_sample_block',
     'sample_generate_coeffs',
     'sample_generate_coeffs_windowed',
+    # Window functions for granular/sample synthesis
     'create_hann_window',
+    'create_hamming_window',
+    'create_blackman_window',
+    'create_kaiser_window',
+    'create_triangular_window',
     'compute_playback_rate',
     # Constants
     'VM_K',

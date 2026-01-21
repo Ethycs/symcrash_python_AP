@@ -110,12 +110,19 @@ class FM6State:
     master_level_q15: int = Q15_ONE   # Overall output scaling (Q15)
     master_pitch_bend: int = 0        # Pitch bend (cents, ±8192 typical)
 
+    # Post-filter (optional one-pole lowpass)
+    # When enabled, softens harsh FM harmonics (like vintage DX7 DAC filter)
+    post_filter_enabled: bool = False
+    post_filter_cutoff_q15: int = 24576  # ~0.75 coefficient (gentle rolloff)
+    _post_filter_state: int = 0          # Filter state (z⁻¹)
+
     def reset(self):
         """Reset all operators and clear buffers."""
         for op in self.operators:
             op.reset()
         self.op_outputs.fill(0)
         self.feedback_buffer.fill(0)
+        self._post_filter_state = 0
 
     def set_algorithm(self, alg_id: int):
         """Set algorithm ID (1-32)."""
@@ -184,6 +191,64 @@ class FM6State:
             op.feedback_q15 = 0
         if alg.feedback_op >= 0:
             self.operators[alg.feedback_op].feedback_q15 = feedback_q15
+
+    def set_post_filter(self, enabled: bool, cutoff_hz: float = 8000.0,
+                        sample_rate: int = 48000):
+        """
+        Configure post-filter for FM output.
+
+        The post-filter is a simple one-pole lowpass that softens harsh
+        FM harmonics, similar to the DAC reconstruction filter on vintage
+        DX7 hardware.
+
+        Args:
+            enabled: Enable/disable post-filter
+            cutoff_hz: Filter cutoff frequency in Hz
+            sample_rate: Audio sample rate (default 48000)
+        """
+        self.post_filter_enabled = enabled
+        if enabled:
+            # One-pole coefficient: a = exp(-2π * fc / fs)
+            # For simplicity, use linear approximation for Q15:
+            # coeff ≈ 32767 * (1 - 2π * fc / fs)
+            import math
+            fc_norm = cutoff_hz / sample_rate
+            # Clamp to valid range
+            fc_norm = max(0.001, min(0.499, fc_norm))
+            # One-pole coefficient (inverted for lowpass: coeff = 1 - exp(-2πfc/fs))
+            coeff = 1.0 - math.exp(-2.0 * math.pi * fc_norm)
+            self.post_filter_cutoff_q15 = int(coeff * Q15_ONE)
+
+    def apply_post_filter(self, audio: 'np.ndarray') -> 'np.ndarray':
+        """
+        Apply post-filter to FM audio output.
+
+        One-pole lowpass: y[n] = y[n-1] + coeff * (x[n] - y[n-1])
+
+        Args:
+            audio: Input audio samples (int16 array)
+
+        Returns:
+            Filtered audio samples (int16 array, same shape)
+        """
+        if not self.post_filter_enabled:
+            return audio
+
+        import numpy as np
+        output = np.zeros_like(audio)
+        state = self._post_filter_state
+        coeff = self.post_filter_cutoff_q15
+
+        for i in range(len(audio)):
+            # y[n] = y[n-1] + coeff * (x[n] - y[n-1])
+            diff = int(audio[i]) - state
+            state = state + ((diff * coeff) >> 15)
+            # Saturate
+            state = max(-32768, min(32767, state))
+            output[i] = state
+
+        self._post_filter_state = state
+        return output.astype(np.int16)
 
 
 def create_fm6_state(algorithm_id: int = 1) -> FM6State:

@@ -34,6 +34,16 @@ from .state import VMState, EnvelopePhase
 from .decode import DecodedPlan, CarrierRole, decode_frame
 from .tables import Tables, OPERATOR_LANES, Lane
 from .executor import vm_step_block
+from .wavetable_engine import (
+    WavetableAtlas,
+    WavetableBank,
+    WavetableState,
+    wavetable_generate_coeffs,
+    wavetable_generate_block,
+    create_basic_waves,
+    create_harmonic_series,
+    create_default_bank,
+)
 
 __all__ = [
     # State
@@ -52,4 +62,14 @@ __all__ = [
 
     # Executor
     'vm_step_block',
+
+    # Wavetable (Phase 4)
+    'WavetableAtlas',
+    'WavetableBank',
+    'WavetableState',
+    'wavetable_generate_coeffs',
+    'wavetable_generate_block',
+    'create_basic_waves',
+    'create_harmonic_series',
+    'create_default_bank',
 ]

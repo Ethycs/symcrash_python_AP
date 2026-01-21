@@ -2,7 +2,7 @@ when running python files use pixi run python
 
 ## Known Issues
 
-- 5 FM6 presets failed to compile due to a serialization issue with FM6 operator ratios exceeding int16 range
+- ~~5 FM6 presets failed to compile due to a serialization issue with FM6 operator ratios exceeding int16 range~~ **FIXED** (2026-01-21): Added `ValueType.I32` to voice_engine_registry.py
 
 ## Tower Implementation (WSE-STD-070)
 

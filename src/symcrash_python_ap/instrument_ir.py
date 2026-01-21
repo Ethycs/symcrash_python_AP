@@ -32,6 +32,8 @@ except ImportError:
 from .primitives import (
     EventLane as _EventLane,
     TailMode as _TailMode,
+    RegimeKind,
+    EdgeTransitionType,
     K_LADDER_MASKS,
     get_k_mask,
     Q15_ONE,
@@ -141,14 +143,7 @@ class FilterMode(Enum):
     NOTCH = "notch"
 
 
-class RegimeKind(Enum):
-    """Regime type classification."""
-    IDLE = "Idle"
-    TRANSIENT = "Transient"
-    STABLE_TONE = "StableTone"
-    NOISE_TEXTURE = "NoiseTexture"
-    GLITCH_CHATTER = "GlitchChatter"
-    RECOVERY = "Recovery"
+# RegimeKind imported from primitives.py (canonical source)
 
 
 class TransitionType(Enum):
@@ -503,6 +498,306 @@ class FamilyMappingConfig:
 
 
 @dataclass
+class WavetableSpec:
+    """
+    Wavetable synthesis configuration (Phase 4).
+
+    Defines wavetable oscillator parameters for the L1 layer.
+    Wavetable synthesis uses 2D interpolation across an atlas of waveforms
+    for smooth timbral morphing.
+
+    Per WSE-STD-WAVETABLE-PROFILE (Phase 4):
+    - Atlas: 2D grid of single-cycle waveforms [positions × frames × samples]
+    - Position: X-axis morph target (0.0-1.0)
+    - Frame: Y-axis evolution stage (0.0-1.0)
+    - Scanning: Automatic frame advancement for evolving timbres
+    """
+    # Atlas reference (by name or index in wavetable bank)
+    atlas_name: str = "BasicWaves"
+    atlas_index: Optional[int] = None
+
+    # Initial position and frame (0.0-1.0 normalized)
+    position: float = 0.0         # X morph position (between wave variants)
+    frame: float = 0.0            # Y frame position (evolution stage)
+
+    # Frame scanning configuration
+    frame_rate_hz: float = 0.0    # Scanning rate in Hz (0 = static, no scanning)
+    frame_loop: bool = True       # Loop frame scanning back to start
+
+    # Modulation routing (target names from mod matrix)
+    position_mod_source: Optional[str] = None  # e.g., "LFO1", "ENV2", "macro:MOTION"
+    frame_mod_source: Optional[str] = None     # e.g., "ENV1", "macro:AGE"
+    position_mod_depth: float = 0.0            # Modulation depth (0.0-1.0)
+    frame_mod_depth: float = 0.0
+
+    # Morph envelope (for smooth position transitions)
+    morph_time_ms: float = 0.0    # Time to morph between positions
+
+    def to_dict(self) -> dict:
+        """Serialize to dictionary for YAML/JSON."""
+        return {
+            'atlas_name': self.atlas_name,
+            'atlas_index': self.atlas_index,
+            'position': self.position,
+            'frame': self.frame,
+            'frame_rate_hz': self.frame_rate_hz,
+            'frame_loop': self.frame_loop,
+            'position_mod_source': self.position_mod_source,
+            'frame_mod_source': self.frame_mod_source,
+            'position_mod_depth': self.position_mod_depth,
+            'frame_mod_depth': self.frame_mod_depth,
+            'morph_time_ms': self.morph_time_ms,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'WavetableSpec':
+        """Deserialize from dictionary."""
+        return cls(
+            atlas_name=data.get('atlas_name', 'BasicWaves'),
+            atlas_index=data.get('atlas_index'),
+            position=data.get('position', 0.0),
+            frame=data.get('frame', 0.0),
+            frame_rate_hz=data.get('frame_rate_hz', 0.0),
+            frame_loop=data.get('frame_loop', True),
+            position_mod_source=data.get('position_mod_source'),
+            frame_mod_source=data.get('frame_mod_source'),
+            position_mod_depth=data.get('position_mod_depth', 0.0),
+            frame_mod_depth=data.get('frame_mod_depth', 0.0),
+            morph_time_ms=data.get('morph_time_ms', 0.0),
+        )
+
+
+@dataclass
+class GranularSpec:
+    """
+    Granular synthesis configuration (Phase 5).
+
+    Defines granular oscillator parameters for the L1 layer.
+    Granular synthesis operates in coefficient domain, extracting
+    grains from pre-transformed sample buffers.
+
+    Key Features:
+    - Up to 8 simultaneous grains per voice
+    - Coefficient-domain operation (no audio-rate FWPT in hot path)
+    - Density-based probabilistic grain scheduling
+    - Spray/scatter for position randomization
+    - Pitch shifting via coefficient interpolation
+    """
+    # Source sample reference (by name or path)
+    sample_name: Optional[str] = None
+    sample_path: Optional[str] = None
+
+    # Grain scheduling parameters
+    density: float = 0.3              # Spawn probability per block (0.0-1.0)
+    grain_size_ms: float = 80.0       # Grain duration in milliseconds
+    spray: float = 0.2                # Position randomization (0.0-1.0)
+
+    # Playback parameters
+    pitch_ratio: float = 1.0          # Grain playback rate (1.0 = original)
+    scan_rate: float = 1.0            # Source scan speed (1.0 = realtime)
+
+    # Window function for grain envelope
+    window_type: str = "hann"         # "hann", "hamming", "blackman", "kaiser", "triangular"
+    kaiser_beta: float = 5.0          # Beta parameter for Kaiser window
+
+    # Modulation routing
+    density_mod_source: Optional[str] = None     # e.g., "LFO1", "ENV2"
+    grain_size_mod_source: Optional[str] = None
+    spray_mod_source: Optional[str] = None
+    pitch_mod_source: Optional[str] = None
+    scan_mod_source: Optional[str] = None
+
+    # Modulation depths (0.0-1.0)
+    density_mod_depth: float = 0.0
+    grain_size_mod_depth: float = 0.0
+    spray_mod_depth: float = 0.0
+    pitch_mod_depth: float = 0.0
+    scan_mod_depth: float = 0.0
+
+    # PRNG seed (for deterministic grain scheduling)
+    prng_seed: Optional[int] = None
+
+    def to_dict(self) -> dict:
+        """Serialize to dictionary for YAML/JSON."""
+        return {
+            'sample_name': self.sample_name,
+            'sample_path': self.sample_path,
+            'density': self.density,
+            'grain_size_ms': self.grain_size_ms,
+            'spray': self.spray,
+            'pitch_ratio': self.pitch_ratio,
+            'scan_rate': self.scan_rate,
+            'window_type': self.window_type,
+            'kaiser_beta': self.kaiser_beta,
+            'density_mod_source': self.density_mod_source,
+            'grain_size_mod_source': self.grain_size_mod_source,
+            'spray_mod_source': self.spray_mod_source,
+            'pitch_mod_source': self.pitch_mod_source,
+            'scan_mod_source': self.scan_mod_source,
+            'density_mod_depth': self.density_mod_depth,
+            'grain_size_mod_depth': self.grain_size_mod_depth,
+            'spray_mod_depth': self.spray_mod_depth,
+            'pitch_mod_depth': self.pitch_mod_depth,
+            'scan_mod_depth': self.scan_mod_depth,
+            'prng_seed': self.prng_seed,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'GranularSpec':
+        """Deserialize from dictionary."""
+        return cls(
+            sample_name=data.get('sample_name'),
+            sample_path=data.get('sample_path'),
+            density=data.get('density', 0.3),
+            grain_size_ms=data.get('grain_size_ms', 80.0),
+            spray=data.get('spray', 0.2),
+            pitch_ratio=data.get('pitch_ratio', 1.0),
+            scan_rate=data.get('scan_rate', 1.0),
+            window_type=data.get('window_type', 'hann'),
+            kaiser_beta=data.get('kaiser_beta', 5.0),
+            density_mod_source=data.get('density_mod_source'),
+            grain_size_mod_source=data.get('grain_size_mod_source'),
+            spray_mod_source=data.get('spray_mod_source'),
+            pitch_mod_source=data.get('pitch_mod_source'),
+            scan_mod_source=data.get('scan_mod_source'),
+            density_mod_depth=data.get('density_mod_depth', 0.0),
+            grain_size_mod_depth=data.get('grain_size_mod_depth', 0.0),
+            spray_mod_depth=data.get('spray_mod_depth', 0.0),
+            pitch_mod_depth=data.get('pitch_mod_depth', 0.0),
+            scan_mod_depth=data.get('scan_mod_depth', 0.0),
+            prng_seed=data.get('prng_seed'),
+        )
+
+
+@dataclass
+class WarpSpec:
+    """
+    Waveshaper configuration (Phase 4 waveshaping).
+
+    Defines waveshaper/distortion parameters for coefficient-domain
+    nonlinear processing. Maps to Material Engine building blocks:
+    - P2: Soft saturator (tanh-like)
+    - P7: Catastrophe shaper (fold/cusp/swallowtail bifurcation)
+
+    Waveshaping Types:
+    - "soft": Smooth saturation (tanh-like curve)
+    - "hard": Hard clipping
+    - "fold": Wavefolding (catastrophe fold map)
+    - "cusp": Cusp catastrophe (asymmetric distortion)
+    - "swallowtail": Swallowtail catastrophe (complex hysteresis)
+    - "asymmetric": Asymmetric soft clipping (tube-like)
+    - "tape": Tape saturation with hysteresis
+
+    The warp_table field allows custom transfer function lookup tables
+    for arbitrary waveshaping curves (256 entries, Q15 format).
+    """
+    # Waveshaper type selection
+    warp_type: str = "soft"           # Shaper type (see docstring)
+
+    # Drive/amount parameters
+    drive: float = 0.5                # Input gain (0.0-1.0, maps to internal scaling)
+    mix: float = 1.0                  # Wet/dry mix (0.0=dry, 1.0=fully wet)
+    output_gain: float = 1.0          # Post-shaper gain compensation
+
+    # Type-specific parameters
+    # Soft/asymmetric saturation
+    asymmetry: float = 0.0            # Asymmetry amount (-1.0 to 1.0)
+    knee: float = 0.7                 # Soft knee threshold (0.0-1.0)
+
+    # Catastrophe-specific
+    catastrophe_a: float = 0.5        # Control parameter A (bifurcation shape)
+    catastrophe_b: float = 0.0        # Control parameter B (for swallowtail)
+
+    # Fold-specific
+    fold_stages: int = 1              # Number of folding stages (1-4)
+    fold_threshold: float = 0.8       # Fold threshold (0.0-1.0)
+
+    # Tape-specific
+    tape_bias: float = 0.5            # Tape bias current (affects hysteresis)
+    tape_saturation: float = 0.7      # Tape saturation level
+
+    # Custom lookup table (256 entries, Q15)
+    # If provided, overrides warp_type
+    warp_table: Optional[List[int]] = None
+    warp_table_name: Optional[str] = None  # Named table from library
+
+    # Modulation routing
+    drive_mod_source: Optional[str] = None      # e.g., "ENV1", "VEL"
+    mix_mod_source: Optional[str] = None
+    param_a_mod_source: Optional[str] = None    # Maps to catastrophe_a or asymmetry
+    param_b_mod_source: Optional[str] = None    # Maps to catastrophe_b or knee
+
+    # Modulation depths (0.0-1.0)
+    drive_mod_depth: float = 0.0
+    mix_mod_depth: float = 0.0
+    param_a_mod_depth: float = 0.0
+    param_b_mod_depth: float = 0.0
+
+    # Pre/post filtering (optional)
+    pre_filter_hz: Optional[float] = None       # Pre-emphasis filter cutoff
+    post_filter_hz: Optional[float] = None      # Post-shaper lowpass
+
+    def to_dict(self) -> dict:
+        """Serialize to dictionary for YAML/JSON."""
+        return {
+            'warp_type': self.warp_type,
+            'drive': self.drive,
+            'mix': self.mix,
+            'output_gain': self.output_gain,
+            'asymmetry': self.asymmetry,
+            'knee': self.knee,
+            'catastrophe_a': self.catastrophe_a,
+            'catastrophe_b': self.catastrophe_b,
+            'fold_stages': self.fold_stages,
+            'fold_threshold': self.fold_threshold,
+            'tape_bias': self.tape_bias,
+            'tape_saturation': self.tape_saturation,
+            'warp_table': self.warp_table,
+            'warp_table_name': self.warp_table_name,
+            'drive_mod_source': self.drive_mod_source,
+            'mix_mod_source': self.mix_mod_source,
+            'param_a_mod_source': self.param_a_mod_source,
+            'param_b_mod_source': self.param_b_mod_source,
+            'drive_mod_depth': self.drive_mod_depth,
+            'mix_mod_depth': self.mix_mod_depth,
+            'param_a_mod_depth': self.param_a_mod_depth,
+            'param_b_mod_depth': self.param_b_mod_depth,
+            'pre_filter_hz': self.pre_filter_hz,
+            'post_filter_hz': self.post_filter_hz,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'WarpSpec':
+        """Deserialize from dictionary."""
+        return cls(
+            warp_type=data.get('warp_type', 'soft'),
+            drive=data.get('drive', 0.5),
+            mix=data.get('mix', 1.0),
+            output_gain=data.get('output_gain', 1.0),
+            asymmetry=data.get('asymmetry', 0.0),
+            knee=data.get('knee', 0.7),
+            catastrophe_a=data.get('catastrophe_a', 0.5),
+            catastrophe_b=data.get('catastrophe_b', 0.0),
+            fold_stages=data.get('fold_stages', 1),
+            fold_threshold=data.get('fold_threshold', 0.8),
+            tape_bias=data.get('tape_bias', 0.5),
+            tape_saturation=data.get('tape_saturation', 0.7),
+            warp_table=data.get('warp_table'),
+            warp_table_name=data.get('warp_table_name'),
+            drive_mod_source=data.get('drive_mod_source'),
+            mix_mod_source=data.get('mix_mod_source'),
+            param_a_mod_source=data.get('param_a_mod_source'),
+            param_b_mod_source=data.get('param_b_mod_source'),
+            drive_mod_depth=data.get('drive_mod_depth', 0.0),
+            mix_mod_depth=data.get('mix_mod_depth', 0.0),
+            param_a_mod_depth=data.get('param_a_mod_depth', 0.0),
+            param_b_mod_depth=data.get('param_b_mod_depth', 0.0),
+            pre_filter_hz=data.get('pre_filter_hz'),
+            post_filter_hz=data.get('post_filter_hz'),
+        )
+
+
+@dataclass
 class L1Lift:
     """
     L1 gesture basis, macro semantics, and control manifold.
@@ -538,6 +833,15 @@ class L1Lift:
     # FM6 topology morphing (L1 family morph pairs)
     fm6_morph: Optional[FM6MorphConfig] = None
 
+    # Wavetable synthesis configuration (Phase 4)
+    wavetable_spec: Optional['WavetableSpec'] = None
+
+    # Granular synthesis configuration (Phase 5)
+    granular_spec: Optional['GranularSpec'] = None
+
+    # Waveshaper configuration (Phase 4 waveshaping)
+    warp_spec: Optional['WarpSpec'] = None
+
     # Modulation parameters (gesture-based, family-level behavior)
     vibrato: Optional[VibratoParams] = None
     body_warble: Optional[BodyWarbleParams] = None
@@ -555,18 +859,7 @@ class Hysteresis:
     exit: float
 
 
-class EdgeTransitionType(Enum):
-    """
-    Edge transition types per Voice Engine Tower spec.
-
-    Per symcrash_docs/03 - Audio Pipeline/00 - Voice Engine/Evolution/05:
-    These define how the transition between regimes behaves.
-    """
-    HARD = "hard"                  # Immediate switch, no crossfade
-    SOFT = "soft"                  # Smooth crossfade over duration_blocks
-    CHAOTIC = "chaotic"            # Stochastic switching with jitter
-    CORRIDOR_ENTRY = "corridor"    # Entry into degradation corridor
-    RECOVERY = "recovery"          # Return from instability to stable regime
+# EdgeTransitionType imported from primitives.py (canonical source)
 
 
 @dataclass
@@ -2143,14 +2436,21 @@ def load_instrument_from_dict(data: dict) -> InstrumentIR:
     if 'control' in data:
         control = _parse_control_config(data['control'])
 
-    return InstrumentIR(
+    # Create IR object
+    ir = InstrumentIR(
         meta=_parse_instrument_meta(data.get('meta', {})),
         io=_parse_io_config(data.get('io', {})),
         layers=_parse_layers(data.get('layers', {})),
         compile=_parse_compile_config(data.get('compile', {})),
-        envelopes=envelopes,
-        control=control,
     )
+
+    # Set envelopes and control via property setters (migrates to proper Tower layers)
+    if envelopes:
+        ir.envelopes = envelopes
+    if control is not None:
+        ir.control = control
+
+    return ir
 
 
 def load_instrument(path) -> InstrumentIR:
@@ -2646,7 +2946,7 @@ __all__ = [
     # L0 types
     'Macro', 'ADSR', 'EnvelopeBinding', 'ControlConfig', 'NodeParams', 'L0Node', 'L0Edge', 'L0Graph',
     # L1 types
-    'GestureSource', 'MacroAffect', 'MacroSemantic', 'L1Lift',
+    'GestureSource', 'MacroAffect', 'MacroSemantic', 'WavetableSpec', 'GranularSpec', 'WarpSpec', 'L1Lift',
     # L2 types (regime graph - the graph-based state machine)
     'Hysteresis', 'EdgeSpec', 'RegimeGraphSpec',
     'RegimeNode', 'RegimeTransition', 'L2Regimes',

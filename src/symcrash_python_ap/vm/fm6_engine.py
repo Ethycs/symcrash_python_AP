@@ -228,7 +228,14 @@ def fm6_generate_block_full(state: FM6State, base_phase_inc: int) -> np.ndarray:
     if len(carriers) > 1:
         output = output // len(carriers)
 
-    return np.clip(output, -32768, 32767).astype(np.int16)
+    # Saturate to int16
+    output = np.clip(output, -32768, 32767).astype(np.int16)
+
+    # Apply post-filter if enabled (softens harsh FM harmonics)
+    if state.post_filter_enabled:
+        output = state.apply_post_filter(output)
+
+    return output
 
 
 def fm6_to_coefficients(output_k: np.ndarray) -> np.ndarray:

@@ -10,7 +10,7 @@ Applies selected "material" programs to audio:
 - Clean: transparent pass-through with gentle glue
 """
 
-from typing import List, Tuple
+from typing import List, Tuple, Generic, TypeVar, Callable
 from dataclasses import dataclass
 
 from ..fixed import (
@@ -138,6 +138,73 @@ class ReverbState:
             self.ap_idx = [0, 0]
 
 
+@dataclass
+class KarplusStrongState:
+    """
+    State for Karplus-Strong plucked string synthesis (MONO).
+
+    The classic Karplus-Strong algorithm:
+    1. Fill delay line with noise burst (exciter)
+    2. Each sample: output = delay_line[read], write = avg(old, delay_line[read])
+    3. The averaging filter determines decay rate and timbre
+
+    FPGA NOTE: ~2ms delay for 500Hz fundamental = 96 samples = 192 bytes
+    Full range 20Hz-5kHz needs ~2400 samples max = ~5KB per channel
+    Fits comfortably in BRAM.
+
+    The delay length sets the pitch: delay_samples = sample_rate / frequency
+    """
+    buffer: List[int] = None
+    write_idx: int = 0
+    delay_samples: int = 109  # Default ~440Hz at 48kHz
+    prev_sample: int = 0      # For averaging filter
+    max_samples: int = 2400   # ~20Hz at 48kHz
+
+    def __post_init__(self):
+        if self.buffer is None:
+            self.buffer = [0] * self.max_samples
+
+    def reset(self, delay_samples: int = None):
+        """Reset state, optionally setting new delay length."""
+        if delay_samples is not None:
+            self.delay_samples = max(1, min(delay_samples, self.max_samples - 1))
+        self.buffer = [0] * self.max_samples
+        self.write_idx = 0
+        self.prev_sample = 0
+
+
+# =============================================================================
+# STEREO STATE WRAPPER
+# =============================================================================
+
+T = TypeVar('T')
+
+
+@dataclass
+class StereoState(Generic[T]):
+    """
+    Wrapper for stereo state pairs.
+
+    Consolidates left/right channel state into a single container.
+    Reduces boilerplate in MaterialEngine initialization.
+    """
+    left: T
+    right: T
+
+    @classmethod
+    def create(cls, factory: Callable[[], T]) -> 'StereoState[T]':
+        """Create stereo state from a factory function."""
+        return cls(left=factory(), right=factory())
+
+
+# =============================================================================
+# MATERIAL STRATEGY FUNCTIONS (dispatch targets)
+# =============================================================================
+# These are the method signatures for material processing strategies.
+# Type alias for clarity: (engine, L, R, **kwargs) -> (L_out, R_out)
+MaterialStrategy = Callable[['MaterialEngine', List[int], List[int]], Tuple[List[int], List[int]]]
+
+
 class MaterialEngine:
     """
     Applies material programs to stereo audio blocks.
@@ -146,40 +213,48 @@ class MaterialEngine:
     
     def __init__(self, block_size: int = 64):
         self.B = block_size
-        
-        # Per-channel state
-        self.tape_L = TapeState()
-        self.tape_R = TapeState()
-        
-        self.cat_L = CatastropheState()
-        self.cat_R = CatastropheState()
-        
-        self.rank_L = RankState()
-        self.rank_R = RankState()
 
-        # Delay state (material_id=6)
-        self.delay_L = DelayState()
-        self.delay_R = DelayState()
+        # Stereo state pairs using StereoState wrapper
+        self.tape = StereoState.create(TapeState)
+        self.cat = StereoState.create(CatastropheState)
+        self.rank = StereoState.create(RankState)
+        self.delay = StereoState.create(DelayState)       # material_id=6
+        self.chorus = StereoState.create(ChorusState)     # material_id=7
+        self.reverb = StereoState.create(ReverbState)     # material_id=8 (FPGA: use external SRAM)
+        self.svf = StereoState.create(SVFState)           # material_id=9
+        self.ks = StereoState.create(KarplusStrongState)  # material_id=10
 
-        # Chorus state (material_id=7)
-        self.chorus_L = ChorusState()
-        self.chorus_R = ChorusState()
-
-        # Reverb state (material_id=8)
-        # FPGA NOTE: Reverb buffers should use external SRAM/SDRAM
-        self.reverb_L = ReverbState()
-        self.reverb_R = ReverbState()
-
-        # SVF filter state (material_id=9)
-        self.svf_L = SVFState()
-        self.svf_R = SVFState()
+        # Backward compatibility aliases (for existing code that uses _L/_R)
+        self.tape_L, self.tape_R = self.tape.left, self.tape.right
+        self.cat_L, self.cat_R = self.cat.left, self.cat.right
+        self.rank_L, self.rank_R = self.rank.left, self.rank.right
+        self.delay_L, self.delay_R = self.delay.left, self.delay.right
+        self.chorus_L, self.chorus_R = self.chorus.left, self.chorus.right
+        self.reverb_L, self.reverb_R = self.reverb.left, self.reverb.right
+        self.svf_L, self.svf_R = self.svf.left, self.svf.right
+        self.ks_L, self.ks_R = self.ks.left, self.ks.right
 
         # Slewed parameters
         self.params = MaterialParams()
-        
+
         # One-pole lowpass state for tone control
         self.lp_zL = 0
         self.lp_zR = 0
+
+        # Strategy dispatch table (material_id -> processing method)
+        self._strategies: dict[int, MaterialStrategy] = {
+            0: self._clean_glue,
+            1: self._tape_bus,
+            2: self._rank_grit,
+            3: self._tropical_cut,
+            4: self._cat_fold,
+            5: self._cat_cusp,
+            6: self._delay_line,
+            7: self._chorus,
+            8: self._reverb,
+            # 9: SVF handled separately (has extra params)
+            10: self._karplus_strong,
+        }
     
     def step_block(self, L: List[int], R: List[int], params: ParamFrame,
                    material_id: int, cat_id: int = 0,
@@ -200,6 +275,7 @@ class MaterialEngine:
             7 = chorus/flanger
             8 = reverb
             9 = SVF filter (TPT)
+            10 = Karplus-Strong pluck
 
         Filter parameters (used when material_id=9):
             filter_cutoff_q15: Cutoff frequency (Q15: 0=20Hz, 32767=20kHz, log scale)
@@ -209,26 +285,13 @@ class MaterialEngine:
         # Slew parameters
         self.params.slew_from(params)
 
-        if material_id == 1:
-            return self._tape_bus(L, R)
-        elif material_id == 2:
-            return self._rank_grit(L, R)
-        elif material_id == 3:
-            return self._tropical_cut(L, R)
-        elif material_id == 4:
-            return self._cat_fold(L, R)
-        elif material_id == 5:
-            return self._cat_cusp(L, R)
-        elif material_id == 6:
-            return self._delay_line(L, R)
-        elif material_id == 7:
-            return self._chorus(L, R)
-        elif material_id == 8:
-            return self._reverb(L, R)
-        elif material_id == 9:
+        # SVF filter has extra parameters, handle separately
+        if material_id == 9:
             return self._svf_filter(L, R, filter_cutoff_q15, filter_reso_q15, filter_mode)
-        else:
-            return self._clean_glue(L, R)
+
+        # Use strategy dispatch table, default to clean_glue
+        strategy = self._strategies.get(material_id, self._clean_glue)
+        return strategy(L, R)
     
     # =========================================================================
     # TAPE BUS
@@ -987,3 +1050,146 @@ class MaterialEngine:
             outR.append(yR)
 
         return outL, outR
+
+    # =========================================================================
+    # KARPLUS-STRONG (material_id=10)
+    # =========================================================================
+    #
+    # Classic plucked string synthesis using a delay line with averaging filter.
+    #
+    # The input signal acts as an exciter - typically noise burst or impulse.
+    # The delay line length determines pitch: delay = sample_rate / frequency
+    # The averaging filter determines decay rate and brightness.
+    #
+    # Parameters mapped:
+    #   drive_q15: Exciter mix (0=resonator only, 32767=full input)
+    #   tone_q15: Damping (0=bright/long, 32767=dark/short decay)
+    #   pressure_q15: Feedback amount (0=no feedback, 32767=infinite sustain)
+    #   bias_q15: Pitch offset (for detuning/stereo spread)
+    #
+    # FPGA NOTES:
+    # - Simple algorithm: 1 read, 1 write, 1 average per sample
+    # - Memory: ~5KB per channel for full pitch range
+    # - Deterministic: fixed operations per sample
+
+    def _ks_sample(self, x: int, state: KarplusStrongState,
+                   exciter_mix_q15: int, damping_q15: int,
+                   feedback_q15: int) -> int:
+        """
+        Single-sample Karplus-Strong with exciter input.
+
+        Args:
+            x: Input/exciter sample (Q15)
+            state: KarplusStrongState with delay buffer
+            exciter_mix_q15: How much input goes into the delay (Q15)
+            damping_q15: Filter coefficient for decay (Q15: 0=bright, 32767=dark)
+            feedback_q15: Feedback gain (Q15: ~32000 for long sustain)
+
+        Returns:
+            Output sample (Q15)
+        """
+        delay = state.delay_samples
+
+        # Read from delay line
+        read_idx = (state.write_idx - delay) % state.max_samples
+        if read_idx < 0:
+            read_idx += state.max_samples
+        delayed = state.buffer[read_idx]
+
+        # Output is the delayed sample
+        output = delayed
+
+        # Averaging filter: new = (prev + current) / 2
+        # This is the classic KS lowpass that causes decay
+        # More damping = more low-pass = faster high-frequency decay
+        #
+        # Adjustable damping: lerp between current and average
+        # damping_q15=0: output unchanged (bright, long sustain)
+        # damping_q15=32767: full averaging (dark, fast decay)
+        avg = (state.prev_sample + delayed) >> 1
+        filtered = delayed + mul_q15_sat(avg - delayed, damping_q15)
+
+        # Apply feedback gain (controls overall decay rate)
+        feedback_signal = mul_q15_sat(filtered, feedback_q15)
+
+        # Mix exciter input with feedback
+        # exciter_mix_q15=0: pure resonator (no new energy)
+        # exciter_mix_q15=32767: full input (continuous excitation)
+        exciter = mul_q15_sat(x, exciter_mix_q15)
+        write_val = sat16(exciter + feedback_signal)
+
+        # Write to delay line
+        state.buffer[state.write_idx] = write_val
+
+        # Update state
+        state.prev_sample = delayed
+        state.write_idx = (state.write_idx + 1) % state.max_samples
+
+        return output
+
+    def _karplus_strong(self, L: List[int], R: List[int]) -> Tuple[List[int], List[int]]:
+        """
+        Karplus-Strong plucked string processing.
+
+        Uses material params:
+            drive_q15: Exciter amount (0=resonator, 32767=full input)
+            tone_q15: Damping/brightness (0=bright, 32767=dark)
+            pressure_q15: Feedback/sustain (0=short, 32767=long)
+            bias_q15: Stereo detune offset (adds slight pitch difference L/R)
+        """
+        outL = []
+        outR = []
+
+        # Map parameters
+        exciter_mix = self.params.drive_q15
+        damping = self.params.tone_q15
+        # Feedback should be high for musical sustain (~0.95-0.99)
+        # Map pressure 0-32767 to feedback 0.9-0.999 range
+        # fb = 29491 + (pressure/32767) * 3276 = ~0.9 to ~0.999
+        feedback = 29491 + ((self.params.pressure_q15 * 3276) >> 15)
+
+        for i in range(self.B):
+            yL = self._ks_sample(L[i], self.ks_L, exciter_mix, damping, feedback)
+            yR = self._ks_sample(R[i], self.ks_R, exciter_mix, damping, feedback)
+
+            outL.append(yL)
+            outR.append(yR)
+
+        return outL, outR
+
+    def set_karplus_pitch(self, freq_hz: float, sample_rate: int = 48000):
+        """
+        Set Karplus-Strong pitch by frequency.
+
+        Args:
+            freq_hz: Desired fundamental frequency (20-5000 Hz typical)
+            sample_rate: Audio sample rate
+
+        This sets the delay line length for both L and R channels.
+        For stereo spread, manually adjust L/R delay_samples slightly.
+        """
+        delay_samples = int(sample_rate / freq_hz)
+        delay_samples = max(10, min(delay_samples, self.ks_L.max_samples - 1))
+
+        self.ks_L.delay_samples = delay_samples
+        self.ks_R.delay_samples = delay_samples
+
+    def excite_karplus(self, noise_level_q15: int = 32767):
+        """
+        Excite the Karplus-Strong string with a noise burst.
+
+        This fills the delay line with noise to create the "pluck" attack.
+        Call this on note-on for realistic plucked string sound.
+
+        Args:
+            noise_level_q15: Amplitude of noise burst (Q15)
+        """
+        import random
+
+        for i in range(self.ks_L.delay_samples):
+            noise = random.randint(-noise_level_q15, noise_level_q15)
+            self.ks_L.buffer[i] = noise
+
+        for i in range(self.ks_R.delay_samples):
+            noise = random.randint(-noise_level_q15, noise_level_q15)
+            self.ks_R.buffer[i] = noise

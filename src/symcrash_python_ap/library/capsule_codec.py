@@ -163,16 +163,46 @@ def pack_voice_params(defaults: Dict[int, int]) -> bytes:
                 param_id,
                 value & 0xFFFF,  # Ensure u16 range
             ))
-        else:
-            # 16-bit signed: 6-byte entry (default for unknown params)
-            value_type_id = int(entry.value_type) if entry else 0
+        elif entry is not None and entry.value_type == ValueType.I32:
+            # 32-bit signed: 8-byte entry
+            parts.append(struct.pack(
+                '<BBHi',
+                0,  # persistence (default PER_VOICE)
+                int(ValueType.I32),
+                param_id,
+                value & 0xFFFFFFFF,  # Mask to 32 bits
+            ))
+        elif entry is not None and entry.value_type in (ValueType.I16, ValueType.Q15S):
+            # 16-bit signed: 6-byte entry
             parts.append(struct.pack(
                 '<BBHh',
                 0,  # persistence (default PER_VOICE)
-                value_type_id,
+                int(entry.value_type),
                 param_id,
-                value,
+                max(-32768, min(32767, value)),  # Clamp to i16 range
             ))
+        else:
+            # Fallback: determine size from value magnitude
+            # For unknown params, use 32-bit if value exceeds 16-bit range
+            if value > 32767 or value < -32768:
+                # Value requires 32-bit storage
+                parts.append(struct.pack(
+                    '<BBHI',
+                    0,  # persistence (default PER_VOICE)
+                    int(ValueType.U32),
+                    param_id,
+                    value & 0xFFFFFFFF,
+                ))
+            else:
+                # Value fits in 16-bit signed
+                value_type_id = int(entry.value_type) if entry else int(ValueType.I16)
+                parts.append(struct.pack(
+                    '<BBHh',
+                    0,  # persistence (default PER_VOICE)
+                    value_type_id,
+                    param_id,
+                    value,
+                ))
 
     return b''.join(parts)
 
@@ -204,14 +234,26 @@ def unpack_voice_params(data: bytes) -> Dict[int, int]:
                 break
             value, = struct.unpack_from('<I', data, offset + 4)
             offset += 8
+        elif value_type == int(ValueType.I32):
+            # 32-bit signed: 8-byte entry
+            if offset + 8 > len(data):
+                break
+            value, = struct.unpack_from('<i', data, offset + 4)
+            offset += 8
         elif value_type in (int(ValueType.U16), int(ValueType.Q15U)):
             # 16-bit unsigned: 6-byte entry
             if offset + 6 > len(data):
                 break
             value, = struct.unpack_from('<H', data, offset + 4)
             offset += 6
-        else:
+        elif value_type in (int(ValueType.I16), int(ValueType.Q15S)):
             # 16-bit signed: 6-byte entry
+            if offset + 6 > len(data):
+                break
+            value, = struct.unpack_from('<h', data, offset + 4)
+            offset += 6
+        else:
+            # Unknown type - try to read as 16-bit signed (legacy fallback)
             if offset + 6 > len(data):
                 break
             value, = struct.unpack_from('<h', data, offset + 4)

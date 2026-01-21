@@ -10,8 +10,8 @@ from typing import Tuple, Optional, TYPE_CHECKING
 import numpy as np
 
 from .state import (
-    VMState, OSC_MODE_A, OSC_MODE_B, OSC_MODE_SAMPLE, OSC_MODE_FM6,
-    PAYLOAD_TYPE_NODEMASK_SET, PAYLOAD_TYPE_TAILMODE_SET,
+    VMState, OSC_MODE_A, OSC_MODE_B, OSC_MODE_SAMPLE, OSC_MODE_FM6, OSC_MODE_WAVETABLE,
+    OSC_MODE_GRANULAR, PAYLOAD_TYPE_NODEMASK_SET, PAYLOAD_TYPE_TAILMODE_SET,
 )
 from .decode import DecodedPlan, decode_frame, FM_SOURCE_FEEDBACK
 from .tables import Tables, DEFAULT_TABLES, BLOCK_SAMPLES, VM_K
@@ -23,7 +23,7 @@ from .lanes import (
     lane_ccs_render,
 )
 from ..fixed import RSHIFT_RNE
-from ..primitives import Q15_ONE, Q15_HALF, Q15_NEG_ONE
+from ..primitives import Q15_ONE, Q15_HALF, Q15_NEG_ONE, DRONE_MODE_CARRIER_MIX
 
 if TYPE_CHECKING:
     from ..frames import VoiceFrame
@@ -68,6 +68,71 @@ def _process_cmmm_events(state: VMState, frame: 'VoiceFrame') -> None:
     if tail_mode is not None:
         traction = getattr(frame, 'cmmm_traction_q15', 32767)
         latch.apply_tailmode_event(tail_mode, traction)
+
+
+# =============================================================================
+# MODE B HELPER FUNCTIONS
+# =============================================================================
+
+def _setup_mode_b_harmonic_weights(mb_state, params) -> None:
+    """
+    Set up Mode B harmonic weights based on params.
+
+    Priority order: OEIS sequence > custom_harmonics > waveform_type
+
+    Args:
+        mb_state: ModeBState instance
+        params: Oscillator params with weight configuration
+    """
+    oeis_id = getattr(params, 'oeis_sequence_id', -1)
+    if oeis_id >= 0:
+        rolloff = getattr(params, 'oeis_rolloff_db', -3.0)
+        mb_state.weights.set_oeis(oeis_id, mb_state.H_active, rolloff)
+    elif params.custom_harmonics:
+        mb_state.weights.set_custom(params.custom_harmonics)
+        mb_state.H_active = min(len(params.custom_harmonics), mb_state.H_bandlimit)
+    else:
+        waveform_type = getattr(params, 'waveform_type', 0)
+        mb_state.weights.set_from_waveform_type(
+            waveform_type, mb_state.H_active, params.pwm_width_q15
+        )
+
+
+# =============================================================================
+# FM6 HELPER FUNCTIONS
+# =============================================================================
+
+def _update_fm6_operators(fm6_state, fm_op_ratios, fm_op_levels, env_targets) -> None:
+    """
+    Update FM6 operators with ratios, levels, and envelope targets.
+
+    Args:
+        fm6_state: FM6State or FM6MorphState instance
+        fm_op_ratios: Optional list of 6 operator ratios (Q16)
+        fm_op_levels: Optional list of 6 operator levels (Q15)
+        env_targets: Optional dict of envelope target values (Q15)
+    """
+    from .fm6_state import Q15_ONE as FM6_Q15_ONE
+
+    # Update operator ratios if specified
+    if fm_op_ratios is not None:
+        for i, ratio in enumerate(fm_op_ratios[:6]):
+            fm6_state.operators[i].ratio_q16 = ratio
+
+    # Update operator levels if specified
+    if fm_op_levels is not None:
+        for i, level in enumerate(fm_op_levels[:6]):
+            fm6_state.operators[i].level_q15 = level
+
+    # Apply envelope targets to operators
+    if env_targets:
+        for target_id, value in env_targets.items():
+            if 0 <= target_id <= 5:
+                fm6_state.operators[target_id].env_value_q15 = value
+    else:
+        # Default: full envelope value
+        for op in fm6_state.operators:
+            op.env_value_q15 = FM6_Q15_ONE
 
 
 # =============================================================================
@@ -164,19 +229,8 @@ def vm_step_block(
             mb_state.pwm_width_q15 = params.pwm_width_q15
             mb_state.pwm_enabled = params.pwm_enabled
             mb_state.H_active = min(params.H_request, mb_state.H_bandlimit)
-            # Set harmonic weights: OEIS > custom_harmonics > waveform_type
-            oeis_id = getattr(params, 'oeis_sequence_id', -1)
-            if oeis_id >= 0:
-                rolloff = getattr(params, 'oeis_rolloff_db', -3.0)
-                mb_state.weights.set_oeis(oeis_id, mb_state.H_active, rolloff)
-            elif params.custom_harmonics:
-                mb_state.weights.set_custom(params.custom_harmonics)
-                mb_state.H_active = min(len(params.custom_harmonics), mb_state.H_bandlimit)
-            else:
-                waveform_type = getattr(params, 'waveform_type', 0)
-                mb_state.weights.set_from_waveform_type(
-                    waveform_type, mb_state.H_active, params.pwm_width_q15
-                )
+            # Set harmonic weights using helper
+            _setup_mode_b_harmonic_weights(mb_state, params)
         elif pitch_changed or mb_state.note != params.note:
             # Pitch changed: use legato_mode to decide how to handle
             if params.legato_mode:
@@ -189,19 +243,8 @@ def vm_step_block(
                 mb_state.pwm_width_q15 = params.pwm_width_q15
                 mb_state.pwm_enabled = params.pwm_enabled
                 mb_state.H_active = min(params.H_request, mb_state.H_bandlimit)
-                # Set harmonic weights: OEIS > custom_harmonics > waveform_type
-                oeis_id = getattr(params, 'oeis_sequence_id', -1)
-                if oeis_id >= 0:
-                    rolloff = getattr(params, 'oeis_rolloff_db', -3.0)
-                    mb_state.weights.set_oeis(oeis_id, mb_state.H_active, rolloff)
-                elif params.custom_harmonics:
-                    mb_state.weights.set_custom(params.custom_harmonics)
-                    mb_state.H_active = min(len(params.custom_harmonics), mb_state.H_bandlimit)
-                else:
-                    waveform_type = getattr(params, 'waveform_type', 0)
-                    mb_state.weights.set_from_waveform_type(
-                        waveform_type, mb_state.H_active, params.pwm_width_q15
-                    )
+                # Set harmonic weights using helper
+                _setup_mode_b_harmonic_weights(mb_state, params)
 
         # Update FM depth from VoiceFrame (modulator signal comes from fm_mod_buffer)
         # Phase 3 FM/PM will provide the modulator via operator graph
@@ -326,26 +369,9 @@ def vm_step_block(
             # Set morphing parameters
             fm6_morph_state.set_morph(fm_topo_a_id, fm_topo_b_id, fm_topo_blend_q15)
 
-            # Update operator ratios if specified
-            if fm_op_ratios is not None:
-                for i, ratio in enumerate(fm_op_ratios[:6]):
-                    fm6_morph_state.operators[i].ratio_q16 = ratio
-
-            # Update operator levels if specified
-            if fm_op_levels is not None:
-                for i, level in enumerate(fm_op_levels[:6]):
-                    fm6_morph_state.operators[i].level_q15 = level
-
-            # Apply matrix envelope targets
+            # Update operators using helper
             env_targets = getattr(frame, 'env_targets_q15', None)
-            if env_targets:
-                for target_id, value in env_targets.items():
-                    if 0 <= target_id <= 5:
-                        fm6_morph_state.operators[target_id].env_value_q15 = value
-            else:
-                from .fm6_state import Q15_ONE as FM6_Q15_ONE
-                for op in fm6_morph_state.operators:
-                    op.env_value_q15 = FM6_Q15_ONE
+            _update_fm6_operators(fm6_morph_state, fm_op_ratios, fm_op_levels, env_targets)
 
             # FM6 morphed audio generation
             base_phase_inc = params.phase_inc
@@ -363,17 +389,11 @@ def vm_step_block(
             if fm_algorithm_id is not None and fm_algorithm_id != fm6_state.algorithm_id:
                 fm6_state.set_algorithm(fm_algorithm_id)
 
-            # Update operator ratios if specified
-            if fm_op_ratios is not None:
-                for i, ratio in enumerate(fm_op_ratios[:6]):
-                    fm6_state.operators[i].ratio_q16 = ratio
+            # Update operators using helper
+            env_targets = getattr(frame, 'env_targets_q15', None)
+            _update_fm6_operators(fm6_state, fm_op_ratios, fm_op_levels, env_targets)
 
-            # Update operator levels if specified
-            if fm_op_levels is not None:
-                for i, level in enumerate(fm_op_levels[:6]):
-                    fm6_state.operators[i].level_q15 = level
-
-            # Update feedback depth if specified
+            # Update feedback depth if specified (algorithm-specific)
             if fm_feedback_depth is not None:
                 from .fm6_state import dx7_feedback_to_q15
                 from .fm_algorithms import get_algorithm
@@ -382,17 +402,12 @@ def vm_step_block(
                 if alg.feedback_op >= 0:
                     fm6_state.operators[alg.feedback_op].feedback_q15 = feedback_q15
 
-            # Apply matrix envelope targets to FM6 operators
-            env_targets = getattr(frame, 'env_targets_q15', None)
-            if env_targets:
-                from .fm6_state import Q15_ONE as FM6_Q15_ONE
-                for target_id, value in env_targets.items():
-                    if 0 <= target_id <= 5:
-                        fm6_state.operators[target_id].env_value_q15 = value
-            else:
-                from .fm6_state import Q15_ONE as FM6_Q15_ONE
-                for op in fm6_state.operators:
-                    op.env_value_q15 = FM6_Q15_ONE
+            # Configure post-filter if specified
+            fm_post_filter_enabled = getattr(frame, 'fm_post_filter_enabled', None)
+            fm_post_filter_cutoff = getattr(frame, 'fm_post_filter_cutoff_hz', None)
+            if fm_post_filter_enabled is not None:
+                cutoff = fm_post_filter_cutoff if fm_post_filter_cutoff else 8000.0
+                fm6_state.set_post_filter(fm_post_filter_enabled, cutoff)
 
             # FM6 generates audio directly at sample rate
             base_phase_inc = params.phase_inc
@@ -439,6 +454,143 @@ def vm_step_block(
         state.eta_prev_q15 = cfg.eta_curr_q15
         state.gain_prev_q15 = cfg.gain_curr_q15
         return state, output
+    elif osc_mode == OSC_MODE_WAVETABLE:
+        # -----------------------------------------------------------------
+        # MODE WAVETABLE: 2D Wavetable Synthesis (Phase 4 - WSE-STD-210)
+        # -----------------------------------------------------------------
+        # Wavetable generates audio via atlas interpolation, then uses FWPT
+        # to re-enter the unified coefficient domain pipeline.
+        #
+        # Pipeline: atlas interpolation -> audio -> FWPT -> coeff_ops -> IDWPT
+        from .wavetable_engine import wavetable_generate_coeffs, create_default_bank
+
+        # Get wavetable state
+        wt_state = state.wavetable_state
+
+        # Configure wavetable from VoiceFrame parameters if provided
+        wt_atlas_name = getattr(frame, 'wt_atlas_name', None)
+        wt_position = getattr(frame, 'wt_position', None)
+        wt_frame = getattr(frame, 'wt_frame', None)
+        wt_frame_rate = getattr(frame, 'wt_frame_rate_hz', None)
+
+        # Initialize atlas if needed (lazy bank creation)
+        if wt_state.atlas is None:
+            bank = create_default_bank()
+            if wt_atlas_name:
+                atlas = bank.get_by_name(wt_atlas_name)
+            else:
+                atlas = bank.get(0)  # Default to BasicWaves
+            wt_state.atlas = atlas
+            wt_state.reset()
+
+        # Update pitch from note
+        if pitch_changed or wt_state.phase_inc_q32 == 0:
+            wt_state.set_pitch_note(params.note)
+
+        # Update position and frame if specified
+        if wt_position is not None:
+            wt_state.set_position(wt_position)
+        if wt_frame is not None:
+            wt_state.set_frame(wt_frame)
+        if wt_frame_rate is not None:
+            wt_state.set_frame_rate(wt_frame_rate)
+
+        # Ensure playing
+        if not wt_state.is_playing:
+            wt_state.is_playing = True
+
+        # Generate coefficients from wavetable
+        wavetable_generate_coeffs(wt_state, carrier_512)
+
+        # Inject into coeff_state for unified pipeline
+        for idx in range(COEFF_LEN):
+            state.coeff_state[idx] = int(carrier_512[idx])
+
+        # Apply coefficient-domain operators (unified path)
+        lane_inject(state, cfg)
+        for instr in cfg.backbone_instrs:
+            dispatch_coeff_op_crossfade(state, instr)
+        lane_tail(state, cfg)
+
+        # IDWPT reconstruction back to audio
+        output = lane_ccs_render(state, cfg)
+
+        # Apply gain interpolation
+        gain_curr = cfg.gain_curr_q15
+        gain_prev = cfg.gain_prev_q15
+        if gain_curr != Q15_ONE or gain_prev != Q15_ONE:
+            for i in range(BLOCK_SAMPLES):
+                alpha = (i * Q15_ONE + (BLOCK_SAMPLES >> 1)) // BLOCK_SAMPLES
+                gain = gain_prev + RSHIFT_RNE((gain_curr - gain_prev) * alpha, 15)
+                output[i] = RSHIFT_RNE(int(output[i]) * gain, 15)
+
+        # Update state and return
+        state.eta_prev_q15 = cfg.eta_curr_q15
+        state.gain_prev_q15 = cfg.gain_curr_q15
+        return state, output
+    elif osc_mode == OSC_MODE_GRANULAR:
+        # -----------------------------------------------------------------
+        # MODE GRANULAR: Coefficient-Domain Granular Synthesis (Phase 5)
+        # -----------------------------------------------------------------
+        # Granular operates entirely in coefficient domain:
+        # - Pre-computed coefficient buffers (FWPT done once at load time)
+        # - Up to 8 simultaneous grains per voice
+        # - Grain scheduling, spray, pitch shifting
+        #
+        # Pipeline: grain mixing (coeff) -> coeff_ops -> IDWPT
+        from .granular_engine import granular_generate_coeffs, granular_set_parameters
+
+        # Get granular state
+        gr_state = state.granular_state
+
+        # Configure granular parameters from VoiceFrame if provided
+        gr_density = getattr(frame, 'granular_density', None)
+        gr_grain_size_ms = getattr(frame, 'granular_grain_size_ms', None)
+        gr_spray = getattr(frame, 'granular_spray', None)
+        gr_pitch_ratio = getattr(frame, 'granular_pitch_ratio', None)
+        gr_scan_rate = getattr(frame, 'granular_scan_rate', None)
+
+        # Update parameters if any are specified
+        if any(p is not None for p in [gr_density, gr_grain_size_ms, gr_spray, gr_pitch_ratio, gr_scan_rate]):
+            granular_set_parameters(
+                gr_state,
+                density=gr_density if gr_density is not None else 0.3,
+                grain_size_ms=gr_grain_size_ms if gr_grain_size_ms is not None else 80.0,
+                spray=gr_spray if gr_spray is not None else 0.2,
+                pitch_ratio=gr_pitch_ratio if gr_pitch_ratio is not None else 1.0,
+                scan_rate=gr_scan_rate if gr_scan_rate is not None else 1.0,
+            )
+
+        # Generate coefficients from granular synthesis
+        # Note: Source buffer must be loaded separately via gr_state.set_source()
+        granular_generate_coeffs(gr_state, carrier_512)
+
+        # Inject into coeff_state for unified pipeline
+        for idx in range(COEFF_LEN):
+            state.coeff_state[idx] = int(carrier_512[idx])
+
+        # Apply coefficient-domain operators (unified path)
+        lane_inject(state, cfg)
+        for instr in cfg.backbone_instrs:
+            dispatch_coeff_op_crossfade(state, instr)
+        lane_tail(state, cfg)
+
+        # IDWPT reconstruction back to audio
+        output = lane_ccs_render(state, cfg)
+
+        # Apply gain interpolation
+        gain_curr = cfg.gain_curr_q15
+        gain_prev = cfg.gain_prev_q15
+        if gain_curr != Q15_ONE or gain_prev != Q15_ONE:
+            for i in range(BLOCK_SAMPLES):
+                alpha = (i * Q15_ONE + (BLOCK_SAMPLES >> 1)) // BLOCK_SAMPLES
+                gain = gain_prev + RSHIFT_RNE((gain_curr - gain_prev) * alpha, 15)
+                output[i] = RSHIFT_RNE(int(output[i]) * gain, 15)
+
+        # Update state and return
+        state.eta_prev_q15 = cfg.eta_curr_q15
+        state.gain_prev_q15 = cfg.gain_curr_q15
+        return state, output
     else:
         # -----------------------------------------------------------------
         # MODE A: LUT-based (existing path)
@@ -452,7 +604,7 @@ def vm_step_block(
     # Drone mode: reduce base_mix for slow-evolving textures (Phase 4)
     # 5% carrier refresh means operators dominate sound evolution
     if params.drone_mode:
-        base_mix = 1638  # ~5% carrier, 95% persistence
+        base_mix = DRONE_MODE_CARRIER_MIX  # ~5% carrier, 95% persistence
     else:
         base_mix = params.base_mix_q15
 

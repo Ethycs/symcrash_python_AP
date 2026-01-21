@@ -21,8 +21,8 @@ from ..wavelet.sine_core import (
     sine_q15_vectorized as _sine_vectorized,
 )
 
-# Import canonical Q15 constants from primitives (single source of truth)
-from ..primitives import Q15_ONE, Q15_HALF
+# Import canonical Q15 constants and utilities from primitives (single source of truth)
+from ..primitives import Q15_ONE, Q15_HALF, clamp_q15, iter_active_nodes
 
 
 # =============================================================================
@@ -97,6 +97,30 @@ def sin_q15(eta_q15: int) -> int:
     # Mask to uint32 range for deterministic behavior
     phase = ((eta_q15 * 0x40000000) >> 15) & 0xFFFFFFFF
     return _sine_q15(phase)
+
+
+# =============================================================================
+# ENERGY TRANSFER HELPER
+# =============================================================================
+
+def _transfer_energy(state: VMState, src_idx: int, dst_idx: int, strength: int) -> None:
+    """
+    Transfer energy between two coefficient indices.
+
+    Used by DiffuseUp and DiffuseDown operators for energy transport.
+    Uses Python int to avoid numpy overflow, then clamps to Q15.
+
+    Args:
+        state: VMState with coeff_state array
+        src_idx: Source coefficient index
+        dst_idx: Destination coefficient index
+        strength: Transfer strength in Q16 format
+    """
+    src_val = int(state.coeff_state[src_idx])
+    dst_val = int(state.coeff_state[dst_idx])
+    transfer = (src_val * strength) >> 16
+    state.coeff_state[dst_idx] = clamp_q15(dst_val + transfer)
+    state.coeff_state[src_idx] = clamp_q15(src_val - transfer)
 
 
 # =============================================================================
@@ -215,7 +239,7 @@ def apply_wet_ola(state: VMState, wet_buf: np.ndarray) -> np.ndarray:
             prev_sample * _WET_OLA_FADE_OUT[i] + curr_sample * _WET_OLA_FADE_IN[i], 15
         )
         # Clamp to int16
-        wet_buf[i] = max(-32768, min(32767, blended))
+        wet_buf[i] = clamp_q15(blended)
 
     # Save tail for next block
     state.wet_ola_tail[:] = wet_buf[-WET_OLA_SIZE:]
@@ -385,9 +409,9 @@ def _inject_impulse(state: VMState, mask: int, strength: int, payload: int) -> N
     # Inject into first coefficient of target node
     coeff_idx = target_node * NODE_LEN
     if coeff_idx < COEFF_LEN:
-        state.coeff_state[coeff_idx] = min(32767, max(-32768,
+        state.coeff_state[coeff_idx] = clamp_q15(
             state.coeff_state[coeff_idx] + ((strength * (payload >> 8 & 0xFF)) >> 8)
-        ))
+        )
 
 
 def _inject_noise(state: VMState, mask: int, strength: int, lane: int) -> None:
@@ -409,9 +433,7 @@ def _inject_noise(state: VMState, mask: int, strength: int, lane: int) -> None:
         noise = ((rand_val & 0xFFFF) - 32768)
         noise = (noise * strength) >> 15
 
-        state.coeff_state[i] = min(32767, max(-32768,
-            state.coeff_state[i] + noise
-        ))
+        state.coeff_state[i] = clamp_q15(state.coeff_state[i] + noise)
 
 
 def _inject_global_pulse(state: VMState, mask: int, strength: int) -> None:
@@ -426,9 +448,7 @@ def _inject_global_pulse(state: VMState, mask: int, strength: int) -> None:
 
         coeff_idx = node * NODE_LEN
         if coeff_idx < COEFF_LEN:
-            state.coeff_state[coeff_idx] = min(32767, max(-32768,
-                state.coeff_state[coeff_idx] + weight
-            ))
+            state.coeff_state[coeff_idx] = clamp_q15(state.coeff_state[coeff_idx] + weight)
 
 
 def _inject_cusp(state: VMState, mask: int, strength: int) -> None:
@@ -441,9 +461,9 @@ def _inject_cusp(state: VMState, mask: int, strength: int) -> None:
         sign = 1 if (node % 2) == 0 else -1
         coeff_idx = node * NODE_LEN
         if coeff_idx < COEFF_LEN:
-            state.coeff_state[coeff_idx] = min(32767, max(-32768,
+            state.coeff_state[coeff_idx] = clamp_q15(
                 state.coeff_state[coeff_idx] + sign * (strength >> 2)
-            ))
+            )
 
 
 def _inject_gate_mask(state: VMState, mask: int, strength: int) -> None:
@@ -546,7 +566,7 @@ def dispatch_coeff_op_crossfade(
             (int(coeff_start[i]) * start_weight +
              int(coeff_target[i]) * target_weight) >> 15
         )
-        state.coeff_state[i] = max(-32768, min(32767, blended))
+        state.coeff_state[i] = clamp_q15(blended)
 
 
 def lane_diag(state: VMState, instr: BackboneEntry, mask: int) -> None:
@@ -571,9 +591,7 @@ def lane_diag(state: VMState, instr: BackboneEntry, mask: int) -> None:
             for i in range(coeff_idx, min(coeff_idx + NODE_LEN, COEFF_LEN)):
                 # Use Python int to avoid numpy overflow
                 val = int(state.coeff_state[i])
-                state.coeff_state[i] = min(32767, max(-32768,
-                    (val * tilt_factor) >> 15
-                ))
+                state.coeff_state[i] = clamp_q15((val * tilt_factor) >> 15)
 
     elif op_id in (15, 20):  # PressureRamp, FoldPressure
         # Catastrophe regime pressure
@@ -588,7 +606,7 @@ def lane_diag(state: VMState, instr: BackboneEntry, mask: int) -> None:
                 if abs(x) > Q15_HALF:
                     sign = 1 if x > 0 else -1
                     x = sign * (Q15_HALF + ((abs(x) - Q15_HALF) * strength) // Q15_ONE)
-                    state.coeff_state[i] = min(32767, max(-32768, x))
+                    state.coeff_state[i] = clamp_q15(x)
 
     elif op_id == 16:  # GateMask
         _inject_gate_mask(state, mask, strength)
@@ -638,15 +656,10 @@ def lane_banded(state: VMState, instr: BackboneEntry, mask: int) -> None:
             if not (mask & (1 << (node - 1))):
                 continue
 
-            # Transfer energy up (use Python int to avoid overflow)
+            # Transfer energy up using shared helper
             src_idx = node * NODE_LEN
             dst_idx = (node - 1) * NODE_LEN
-
-            src_val = int(state.coeff_state[src_idx])
-            dst_val = int(state.coeff_state[dst_idx])
-            transfer = (src_val * strength) >> 16
-            state.coeff_state[dst_idx] = min(32767, max(-32768, dst_val + transfer))
-            state.coeff_state[src_idx] = min(32767, max(-32768, src_val - transfer))
+            _transfer_energy(state, src_idx, dst_idx, strength)
 
     elif op_id == 5:  # DiffuseDown
         # Energy transport: coarse → fine
@@ -656,15 +669,10 @@ def lane_banded(state: VMState, instr: BackboneEntry, mask: int) -> None:
             if not (mask & (1 << (node + 1))):
                 continue
 
-            # Transfer energy down (use Python int to avoid overflow)
+            # Transfer energy down using shared helper
             src_idx = node * NODE_LEN
             dst_idx = (node + 1) * NODE_LEN
-
-            src_val = int(state.coeff_state[src_idx])
-            dst_val = int(state.coeff_state[dst_idx])
-            transfer = (src_val * strength) >> 16
-            state.coeff_state[dst_idx] = min(32767, max(-32768, dst_val + transfer))
-            state.coeff_state[src_idx] = min(32767, max(-32768, src_val - transfer))
+            _transfer_energy(state, src_idx, dst_idx, strength)
 
 
 def lane_permute(state: VMState, instr: BackboneEntry, mask: int) -> None:
@@ -740,9 +748,9 @@ def lane_permute(state: VMState, instr: BackboneEntry, mask: int) -> None:
                     # Blend instead of hard swap (use Python int to avoid overflow)
                     dst_val = int(tmp[dst_idx + i])
                     src_val = int(tmp[src_idx + i])
-                    state.coeff_state[dst_idx + i] = min(32767, max(-32768,
+                    state.coeff_state[dst_idx + i] = clamp_q15(
                         (dst_val * (Q15_ONE - strength) + src_val * strength) >> 15
-                    ))
+                    )
 
 
 def lane_lowrank(state: VMState, instr: BackboneEntry, mask: int) -> None:
@@ -774,9 +782,7 @@ def lane_lowrank(state: VMState, instr: BackboneEntry, mask: int) -> None:
                 for i in range(coeff_idx, min(coeff_idx + NODE_LEN, COEFF_LEN)):
                     val = int(state.coeff_state[i])
                     diff = mean - val
-                    state.coeff_state[i] = min(32767, max(-32768,
-                        val + ((diff * strength) >> 15)
-                    ))
+                    state.coeff_state[i] = clamp_q15(val + ((diff * strength) >> 15))
 
 
 def lane_proj(state: VMState, instr: BackboneEntry, mask: int) -> None:
@@ -800,12 +806,12 @@ def lane_proj(state: VMState, instr: BackboneEntry, mask: int) -> None:
                 val_a = int(state.coeff_state[idx_a])
                 val_b = int(state.coeff_state[idx_b])
                 avg = (val_a + val_b) >> 1
-                state.coeff_state[idx_a] = min(32767, max(-32768,
+                state.coeff_state[idx_a] = clamp_q15(
                     val_a + ((avg - val_a) * strength) >> 15
-                ))
-                state.coeff_state[idx_b] = min(32767, max(-32768,
+                )
+                state.coeff_state[idx_b] = clamp_q15(
                     val_b + ((avg - val_b) * strength) >> 15
-                ))
+                )
 
 
 # =============================================================================
@@ -925,7 +931,7 @@ def _tail_normalize_scale(state: VMState, mask: int) -> None:
             end_idx = min(coeff_idx + NODE_LEN, COEFF_LEN)
             for i in range(coeff_idx, end_idx):
                 val = int(state.coeff_state[i])
-                state.coeff_state[i] = min(32767, max(-32768, (val * scale) >> 15))
+                state.coeff_state[i] = clamp_q15((val * scale) >> 15)
 
 
 def _tail_sheaf_project(state: VMState, mask: int) -> None:
