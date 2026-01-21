@@ -116,8 +116,8 @@ IntentFrame (GestureTime - async)
          │
          ▼
 ┌─────────────────────────────────┐
-│   Stage 9: MATERIAL ENGINE      │  🔲 Schema only
-│   7 programs specified          │  ❌ No audio implementation
+│   Stage 9: MATERIAL ENGINE      │  🟡 TPT SVF Filter
+│   7 programs specified          │  ✅ Filter audio operational
 └─────────────────────────────────┘
          │
          ▼
@@ -143,9 +143,9 @@ IntentFrame (GestureTime - async)
 
 | Gap | Severity | Spec Location | Description |
 |-----|----------|---------------|-------------|
-| **Material Engine** | 🔴 HIGH | symcrash_docs Material Engine v0 | 7 programs fully specified, zero audio code |
-| **SVF Filter** | 🟡 MEDIUM | WSE-STD-CMM-ROADMAP Phase 2 | Schema exists in IR, no audio operator |
-| **LFO Generator** | 🟡 MEDIUM | WSE-STD-CMM-ROADMAP Phase 2 | `arc_phase_q16` exists, no generator code |
+| **Material Engine** | 🟡 MEDIUM | symcrash_docs Material Engine v0 | TPT SVF filter implemented; 6 programs remaining |
+| ~~**SVF Filter**~~ | ✅ FIXED | WSE-STD-CMM-ROADMAP Phase 2 | TPT SVF in Material Engine (material_id=9) |
+| ~~**LFO Generator**~~ | ✅ FIXED | WSE-STD-CMM-ROADMAP Phase 2 | `LFOState` + `arc_phase_q16` wired in voice_engine |
 
 ### Tier 2: Missing Specifications
 
@@ -246,7 +246,7 @@ Per WSE-STD-CMM-ROADMAP:
 
 | Phase | Profile | IR Fields | Audio | Formal Spec | Golden Traces |
 |-------|---------|-----------|-------|-------------|---------------|
-| 2 | SUBTRACTIVE | ✅ | 🟡 60% | 🔲 | 🔲 |
+| 2 | SUBTRACTIVE | ✅ | ✅ 90% | 🔲 | 🔲 |
 | 3 | FM/PM | ✅ | ✅ 85% | 🔲 | 🟡 |
 | 4 | WAVETABLE | 🔲 | 🔲 | 🔲 | 🔲 |
 | 5 | SAMPLER | 🔲 | 🔲 | 🔲 | 🔲 |
@@ -254,9 +254,10 @@ Per WSE-STD-CMM-ROADMAP:
 | 7 | MODAL/RESON | 🔲 | 🔲 | 🔲 | 🔲 |
 
 ### SUBTRACTIVE Remaining
-- [ ] SVF filter audio operator
-- [ ] LFO generator
-- [ ] LFO → mod matrix routing
+- [x] SVF filter audio operator — ✅ TPT SVF in Material Engine (2026-01-20)
+- [x] LFO generator — ✅ LFOState with arc_phase_q16
+- [x] LFO → mod matrix routing — ✅ FILTER_CUTOFF, FILTER_RESO targets
+- [x] BRIGHTNESS → filter cutoff — ✅ Macro wiring in voice_engine.py
 - [ ] Formal WSE-STD-SUBTRACTIVE-PROFILE spec
 
 ### FM/PM Remaining
@@ -294,21 +295,32 @@ Per WSE-STD-CMM-ROADMAP:
 - SynthMaster now routes ControlFrame through VoiceEngine
 - ParamFrame flows from VoiceEngine to Material/Safety engines
 
-### Phase B: Complete SUBTRACTIVE Profile
+### Phase B: Complete SUBTRACTIVE Profile ✅ COMPLETE
 
 **Goal:** Full virtual analog synthesis path
 
-| Task | Location | Priority |
-|------|----------|----------|
-| Implement SVF filter audio operator | `vm/operators.py` | 🟡 MEDIUM |
-| Implement LFO generator | `voice/lfo.py` | 🟡 MEDIUM |
-| Wire LFO → mod matrix | `voiceframe_emitter.py` | 🟡 MEDIUM |
+| Task | Location | Status |
+|------|----------|--------|
+| Implement SVF filter audio operator | `material/material_engine.py` | ✅ Done (TPT SVF) |
+| Implement LFO generator | `vm/harmonic_bank.py` | ✅ Done (LFOState) |
+| Wire LFO → mod matrix | `voice/voice_engine.py` | ✅ Done |
+| Wire VIBRATO macro → LFO depth | `voice/voice_engine.py` | ✅ Done |
+| Wire BRIGHTNESS macro → filter cutoff | `voice/voice_engine.py` | ✅ Done |
 | Write WSE-STD-SUBTRACTIVE-PROFILE | `docs/standards/` | 🟢 LOW |
 
 **Exit Criteria:**
-- [ ] Filter cutoff modulates audio
-- [ ] LFO → pitch/cutoff/pw working
-- [ ] PWM strings preset playable
+- [x] Filter cutoff modulates audio — TPT SVF in Material Engine
+- [x] LFO → pitch/cutoff/pw working — LFOTarget.FILTER_CUTOFF/FILTER_RESO
+- [ ] PWM strings preset playable — needs testing
+- [x] BRIGHTNESS macro controls filter — voice_engine.py wiring
+
+**Completed:** 2026-01-20
+**Key Changes:**
+- Added TPT SVF filter in `material_engine.py` (material_id=9)
+- Added `LFOTarget.FILTER_CUTOFF` and `LFOTarget.FILTER_RESO` enums
+- Wired `SystemMacro.VIBRATO` to scale LFO output
+- Wired `SystemMacro.BRIGHTNESS` to filter cutoff
+- Filter params flow through VoiceFrame → SynthMaster → MaterialEngine
 
 ### Phase C: Material Engine v0
 
@@ -424,7 +436,54 @@ Each profile MUST have:
 
 ---
 
+## 12. Document Authority Matrix
+
+This matrix clarifies which document is authoritative for each Tower concept.
+
+| Topic | Authoritative Document | Category | Notes |
+|-------|----------------------|----------|-------|
+| **Tower level definitions** | [WSE-STD-070](../standards/architecture/WSE-STD-070.md) §3 | Standard | Normative L0-L5 specs |
+| **Tower quick reference** | [WSE-STD-TOWER-OVERVIEW](../standards/architecture/WSE-STD-TOWER-OVERVIEW.md) | Standard | Entry point for developers |
+| **Preset format** | [WSE-STD-PRESET-v0](../standards/control/WSE-STD-PRESET-v0.md) | Standard | YAML/JSON schema |
+| **Preset authoring** | [PRESET-AUTHORING-GUIDE](../standards/library/PRESET-AUTHORING-GUIDE.md) | Guide | Python API usage |
+| **Editor primitives** | [WSE-STD-070](../standards/architecture/WSE-STD-070.md) §2 | Standard | Normative |
+| **Tower completion rules** | [WSE-STD-070](../standards/architecture/WSE-STD-070.md) §4 | Standard | Normative |
+| **CMMM definition** | [Voice Engine Tower](../../symcrash_docs/03%20-%20Audio%20Pipeline/00%20-%20Voice%20Engine/Evolution/02%20-%20The%20Voice%20Engine%20Tower.md) | Theory | Mathematical model |
+| **Functorial structure** | [Lifting the Tower](../../symcrash_docs/00%20-%20Theory/04%20-%20Voice%20Engine%20Background/04%20-%20Lifting%20the%20Tower.md) | Theory | Category theory |
+| **IR layer schemas** | [InstrumentIR Conformance](../design/core-system/04%20-%20InstrumentIR%20Tower%20Conformance%20Spec.md) §1-3 | Design | Implementation details |
+| **Emit templates** | [InstrumentIR Conformance](../design/core-system/04%20-%20InstrumentIR%20Tower%20Conformance%20Spec.md) §3 | Design | Template format |
+| **Envelope system** | [WSE-STD-ENVELOPE-SUITE-v0](../standards/control/WSE-STD-ENVELOPE-SUITE-v0.md) | Standard | ADSR, AR, LFO, etc. |
+| **Macro system** | [MACROS-AND-CONTROLS](../standards/library/MACROS-AND-CONTROLS.md) | Guide | Control layer |
+| **Fixed-point arithmetic** | [WSE-STD-001](../standards/core/WSE-STD-001.md) | Standard | Q15/Q16 formats |
+| **FM6 synthesis** | [FM6_PATHWAY_GUIDE](../FM6_PATHWAY_GUIDE.md) | Guide | Complete FM6 docs |
+| **Implementation status** | This document | Roadmap | Living status tracker |
+| **L5 Lab (future)** | WSE-STD-L5-LAB (TBD) | Standard | When specified |
+
+### Document Categories
+
+| Category | Mutability | Authority |
+|----------|------------|-----------|
+| **Standard** | Frozen once finalized | Primary - normative |
+| **Guide** | Updated for clarity | Secondary - practical |
+| **Design** | Evolving | Secondary - exploratory |
+| **Theory** | Reference only | Background - educational |
+| **Roadmap** | Actively maintained | Status tracking only |
+
+---
+
 ## Changelog
+
+### v1.2 (2026-01-20)
+- **Phase B Complete:** SUBTRACTIVE profile audio operational
+  - TPT SVF filter implemented in Material Engine (material_id=9)
+  - LFOState system with arc_phase_q16 unified storage
+  - LFO → filter cutoff/resonance routing (LFOTarget enums)
+  - VIBRATO macro → LFO depth scaling
+  - BRIGHTNESS macro → filter cutoff modulation
+  - Filter params flow: VoiceFrame → SynthMaster → MaterialEngine
+- Updated SUBTRACTIVE audio status: 60% → 90%
+- Tier 1 gaps (SVF Filter, LFO Generator) marked FIXED
+- Material Engine status updated: schema only → TPT SVF operational
 
 ### v1.1 (2026-01-19)
 - **Phase A Complete:** Control plane wired

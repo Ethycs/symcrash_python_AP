@@ -26,7 +26,8 @@ from .capsule import (
 )
 
 # Import registry for value type lookup
-from symcrash_python_ap.voice.voice_engine_registry import get_registry, ValueType
+from .central_registry import get_central_registry
+from ..voice.voice_engine_registry import ValueType
 
 
 # =============================================================================
@@ -134,7 +135,7 @@ def pack_voice_params(defaults: Dict[int, int]) -> bytes:
         return b''
 
     # Get registry for value type lookup
-    registry = get_registry()
+    registry = get_central_registry().voice_engine
 
     # Sort by param_id
     sorted_items = sorted(defaults.items(), key=lambda x: x[0])

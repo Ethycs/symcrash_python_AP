@@ -42,8 +42,9 @@ from .capsule import (
     create_synth_capsule,
 )
 from .lifecycle import LifecycleState, CapsuleRecord, create_compiled_record
-from ..control_registry import ControlRegistry, ControlID
-from ..voice.voice_engine_registry import VoiceEngineRegistry, VoiceParamID, get_registry
+from .central_registry import get_central_registry
+from ..control_registry import ControlID
+from ..voice.voice_engine_registry import VoiceParamID
 
 if TYPE_CHECKING:
     from ..instrument_ir import InstrumentIR
@@ -78,22 +79,19 @@ class CapsuleCompiler:
 
     def __init__(
         self,
-        control_registry: ControlRegistry = None,
-        voice_registry: VoiceEngineRegistry = None,
         sample_rate: int = 48000,
         block_size: int = 64,
     ):
         """
-        Initialize compiler with registries.
+        Initialize compiler with central registry.
 
         Args:
-            control_registry: ControlRegistry for validation
-            voice_registry: VoiceEngineRegistry for validation
             sample_rate: Target sample rate
             block_size: Target block size
         """
-        self.control_registry = control_registry or ControlRegistry()
-        self.voice_registry = voice_registry or get_registry()
+        central = get_central_registry()
+        self.control_registry = central.controls
+        self.voice_registry = central.voice_engine
         self.sample_rate = sample_rate
         self.block_size = block_size
 

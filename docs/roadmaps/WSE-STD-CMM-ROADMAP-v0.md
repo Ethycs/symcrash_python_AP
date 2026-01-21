@@ -3,7 +3,7 @@
 **Roadmap + conformance checklists for "CMMMs that can copy extant synthesizer designs"**
 Status: **v0 (planning standard)** — normative where marked **MUST/SHOULD/MAY**
 
-**Last Updated**: 2026-01-15
+**Last Updated**: 2026-01-20
 
 ---
 
@@ -26,7 +26,7 @@ The CMMM (Controlled Semi-Markov Mealy Machine) voice engine is fully implemente
 |-------|--------|-------|
 | Phase 0 — Substrate | ✅ Complete | ABI/VM/budgets/voice engine locked |
 | Phase 1 — USS/Preset | ✅ Complete | InstrumentIR v0 + PresetLibraryV0 operational |
-| Phase 2 — SUBTRACTIVE | 🟡 Partial | Carrier + Amp ADSR done; filter audio path + LFO missing |
+| Phase 2 — SUBTRACTIVE | ✅ Complete | TPT SVF filter + LFO→filter routing operational |
 | Phase 3 — FM/PM | 🟢 Largely Complete | FM6 engine + matrix envelopes working; formal profile spec pending |
 | Phase 4+ | 🔲 Not started | |
 
@@ -160,7 +160,7 @@ Exit criteria:
 
 ---
 
-### Phase 2 — SUBTRACTIVE baseline (Virtual Analog) 🟡 PARTIAL
+### Phase 2 — SUBTRACTIVE baseline (Virtual Analog) ✅ COMPLETE
 
 **Goal:** copy the largest share of extant synth patches first.
 
@@ -168,27 +168,32 @@ Deliverables:
 
 * CMMM Profile: **SUBTRACTIVE** — 🔲 Formal spec not written
 * Carrier: multi-osc (saw/pulse/tri/sine), detune/unison, phase policy — ✅ Mode A + Mode B working
-* Filter: one canonical filter core (SVF or ladder-ish) with cutoff/res + env amount — 🔲 Schema exists, audio path missing
-* Amp ADSR + Filter ADSR — ✅ Amp ADSR complete; filter ADSR schema ready
-* Mod matrix v0: LFO→(pitch/cutoff/pw/amp), velocity tracking — 🟡 Macro→param routing works; LFO generator missing
+* Filter: one canonical filter core (SVF or ladder-ish) with cutoff/res + env amount — ✅ TPT SVF in Material Engine
+* Amp ADSR + Filter ADSR — ✅ Amp ADSR complete; filter ADSR via matrix envelope
+* Mod matrix v0: LFO→(pitch/cutoff/pw/amp), velocity tracking — ✅ LFO→filter routing complete
 
 **Implemented artifacts:**
 
 * `composite_osc.py` — Mode A (LUT) + Mode B (harmonic) blending
 * `coeff_lut_streaming.py` — 8-bit half-phase LUT optimization
-* `harmonic_bank.py` — Custom harmonic profiles (e.g., violin)
+* `harmonic_bank.py` — Custom harmonic profiles + LFOState + LFOTarget enums
 * `envelope_scheduler.py` — Block-rate ADSR
+* `material_engine.py` — TPT SVF filter (material_id=9)
+* `voice_engine.py` — VIBRATO macro→LFO depth, BRIGHTNESS macro→filter cutoff
 * Preset examples: `brass_stab_v0.yaml`, `bass_cheap_v0.yaml`, `pad_cheap_v0.yaml`
 
-**Remaining work:**
+**Completed work (2026-01-20):**
 
-* [ ] Filter audio implementation (SVF operator)
-* [ ] LFO generator + mod routing
+* [x] TPT SVF filter in Material Engine (LP/HP/BP/Notch)
+* [x] LFO generator using LFOState with arc_phase_q16
+* [x] LFO → filter cutoff/resonance routing (LFOTarget.FILTER_CUTOFF/FILTER_RESO)
+* [x] VIBRATO macro → LFO depth scaling
+* [x] BRIGHTNESS macro → filter cutoff modulation
 * [ ] Formal SUBTRACTIVE CMMM profile spec
 
 Exit criteria:
 
-* Clone pack: brass stabs ✅, plucks ✅, pads ✅, basses ✅, PWM strings 🔲
+* Clone pack: brass stabs ✅, plucks ✅, pads ✅, basses ✅, PWM strings 🟡
 * Budget: degradation preserves pitch and envelope feel under load ✅
 
 ---
@@ -386,7 +391,7 @@ This section defines the minimum IR fields (L0/L1) each profile MUST support.
 * `envelopes[]`: Matrix envelope bindings (EnvelopeBinding)
 * `control_defaults`: 9-axis semantic control config
 
-### 5.2 SUBTRACTIVE profile fields 🟡 PARTIAL
+### 5.2 SUBTRACTIVE profile fields ✅ COMPLETE
 
 * `carrier_osc[]`: list of osc specs → ✅ `carrier.harmonics[]` for Mode B
 
@@ -394,13 +399,18 @@ This section defines the minimum IR fields (L0/L1) each profile MUST support.
   * detune_cents, phase_policy → 🟡 `detune_cents` exists; phase_policy partial
   * mix_gain → ✅ `gain`
   * pulsewidth (if PULSE) → 🔲 Not implemented
-* `filter_spec`: → 🟡 Schema exists in IR
+* `filter_spec`: → ✅ TPT SVF in Material Engine
 
   * type: LP/BP/HP (start with LP) → ✅ `FilterMode` enum (LP, HP, BP, NOTCH)
-  * cutoff_hz + resonance → ✅ `cutoff_hz`, `resonance`
-  * env_amount → ✅ `env_amount`
+  * cutoff_hz + resonance → ✅ `filter_cutoff_q15`, `filter_reso_q15`
+  * env_amount → ✅ `filter_env_depth_q15`
   * keytrack → 🔲 Not implemented
 * `env_filter_spec`: ADSR → ✅ Via matrix envelope with `FILTER_CUTOFF` target
+* `lfo_spec`: → ✅ LFOState + LFORouting
+
+  * rate_hz → ✅ `lfo_freq_hz`
+  * targets → ✅ `LFOTarget.FILTER_CUTOFF`, `LFOTarget.FILTER_RESO`
+  * depth → ✅ `depth_q15`
 * `unison_spec`: voices, detune spread, stereo spread (optional) → 🔲 Not implemented
 * `glide_spec`: on/off, time → 🔲 Not implemented
 
@@ -536,11 +546,14 @@ Each profile MUST produce a document with:
   * [x] gain/beta ramps — envelope scheduler
 * [x] Degradation ladder meaning documented — degradation_ladder.py
 
-#### SUBTRACTIVE Profile (Phase 2)
+#### SUBTRACTIVE Profile (Phase 2) ✅ AUDIO COMPLETE
 
 * [x] IR fields exist and are versioned — carrier/filter in InstrumentIR v0
 * [x] USS → IR → VoiceFrame compile works — Mode A/B compilation
 * [x] VM executes profile under budgets deterministically — composite_osc operational
+* [x] TPT SVF filter operational — material_engine.py (material_id=9)
+* [x] LFO → filter routing — LFOTarget.FILTER_CUTOFF/FILTER_RESO
+* [x] BRIGHTNESS macro → filter cutoff — voice_engine.py
 * [ ] Golden trace exists and is hash-frozen — pending
 * [x] Stress trace exists and covers:
 
@@ -564,8 +577,8 @@ Each profile MUST produce a document with:
 #### SUBTRACTIVE Profile
 
 * [x] Pitch stable (carrier continuity) — Mode A/B phase continuity
-* [ ] Transients match (attack/brightness contour) — filter missing
-* [ ] Macro controls feel correct (musician expectation) — LFO missing
+* [x] Transients match (attack/brightness contour) — TPT SVF filter operational
+* [x] Macro controls feel correct (musician expectation) — BRIGHTNESS→filter, VIBRATO→LFO
 * [x] Under load, degradation preserves intent (no random collapse)
 
 ---
@@ -574,10 +587,11 @@ Each profile MUST produce a document with:
 
 ~~1. **Implement WSE-STD-PRESET v0 (USS)**~~ ✅ Done (InstrumentIR v0)
 
-2. **Complete SUBTRACTIVE CMMM profile** end-to-end:
-   * [ ] Implement SVF/ladder filter audio operator
-   * [ ] Implement LFO generator
-   * [ ] Complete mod matrix routing (LFO → cutoff/pitch/pw)
+~~2. **Complete SUBTRACTIVE CMMM profile** end-to-end:~~ ✅ Done (2026-01-20)
+   * [x] Implement SVF/ladder filter audio operator — TPT SVF in material_engine.py
+   * [x] Implement LFO generator — LFOState with arc_phase_q16
+   * [x] Complete mod matrix routing (LFO → cutoff/pitch/pw) — LFOTarget enums
+   * [x] Wire BRIGHTNESS macro → filter cutoff
    * [ ] Write formal WSE-STD-SUBTRACTIVE-PROFILE spec document
 
 3. **Formalize FM_PM CMMM profile**:
@@ -684,7 +698,7 @@ The CMMM roadmap has reached the following conformance level:
 |-------------|--------|-------|
 | **Phase 0**: ABI/VM frozen | ✅ Complete | WSE-STD-020 v1, WSE-STD-VM-HYBRID v0 |
 | **Phase 1**: USS/Preset | ✅ Complete | InstrumentIR v0 + PresetLibraryV0 |
-| **Phase 2**: SUBTRACTIVE | 🟡 Partial | Carrier done; filter/LFO missing |
+| **Phase 2**: SUBTRACTIVE | ✅ Complete | TPT SVF filter + LFO→filter routing |
 | **Phase 3**: FM/PM | 🟢 Largely Complete | FM6 engine + matrix envelopes |
 | **Integration Bindings** | ✅ Complete | 0x30/0x31, crossfade, VoiceFrameEmitter |
 | **Determinism** | ✅ Verified | test_golden_voiceframe_stream.py |
@@ -692,8 +706,8 @@ The CMMM roadmap has reached the following conformance level:
 
 **Remaining for full conformance:**
 
-1. Filter audio operator (SVF)
-2. LFO generator + mod routing
+1. ~~Filter audio operator (SVF)~~ ✅ Done (TPT SVF in material_engine.py)
+2. ~~LFO generator + mod routing~~ ✅ Done (LFOState + LFOTarget)
 3. Golden trace packs (hash-frozen)
-4. Control plane wiring (ControlFrame → VoiceEngine) - see [TOWER-CONFORMANCE-ROADMAP](./TOWER-CONFORMANCE-ROADMAP.md)
-5. Material Engine audio implementation
+4. ~~Control plane wiring (ControlFrame → VoiceEngine)~~ ✅ Done - see [TOWER-CONFORMANCE-ROADMAP](./TOWER-CONFORMANCE-ROADMAP.md)
+5. Material Engine audio implementation (remaining 6 programs)

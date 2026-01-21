@@ -1,12 +1,37 @@
 # WSE-STD-GESTURE v0 — Gesture Lifecycle & Regime FSM
 
 **Status:** Normative (v0 frozen)
+**Last Updated:** 2026-01-20
 **Applies to:** VoiceEngine, CMMM integration, cockpit input processing
 **Depends on:**
 
 * WSE-STD-VOICEENGINEREGISTRY v0 (engine parameters)
 * WSE-STD-CONTROLREGISTRY v0 (cockpit macros)
 * WSE-STD-020 (VoiceFrame ABI)
+* WSE-STD-MACRO v0 (system macros)
+
+---
+
+## Implementation Status (2026-01-20)
+
+| Component | Status | Location |
+|-----------|--------|----------|
+| GestureBasis (8-field) | ✅ Complete | `voice_engine.py:1078-1108` |
+| IntentVector (8-lane) | ✅ Complete | `voice_engine.py:1115-1155` |
+| Gesture → Intent mapping | ✅ Complete | `voice_engine.py:1160-1202` |
+| Regime FSM (R0-R6) | ✅ Complete | `voice_engine.py:895-950` |
+| RegimeSpec per regime | ✅ Complete | `voice_engine.py:795-890` |
+| EdgeSpec with hysteresis | ✅ Complete | `instrument_ir.py:572-620` |
+| ArcSpec for transitions | ✅ Complete | `voice_engine.py:420-481` |
+| Arc phase storage | ✅ Complete | `VoiceState.arc_phase_q16[8]` |
+| Family weight computation | ✅ Complete | `voice_engine.py:1241-1277` |
+| Event lanes (E0-E7) | ✅ Complete | `voice_engine.py:498-520` |
+| LFO System | ✅ Complete | `harmonic_bank.py:616-741` |
+| System Macros (0-12) | ✅ Complete | `primitives.py`, `macro_runtime.py` |
+| BRIGHTNESS → filter | ✅ Complete | `voice_engine.py` |
+| VIBRATO → LFO depth | ✅ Complete | `voice_engine.py` |
+| TPT SVF Filter | ✅ Complete | `material_engine.py:791-948` |
+| LFO → filter routing | ✅ Complete | `LFOTarget.FILTER_CUTOFF/RESO` |
 
 ---
 
@@ -437,6 +462,154 @@ class ArcSpec:
 
 ---
 
+## 7A. LFO System (Implemented 2026-01-20)
+
+LFOs (Low Frequency Oscillators) use the arc phase storage for unified time ownership.
+
+### 7A.1 LFOState Structure
+
+```python
+@dataclass
+class LFOState:
+    """LFO state using arc_phase_q16 storage."""
+    lfo_id: int = 0
+    arc_slot: int = 0           # Which arc_phase_q16 slot to use
+    waveform: int = 0           # 0=sine, 1=tri, 2=saw, 3=square
+    freq_hz: float = 5.0        # LFO frequency
+    phase_offset_q16: int = 0   # Phase offset
+
+    def advance_block_with_arc(self, arc_phase: List[int], block_samples: int = 64):
+        """Advance LFO phase using arc_phase_q16 storage."""
+        # Phase increment per block
+        delta = int((self.freq_hz * 65536 * block_samples) / 48000)
+        arc_phase[self.arc_slot] = (arc_phase[self.arc_slot] + delta) & 0xFFFF
+
+    def get_value_q15(self, arc_phase: List[int]) -> int:
+        """Get current LFO value from arc phase storage."""
+        phase = arc_phase[self.arc_slot]
+        # Waveform generation (returns Q15)
+        ...
+```
+
+### 7A.2 LFO Targets (LFOTarget Enum)
+
+```python
+class LFOTarget(IntEnum):
+    PITCH = 0           # Pitch modulation (vibrato)
+    GAIN = 1            # Amplitude modulation (tremolo)
+    PWM_WIDTH = 10      # Pulse width modulation
+    TILT = 11           # Spectral tilt
+    FILTER_CUTOFF = 15  # Filter cutoff frequency
+    FILTER_RESO = 16    # Filter resonance
+    BAND_SCALE = 20     # Wavelet band scaling
+    VFO_RING = 30       # Ring modulation
+```
+
+### 7A.3 LFO Routing
+
+```python
+@dataclass
+class LFORouting:
+    """Routes LFO output to a target parameter."""
+    lfo_id: int = 0
+    target: LFOTarget = LFOTarget.PITCH
+    depth_q15: int = 0  # Modulation depth (Q15)
+```
+
+### 7A.4 LFO → Arc Integration
+
+LFO phases are stored in `VoiceState.arc_phase_q16[arc_slot]`:
+
+- Unified time ownership per WSE-ARCHITECTURE-v1
+- 8 slots available (MAX_ARCS = 8)
+- Q0.16 fixed-point (0-65535 = one cycle)
+- Voice Engine advances phases each block via `tick_lfos()`
+
+---
+
+## 7B. System Macros (WSE-STD-MACRO v0)
+
+System macros provide semantic control axes for expressive synthesis.
+
+### 7B.1 System Macro IDs (Frozen v0)
+
+| ID | Name | Purpose | Set By | Default Slew |
+|----|------|---------|--------|--------------|
+| 0 | ENERGY_STATE | Envelope-owned | Envelope only | NONE |
+| 1 | ENERGY_INTENT | Attack character | Controller | ONE_POLE (2048) |
+| 2 | MOTION | Movement/modulation | Controller | ONE_POLE (2048) |
+| 3 | FOCUS | Spectral concentration | Controller | ONE_POLE (2048) |
+| 4 | BRIGHTNESS | Harmonic content (timbre) | Controller | ONE_POLE (2048) |
+| 5 | DENSITY | Low-mid presence (body) | Controller | ONE_POLE (2048) |
+| 6 | RISK | Chaos/instability | Controller | NBLOCK (16) |
+| 7 | AGE | CMMM integrator | CMMM only | NONE |
+| 8 | SPACE | Spatial/reverb | Controller | ONE_POLE (2048) |
+| 9 | MATERIAL | Surface texture | Controller | NBLOCK (32) |
+| 10 | UNITY | Voice coherence | Controller | NBLOCK (32) |
+| 11 | VIBRATO | LFO depth scaling | Controller | ONE_POLE (4096) |
+| 12 | LEGATO | Legato/portamento | Controller | NONE |
+
+### 7B.2 Macro → Audio Routing (Implemented)
+
+| Macro | Target | Implementation |
+|-------|--------|----------------|
+| BRIGHTNESS (4) | Filter cutoff | `filter_cutoff_q15 *= brightness_q15 >> 15` |
+| VIBRATO (11) | LFO depth | Scales all LFO outputs |
+| DENSITY (5) | Body/thickness | Family weight bias |
+| RISK (6) | Tail mode | High risk → MIN/EMERGENCY tail |
+
+### 7B.3 MacroRuntime
+
+```python
+class MacroRuntime:
+    """Runtime macro state with slew filters."""
+    macro_target_q15: Dict[int, int]  # Target values
+    macro_curr_q15: Dict[int, int]    # Current (slewed) values
+
+    def set_macro(self, preset_macro: str, value_q15: int): ...
+    def get_system_macro(self, macro_id: int) -> int: ...
+    def tick(self): ...  # Advance slew filters
+```
+
+---
+
+## 7C. Filter System (Implemented 2026-01-20)
+
+The TPT SVF filter is implemented in the Material Engine (Stage 9).
+
+### 7C.1 Filter Parameters
+
+| Parameter | Type | Range | Description |
+|-----------|------|-------|-------------|
+| `filter_cutoff_q15` | Q15U | 0-32767 | Cutoff (log scale 20Hz-20kHz) |
+| `filter_reso_q15` | Q15U | 0-32767 | Resonance (0=flat, max=self-osc) |
+| `filter_mode` | int | 0-3 | 0=LP, 1=HP, 2=BP, 3=Notch |
+| `filter_env_depth_q15` | Q15S | -32768-32767 | Envelope modulation amount |
+
+### 7C.2 Filter Modulation Sources
+
+1. **BRIGHTNESS macro** → filter cutoff (multiplicative)
+2. **LFO** → filter cutoff/resonance (additive via LFOTarget)
+3. **Matrix envelope** → filter cutoff (ADSR modulation)
+
+### 7C.3 Filter Data Flow
+
+```
+Preset defaults → filter_cutoff_q15
+                       ↓
+BRIGHTNESS macro → × brightness_q15 >> 15
+                       ↓
+LFO routing → + scaled_lfo (if LFOTarget.FILTER_CUTOFF)
+                       ↓
+VoiceFrame.filter_cutoff_q15
+                       ↓
+SynthMaster (aggregate min cutoff across voices)
+                       ↓
+MaterialEngine._svf_filter() [material_id=9]
+```
+
+---
+
 ## 8. Family Weights (Frozen v0)
 
 ### 8.1 Family Enum
@@ -651,17 +824,42 @@ On NOTE_OFF / release event:
 
 An implementation conforms iff it:
 
-* [ ] Implements GestureBasis 8-field structure (§1)
-* [ ] Implements IntentVector 8-lane structure (§2)
-* [ ] Provides `default_gesture_to_intent()` mapping (§3)
-* [ ] Implements Regime enum R0-R6 (§4)
-* [ ] Implements RegimeSpec per regime (§5)
-* [ ] Implements EdgeSpec with hysteresis (§6)
-* [ ] Implements ArcSpec for transitions (§7)
-* [ ] Computes family weights per §8
-* [ ] Implements event lanes E0-E7 (§9)
-* [ ] Follows per-block processing order (§13.1)
-* [ ] Produces deterministic results given identical inputs
+### Core Gesture/Regime (Frozen v0)
+
+* [x] Implements GestureBasis 8-field structure (§1)
+* [x] Implements IntentVector 8-lane structure (§2)
+* [x] Provides `default_gesture_to_intent()` mapping (§3)
+* [x] Implements Regime enum R0-R6 (§4)
+* [x] Implements RegimeSpec per regime (§5)
+* [x] Implements EdgeSpec with hysteresis (§6)
+* [x] Implements ArcSpec for transitions (§7)
+* [x] Computes family weights per §8
+* [x] Implements event lanes E0-E7 (§9)
+* [x] Follows per-block processing order (§13.1)
+* [x] Produces deterministic results given identical inputs
+
+### LFO System (§7A)
+
+* [x] LFOState uses arc_phase_q16 storage
+* [x] LFOTarget enum includes FILTER_CUTOFF, FILTER_RESO
+* [x] LFORouting routes LFO to targets with depth
+* [x] Voice Engine advances LFO phases via tick_lfos()
+
+### System Macros (§7B)
+
+* [x] SystemMacro enum (0-12) defined in primitives.py
+* [x] MacroRuntime with slew filters per WSE-STD-MACRO v0
+* [x] BRIGHTNESS (4) → filter cutoff wired
+* [x] VIBRATO (11) → LFO depth scaling wired
+* [x] Preset ControlConfig applied at load time
+
+### Filter System (§7C)
+
+* [x] TPT SVF filter in Material Engine (material_id=9)
+* [x] Filter parameters in VoiceFrame (cutoff, reso, mode)
+* [x] LFO → filter routing via LFOTarget enums
+* [x] BRIGHTNESS macro → filter cutoff modulation
+* [x] Matrix envelope → filter cutoff support
 
 ---
 

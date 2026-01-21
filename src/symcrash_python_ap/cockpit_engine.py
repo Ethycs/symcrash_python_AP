@@ -29,8 +29,8 @@ Usage:
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, TYPE_CHECKING
 
+from .library.central_registry import get_central_registry
 from .control_registry import (
-    ControlRegistry,
     ControlID,
     ValueType,
     SlewPolicy,
@@ -91,7 +91,7 @@ class CockpitEngine:
     """
 
     def __init__(self):
-        self.registry = ControlRegistry()
+        self.registry = get_central_registry().controls
         self.block_index = 0
 
         # Control state (all controls, indexed by ControlID)

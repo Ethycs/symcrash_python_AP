@@ -8,6 +8,21 @@ Implements envelope scheduling at 750 blocks/sec (48kHz / 64 samples).
 All output values are Q15 (0-32767).
 
 Per WSE-STD-PRESET v0, envelope updates happen at block boundaries only.
+
+NOTE: This module provides a legacy EnvelopeScheduler implementation.
+For new code, prefer using envelope_suite.py which provides a unified
+suite of envelope generators and processors:
+
+    from symcrash_python_ap.envelope_suite import (
+        ADSR,              # Standard ADSR envelope (replaces EnvelopeScheduler)
+        AR,                # Attack-Release (percussive)
+        Decay,             # One-shot exponential decay
+        EnvelopeFollower,  # Tracks input amplitude
+        Slew,              # Smoothing filter for control signals
+        LFO,               # Low-frequency oscillator
+    )
+
+See WSE-STD-ENVELOPE-SUITE-v0 for the full specification.
 """
 
 from dataclasses import dataclass

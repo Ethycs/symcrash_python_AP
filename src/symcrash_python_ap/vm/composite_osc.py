@@ -35,7 +35,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Tuple
 import numpy as np
 
-from ..fixed import RSHIFT_RNE, SAT16, Q15_ONE
+from ..fixed import RSHIFT_RNE, SAT16, Q15_ONE, Q15_HALF
 from .coeff_lut_streaming import (
     StreamingCoeffLUT, CCSState, get_lut_for_note,
     WAVE_SINE, WAVE_SAW, WAVE_SQUARE, WAVE_TRIANGLE, WAVE_PULSE,
@@ -55,8 +55,8 @@ COEFF_LEN_POLYPHASE = NUM_LEAVES * DEFAULT_K  # 64 * 8 = 512
 
 # Composite blend modes
 BLEND_PURE_A = 0        # 100% Mode A
-BLEND_PURE_B = 32767    # 100% Mode B
-BLEND_EQUAL = 16384     # 50/50 mix
+BLEND_PURE_B = Q15_ONE  # 100% Mode B
+BLEND_EQUAL = Q15_HALF  # 50/50 mix
 
 # Quarter-phase quadrants
 QUADRANT_0 = 0  # 0-90°: use table directly

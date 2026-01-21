@@ -34,6 +34,7 @@ from .primitives import (
     TailMode as _TailMode,
     K_LADDER_MASKS,
     get_k_mask,
+    Q15_ONE,
 )
 
 # Lazy import for central registry (avoid circular imports)
@@ -83,7 +84,7 @@ def pct_to_q15(pct: float) -> int:
         >>> pct_to_q15(1.0)
         32767
     """
-    return int(max(0.0, min(1.0, pct)) * 32767)
+    return int(max(0.0, min(1.0, pct)) * Q15_ONE)
 
 
 def q15_to_pct(q15: int) -> float:
@@ -100,7 +101,7 @@ def q15_to_pct(q15: int) -> float:
         >>> q15_to_pct(16383)
         0.4999847...
     """
-    return q15 / 32767.0
+    return q15 / Q15_ONE
 
 
 # =============================================================================

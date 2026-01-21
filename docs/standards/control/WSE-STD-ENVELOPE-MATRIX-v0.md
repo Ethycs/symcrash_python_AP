@@ -9,6 +9,7 @@
 * WSE-STD-020 v1 (VoiceFrame ABI)
 * WSE-STD-VM-HYBRID v0 (VM execution semantics)
 * WSE-STD-FM6 (FM6 synthesis)
+* WSE-STD-ENVELOPE-SUITE v0 (Envelope generators and processors)
 
 ---
 
@@ -24,7 +25,8 @@ This standard defines:
 
 This standard does **not** define:
 
-* ADSR envelope shape computation (see EnvelopeScheduler)
+* ADSR envelope shape computation (see WSE-STD-ENVELOPE-SUITE v0 / `envelope_suite.py`)
+* Additional envelope types (AR, Decay, LFO, EnvelopeFollower) — see WSE-STD-ENVELOPE-SUITE v0
 * Individual target semantics beyond routing (see WSE-STD-FM6 for FM operators)
 
 ---
@@ -334,10 +336,13 @@ A conforming implementation MAY:
 
 ## 9. References
 
+- [envelope_suite.py](../../../src/symcrash_python_ap/envelope_suite.py) - ADSR, AR, Decay, LFO, EnvelopeFollower, Slew
 - [envelope_targets.py](../../../src/symcrash_python_ap/envelope_targets.py) - EnvelopeTarget enum
+- [envelope_scheduler.py](../../../src/symcrash_python_ap/envelope_scheduler.py) - Legacy EnvelopeScheduler (use envelope_suite.ADSR instead)
 - [instrument_ir.py](../../../src/symcrash_python_ap/instrument_ir.py) - EnvelopeBinding dataclass
 - [voiceframe_emitter.py](../../../src/symcrash_python_ap/voiceframe_emitter.py) - Matrix integration
 - [executor.py](../../../src/symcrash_python_ap/vm/executor.py) - Target application
+- [WSE-STD-ENVELOPE-SUITE-v0.md](WSE-STD-ENVELOPE-SUITE-v0.md) - Envelope Suite specification
 
 ---
 

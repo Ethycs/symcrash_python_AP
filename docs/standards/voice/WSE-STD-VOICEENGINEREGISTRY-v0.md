@@ -1,14 +1,8 @@
-Below are **two normative specs**:
-
-1. **WSE-STD-VOICEENGINEREGISTRY v0** (full, implementable, frozen interfaces)
-2. **WSE-STD-CAPSULE-COMPAT v0** — a **ControlRegistry + VoiceFrame contract** that makes a **Capsule object** portable and engine-compatible (without making the Library responsible for morphing)
-
----
-
 # WSE-STD-VOICEENGINEREGISTRY v0 — Voice Engine Registry (Truth Table)
 
 **Status:** Normative (v0 frozen)
 **Applies to:** VoiceEngine (CMMM/VM), per-voice init, runtime param updates, preset/capsule load, snapshot load
+**Part of:** [WSE-STD-REGISTRY-MASTER-v0](../library/WSE-STD-REGISTRY-MASTER-v0.md) (Central Registry)
 **Depends on:**
 
 * WSE-STD-CONTROLREGISTRY v0 (cockpit controls truth table)

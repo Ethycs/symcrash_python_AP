@@ -76,8 +76,40 @@ Preset macros (defined in L0_graph.macros) map to system macros:
 
 | ID | Name | Purpose | Set By | Default Slew |
 |----|------|---------|--------|--------------|
-| 11 | VIBRATO | Vibrato/tremolo depth | Controller + MacroProgram | ONE_POLE (4096) |
+| 11 | VIBRATO | Vibrato/tremolo depth, LFO scaling | Controller + MacroProgram | ONE_POLE (4096) |
 | 12 | LEGATO | Legato/portamento mode | Controller + MacroProgram | NONE |
+
+### Macro → Audio Routing
+
+System macros are wired to audio parameters in `voice_engine.py`:
+
+| Macro | Target | Routing |
+|-------|--------|---------|
+| BRIGHTNESS (4) | Filter cutoff | `filter_cutoff_q15 *= brightness_q15 >> 15` |
+| VIBRATO (11) | LFO depth | Scales all LFO outputs by `vibrato_depth_scale` |
+| DENSITY (5) | Low-mid presence | Controls body/thickness |
+
+#### BRIGHTNESS → Filter Cutoff
+
+The BRIGHTNESS macro directly modulates filter cutoff frequency. At preset load time, `filter_cutoff_q15` is initialized from the preset defaults, then scaled by the current BRIGHTNESS macro value:
+
+```python
+brightness_q15 = macro_runtime.get_system_macro(SystemMacro.BRIGHTNESS)
+filter_cutoff_q15 = RSHIFT_RNE(filter_cutoff_q15 * brightness_q15, 15)
+```
+
+This allows real-time timbral control: lower BRIGHTNESS = darker, higher = brighter.
+
+#### VIBRATO → LFO Depth
+
+The VIBRATO macro scales all LFO outputs, providing global control over modulation depth:
+
+```python
+vibrato_depth_scale = macro_runtime.get_system_macro(SystemMacro.VIBRATO)
+scaled_lfo = RSHIFT_RNE(lfo_output * vibrato_depth_scale, 15)
+```
+
+This allows performers to dial in vibrato/tremolo intensity in real-time.
 
 ---
 
@@ -532,6 +564,25 @@ System macros can influence CMMM event emission:
 | RISK | tail_mode | High risk → MIN/EMERGENCY tail |
 | ENERGY_STATE | node_mask | Low energy → reduced K |
 | DENSITY | node_mask | High density → more nodes |
+
+### LFO → Filter Routing
+
+LFOs can modulate filter parameters via `LFOTarget` enums:
+
+| Target | Value | Description |
+|--------|-------|-------------|
+| `FILTER_CUTOFF` | 15 | Filter cutoff frequency |
+| `FILTER_RESO` | 16 | Filter resonance |
+
+```python
+# In voice_engine.py
+if routing.target == LFOTarget.FILTER_CUTOFF:
+    filter_cutoff_q15 = clamp(filter_cutoff_q15 + scaled_lfo, 0, Q15_ONE)
+elif routing.target == LFOTarget.FILTER_RESO:
+    filter_reso_q15 = clamp(filter_reso_q15 + scaled_lfo, 0, Q15_ONE)
+```
+
+Filter parameters flow through the VoiceFrame to SynthMaster, which aggregates across active voices (min cutoff, max resonance) and passes to the Material Engine's TPT SVF filter.
 
 ---
 

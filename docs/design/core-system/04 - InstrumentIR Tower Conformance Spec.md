@@ -369,7 +369,51 @@ Blended operator output (click-free)
 
 ---
 
-## 9. References
+## 9. L4/L5 Future Extensions (Placeholder)
+
+This section documents planned extensions for Tower levels L4 (Forge) and L5 (Lab).
+
+### 9.1 L4 Forge (Graph Editing)
+
+**Status:** Enum defined, implementation deferred
+
+L4 enables runtime graph editing operations:
+
+| Operation | Description | Status |
+|-----------|-------------|--------|
+| ADD_REGIME | Add regime to graph | 🔲 Not implemented |
+| REMOVE_REGIME | Remove regime from graph | 🔲 Not implemented |
+| ADD_EDGE | Add transition edge | 🔲 Not implemented |
+| MODIFY_TEMPLATE | Edit emit template | 🔲 Not implemented |
+
+**Validation:** $V_4$ must ensure edited graphs remain valid (no orphan regimes, reachable from start).
+
+### 9.2 L5 Lab (Custom Operators/Trees)
+
+**Status:** Enum defined, specification deferred
+
+L5 enables research features that must compile down to L3:
+
+| Component | Description | Status |
+|-----------|-------------|--------|
+| NewOpDef | Custom operator definition (YAML + kernel) | 🔲 Not specified |
+| NewTreeDef | Custom wavelet tree family | 🔲 Not specified |
+| $C_{5\to3}$ | Compilation validator | 🔲 Not implemented |
+
+**Constraint:** Lab objects MUST compile to valid Cockpit instruments before runtime execution. The compilation map $C_{5\to3}: \mathcal{M}_5 \to \mathcal{M}_3$ must preserve CMMM invariants.
+
+### 9.3 Implementation Timeline
+
+L4/L5 implementation will begin when:
+1. P3 conformance (budgeting) is complete
+2. All current profiles (SUBTRACTIVE, FM) are stable
+3. Editor infrastructure is ready for graph manipulation
+
+> **See also:** [TOWER-DOCUMENTATION-CONSOLIDATION-PLAN](../../roadmaps/TOWER-DOCUMENTATION-CONSOLIDATION-PLAN.md) §4 for L5 component checklist.
+
+---
+
+## 10. References
 
 - [CMMM-2: Budgeting Spec](../../cmmm-infopacket/CMMM-2.md)
 - [Voice Engine Tower](../../../symcrash_docs/03%20-%20Audio%20Pipeline/00%20-%20Voice%20Engine/Evolution/02%20-%20The%20Voice%20Engine%20Tower.md)

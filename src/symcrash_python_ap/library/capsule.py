@@ -21,8 +21,8 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Dict, List, Optional
 
-# Import canonical SystemMacro from primitives (single source of truth)
-from ..primitives import SystemMacro as _SystemMacro
+# Import canonical primitives (single source of truth)
+from ..primitives import SystemMacro as _SystemMacro, SAMPLE_RATE_HZ, BLOCK_SIZE
 
 
 # =============================================================================
@@ -73,8 +73,8 @@ class EngineCompat:
     control_registry_abi: int = 0
     voice_registry_abi: int = 0
     voiceframe_abi: int = 0
-    sample_rate_hz: int = 48000
-    block_size: int = 64
+    sample_rate_hz: int = SAMPLE_RATE_HZ
+    block_size: int = BLOCK_SIZE
 
 
 @dataclass

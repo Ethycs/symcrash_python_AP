@@ -32,7 +32,7 @@ from ..frames import CarrierModel, CarrierRole, TransitionKind
 from ..vm.harmonic_bank import LFOState, LFOWaveform, LFOSyncMode, LFOTarget, LFORouting
 
 # Import canonical primitives (single source of truth)
-from ..primitives import K_LADDER_MASKS, TailMode as _TailMode, Q15_ONE, Q15_HALF
+from ..primitives import K_LADDER_MASKS, TailMode as _TailMode, Q15_ONE, Q15_HALF, Q16_ONE
 
 # Import central registry for validation
 from .central_registry import get_central_registry
@@ -74,8 +74,8 @@ class FM6Config:
     from a YAML preset.
     """
     algorithm_id: int = 1                   # DX7 algorithm (1-32)
-    op_ratios: list = field(default_factory=lambda: [65536]*6)   # 6 × Q16 ratios
-    op_levels: list = field(default_factory=lambda: [32767]*6)   # 6 × Q15 levels
+    op_ratios: list = field(default_factory=lambda: [Q16_ONE]*6)   # 6 × Q16 ratios
+    op_levels: list = field(default_factory=lambda: [Q15_ONE]*6)   # 6 × Q15 levels
     feedback_depth: int = 0                 # DX7 feedback level (0-7)
 
     @classmethod
@@ -84,15 +84,15 @@ class FM6Config:
         # Support both 'algorithm_id' and 'algorithm' keys
         algorithm_id = d.get('algorithm_id', d.get('algorithm', 1))
 
-        # Parse operator ratios (Q16: 65536 = 1.0)
-        op_ratios = d.get('op_ratios', [65536]*6)
+        # Parse operator ratios (Q16: Q16_ONE = 1.0)
+        op_ratios = d.get('op_ratios', [Q16_ONE]*6)
         if len(op_ratios) < 6:
-            op_ratios = op_ratios + [65536] * (6 - len(op_ratios))
+            op_ratios = op_ratios + [Q16_ONE] * (6 - len(op_ratios))
 
-        # Parse operator levels (Q15: 32767 = 1.0)
-        op_levels = d.get('op_levels', [32767]*6)
+        # Parse operator levels (Q15: Q15_ONE = 1.0)
+        op_levels = d.get('op_levels', [Q15_ONE]*6)
         if len(op_levels) < 6:
-            op_levels = op_levels + [32767] * (6 - len(op_levels))
+            op_levels = op_levels + [Q15_ONE] * (6 - len(op_levels))
 
         # Support both 'feedback_depth' and 'feedback' keys
         feedback_depth = d.get('feedback_depth', d.get('feedback', 0))
@@ -116,7 +116,7 @@ class CarrierConfig:
     role: CarrierRole = CarrierRole.AUDIBLE
     transition: TransitionKind = TransitionKind.RETRIGGER
     detune_cents: int = 0
-    pulse_width_q15: int = 16384  # 0.5 for pulse wave
+    pulse_width_q15: int = Q15_HALF  # 0.5 for pulse wave
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> 'CarrierConfig':
@@ -150,7 +150,7 @@ class CarrierConfig:
             role=role_map.get(role_str, CarrierRole.AUDIBLE),
             transition=transition_map.get(transition_str, TransitionKind.RETRIGGER),
             detune_cents=d.get('detune_cents', 0),
-            pulse_width_q15=d.get('pulse_width_q15', 16384),
+            pulse_width_q15=d.get('pulse_width_q15', Q15_HALF),
         )
 
 
@@ -162,7 +162,7 @@ class CarrierConfig:
 class MaterialConfig:
     """Material (dry/wet) blend configuration."""
     beta_start_q15: int = 0         # Start blend (0 = dry)
-    beta_target_q15: int = 16384    # Target blend
+    beta_target_q15: int = Q15_HALF    # Target blend
     beta_ramp_blocks: int = 8       # Blocks to ramp
 
     @classmethod
@@ -170,7 +170,7 @@ class MaterialConfig:
         """Parse material config from dict."""
         return cls(
             beta_start_q15=d.get('beta_start_q15', 0),
-            beta_target_q15=d.get('beta_target_q15', 16384),
+            beta_target_q15=d.get('beta_target_q15', Q15_HALF),
             beta_ramp_blocks=d.get('beta_ramp_blocks', 8),
         )
 
@@ -222,7 +222,7 @@ class CmmmDefaults:
     node_mask_u32: int = 0xFFFFFFFF      # Target node mask (K=32 default)
     mask_ramp_blocks: int = 5             # Crossfade duration
     tail_mode: int = 0                    # 0=FULL, 1=MID, 2=MIN, 3=EMERGENCY
-    traction_q15: int = 32767             # Projection hardness
+    traction_q15: int = Q15_ONE           # Projection hardness
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> 'CmmmDefaults':
@@ -261,7 +261,7 @@ class CmmmDefaults:
             node_mask_u32=node_mask_u32,
             mask_ramp_blocks=d.get('mask_ramp_blocks', 5),
             tail_mode=int(tail_mode),
-            traction_q15=d.get('traction_q15', 32767),
+            traction_q15=d.get('traction_q15', Q15_ONE),
         )
 
 
@@ -309,7 +309,7 @@ class CompiledPreset:
     cmmm: CmmmDefaults = field(default_factory=CmmmDefaults)
 
     # PWM width default (for Mode B pulse)
-    pwm_width_q15: int = 16384
+    pwm_width_q15: int = Q15_HALF
 
     # LFO modulation state (Phase 2 Mod Matrix)
     lfos: List[LFOState] = field(default_factory=list)
@@ -388,7 +388,7 @@ class PresetCompiler:
             amp_env = ADSRSpec(
                 attack_ms=amp_dict.get('attack_ms', 10.0),
                 decay_ms=amp_dict.get('decay_ms', 100.0),
-                sustain=amp_dict.get('sustain', amp_dict.get('sustain_q15', 16384) / Q15_ONE),
+                sustain=amp_dict.get('sustain', amp_dict.get('sustain_q15', Q15_HALF) / Q15_ONE),
                 release_ms=amp_dict.get('release_ms', 100.0),
             )
 
@@ -434,7 +434,7 @@ class PresetCompiler:
 
         # Parse PWM width from carrier section
         carrier_section = preset_dict.get('carrier', {})
-        pwm_width_q15 = carrier_section.get('pwm_width_q15', 16384)
+        pwm_width_q15 = carrier_section.get('pwm_width_q15', Q15_HALF)
 
         # Parse LFO modulators (Phase 2 Mod Matrix)
         lfos = self._parse_lfos(preset_dict)
@@ -546,14 +546,14 @@ class PresetCompiler:
                 waveform=waveform,
                 sync_mode=sync_mode,
                 routings=routings,
-                depth_q15=lfo_def.get('depth_q15', 16384),
+                depth_q15=lfo_def.get('depth_q15', Q15_HALF),
                 arc_slot=arc_slot,
             )
 
             # Configure timing (includes arc_slot)
             lfo.configure_lfo(
                 rate_hz=lfo_def.get('rate_hz', 5.0),
-                depth_q15=lfo_def.get('depth_q15', 16384),
+                depth_q15=lfo_def.get('depth_q15', Q15_HALF),
                 waveform=waveform,
                 sync_mode=sync_mode,
                 delay_ms=lfo_def.get('delay_ms', 0.0),

@@ -25,7 +25,8 @@ from dataclasses import dataclass, field, asdict
 from typing import Dict, Optional, List
 from pathlib import Path
 
-from ..voice.voice_engine_registry import Persistence, get_registry
+from .central_registry import get_central_registry
+from ..voice.voice_engine_registry import Persistence
 
 
 # =============================================================================
@@ -73,7 +74,7 @@ class ProgramPreset:
 
         Entries sorted by: (persistence asc, domain asc, param_id asc)
         """
-        registry = get_registry()
+        registry = get_central_registry().voice_engine
 
         # Collect all overrides with metadata
         entries = []
@@ -275,7 +276,7 @@ def create_default_preset(program_id: int, name: str) -> ProgramPreset:
 
 def create_glitch_violin_preset() -> ProgramPreset:
     """Create default preset for Glitch Violin (program_id=1001)."""
-    from .voice_engine_registry import VoiceParamID
+    from ..voice.voice_engine_registry import VoiceParamID
 
     preset = ProgramPreset(
         program_id=1001,

@@ -101,7 +101,7 @@ class VoiceFrame:
     # These are distributed across leaves via Gaussian soft assignment
     # Default: pure sine (fundamental only), use harmonics knob to add richness
     partial_amps_q15: List[int] = field(
-        default_factory=lambda: [32767, 0, 0, 0, 0, 0, 0, 0]
+        default_factory=lambda: [Q15_ONE, 0, 0, 0, 0, 0, 0, 0]
     )
 
     # Transient window flag
@@ -242,7 +242,7 @@ class VoiceFrame:
     # Tail mode event (payload_type 0x31)
     # When set, triggers a tail mode change in the executor latch
     cmmm_tail_mode: Optional[int] = None          # TailMode enum value
-    cmmm_traction_q15: int = 32767                # Projection hardness
+    cmmm_traction_q15: int = Q15_ONE              # Projection hardness
 
     # =========================================================================
     # Filter Parameters (Material Engine SVF)
@@ -279,12 +279,12 @@ class VoiceFrame:
     @property
     def tree_blend(self) -> float:
         """Legacy: return tree_blend_q15 as float (0-1)."""
-        return self.tree_blend_q15 / 32767.0
+        return self.tree_blend_q15 / Q15_ONE
 
     @tree_blend.setter
     def tree_blend(self, value: float):
         """Legacy: set tree_blend_q15 from float."""
-        self.tree_blend_q15 = int(value * 32767)
+        self.tree_blend_q15 = int(value * Q15_ONE)
 
 
 @dataclass

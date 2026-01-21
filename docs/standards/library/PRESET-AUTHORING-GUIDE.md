@@ -182,6 +182,21 @@ L0Node(
 | 12dB/oct | 0 | Standard |
 | 24dB/oct | 1 | Aggressive |
 
+##### Filter Implementation (Material Engine)
+
+The filter is implemented as a TPT (Topology-Preserving Transform) State Variable Filter in the Material Engine (Stage 9). This is a post-mix filter that processes the combined voice output.
+
+**Key characteristics:**
+- Classic time-domain TPT SVF design (Vadim Zavalishin)
+- Zero-delay feedback topology for accurate resonance
+- Block-rate cutoff/resonance modulation
+- LP/HP/BP/Notch modes available
+
+**Runtime routing:**
+- `BRIGHTNESS` macro → filter cutoff (via voice_engine.py)
+- LFO → filter cutoff/resonance (via `LFOTarget.FILTER_CUTOFF`/`FILTER_RESO`)
+- Matrix envelope → filter cutoff (via `FILTER_CUTOFF` target)
+
 #### Amplifier with Envelope (Amp)
 ```python
 L0Node(
@@ -218,6 +233,8 @@ L0Node(
 #### FM6 Synthesis (Osc with osc_mode=3)
 
 6-operator FM synthesis in the style of the Yamaha DX7. Uses NodeParams FM6 fields:
+
+> **See also:** [FM6_PATHWAY_GUIDE.md](../../FM6_PATHWAY_GUIDE.md) for complete FM6 documentation including algorithms, topology morphing, and compilation pipeline.
 
 ```python
 L0Node(
@@ -317,6 +334,8 @@ ir.layers.L0_graph.macros = [
 | `M_TEXTURE` | MATERIAL | Surface texture |
 | `M_DETUNE` | DETUNE | Pitch detune |
 
+> **See also:** [MACROS-AND-CONTROLS.md](MACROS-AND-CONTROLS.md) for complete system macro IDs (0-12), control registry, slew policies, and value types.
+
 ### Control Config (Semantic Axes)
 
 Presets can specify default values for CMMM semantic control axes:
@@ -356,6 +375,8 @@ These values are pushed to MacroRuntime at preset load time. All values are norm
 ### Matrix Envelope System
 
 The Matrix Envelope System allows named envelopes to route to multiple targets. This is particularly useful for FM6 synthesis where multiple operators share envelope shapes.
+
+> **See also:** [WSE-STD-ENVELOPE-SUITE-v0.md](../control/WSE-STD-ENVELOPE-SUITE-v0.md) for complete envelope specification including ADSR, AR, Decay, EnvelopeFollower, Slew, and LFO components.
 
 ```yaml
 instrument_ir_v0:
@@ -426,6 +447,39 @@ NodeParams(
     ),
 )
 ```
+
+### LFO Modulation Routing
+
+LFOs can modulate filter parameters via the `LFORouting` system:
+
+```yaml
+instrument_ir_v0:
+  layers:
+    L0_graph:
+      lfo_routings:
+        - lfo_id: 0
+          target: filter_cutoff     # LFOTarget.FILTER_CUTOFF
+          depth_q15: 8192           # Modulation depth (25%)
+
+        - lfo_id: 0
+          target: filter_reso       # LFOTarget.FILTER_RESO
+          depth_q15: 4096           # Modulation depth (12.5%)
+```
+
+#### LFO Targets
+
+| Target | Value | Description |
+|--------|-------|-------------|
+| `pitch` | 0 | Pitch modulation (vibrato) |
+| `gain` | 1 | Amplitude modulation (tremolo) |
+| `pwm_width` | 10 | Pulse width modulation |
+| `tilt` | 11 | Spectral tilt |
+| `filter_cutoff` | 15 | Filter cutoff frequency |
+| `filter_reso` | 16 | Filter resonance |
+| `band_scale` | 20 | Wavelet band scaling |
+| `vfo_ring` | 30 | Ring modulation |
+
+The `VIBRATO` macro (SystemMacro 11) scales LFO depth at runtime, allowing performers to control modulation intensity.
 
 ---
 

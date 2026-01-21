@@ -49,6 +49,10 @@ from ..control_registry import (
     ControlRegistry, ControlEntry, ControlID, ValueType, SlewPolicy,
     CONTROL_REGISTRY_V0,
 )
+from ..voice.voice_engine_registry import (
+    VoiceEngineRegistry, VoiceParamEntry, VoiceParamID,
+    get_registry as get_voice_registry,
+)
 
 # Import primitives as a constants namespace
 from .. import primitives
@@ -225,6 +229,7 @@ class CentralRegistry:
         self._regimes: Optional[RegimeRegistry] = None
         self._trees: Optional[TreeRegistry] = None
         self._controls: Optional[ControlRegistry] = None
+        self._voice_engine: Optional[VoiceEngineRegistry] = None
         self._operators: Optional[OperatorRegistry] = None
         self._patterns: Optional[PatternRegistry] = None
 
@@ -248,6 +253,13 @@ class CentralRegistry:
         if self._controls is None:
             self._controls = ControlRegistry()
         return self._controls
+
+    @property
+    def voice_engine(self) -> VoiceEngineRegistry:
+        """Access voice engine registry (lazy init)."""
+        if self._voice_engine is None:
+            self._voice_engine = get_voice_registry()
+        return self._voice_engine
 
     @property
     def operators(self) -> OperatorRegistry:
@@ -345,14 +357,17 @@ class CentralRegistry:
 
     def summary(self) -> str:
         """Generate human-readable registry summary."""
+        # Count voice engine entries by domain
+        voice_entries = list(self.voice_engine._entries.values())
         lines = [
             "=== Central Registry Summary ===",
             "",
-            f"Regimes:   {len(self.regimes.list_all())} registered",
-            f"Trees:     {len(self.trees.list_all())} registered",
-            f"Controls:  {len(self.controls.all_entries())} registered",
-            f"Operators: {len(self.operators.list_all())} registered",
-            f"Patterns:  {len(self.patterns.list_all())} registered",
+            f"Regimes:      {len(self.regimes.list_all())} registered",
+            f"Trees:        {len(self.trees.list_all())} registered",
+            f"Controls:     {len(self.controls.all_entries())} registered",
+            f"VoiceEngine:  {len(voice_entries)} registered",
+            f"Operators:    {len(self.operators.list_all())} registered",
+            f"Patterns:     {len(self.patterns.list_all())} registered",
             "",
             "Constants:",
             f"  Q15_ONE = {primitives.Q15_ONE}",
@@ -411,4 +426,7 @@ __all__ = [
     "TreeID",
     "ControlRegistry",
     "ControlID",
+    "VoiceEngineRegistry",
+    "VoiceParamEntry",
+    "VoiceParamID",
 ]

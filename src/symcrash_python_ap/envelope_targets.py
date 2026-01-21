@@ -7,10 +7,17 @@ Defines valid destinations for envelope routing in the matrix envelope system.
 Envelopes can route their Q15 output to any of these targets. Multiple targets
 can share the same envelope (e.g., carrier envelope → FM_OP1, FM_OP2, FM_OP3, FM_OP4).
 
+For envelope generators and processors, see envelope_suite.py which provides:
+- ADSR, AR, Decay (envelope generators)
+- EnvelopeFollower, Slew (signal processors)
+- LFO (modulator)
+
 Usage:
     from symcrash_python_ap.envelope_targets import EnvelopeTarget
+    from symcrash_python_ap.envelope_suite import ADSR, LFO
 
     targets = [EnvelopeTarget.FM_OP1, EnvelopeTarget.FM_OP2]
+    env = ADSR(attack_ms=10, decay_ms=100, sustain=0.7, release_ms=200)
 """
 
 from enum import IntEnum

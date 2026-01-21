@@ -3,6 +3,7 @@
 **Status:** Normative (v0 frozen)
 **Applies to:** CockpitEngine, VoiceFrameEmitter, presets
 **Scope:** Control definitions, ranges, defaults, slew, and binding targets
+**Part of:** [WSE-STD-REGISTRY-MASTER-v0](../library/WSE-STD-REGISTRY-MASTER-v0.md) (Central Registry)
 
 ---
 
