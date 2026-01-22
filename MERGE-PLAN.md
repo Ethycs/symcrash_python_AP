@@ -1,19 +1,41 @@
 # Merge Plan: docs/ into symcrash_docs/
 
-## Overview
+## Status: PHASE 1 COMPLETE
 
 **Goal**: Consolidate `docs/` into `symcrash_docs/` (git submodule), extending its numbered hierarchy.
 
-**Current State**:
-- `symcrash_docs/` - Git submodule (140 files, `[00-04] - Category/` numbered hierarchy)
-- `docs/` - Local directory (81 files, flat functional categories)
-- Multiple duplicates exist between them
+---
+
+## Completed: Duplicate Resolution
+
+### Files Updated (newer/expanded versions merged into symcrash_docs)
+
+| File | Location | Change |
+|------|----------|--------|
+| `WSE-STD-070.md` | `symcrash_docs/` | v0 (299 lines) → v1 (1,114 lines) with 19 complexity axes, CustomDef schemas, CMMM bindings |
+| `03 - InstrumentIR v0` | `symcrash_docs/02 - Implementation/03 - Core System/` | 514 lines → 1,209 lines with Intent Vector, Gesture Basis, Carrier-First Semantics, CMMM Runtime Control |
+
+### Files Added (new specs from docs/)
+
+| File | Location | Description |
+|------|----------|-------------|
+| `04 - InstrumentIR Tower Conformance Spec.md` | `symcrash_docs/02 - Implementation/03 - Core System/` | CMMM graph-based state machine, emit templates, budgeting integration |
+| `04 - Wire Contract v0b, VoiceFrame Packet v0b.md` | `symcrash_docs/02 - Implementation/03 - Core System/` | Final ABI closure, per-lane payload semantics, carrier header v1 |
+| `05 - InstrumentIR Tower Organization Plan.md` | `symcrash_docs/02 - Implementation/03 - Core System/` | Parameter consolidation plan for eliminating hardcoded values |
+
+### Files Unchanged (already identical)
+
+- WSE-STD-001, 010, 020, 030, 040, 050, 060
+- Scheduler Spec v0, v01
+- Closure Appendix v0.1
+- Packet Byte Order v0
+- Symbol Executor v0
 
 ---
 
-## Recommended Approach: Extend symcrash_docs with [05-09] Sections
+## Remaining: Extend symcrash_docs with [05-09] Sections
 
-Migrate `docs/` content into new numbered sections in `symcrash_docs/`, preserving its organizational scheme.
+Migrate remaining `docs/` content into new numbered sections in `symcrash_docs/`.
 
 ---
 
@@ -231,17 +253,21 @@ git commit -m "Complete merge of docs/ into symcrash_docs submodule"
 
 ## Files Requiring Manual Comparison
 
-Before executing, diff these files to determine which version to keep:
+~~Before executing, diff these files to determine which version to keep:~~ **COMPLETED**
 
-- [ ] `WSE-STD-001.md` - symcrash_docs root vs docs/standards/core/
-- [ ] `WSE-STD-010.md` - symcrash_docs root vs docs/standards/wavelet/
-- [ ] `WSE-STD-020.md` - symcrash_docs root vs docs/standards/core/
-- [ ] `WSE-STD-030.md` - symcrash_docs root vs docs/standards/core/
-- [ ] `WSE-STD-040.md` - symcrash_docs root vs docs/standards/runtime/
-- [ ] `WSE-STD-050.md` - symcrash_docs root vs docs/standards/runtime/
-- [ ] `WSE-STD-060.md` - symcrash_docs root vs docs/standards/testing/
-- [ ] `WSE-STD-070.md` - symcrash_docs root vs docs/standards/architecture/
-- [ ] Core System specs (5 files) - symcrash_docs/02 vs docs/design/core-system/
+- [x] `WSE-STD-001.md` - identical
+- [x] `WSE-STD-010.md` - identical
+- [x] `WSE-STD-020.md` - identical
+- [x] `WSE-STD-030.md` - identical
+- [x] `WSE-STD-040.md` - identical
+- [x] `WSE-STD-050.md` - identical
+- [x] `WSE-STD-060.md` - identical
+- [x] `WSE-STD-070.md` - **updated** (v0 → v1, +815 lines)
+- [x] `03 - InstrumentIR v0.md` - **updated** (+695 lines)
+- [x] Scheduler Spec v0, v01 - identical
+- [x] Closure Appendix v0.1 - identical
+- [x] Packet Byte Order v0 - identical
+- [x] Symbol Executor v0 - identical
 
 ---
 
