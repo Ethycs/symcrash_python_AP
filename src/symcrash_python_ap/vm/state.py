@@ -14,7 +14,7 @@ import numpy as np
 from .tables import COEFF_LEN, BLOCK_SAMPLES
 from ..fixed import midi_to_phase_inc_fixed
 from .coeff_lut_streaming import CCSState, midi_to_hz, SAMPLE_RATE
-from ..primitives import Q15_ONE
+from ..primitives import Q15_ONE, Q15_HALF, SymbolMode, TimbralMode
 
 # Defer import to avoid circular dependency - ModeBState imported when needed
 # from .harmonic_bank import ModeBState, OSC_MODE_A, OSC_MODE_B
@@ -26,6 +26,98 @@ OSC_MODE_SAMPLE = 2      # Sample playback via FWPT gateway (Phase 3)
 OSC_MODE_FM6 = 3         # 6-operator FM synthesis (WSE-STD-FM-TOPOLOGY-v0)
 OSC_MODE_WAVETABLE = 4   # Wavetable synthesis with 2D interpolation (Phase 4)
 OSC_MODE_GRANULAR = 5    # Granular synthesis (coefficient-domain)
+
+# =============================================================================
+# CMMM MEMORY (Gap G2: Accumulated State)
+# =============================================================================
+# CMMMemory tracks tension, fatigue, and harmonic memory across blocks.
+# This extends the single-block AGE macro to multi-dimensional memory.
+
+@dataclass
+class CMMMemory:
+    """
+    Accumulated CMMM state across blocks (beyond single-block AGE macro).
+
+    Reference: CMMM-ENRICHMENT-DESIGN.md §9.3
+
+    Attributes:
+        tension_q15: Accumulated expressive demand (0 = relaxed, Q15_ONE = max tension)
+        fatigue_q15: Accumulated effort (0 = fresh, Q15_ONE = exhausted)
+        harmonic_memory_q15: Timbral inertia (tracks recent harmonic character)
+        blocks_since_transition: Blocks since last regime/mode transition
+    """
+    tension_q15: int = 0
+    fatigue_q15: int = 0
+    harmonic_memory_q15: int = 0
+    blocks_since_transition: int = 0
+
+    # Decay constants (per-block decay amount, not rate)
+    # These are subtracted each block, not multiplied
+    TENSION_DECAY: int = 328       # ~1% of Q15_ONE per block → ~75% after 100 blocks
+    FATIGUE_DECAY: int = 164       # ~0.5% of Q15_ONE per block → ~60% after 100 blocks
+    HARMONIC_DECAY: int = 656      # ~2% of Q15_ONE per block → ~13% after 100 blocks
+
+    def step(self, intent_energy_q15: int, is_transition: bool) -> None:
+        """
+        Called each block to update memory state.
+
+        Args:
+            intent_energy_q15: Sum of intent vector lanes (or average) in Q15
+            is_transition: True if currently in a transition (crossfade active)
+        """
+        # Tension builds with high intent energy
+        tension_gain = intent_energy_q15 >> 3  # 12.5% of energy adds to tension
+        self.tension_q15 = min(Q15_ONE, self.tension_q15 + tension_gain)
+        self.tension_q15 = max(0, self.tension_q15 - self.TENSION_DECAY)
+
+        # Fatigue builds slowly with any activity above threshold
+        # Gain is proportional to how much above threshold
+        if intent_energy_q15 > Q15_HALF:
+            excess = intent_energy_q15 - Q15_HALF
+            fatigue_gain = 32 + (excess >> 6)  # Base 32 + ~1.5% of excess
+            self.fatigue_q15 = min(Q15_ONE, self.fatigue_q15 + fatigue_gain)
+        self.fatigue_q15 = max(0, self.fatigue_q15 - self.FATIGUE_DECAY)
+
+        # Harmonic memory decays naturally
+        # (updated externally by timbral mode transitions via set_harmonic_memory)
+        self.harmonic_memory_q15 = max(0, self.harmonic_memory_q15 - self.HARMONIC_DECAY)
+
+        # Transition tracking
+        if is_transition:
+            self.blocks_since_transition = 0
+        else:
+            self.blocks_since_transition += 1
+
+    def set_harmonic_memory(self, value_q15: int) -> None:
+        """Set harmonic memory (called on timbral mode change)."""
+        self.harmonic_memory_q15 = max(0, min(Q15_ONE, value_q15))
+
+    def reset_for_note_on(self) -> None:
+        """Reset memory state for a new note."""
+        self.tension_q15 = 0
+        self.fatigue_q15 = 0
+        self.harmonic_memory_q15 = 0
+        self.blocks_since_transition = 0
+
+    def to_dict(self) -> dict:
+        """Serialize for snapshot."""
+        return {
+            'tension_q15': self.tension_q15,
+            'fatigue_q15': self.fatigue_q15,
+            'harmonic_memory_q15': self.harmonic_memory_q15,
+            'blocks_since_transition': self.blocks_since_transition,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'CMMMemory':
+        """Deserialize from snapshot."""
+        mem = cls()
+        mem.tension_q15 = data.get('tension_q15', 0)
+        mem.fatigue_q15 = data.get('fatigue_q15', 0)
+        mem.harmonic_memory_q15 = data.get('harmonic_memory_q15', 0)
+        mem.blocks_since_transition = data.get('blocks_since_transition', 0)
+        return mem
+
 
 # =============================================================================
 # EXECUTOR LATCH (CMMM Runtime State)
@@ -68,6 +160,20 @@ class ExecutorLatch:
     # Ramp tracking for crossfade
     _mask_ramp_total: int = 0             # Total blocks for current ramp
     _mask_start_u32: int = 0xFFFFFFFF     # Mask at ramp start
+
+    # -------------------------------------------------------------------------
+    # Symbol Engine Mode (CMMM Enrichment Gap G1)
+    # -------------------------------------------------------------------------
+    symbol_mode: int = 1                  # SymbolMode.EVOLVE default
+    mode_dwell_blocks: int = 0            # Blocks in current mode
+    phrase_quantize_pending: bool = False # For PHRASE_QUANTIZE mode (commit pending)
+
+    # -------------------------------------------------------------------------
+    # Timbral Sub-state (CMMM Enrichment Gap G4)
+    # -------------------------------------------------------------------------
+    timbral_mode: int = 0                 # TimbralMode.T0_PURE default
+    timbral_target: int = 0               # Target timbral mode for ramping
+    timbral_ramp_blocks: int = 0          # Blocks remaining in timbral ramp
 
     def apply_nodemask_event(self, new_mask: int, ramp_blocks: int = 5) -> None:
         """
@@ -149,6 +255,63 @@ class ExecutorLatch:
     def is_ramping(self) -> bool:
         """Check if currently in a mask ramp transition."""
         return self.mask_ramp_remaining > 0
+
+    # -------------------------------------------------------------------------
+    # Symbol Mode Methods (CMMM Enrichment Gap G1)
+    # -------------------------------------------------------------------------
+
+    def set_symbol_mode(self, mode: int) -> None:
+        """
+        Set the symbol engine mode.
+
+        Args:
+            mode: SymbolMode enum value (0-3)
+        """
+        if mode != self.symbol_mode:
+            self.symbol_mode = mode
+            self.mode_dwell_blocks = 0
+            self.phrase_quantize_pending = False
+
+    def step_symbol_mode(self) -> None:
+        """Advance mode dwell counter (called each block)."""
+        self.mode_dwell_blocks += 1
+
+    def get_evolution_rate_q15(self) -> int:
+        """
+        Get coefficient evolution rate for current mode.
+
+        Returns:
+            Q15 multiplier (0 = freeze, 32767 = full evolution)
+        """
+        from ..primitives import get_symbol_mode_evolution_rate
+        return get_symbol_mode_evolution_rate(self.symbol_mode)
+
+    # -------------------------------------------------------------------------
+    # Timbral Mode Methods (CMMM Enrichment Gap G4)
+    # -------------------------------------------------------------------------
+
+    def set_timbral_mode(self, mode: int, ramp_blocks: int = 4) -> None:
+        """
+        Set the timbral sub-state.
+
+        Args:
+            mode: TimbralMode enum value (0-7)
+            ramp_blocks: Blocks to ramp between timbral modes
+        """
+        if mode != self.timbral_mode:
+            self.timbral_target = mode
+            self.timbral_ramp_blocks = ramp_blocks
+
+    def step_timbral_mode(self) -> None:
+        """Advance timbral ramp (called each block)."""
+        if self.timbral_ramp_blocks > 0:
+            self.timbral_ramp_blocks -= 1
+            if self.timbral_ramp_blocks <= 0:
+                self.timbral_mode = self.timbral_target
+
+    def is_timbral_ramping(self) -> bool:
+        """Check if currently transitioning between timbral modes."""
+        return self.timbral_ramp_blocks > 0
 
 
 # =============================================================================
@@ -326,6 +489,12 @@ class VMState:
     # -------------------------------------------------------------------------
     # Holds latched values for node mask and tail mode, updated by CMMM events
     executor_latch: ExecutorLatch = field(default_factory=ExecutorLatch)
+
+    # -------------------------------------------------------------------------
+    # CMMM Memory (CMMM Enrichment Gap G2)
+    # -------------------------------------------------------------------------
+    # Tracks accumulated tension, fatigue, and harmonic memory across blocks
+    cmmm_memory: CMMMemory = field(default_factory=CMMMemory)
 
     @property
     def fm6_state(self) -> 'FM6State':
@@ -527,6 +696,9 @@ class VMState:
         # Reset CMMM Executor Latch (WSE-STD-070)
         self.executor_latch = ExecutorLatch()
 
+        # Reset CMMM Memory (CMMM Enrichment Gap G2)
+        self.cmmm_memory.reset_for_note_on()
+
     def trigger_release(self) -> None:
         """Trigger note release (enter release phase)."""
         if self.envelope.phase in (EnvelopePhase.ATTACK, EnvelopePhase.DECAY, EnvelopePhase.SUSTAIN):
@@ -590,6 +762,14 @@ class VMState:
             'executor_latch_traction': self.executor_latch.traction_q15,
             'executor_latch_mask_ramp_total': self.executor_latch._mask_ramp_total,
             'executor_latch_mask_start': self.executor_latch._mask_start_u32,
+            # CMMM Enrichment: Symbol mode and timbral mode
+            'executor_latch_symbol_mode': self.executor_latch.symbol_mode,
+            'executor_latch_mode_dwell': self.executor_latch.mode_dwell_blocks,
+            'executor_latch_timbral_mode': self.executor_latch.timbral_mode,
+            'executor_latch_timbral_target': self.executor_latch.timbral_target,
+            'executor_latch_timbral_ramp': self.executor_latch.timbral_ramp_blocks,
+            # CMMM Memory (CMMM Enrichment Gap G2)
+            'cmmm_memory': self.cmmm_memory.to_dict(),
         }
 
     @classmethod
@@ -653,6 +833,15 @@ class VMState:
             state.executor_latch.traction_q15 = snapshot['executor_latch_traction']
             state.executor_latch._mask_ramp_total = snapshot.get('executor_latch_mask_ramp_total', 0)
             state.executor_latch._mask_start_u32 = snapshot.get('executor_latch_mask_start', 0xFFFFFFFF)
+            # CMMM Enrichment: Symbol mode and timbral mode
+            state.executor_latch.symbol_mode = snapshot.get('executor_latch_symbol_mode', 1)
+            state.executor_latch.mode_dwell_blocks = snapshot.get('executor_latch_mode_dwell', 0)
+            state.executor_latch.timbral_mode = snapshot.get('executor_latch_timbral_mode', 0)
+            state.executor_latch.timbral_target = snapshot.get('executor_latch_timbral_target', 0)
+            state.executor_latch.timbral_ramp_blocks = snapshot.get('executor_latch_timbral_ramp', 0)
+        # Restore CMMM Memory (CMMM Enrichment Gap G2)
+        if 'cmmm_memory' in snapshot:
+            state.cmmm_memory = CMMMemory.from_dict(snapshot['cmmm_memory'])
         return state
 
 
@@ -710,4 +899,6 @@ __all__ = [
     'ExecutorLatch',
     'PAYLOAD_TYPE_NODEMASK_SET',
     'PAYLOAD_TYPE_TAILMODE_SET',
+    # CMMM Memory (CMMM Enrichment Gap G2)
+    'CMMMemory',
 ]

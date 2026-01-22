@@ -35,7 +35,7 @@ from ..voice.voice_engine_registry import ValueType
 # =============================================================================
 
 CAPSULE_MAGIC = b'WSEC'
-CAPSULE_VERSION = 0
+CAPSULE_VERSION = 1  # Bumped for CMMM enrichment support (Phase P5)
 
 
 class ChunkType:
@@ -46,6 +46,7 @@ class ChunkType:
     VOICE_PARAMS = 4
     ASSETS = 5
     SEEDS = 6
+    CMMM_CONFIG = 7  # CMMM Enrichment (Phase P5): temperament, symbol_ops
 
 
 # =============================================================================
@@ -436,6 +437,49 @@ def unpack_seeds(payload: bytes) -> SeedConfig:
 
 
 # =============================================================================
+# CMMM CONFIG CHUNK (Phase P5: CMMM Enrichment)
+# =============================================================================
+
+def pack_cmmm_config(temperament_dict: Optional[dict]) -> bytes:
+    """
+    Pack CMMM configuration (temperament) as JSON payload.
+
+    Format: JSON object containing temperament parameters.
+
+    Args:
+        temperament_dict: Temperament parameters as dict, or None for defaults
+
+    Returns:
+        JSON-encoded bytes
+    """
+    if temperament_dict is None:
+        # Return empty dict for defaults
+        temperament_dict = {}
+
+    data = {
+        'temperament': temperament_dict,
+        # Reserved for future CMMM config (symbol_ops overrides, etc.)
+    }
+    return json.dumps(data).encode('utf-8')
+
+
+def unpack_cmmm_config(payload: bytes) -> dict:
+    """
+    Unpack CMMM configuration from JSON payload.
+
+    Returns:
+        Dict with 'temperament' key containing temperament params
+    """
+    if not payload:
+        return {'temperament': {}}
+
+    data = json.loads(payload.decode('utf-8'))
+    return {
+        'temperament': data.get('temperament', {}),
+    }
+
+
+# =============================================================================
 # FULL CAPSULE SERIALIZATION
 # =============================================================================
 
@@ -481,6 +525,12 @@ def capsule_to_bytes(capsule: CapsuleV0) -> bytes:
 
     # Chunk 6: Seeds
     chunks.append(pack_chunk(ChunkType.SEEDS, pack_seeds(capsule.seeds)))
+
+    # Chunk 7: CMMM Config (Phase P5 - if present)
+    if capsule.cmmm_config is not None:
+        temperament = capsule.cmmm_config.get('temperament', {})
+        payload = pack_cmmm_config(temperament)
+        chunks.append(pack_chunk(ChunkType.CMMM_CONFIG, payload))
 
     # Combine chunks
     chunk_bytes = b''.join(chunks)
@@ -532,8 +582,9 @@ def capsule_from_bytes(data: bytes) -> CapsuleV0:
 
     version, kind, flags, chunk_count, reserved, global_crc = struct.unpack_from('<HBBHHI', data, 4)
 
-    if version != CAPSULE_VERSION:
-        raise ValueError(f"Unsupported capsule version: {version}")
+    # Support both v0 (legacy) and v1 (CMMM enrichment) capsules
+    if version > CAPSULE_VERSION:
+        raise ValueError(f"Unsupported capsule version: {version} (max supported: {CAPSULE_VERSION})")
 
     # Verify global CRC
     header_for_crc = data[:12]
@@ -550,6 +601,7 @@ def capsule_from_bytes(data: bytes) -> CapsuleV0:
     defaults = CapsuleDefaults()
     assets = []
     seeds = SeedConfig()
+    cmmm_config = None  # Phase P5: CMMM enrichment
 
     for _ in range(chunk_count):
         chunk_type, payload, offset = unpack_chunk(data, offset)
@@ -566,6 +618,8 @@ def capsule_from_bytes(data: bytes) -> CapsuleV0:
             assets = unpack_assets(payload)
         elif chunk_type == ChunkType.SEEDS:
             seeds = unpack_seeds(payload)
+        elif chunk_type == ChunkType.CMMM_CONFIG:
+            cmmm_config = unpack_cmmm_config(payload)
 
     if identity is None:
         raise ValueError("Missing identity chunk")
@@ -576,6 +630,7 @@ def capsule_from_bytes(data: bytes) -> CapsuleV0:
         defaults=defaults,
         assets=assets,
         seeds=seeds,
+        cmmm_config=cmmm_config,
     )
 
 
@@ -668,6 +723,10 @@ def save_capsule_bundle(capsule: CapsuleV0, dirpath: str):
     if voice_params_crc is not None:
         manifest['files']['voice_params'] = 'voice_params.bin'
         manifest['crc']['voice_params'] = f'0x{voice_params_crc:08X}'
+
+    # CMMM config (Phase P5)
+    if capsule.cmmm_config is not None:
+        manifest['cmmm_config'] = capsule.cmmm_config
 
     if capsule.assets:
         manifest['assets'] = [
@@ -778,12 +837,16 @@ def load_capsule_bundle(dirpath: str) -> CapsuleV0:
             asset_path=a.get('path'),
         ))
 
+    # CMMM config (Phase P5)
+    cmmm_config = manifest.get('cmmm_config')
+
     return CapsuleV0(
         identity=identity,
         program=program,
         defaults=defaults,
         assets=assets,
         seeds=seeds,
+        cmmm_config=cmmm_config,
     )
 
 
@@ -794,6 +857,8 @@ __all__ = [
     'unpack_control_defaults',
     'pack_voice_params',
     'unpack_voice_params',
+    'pack_cmmm_config',
+    'unpack_cmmm_config',
     'capsule_to_bytes',
     'capsule_from_bytes',
     'save_capsule',

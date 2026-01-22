@@ -680,6 +680,294 @@ OSC_MODE_TABLE: Dict[int, OscModeInfo] = {
 
 
 # =============================================================================
+# SYMBOL ENGINE MODES (WSE-STD-CMMM-ENRICHMENT Gap G1)
+# =============================================================================
+
+class SymbolMode(IntEnum):
+    """
+    Symbol Engine operating modes (semi-Markov).
+
+    These modes control coefficient evolution rate. Note that IDLE, ACCENT,
+    TRANSITION, BUDGET_DEGRADE, and RECOVER are already handled by the
+    Regime FSM (R0-R6) + degradation ladder. These 4 modes fill the gaps.
+
+    Reference: CMMM-ENRICHMENT-DESIGN.md §9.2
+    """
+    HOLD = 0              # Low-motion sustain, minimal coefficient evolution (~3%)
+    EVOLVE = 1            # Normal "living" voice, full evolution (100%)
+    PHRASE_QUANTIZE = 2   # Tempo-locked commits (100% but gated to beat)
+    FREEZE = 3            # Stop evolution, optionally cache coefficients (0%)
+
+
+class SymbolModeInfo(NamedTuple):
+    """Symbol mode metadata."""
+    id: int
+    name: str
+    evolution_rate_q15: int  # Evolution rate multiplier (Q15)
+    description: str
+
+
+# Evolution rate multiplier per mode (Q15)
+# Q15_ONE = 32767 = 100%, 1024 = ~3%, 0 = 0%
+SYMBOL_MODE_TABLE: Dict[int, SymbolModeInfo] = {
+    0: SymbolModeInfo(0, "HOLD", 1024, "Low-motion sustain (~3% evolution)"),
+    1: SymbolModeInfo(1, "EVOLVE", 32767, "Normal voice (100% evolution)"),
+    2: SymbolModeInfo(2, "PHRASE_QUANTIZE", 32767, "Tempo-locked (100% but gated)"),
+    3: SymbolModeInfo(3, "FREEZE", 0, "Frozen coefficients (0% evolution)"),
+}
+
+
+def get_symbol_mode_evolution_rate(mode: int) -> int:
+    """Get evolution rate (Q15) for a symbol mode."""
+    return SYMBOL_MODE_TABLE.get(mode, SYMBOL_MODE_TABLE[1]).evolution_rate_q15
+
+
+# Regime → default symbol mode mapping
+# Used when no explicit mode is requested
+REGIME_TO_SYMBOL_MODE: Dict[int, int] = {
+    0: SymbolMode.HOLD,      # R0_IDLE → HOLD (minimal evolution)
+    1: SymbolMode.EVOLVE,    # R1_ATTACK → EVOLVE
+    2: SymbolMode.EVOLVE,    # R2_STABLE → EVOLVE (default)
+    3: SymbolMode.EVOLVE,    # R3_AIR → EVOLVE
+    4: SymbolMode.EVOLVE,    # R4_GLITCH → EVOLVE
+    5: SymbolMode.FREEZE,    # R5_CATASTROPHE → FREEZE (safety)
+    6: SymbolMode.HOLD,      # R6_RECOVERY → HOLD
+}
+
+
+# =============================================================================
+# TIMBRAL MODES (WSE-STD-CMMM-ENRICHMENT Gap G4)
+# =============================================================================
+
+class TimbralMode(IntEnum):
+    """
+    Timbral sub-states within STABLE_TONE regime for dynamic operator selection.
+
+    These are hierarchical sub-states that select which operators to use
+    within a given regime. Intent vector drives timbral mode selection.
+
+    Reference: CMMM-ENRICHMENT-DESIGN.md §9.5
+    """
+    T0_PURE = 0       # Harmonic, clean
+    T1_BRIGHT = 1     # High frequency emphasis
+    T2_DARK = 2       # Low frequency emphasis
+    T3_HOLLOW = 3     # Mid-frequency scoop
+    T4_NASAL = 4      # Formant peak emphasis
+    T5_BREATHY = 5    # Air + tone blend
+    T6_GROWL = 6      # Modulation artifacts
+    T7_CHAOS = 7      # Full catastrophe mode
+
+
+class TimbralModeInfo(NamedTuple):
+    """Timbral mode metadata."""
+    id: int
+    name: str
+    description: str
+
+
+TIMBRAL_MODE_TABLE: Dict[int, TimbralModeInfo] = {
+    0: TimbralModeInfo(0, "T0_PURE", "Harmonic, clean"),
+    1: TimbralModeInfo(1, "T1_BRIGHT", "High frequency emphasis"),
+    2: TimbralModeInfo(2, "T2_DARK", "Low frequency emphasis"),
+    3: TimbralModeInfo(3, "T3_HOLLOW", "Mid-frequency scoop"),
+    4: TimbralModeInfo(4, "T4_NASAL", "Formant peak emphasis"),
+    5: TimbralModeInfo(5, "T5_BREATHY", "Air + tone blend"),
+    6: TimbralModeInfo(6, "T6_GROWL", "Modulation artifacts"),
+    7: TimbralModeInfo(7, "T7_CHAOS", "Full catastrophe mode"),
+}
+
+
+# =============================================================================
+# REGIME-SYMBOL OPERATOR TABLE (CMMM Enrichment Gap G4)
+# =============================================================================
+# Maps (regime_id, timbral_mode) to list of operator IDs.
+# This enables dynamic operator selection based on CMMM state.
+#
+# Reference: CMMM-ENRICHMENT-DESIGN.md §3.5 (Per-Symbol Operator Selection)
+#
+# Operator IDs (from vm/tables.py OPERATOR_LANES):
+#   0: Identity      1: Tilt         2: FineClamp     3: IntraMix
+#   4: DiffuseUp     5: DiffuseDown  6: BandShear     7: LowRankMorph
+#   8: GlobalPulse   9: SwapBands   10: RotateNodes  11: NormalizeScale
+#  12: GluePair     13: Impulse     14: NoiseBand    15: PressureRamp
+#  16: GateMask     17: QuasiRotate 18: MorphMix     19: EmergencySimplify
+#  20: FoldPressure 21: CuspInjection 22: SwallowtailMask 23: SheafProject
+
+REGIME_SYMBOL_OPS: Dict[Tuple[int, int], List[int]] = {
+    # -------------------------------------------------------------------------
+    # R0_IDLE: Minimal processing (voice inactive)
+    # -------------------------------------------------------------------------
+    (0, 0): [0],           # T0_PURE: Identity only
+    (0, 1): [0, 1],        # T1_BRIGHT: Identity + Tilt (slight brightening)
+
+    # -------------------------------------------------------------------------
+    # R1_ATTACK: Transient burst (attack phase)
+    # -------------------------------------------------------------------------
+    (1, 0): [13, 8],       # T0_PURE: Impulse + GlobalPulse (sharp attack)
+    (1, 1): [13, 4, 8],    # T1_BRIGHT: Impulse + DiffuseUp + GlobalPulse
+    (1, 2): [13, 5, 8],    # T2_DARK: Impulse + DiffuseDown + GlobalPulse
+    (1, 3): [13, 6, 8],    # T3_HOLLOW: Impulse + BandShear + GlobalPulse
+    (1, 4): [13, 7, 8],    # T4_NASAL: Impulse + LowRankMorph + GlobalPulse
+    (1, 5): [13, 14, 8],   # T5_BREATHY: Impulse + NoiseBand + GlobalPulse
+    (1, 6): [13, 15, 20],  # T6_GROWL: Impulse + PressureRamp + FoldPressure
+    (1, 7): [13, 21, 22],  # T7_CHAOS: Impulse + CuspInjection + SwallowtailMask
+
+    # -------------------------------------------------------------------------
+    # R2_STABLE: Sustained tone (main playback regime)
+    # Most timbral variety happens here
+    # -------------------------------------------------------------------------
+    (2, 0): [1, 3, 12],    # T0_PURE: Tilt + IntraMix + GluePair (harmonic, clean)
+    (2, 1): [1, 4, 5],     # T1_BRIGHT: Tilt + DiffuseUp + DiffuseDown (high emphasis)
+    (2, 2): [1, 3, 5],     # T2_DARK: Tilt + IntraMix + DiffuseDown (low emphasis)
+    (2, 3): [6, 10, 12],   # T3_HOLLOW: BandShear + RotateNodes + GluePair (mid scoop)
+    (2, 4): [7, 12, 3],    # T4_NASAL: LowRankMorph + GluePair + IntraMix (formant peak)
+    (2, 5): [14, 3, 12],   # T5_BREATHY: NoiseBand + IntraMix + GluePair (air + tone)
+    (2, 6): [15, 20, 3],   # T6_GROWL: PressureRamp + FoldPressure + IntraMix (modulation)
+    (2, 7): [21, 22, 8],   # T7_CHAOS: CuspInjection + SwallowtailMask + GlobalPulse
+
+    # -------------------------------------------------------------------------
+    # R3_AIR: Breathy sustain (noise texture regime)
+    # -------------------------------------------------------------------------
+    (3, 0): [14, 4],       # T0_PURE: NoiseBand + DiffuseUp
+    (3, 1): [14, 4, 1],    # T1_BRIGHT: NoiseBand + DiffuseUp + Tilt
+    (3, 2): [14, 5, 3],    # T2_DARK: NoiseBand + DiffuseDown + IntraMix
+    (3, 3): [14, 6, 10],   # T3_HOLLOW: NoiseBand + BandShear + RotateNodes
+    (3, 4): [14, 7, 12],   # T4_NASAL: NoiseBand + LowRankMorph + GluePair
+    (3, 5): [14, 14, 4],   # T5_BREATHY: Double NoiseBand + DiffuseUp (more air)
+    (3, 6): [14, 15, 20],  # T6_GROWL: NoiseBand + PressureRamp + FoldPressure
+    (3, 7): [14, 21, 22],  # T7_CHAOS: NoiseBand + CuspInjection + SwallowtailMask
+
+    # -------------------------------------------------------------------------
+    # R4_GLITCH: Artifact regime
+    # -------------------------------------------------------------------------
+    (4, 0): [13, 14, 9],   # T0_PURE: Impulse + NoiseBand + SwapBands
+    (4, 1): [13, 4, 9],    # T1_BRIGHT: Impulse + DiffuseUp + SwapBands
+    (4, 2): [13, 5, 9],    # T2_DARK: Impulse + DiffuseDown + SwapBands
+    (4, 3): [13, 6, 9],    # T3_HOLLOW: Impulse + BandShear + SwapBands
+    (4, 4): [13, 7, 9],    # T4_NASAL: Impulse + LowRankMorph + SwapBands
+    (4, 5): [14, 13, 9],   # T5_BREATHY: NoiseBand + Impulse + SwapBands
+    (4, 6): [13, 15, 9],   # T6_GROWL: Impulse + PressureRamp + SwapBands
+    (4, 7): [21, 22, 9],   # T7_CHAOS: CuspInjection + SwallowtailMask + SwapBands
+
+    # -------------------------------------------------------------------------
+    # R5_CATASTROPHE: Extreme chaos (safety regime)
+    # -------------------------------------------------------------------------
+    (5, 0): [21, 22, 15, 20],  # All modes use full catastrophe family
+    (5, 1): [21, 22, 15, 20],
+    (5, 2): [21, 22, 15, 20],
+    (5, 3): [21, 22, 15, 20],
+    (5, 4): [21, 22, 15, 20],
+    (5, 5): [21, 22, 15, 20],
+    (5, 6): [21, 22, 15, 20],
+    (5, 7): [21, 22, 15, 20],
+
+    # -------------------------------------------------------------------------
+    # R6_RECOVERY: Return to calm (healing regime)
+    # -------------------------------------------------------------------------
+    (6, 0): [12, 23],      # T0_PURE: GluePair + SheafProject (stabilize)
+    (6, 1): [12, 23, 1],   # T1_BRIGHT: + Tilt
+    (6, 2): [12, 23, 5],   # T2_DARK: + DiffuseDown
+    (6, 3): [12, 23, 6],   # T3_HOLLOW: + BandShear
+    (6, 4): [12, 23, 7],   # T4_NASAL: + LowRankMorph
+    (6, 5): [12, 23, 14],  # T5_BREATHY: + NoiseBand
+    (6, 6): [12, 23, 3],   # T6_GROWL: + IntraMix
+    (6, 7): [12, 23, 8],   # T7_CHAOS: + GlobalPulse
+}
+
+
+def get_operators_for_state(regime: int, timbral_mode: int) -> List[int]:
+    """
+    Get operator list for current (regime, timbral_mode) state.
+
+    Args:
+        regime: Regime enum value (0-6)
+        timbral_mode: TimbralMode enum value (0-7)
+
+    Returns:
+        List of operator IDs for this state. Returns default [0] if not found.
+    """
+    key = (regime, timbral_mode)
+    if key in REGIME_SYMBOL_OPS:
+        return REGIME_SYMBOL_OPS[key]
+    # Fallback: try regime-level default (timbral_mode=0)
+    fallback_key = (regime, 0)
+    if fallback_key in REGIME_SYMBOL_OPS:
+        return REGIME_SYMBOL_OPS[fallback_key]
+    # Ultimate fallback: Identity only
+    return [0]
+
+
+# =============================================================================
+# INTENT → TIMBRAL MODE MAPPING (CMMM Enrichment Gap G4)
+# =============================================================================
+# Maps intent vector to timbral mode selection.
+# Higher intent lanes push toward specific timbral modes.
+#
+# Reference: CMMM-ENRICHMENT-DESIGN.md §4.5 Phase P3
+
+def compute_timbral_mode_from_intent(intent_lanes: List[int]) -> int:
+    """
+    Compute timbral mode from intent vector.
+
+    Uses intent lane values to select appropriate timbral mode:
+    - High I_TONE (0) + low others → T0_PURE
+    - High I_AIR (2) → T5_BREATHY
+    - High I_GLITCH (3) → T6_GROWL or T7_CHAOS
+    - etc.
+
+    Args:
+        intent_lanes: List of 8 intent lane values (Q15)
+
+    Returns:
+        TimbralMode enum value (0-7)
+    """
+    if len(intent_lanes) < 4:
+        return TimbralMode.T0_PURE
+
+    i_tone = intent_lanes[0]     # Intent.I_TONE
+    i_bow = intent_lanes[1]      # Intent.I_BOW
+    i_air = intent_lanes[2]      # Intent.I_AIR
+    i_glitch = intent_lanes[3]   # Intent.I_GLITCH
+
+    # Thresholds in Q15
+    HIGH_THRESH = 24576    # ~75% of Q15_ONE (32767)
+    MED_THRESH = 16384     # ~50% of Q15_ONE
+    LOW_THRESH = 8192      # ~25% of Q15_ONE
+
+    # Priority-based selection (higher priority wins):
+    # 1. Extreme chaos: I_GLITCH very high
+    if i_glitch > HIGH_THRESH:
+        return TimbralMode.T7_CHAOS
+
+    # 2. Growl: I_GLITCH medium-high
+    if i_glitch > MED_THRESH:
+        return TimbralMode.T6_GROWL
+
+    # 3. Breathy: I_AIR high
+    if i_air > HIGH_THRESH:
+        return TimbralMode.T5_BREATHY
+
+    # 4. Nasal: I_BOW high (sustained pressure → formant emphasis)
+    if i_bow > HIGH_THRESH and i_tone > MED_THRESH:
+        return TimbralMode.T4_NASAL
+
+    # 5. Hollow: Low tone, medium air
+    if i_tone < LOW_THRESH and i_air > LOW_THRESH:
+        return TimbralMode.T3_HOLLOW
+
+    # 6. Bright: High tone, low air
+    if i_tone > MED_THRESH and i_air < LOW_THRESH:
+        return TimbralMode.T1_BRIGHT
+
+    # 7. Dark: Medium tone, medium bow
+    if i_tone > LOW_THRESH and i_bow > MED_THRESH and i_air < MED_THRESH:
+        return TimbralMode.T2_DARK
+
+    # 8. Default: Pure
+    return TimbralMode.T0_PURE
+
+
+# =============================================================================
 # K LADDER (degradation masks)
 # =============================================================================
 
@@ -764,4 +1052,11 @@ __all__ = [
     'OscMode', 'OscModeInfo', 'OSC_MODE_TABLE',
     # K Ladder
     'KLadder', 'K_LADDER_MASKS', 'get_k_mask', 'get_k_from_mask',
+    # Symbol Mode (CMMM Enrichment Gap G1)
+    'SymbolMode', 'SymbolModeInfo', 'SYMBOL_MODE_TABLE',
+    'get_symbol_mode_evolution_rate', 'REGIME_TO_SYMBOL_MODE',
+    # Timbral Mode (CMMM Enrichment Gap G4)
+    'TimbralMode', 'TimbralModeInfo', 'TIMBRAL_MODE_TABLE',
+    # Regime-Symbol Ops (CMMM Enrichment Gap G4)
+    'REGIME_SYMBOL_OPS', 'get_operators_for_state', 'compute_timbral_mode_from_intent',
 ]

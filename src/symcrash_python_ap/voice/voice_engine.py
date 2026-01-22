@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     from ..envelope_scheduler import EnvelopeScheduler
     from ..control_frame import ControlFrame, EventType
     from ..frames import ParamFrame, VoiceFrame
+    from ..vm.state import CMMMemory
 
 from ..fixed import (
     sat16, mul_q15_sat, slew_q15,
@@ -393,6 +394,19 @@ class EdgeSpec:
     # Overlay for temporary modification
     overlay: Optional[OverlaySpec] = None
 
+    # -------------------------------------------------------------------------
+    # Stochastic Transition Parameters (CMMM Enrichment Gap G3 - Phase P4)
+    # -------------------------------------------------------------------------
+    # Base probability of transition when threshold is met (Q15)
+    # Q15_ONE (32767) = always transition (deterministic, default)
+    # 0 = never transition (effectively disables edge)
+    base_probability_q15: int = Q15_ONE
+
+    # Intent influence on probability: lane_id -> influence_q15
+    # Positive values increase probability when lane is high
+    # Negative values decrease probability when lane is high
+    stochastic_intent_influences: Dict[int, int] = field(default_factory=dict)
+
     def check_condition(self, intent: 'IntentVector', dwell_blocks: int,
                        gesture: Optional['GestureBasis'] = None) -> bool:
         """Check if transition condition is met."""
@@ -410,6 +424,272 @@ class EdgeSpec:
                 return False
 
         return True
+
+
+# =============================================================================
+# TEMPERAMENT MODULATION (CMMM-ENRICHMENT-DESIGN.md Phase P2)
+# =============================================================================
+
+def apply_temperament_to_hysteresis(
+    hysteresis: HysteresisSpec,
+    temperament: 'TemperamentVector'
+) -> HysteresisSpec:
+    """
+    Modulate HysteresisSpec by temperament parameters.
+
+    Per CMMM-ENRICHMENT-DESIGN.md §9.4:
+    - hysteresis_q15: Scales enter/exit margins (high = sticky, wider margins)
+    - reactivity_q15: Scales debounce inversely (high = faster response)
+
+    Args:
+        hysteresis: Original HysteresisSpec
+        temperament: TemperamentVector from preset
+
+    Returns:
+        Modified HysteresisSpec with temperament applied
+    """
+    # Scale margins by temperament.hysteresis_q15
+    # hysteresis=Q15_HALF (16384) → 1.0x (no change)
+    # hysteresis=Q15_ONE (32767) → ~2.0x (very sticky)
+    # hysteresis=0 → ~0.0x (no hysteresis, twitchy)
+    margin_scale = temperament.hysteresis_q15
+    new_enter = mul_q15_sat(hysteresis.enter_margin_q15 * 2, margin_scale)
+    new_exit = mul_q15_sat(hysteresis.exit_margin_q15 * 2, margin_scale)
+
+    # Scale debounce inversely by reactivity
+    # reactivity=Q15_HALF (16384) → 1.0x (no change)
+    # reactivity=Q15_ONE (32767) → ~0.5x (faster, less debounce)
+    # reactivity=0 → ~2.0x (slow, more debounce)
+    # Formula: debounce_scale = 2.0 - (reactivity / Q15_HALF)
+    #   reactivity=0 → scale=2.0
+    #   reactivity=Q15_HALF → scale=1.0
+    #   reactivity=Q15_ONE → scale=0.0 (clamped to min)
+    reactivity_normalized = (temperament.reactivity_q15 << 15) // Q15_HALF if Q15_HALF > 0 else 0
+    # reactivity_normalized: 0 → 0, Q15_HALF → Q15_ONE, Q15_ONE → 2*Q15_ONE
+    debounce_scale_q15 = max(0, (2 * Q15_ONE) - reactivity_normalized)
+    # debounce_scale_q15: reactivity=0 → 2*Q15_ONE, Q15_HALF → Q15_ONE, Q15_ONE → 0
+    new_debounce = max(1, (hysteresis.debounce_blocks * debounce_scale_q15) // Q15_ONE)
+
+    return HysteresisSpec(
+        enter_margin_q15=new_enter,
+        exit_margin_q15=new_exit,
+        debounce_blocks=new_debounce,
+        last_transition_block=hysteresis.last_transition_block,
+    )
+
+
+def apply_temperament_to_edge(
+    edge: EdgeSpec,
+    temperament: 'TemperamentVector'
+) -> EdgeSpec:
+    """
+    Create a modified EdgeSpec with temperament applied.
+
+    Applies temperament modulation to:
+    - Hysteresis margins and debounce
+    - Minimum dwell time (scaled by stickiness)
+
+    Note: This returns a new EdgeSpec; the original is not modified.
+
+    Args:
+        edge: Original EdgeSpec
+        temperament: TemperamentVector from preset
+
+    Returns:
+        Modified EdgeSpec with temperament applied
+    """
+    # Modulate hysteresis
+    new_hysteresis = apply_temperament_to_hysteresis(edge.hysteresis, temperament)
+
+    # Scale min_dwell by stickiness
+    # stickiness=Q15_HALF → 1.0x (no change)
+    # stickiness=Q15_ONE → ~2.0x (stay longer before transitioning)
+    # stickiness=0 → ~0.5x (transition sooner)
+    # Formula: scale = 0.5 + (stickiness / Q15_ONE)
+    #   stickiness=0 → scale=0.5
+    #   stickiness=Q15_HALF → scale=1.0
+    #   stickiness=Q15_ONE → scale=1.5
+    dwell_scale_q15 = (Q15_HALF >> 1) + ((temperament.stickiness_q15 * Q15_ONE) // Q15_ONE)
+    # Simplify: scale = 0.25*Q15_ONE + stickiness
+    # Wait, let's be more explicit:
+    # stickiness=0 → 0.5 * Q15_ONE = Q15_HALF
+    # stickiness=Q15_HALF → 1.0 * Q15_ONE = Q15_ONE
+    # stickiness=Q15_ONE → 1.5 * Q15_ONE = 1.5 * Q15_ONE
+    # Formula: dwell_scale = Q15_HALF + stickiness (capped at 1.5*Q15_ONE)
+    dwell_scale_q15 = Q15_HALF + temperament.stickiness_q15
+    new_min_dwell = max(0, (edge.min_dwell_blocks * dwell_scale_q15) // Q15_ONE)
+
+    # Create new edge with modified parameters
+    return EdgeSpec(
+        from_regime=edge.from_regime,
+        to_regime=edge.to_regime,
+        edge_type=edge.edge_type,
+        condition=edge.condition,
+        intent_thresholds=edge.intent_thresholds,
+        hysteresis=new_hysteresis,
+        min_dwell_blocks=new_min_dwell,
+        duration_blocks=edge.duration_blocks,
+        priority=edge.priority,
+        arc_id=edge.arc_id,
+        overlay=edge.overlay,
+        # Preserve stochastic transition parameters (Gap G3 - Phase P4)
+        base_probability_q15=edge.base_probability_q15,
+        stochastic_intent_influences=edge.stochastic_intent_influences,
+    )
+
+
+# Type alias for TemperamentVector import (avoid circular)
+try:
+    from ..instrument_ir import TemperamentVector
+except ImportError:
+    TemperamentVector = None  # type: ignore
+
+
+# =============================================================================
+# STOCHASTIC TRANSITION KERNEL (CMMM Enrichment Gap G3 - Phase P4)
+# =============================================================================
+# Reference: CMMM-ENRICHMENT-DESIGN.md §3.4 (Stochastic Transition Kernel)
+#
+# The stochastic kernel computes P_θ(s'|s,u) where:
+# - s = current regime
+# - s' = target regime
+# - u = intent vector
+# - θ = temperament parameters
+#
+# Determinism is preserved by default:
+# - base_probability_q15 = Q15_ONE → always transition if condition met
+# - chaos_amount_q15 = 0 → no stochastic perturbation
+
+def compute_transition_probability(
+    edge: EdgeSpec,
+    intent: 'IntentVector',
+    memory: 'CMMMemory',
+    temperament: 'TemperamentVector',
+    prng_state: int
+) -> Tuple[int, int]:
+    """
+    Compute transition probability P_θ(to_state | from_state, intent).
+
+    This implements the stochastic transition kernel from CMMM theory.
+    The probability is modulated by:
+    1. Base probability from EdgeSpec
+    2. Intent vector influences
+    3. Memory state (tension increases escalation probability)
+    4. Temperament (fatigue reduces probability, chaos adds noise)
+
+    Args:
+        edge: EdgeSpec being evaluated
+        intent: Current IntentVector
+        memory: CMMMemory state
+        temperament: TemperamentVector from preset
+        prng_state: Current PRNG state (for chaos perturbation)
+
+    Returns:
+        (probability_q15, new_prng_state) where probability is clamped to [0, Q15_ONE]
+    """
+    from ..vm.state import xorshift32
+
+    # Start with base probability
+    base_prob = edge.base_probability_q15
+
+    # Modulate by intent influences
+    for lane_id, influence in edge.stochastic_intent_influences.items():
+        if lane_id < len(intent.lanes):
+            # delta = intent[lane] * influence / Q15_ONE
+            delta = mul_q15_sat(intent.lanes[lane_id], influence)
+            base_prob = sat_add_q15(base_prob, delta)
+
+    # Modulate by memory - tension increases escalation probability
+    # Only apply if transitioning to a "higher" regime (escalation)
+    if edge.to_regime.value > edge.from_regime.value:
+        # High tension → more likely to escalate
+        tension_factor = mul_q15_sat(
+            memory.tension_q15, temperament.tension_influence_q15)
+        # Add 25% of tension factor to probability
+        base_prob = sat_add_q15(base_prob, tension_factor >> 2)
+
+    # Modulate by fatigue - high fatigue reduces transition probability
+    fatigue_factor = mul_q15_sat(
+        memory.fatigue_q15, temperament.fatigue_sensitivity_q15)
+    # Multiply by (1 - fatigue/2) to reduce probability
+    fatigue_reduction = Q15_ONE - (fatigue_factor >> 1)
+    base_prob = mul_q15_sat(base_prob, fatigue_reduction)
+
+    # Apply hysteresis - require sustained dwell before full probability
+    # hysteresis_q15 >> 10 gives ~0-32 blocks threshold
+    hysteresis_blocks = temperament.hysteresis_q15 >> 10
+    if memory.blocks_since_transition < hysteresis_blocks:
+        # Reduce probability 4x when below hysteresis threshold
+        base_prob = base_prob >> 2
+
+    # Add stochastic perturbation from temperament.chaos_amount_q15
+    if temperament.chaos_amount_q15 > 0:
+        prng_state, noise = xorshift32(prng_state)
+        # Extract 15-bit noise value
+        noise_q15 = (noise >> 17) & 0x7FFF  # 0-32767
+        noise_scaled = mul_q15_sat(noise_q15, temperament.chaos_amount_q15)
+        # Bipolar noise: [-chaos/2, +chaos/2]
+        chaos_half = temperament.chaos_amount_q15 >> 1
+        base_prob = sat_add_q15(base_prob, noise_scaled - chaos_half)
+
+    # Clamp to valid Q15 range
+    final_prob = max(0, min(Q15_ONE, base_prob))
+
+    return (final_prob, prng_state)
+
+
+def should_transition_stochastic(
+    edge: EdgeSpec,
+    intent: 'IntentVector',
+    memory: 'CMMMemory',
+    temperament: 'TemperamentVector',
+    prng_state: int
+) -> Tuple[bool, int]:
+    """
+    Make stochastic transition decision using PRNG.
+
+    This function:
+    1. Computes the transition probability
+    2. Draws a random threshold from PRNG
+    3. Returns True if threshold < probability
+
+    For deterministic behavior (default):
+    - base_probability_q15 = Q15_ONE and chaos_amount_q15 = 0
+    - Probability will be Q15_ONE, so any threshold < Q15_ONE → always True
+
+    Args:
+        edge: EdgeSpec being evaluated
+        intent: Current IntentVector
+        memory: CMMMemory state
+        temperament: TemperamentVector from preset
+        prng_state: Current PRNG state
+
+    Returns:
+        (should_transition, new_prng_state)
+    """
+    from ..vm.state import xorshift32
+
+    # Compute probability
+    prob, prng_state = compute_transition_probability(
+        edge, intent, memory, temperament, prng_state)
+
+    # Draw random threshold
+    prng_state, draw = xorshift32(prng_state)
+    threshold = draw & 0x7FFF  # 0-32767
+
+    # Transition if threshold < probability
+    return (threshold < prob, prng_state)
+
+
+# Helper: saturating add for Q15 values
+def sat_add_q15(a: int, b: int) -> int:
+    """Saturating add for Q15 values."""
+    result = a + b
+    if result > Q15_ONE:
+        return Q15_ONE
+    if result < -Q15_ONE:
+        return -Q15_ONE
+    return result
 
 
 # =============================================================================
@@ -894,12 +1174,62 @@ class RegimeGraph:
         return sorted(edges, key=lambda e: -e.priority)
 
     def check_transition(self, from_regime: Regime, intent: 'IntentVector',
-                        dwell_blocks: int) -> Optional[Regime]:
-        """Check if any transition should occur."""
+                        dwell_blocks: int,
+                        temperament: 'TemperamentVector' = None,
+                        memory: 'CMMMemory' = None,
+                        prng_state: int = None) -> Tuple[Optional[Regime], int]:
+        """
+        Check if any transition should occur.
+
+        Supports both deterministic (default) and stochastic transitions:
+        - Deterministic: base_probability_q15 = Q15_ONE, chaos_amount_q15 = 0
+        - Stochastic: Uses PRNG to make probabilistic decision
+
+        Args:
+            from_regime: Current regime
+            intent: Intent vector
+            dwell_blocks: Blocks in current regime
+            temperament: Optional temperament for edge modulation
+            memory: Optional CMMMemory for stochastic kernel
+            prng_state: Optional PRNG state for stochastic transitions
+
+        Returns:
+            (target_regime, new_prng_state) where target_regime is None if no transition
+        """
+        # Default PRNG state if not provided
+        if prng_state is None:
+            prng_state = 0x12345678
+
         for edge in self.get_valid_transitions(from_regime):
-            if edge.check_condition(intent, dwell_blocks):
-                return edge.to_regime
-        return None
+            # Apply temperament modulation if provided
+            if temperament is not None:
+                modulated_edge = apply_temperament_to_edge(edge, temperament)
+            else:
+                modulated_edge = edge
+
+            # Check threshold condition first
+            if not modulated_edge.check_condition(intent, dwell_blocks):
+                continue
+
+            # If threshold met, apply stochastic kernel if enabled
+            # Stochastic is enabled when: base_probability < Q15_ONE OR chaos_amount > 0
+            is_stochastic = (
+                modulated_edge.base_probability_q15 < Q15_ONE or
+                (temperament is not None and temperament.chaos_amount_q15 > 0)
+            )
+
+            if is_stochastic and memory is not None and temperament is not None:
+                # Use stochastic transition decision
+                should_transition, prng_state = should_transition_stochastic(
+                    modulated_edge, intent, memory, temperament, prng_state
+                )
+                if should_transition:
+                    return (modulated_edge.to_regime, prng_state)
+            else:
+                # Deterministic: threshold met = transition
+                return (modulated_edge.to_regime, prng_state)
+
+        return (None, prng_state)
 
     def get_arc(self, from_regime: Regime, to_regime: Regime) -> Optional[ArcSpec]:
         """Get arc spec for a transition."""
@@ -1627,6 +1957,10 @@ class InstrumentProgram:
 
     # Regime graph (edges and arcs)
     regime_graph: Optional[RegimeGraph] = None
+
+    # Temperament parameters (CMMM transition behavior, Phase P2)
+    # Default is None = neutral temperament (no modulation of EdgeSpec)
+    temperament: Optional['TemperamentVector'] = None
 
     # Legacy: simple regime transitions (used if regime_graph is None)
     attack_regime: Regime = Regime.R1_ATTACK
@@ -2696,10 +3030,15 @@ class VoiceEngine:
     def _check_regime_transition(self, state: VoiceStateWithProgram) -> Optional[Regime]:
         """
         Check if any regime transition should occur using RegimeGraph.
+
+        Applies temperament modulation to edges if the program has temperament.
         """
         # Use RegimeGraph for intent-based transitions
+        # Pass temperament from program if available
+        temperament = state.program.temperament
         target = self.regime_graph.check_transition(
-            state.regime, state.intent, state.regime_blocks
+            state.regime, state.intent, state.regime_blocks,
+            temperament=temperament
         )
 
         if target is not None:

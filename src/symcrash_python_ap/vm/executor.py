@@ -48,6 +48,11 @@ def _process_cmmm_events(state: VMState, frame: 'VoiceFrame') -> None:
     - 0x30 (NODEMASK_SET): Changes node mask with optional ramp
     - 0x31 (TAILMODE_SET): Changes tail mode with traction
 
+    Also advances CMMM enrichment state:
+    - Symbol mode dwell counter
+    - Timbral mode ramp
+    - CMMMemory (tension, fatigue)
+
     Args:
         state: Per-voice VM state (modified in place)
         frame: VoiceFrame containing CMMM event fields
@@ -68,6 +73,26 @@ def _process_cmmm_events(state: VMState, frame: 'VoiceFrame') -> None:
     if tail_mode is not None:
         traction = getattr(frame, 'cmmm_traction_q15', 32767)
         latch.apply_tailmode_event(tail_mode, traction)
+
+    # -------------------------------------------------------------------------
+    # CMMM Enrichment: Symbol mode and memory (Gaps G1, G2)
+    # -------------------------------------------------------------------------
+    # Step 4: Advance symbol mode dwell counter
+    latch.step_symbol_mode()
+
+    # Step 5: Advance timbral mode ramp
+    latch.step_timbral_mode()
+
+    # Step 6: Update CMMM memory
+    # Compute intent energy from frame (average of 8 intent lanes)
+    intent_vector = getattr(frame, 'intent_vector', None)
+    if intent_vector is not None and len(intent_vector) >= 8:
+        intent_energy = sum(intent_vector) >> 3  # Average of 8 lanes
+    else:
+        intent_energy = Q15_HALF  # Default mid-level intent
+
+    is_transition = latch.is_ramping() or latch.is_timbral_ramping()
+    state.cmmm_memory.step(intent_energy, is_transition)
 
 
 # =============================================================================
@@ -133,6 +158,80 @@ def _update_fm6_operators(fm6_state, fm_op_ratios, fm_op_levels, env_targets) ->
         # Default: full envelope value
         for op in fm6_state.operators:
             op.env_value_q15 = FM6_Q15_ONE
+
+
+# =============================================================================
+# DYNAMIC OPERATOR SELECTION (CMMM Enrichment Gap G4)
+# =============================================================================
+
+def _get_dynamic_backbone(state: VMState, frame: 'VoiceFrame', cfg) -> list:
+    """
+    Get backbone instructions with optional dynamic operator selection.
+
+    This implements CMMM Enrichment Gap G4 (Timbral Sub-states):
+    - If intent vector is present and dynamic_timbral_mode enabled,
+      computes timbral mode from intent and looks up operators in REGIME_SYMBOL_OPS
+    - Falls back to static backbone_instrs from cfg
+
+    Args:
+        state: Per-voice VM state
+        frame: VoiceFrame for this block
+        cfg: Decoded plan with static backbone
+
+    Returns:
+        List of BackboneEntry instructions to execute
+    """
+    from .decode import BackboneEntry
+    from ..primitives import (
+        get_operators_for_state,
+        compute_timbral_mode_from_intent,
+        REGIME_SYMBOL_OPS,
+    )
+
+    # Check if dynamic timbral mode is enabled (opt-in via frame flag)
+    dynamic_enabled = getattr(frame, 'dynamic_timbral_mode', False)
+
+    if not dynamic_enabled:
+        # Use static backbone from preset
+        return cfg.backbone_instrs
+
+    # Get regime from frame
+    regime_id = getattr(frame, 'regime_id', 2)  # Default R2_STABLE
+
+    # Get intent vector for timbral mode computation
+    intent_vector = getattr(frame, 'intent_vector', None)
+    if intent_vector is not None and len(intent_vector) >= 4:
+        # Compute timbral mode from intent
+        timbral_mode = compute_timbral_mode_from_intent(list(intent_vector))
+
+        # Update executor latch timbral mode (with ramp)
+        if timbral_mode != state.executor_latch.timbral_mode:
+            state.executor_latch.set_timbral_mode(timbral_mode, ramp_blocks=4)
+    else:
+        # Use current latched timbral mode
+        timbral_mode = state.executor_latch.timbral_mode
+
+    # Look up dynamic operators
+    key = (regime_id, timbral_mode)
+    if key in REGIME_SYMBOL_OPS:
+        op_ids = REGIME_SYMBOL_OPS[key]
+
+        # Get family strengths from frame if available
+        families = getattr(frame, 'families', {})
+
+        # Build backbone entries from operator IDs
+        backbone = []
+        for op_id in op_ids:
+            # Get strength from families dict (keyed by op_id or op_name)
+            strength = families.get(op_id, Q15_HALF)  # Default 50% strength
+            if isinstance(strength, float):
+                strength = int(strength * 32767)
+            backbone.append(BackboneEntry(op_id=op_id, strength_q15=strength))
+
+        return backbone
+
+    # Fallback: use static backbone from preset
+    return cfg.backbone_instrs
 
 
 # =============================================================================
@@ -626,10 +725,40 @@ def vm_step_block(
     # Step 1: LANE_INJECT (events modify carrier-seeded coeff_state)
     lane_inject(state, cfg)
 
+    # -------------------------------------------------------------------------
+    # CMMM Enrichment: Capture pre-operator state for evolution rate scaling (Gap G1)
+    # -------------------------------------------------------------------------
+    evolution_rate = state.executor_latch.get_evolution_rate_q15()
+    if evolution_rate < Q15_ONE:
+        # Capture state before operators for scaling
+        prev_coeffs = state.coeff_state.copy()
+
+    # -------------------------------------------------------------------------
+    # CMMM Enrichment: Dynamic Operator Selection (Gap G4 - Timbral Sub-states)
+    # -------------------------------------------------------------------------
+    # Get backbone instructions - either from dynamic REGIME_SYMBOL_OPS or static backbone
+    backbone_instrs = _get_dynamic_backbone(state, frame, cfg)
+
     # Steps 2-5: Backbone lanes (operators modify carrier)
     # Use crossfade-aware dispatch for smooth mask transitions (WSE-STD-070)
-    for instr in cfg.backbone_instrs:
+    for instr in backbone_instrs:
         dispatch_coeff_op_crossfade(state, instr)
+
+    # -------------------------------------------------------------------------
+    # CMMM Enrichment: Apply evolution rate scaling (Gap G1)
+    # -------------------------------------------------------------------------
+    # Scale coefficient changes by evolution_rate:
+    # - EVOLVE (32767): Full evolution (100%)
+    # - HOLD (1024): Minimal evolution (~3%)
+    # - FREEZE (0): No evolution (0%)
+    if evolution_rate < Q15_ONE:
+        for idx in range(COEFF_LEN):
+            new_val = int(state.coeff_state[idx])
+            old_val = int(prev_coeffs[idx])
+            delta = new_val - old_val
+            # Scale delta by evolution rate
+            scaled_delta = RSHIFT_RNE(delta * evolution_rate, 15)
+            state.coeff_state[idx] = np.clip(old_val + scaled_delta, Q15_NEG_ONE, Q15_ONE)
 
     # === FM MODULATOR EXTRACTION (Phase 3 - WSE-STD-210 Section 8.3) ===
     # Extract modulator from operator output for NEXT block's FM.

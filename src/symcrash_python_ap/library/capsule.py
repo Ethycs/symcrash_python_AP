@@ -259,6 +259,9 @@ class CapsuleV0:
     seeds: SeedConfig = field(default_factory=SeedConfig)
     macro: Optional[MacroProgram] = None  # Only for CapsuleKind.MACRO
     control: Optional[ControlProgram] = None  # Control axis defaults for INSTRUMENT/SYNTH
+    # CMMM Enrichment (Phase P5): temperament and future CMMM config
+    # Stored as dict for flexibility; parsed by InstrumentIR at load time
+    cmmm_config: Optional[Dict] = None
 
     def validate(self, strict: bool = False) -> List[str]:
         """

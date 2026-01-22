@@ -196,6 +196,95 @@ class EnvelopeBinding:
 
 
 @dataclass
+class TemperamentVector:
+    """
+    Temperament parameters (θ) for CMMM transition kernel.
+
+    These shape HOW the voice responds to gesture, not WHAT sound it makes.
+    Defined at preset level (L3), constant during playback.
+    All values are Q15 (0-32767) representing 0.0-1.0 normalized.
+
+    Per CMMM-ENRICHMENT-DESIGN.md §9.4 Phase P2:
+    - hysteresis_q15: Scales EdgeSpec enter/exit margins (high = sticky)
+    - stickiness_q15: Resistance to leaving current regime
+    - reactivity_q15: Response speed to gesture changes (inverse debounce)
+    - escalation_bias_q15: Tendency toward higher regimes (0=calm, 32767=chaos)
+    - fatigue_sensitivity_q15: How much fatigue affects behavior
+    - tension_influence_q15: How much tension affects transitions
+    - chaos_amount_q15: Base stochasticity (0=deterministic default)
+
+    YAML example:
+        control:
+          temperament:
+            hysteresis: 0.3      # Moderate stickiness
+            reactivity: 0.7      # Fast response
+            chaos_amount: 0.0    # Deterministic (default)
+
+    Or using Q15 directly:
+        control:
+          temperament:
+            hysteresis_q15: 9830
+            reactivity_q15: 22937
+    """
+    # All values Q15 (0-32767), default Q15_HALF (16384) for neutral behavior
+    hysteresis_q15: int = 16384       # Scales EdgeSpec enter/exit margins
+    stickiness_q15: int = 16384       # Resistance to leaving current regime
+    reactivity_q15: int = 16384       # Response speed (inverse debounce scaling)
+    escalation_bias_q15: int = 16384  # Tendency toward higher regimes
+    fatigue_sensitivity_q15: int = 16384  # How much fatigue affects behavior
+    tension_influence_q15: int = 16384    # How much tension affects transitions
+    chaos_amount_q15: int = 0         # 0 = deterministic (default)
+
+    def to_dict(self) -> dict:
+        """Serialize to dictionary for YAML/JSON."""
+        return {
+            'hysteresis_q15': self.hysteresis_q15,
+            'stickiness_q15': self.stickiness_q15,
+            'reactivity_q15': self.reactivity_q15,
+            'escalation_bias_q15': self.escalation_bias_q15,
+            'fatigue_sensitivity_q15': self.fatigue_sensitivity_q15,
+            'tension_influence_q15': self.tension_influence_q15,
+            'chaos_amount_q15': self.chaos_amount_q15,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'TemperamentVector':
+        """Deserialize from dictionary."""
+        if data is None:
+            return cls()
+        return cls(
+            hysteresis_q15=data.get('hysteresis_q15', 16384),
+            stickiness_q15=data.get('stickiness_q15', 16384),
+            reactivity_q15=data.get('reactivity_q15', 16384),
+            escalation_bias_q15=data.get('escalation_bias_q15', 16384),
+            fatigue_sensitivity_q15=data.get('fatigue_sensitivity_q15', 16384),
+            tension_influence_q15=data.get('tension_influence_q15', 16384),
+            chaos_amount_q15=data.get('chaos_amount_q15', 0),
+        )
+
+    @classmethod
+    def from_normalized(cls, **kwargs) -> 'TemperamentVector':
+        """
+        Create from normalized 0.0-1.0 values.
+
+        Example:
+            temp = TemperamentVector.from_normalized(
+                hysteresis=0.3,
+                reactivity=0.7,
+            )
+        """
+        return cls(
+            hysteresis_q15=int(kwargs.get('hysteresis', 0.5) * 32767),
+            stickiness_q15=int(kwargs.get('stickiness', 0.5) * 32767),
+            reactivity_q15=int(kwargs.get('reactivity', 0.5) * 32767),
+            escalation_bias_q15=int(kwargs.get('escalation_bias', 0.5) * 32767),
+            fatigue_sensitivity_q15=int(kwargs.get('fatigue_sensitivity', 0.5) * 32767),
+            tension_influence_q15=int(kwargs.get('tension_influence', 0.5) * 32767),
+            chaos_amount_q15=int(kwargs.get('chaos_amount', 0.0) * 32767),
+        )
+
+
+@dataclass
 class ControlConfig:
     """
     Control axis defaults for cockpit integration.
@@ -215,6 +304,7 @@ class ControlConfig:
     - space: Spatial / reverb character
     - material: Surface texture (wood=low, metal=mid, glass=high)
     - unity: Coherence / blend (how much voices blend together)
+    - temperament: CMMM transition behavior parameters (θ)
 
     YAML example:
         control:
@@ -222,6 +312,9 @@ class ControlConfig:
           density: 0.5        # Neutral body
           energy_intent: 0.6  # Slightly aggressive
           risk: 0.1           # Some instability
+          temperament:
+            hysteresis: 0.3
+            reactivity: 0.7
 
     Or using Q15 directly:
         control:
@@ -238,6 +331,9 @@ class ControlConfig:
     space: float = 0.25               # 0.25 = subtle spatial
     material: float = 0.5             # 0.5 = neutral (neither wood nor glass)
     unity: float = 0.5                # 0.5 = balanced blend
+
+    # CMMM transition behavior (θ parameters)
+    temperament: TemperamentVector = field(default_factory=TemperamentVector)
 
     def to_control_program(self) -> 'ControlProgram':
         """
@@ -1723,6 +1819,11 @@ def _parse_control_config(data: dict) -> ControlConfig:
             return data[q15_key] / 32767.0
         return data.get(name, default)
 
+    # Parse temperament if present (CMMM Enrichment Phase P5)
+    temperament = TemperamentVector()
+    if 'temperament' in data:
+        temperament = TemperamentVector.from_dict(data['temperament'])
+
     return ControlConfig(
         energy_intent=get_value('energy_intent', 0.5),
         motion=get_value('motion', 0.0),
@@ -1733,6 +1834,7 @@ def _parse_control_config(data: dict) -> ControlConfig:
         space=get_value('space', 0.25),
         material=get_value('material', 0.5),
         unity=get_value('unity', 0.5),
+        temperament=temperament,
     )
 
 
