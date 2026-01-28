@@ -31,7 +31,7 @@ Usage:
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, TYPE_CHECKING
 from enum import IntEnum
 
 # Import individual registries
@@ -49,10 +49,13 @@ from ..control_registry import (
     ControlRegistry, ControlEntry, ControlID, ValueType, SlewPolicy,
     CONTROL_REGISTRY_V0,
 )
-from ..voice.voice_engine_registry import (
-    VoiceEngineRegistry, VoiceParamEntry, VoiceParamID,
-    get_registry as get_voice_registry,
-)
+
+# NOTE: voice_engine_registry imported lazily to break circular import chain:
+# executor_scheduling -> uart_protocol -> frames -> ... -> central_registry -> voice/__init__
+if TYPE_CHECKING:
+    from ..voice.voice_engine_registry import (
+        VoiceEngineRegistry, VoiceParamEntry, VoiceParamID,
+    )
 
 # Import primitives as a constants namespace
 from .. import primitives
@@ -255,9 +258,11 @@ class CentralRegistry:
         return self._controls
 
     @property
-    def voice_engine(self) -> VoiceEngineRegistry:
+    def voice_engine(self) -> 'VoiceEngineRegistry':
         """Access voice engine registry (lazy init)."""
         if self._voice_engine is None:
+            # Lazy import to break circular import chain
+            from ..voice.voice_engine_registry import get_registry as get_voice_registry
             self._voice_engine = get_voice_registry()
         return self._voice_engine
 

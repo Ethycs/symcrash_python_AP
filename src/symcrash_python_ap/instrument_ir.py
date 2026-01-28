@@ -1933,10 +1933,31 @@ def _parse_node_params(data: dict) -> NodeParams:
         params.algorithm = data['algorithm']
     if 'feedback' in data:
         params.feedback = data['feedback']
-    if 'op_ratios' in data:
-        params.op_ratios = data['op_ratios']
-    if 'op_levels' in data:
-        params.op_levels = data['op_levels']
+
+    # Support both legacy integer format and new float format per WSE-STD-FM-PROFILE-v0
+    # Legacy: op_ratios: [65536, 65700, ...], op_levels: [32767, 32767, ...]
+    # New: operators: [{ ratio: 1.0, level: 1.0 }, { ratio: 1.003, level: 0.875 }, ...]
+    if 'operators' in data:
+        # Float-based format per WSE-STD-FM-PROFILE-v0 §3.1
+        operators = data['operators']
+        ratios = []
+        levels = []
+        for op in operators:
+            # Convert float ratio to Q16 (65536 = 1.0)
+            ratio = op.get('ratio', 1.0)
+            ratios.append(int(ratio * 65536))
+            # Convert float level to Q15 (32767 = 1.0)
+            level = op.get('level', 1.0)
+            levels.append(int(level * 32767))
+        params.op_ratios = ratios
+        params.op_levels = levels
+    else:
+        # Legacy integer format
+        if 'op_ratios' in data:
+            params.op_ratios = data['op_ratios']
+        if 'op_levels' in data:
+            params.op_levels = data['op_levels']
+
     if 'fm6_topo_a' in data:
         params.fm6_topo_a = data['fm6_topo_a']
     if 'fm6_topo_b' in data:

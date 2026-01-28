@@ -13,6 +13,10 @@ Key Components:
 - DegradeController: Global degrade state D with hysteresis
 - HealthTelemetry: CPU/mem/stab bars and gear
 - BlockScheduler: Main entry point combining all components
+
+NOTE: This module is the voice module's interface for scheduling.
+The canonical implementation is also available at `symbol.executor_scheduling`
+which contains the same code merged with executor budget accounting.
 """
 
 from dataclasses import dataclass, field
@@ -124,6 +128,16 @@ class HealthTelemetry:
 # VOICE SELECTOR (Ring Scheduler)
 # =============================================================================
 
+def tile_id(v: int) -> int:
+    """Get tile ID for voice v."""
+    return v >> 4  # v // TILE_SIZE (TILE_SIZE = 16 = 2^4)
+
+
+def tile_off(v: int) -> int:
+    """Get offset within tile for voice v."""
+    return v & (TILE_SIZE - 1)  # v % TILE_SIZE
+
+
 @dataclass
 class VoiceSelector:
     """
@@ -211,16 +225,6 @@ class VoiceSelector:
 # =============================================================================
 # TILE SCHEDULER (TOP/MID Throttling)
 # =============================================================================
-
-def tile_id(v: int) -> int:
-    """Get tile ID for voice v."""
-    return v >> 4  # v // TILE_SIZE (TILE_SIZE = 16 = 2^4)
-
-
-def tile_off(v: int) -> int:
-    """Get offset within tile for voice v."""
-    return v & (TILE_SIZE - 1)  # v % TILE_SIZE
-
 
 @dataclass
 class TileScheduler:

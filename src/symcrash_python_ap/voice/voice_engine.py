@@ -3641,7 +3641,7 @@ class VoiceEngine:
         """
         from ..frames import ParamFrame, VoiceFrame
         from ..control_frame import ControlFrame, EventType
-        from .scheduler import HealthTelemetry
+        from ..symbol.executor_scheduling import HealthTelemetry
 
         # 1. Process ControlFrame events (NOTE_ON, NOTE_OFF, etc.)
         if control_frame is not None:

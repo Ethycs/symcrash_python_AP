@@ -45,7 +45,7 @@ from .control_frame import (
 )
 
 if TYPE_CHECKING:
-    from .voice.scheduler import HealthTelemetry
+    from .symbol.executor_scheduling import HealthTelemetry
 
 
 # =============================================================================

@@ -39,6 +39,8 @@ from .voice_engine import (
     EventPolicySpec,
 )
 
+# Scheduler components - canonical location is symbol.executor_scheduling
+# but re-exported here for backward compatibility
 from .scheduler import (
     BlockScheduler,
     VoiceSelector,

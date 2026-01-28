@@ -41,7 +41,8 @@ from .library.preset_library import PresetLibraryV0, Query
 from .library.capsule import CapsuleKind
 from .material.material_engine import MaterialEngine
 from .safety.safety_engine import SafetyEngine
-from .voice.scheduler import HealthTelemetry, BLOCK_SIZE
+from .symbol.executor_scheduling import HealthTelemetry
+from .primitives import BLOCK_SIZE
 from .voice.voice_engine import VoiceEngine
 from .voice.emitter_bridge import VoiceEngineAdapter
 from .frames import ParamFrame, VoiceFrame

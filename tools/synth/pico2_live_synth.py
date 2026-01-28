@@ -343,6 +343,7 @@ class Pico2LiveSynth:
 
     def _render_loop(self):
         """Background thread that renders audio blocks."""
+        print("[Render] Thread started")
         while self.running:
             try:
                 # Check if we need to render more blocks
@@ -352,10 +353,11 @@ class Pico2LiveSynth:
                     # Buffer is full, wait a bit
                     time.sleep(0.0001)
             except Exception as e:
-                print(f"Render error: {e}")
+                print(f"[Render] Error: {e}")
                 import traceback
                 traceback.print_exc()
                 time.sleep(0.001)
+        print("[Render] Thread exiting")
 
     def _render_block(self):
         """Render one audio block."""
@@ -369,8 +371,8 @@ class Pico2LiveSynth:
         # This ensures all required fields (ops_enable, families, partial_amps_q15) are populated
         frame = self.emitter.emit_frame()
 
-        # Debug: log occasionally (every ~4 seconds to reduce overhead)
-        if self.blocks_rendered % 3000 == 0:
+        # Debug: log first few blocks and then occasionally
+        if self.blocks_rendered < 5 or self.blocks_rendered % 3000 == 0:
             print(f"[DEBUG] Block {self.blocks_rendered}: "
                   f"active={self.emitter.is_active} "
                   f"note={frame.note} gain={frame.gain_q15} "
@@ -398,6 +400,10 @@ class Pico2LiveSynth:
         # Send note-on via cockpit (will be in next ControlFrame)
         self.cockpit.midi_note_on(note, velocity)
 
+        # Tell the emitter to start the note (this activates the voice)
+        velocity_q15 = int((velocity / 127) * Q15_ONE)
+        self.emitter.note_on(note, velocity_q15)
+
         # Tell the synthesis stage about the voice
         freq = 440.0 * (2 ** ((note - 69) / 12))
         self.stage.voice_on(0, note)  # Single voice (voice_id=0)
@@ -408,6 +414,9 @@ class Pico2LiveSynth:
         """Release the current note."""
         # Send note-off via cockpit
         self.cockpit.midi_note_off(self.current_note)
+
+        # Tell the emitter to release the note
+        self.emitter.note_off()
 
         # Tell the synthesis stage
         self.stage.voice_off(0)  # Single voice (voice_id=0)
