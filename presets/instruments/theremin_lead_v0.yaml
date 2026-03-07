@@ -8,41 +8,32 @@
 # - Slow attack (~50ms)
 # - No decay (full sustain)
 # - Sine-based with slight harmonics
+# Conformance: P0 (static synthesis)
 
 instrument_ir_v0:
   meta:
-    instrument_id: "theremin-lead-v0"
+    id: "theremin-lead-v0"
     name: "Theremin Lead"
     version: 0
     author: "symcrash"
-    seed_u32: 0x54484552
+    seed: 0x54484552
 
-  io:
-    sample_rate_hz: 48000
+  audio:
+    sample_rate: 48000
     block_size: 64
 
-  layers:
-    L0_graph:
-      nodes:
-        - id: "osc1"
-          type: "Osc"
-          params:
-            waveform: "sine"
-        - id: "amp1"
-          type: "Amp"
-          params:
-            adsr:
-              a_ms: 50.0
-              d_ms: 0.0
-              s: 0.8
-              r_ms: 100.0
-      edges:
-        - src: "osc1"
-          dst: "amp1"
-      macros:
-        - id: "M_BRIGHT"
-          name: "Brightness"
-          default: 0.35
-        - id: "M_GLIDE"
-          name: "Glide Time"
-          default: 0.3
+  graph:
+    osc1:
+      type: Osc
+      output: amp1
+      waveform: sine
+    amp1:
+      type: Amp
+      attack: 50.0
+      decay: 0.0
+      sustain: 0.8
+      release: 100.0
+
+  controls:
+    Brightness: 0.35
+    Glide Time: 0.3

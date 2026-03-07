@@ -20,156 +20,91 @@
 #              -> [2*]
 #          [1*]
 # Carriers: Op1-4, Modulators: Op5-6
+# Conformance: P2 (full CMMM synthesis)
 
 instrument_ir_v0:
   meta:
-    instrument_id: "brass-cheap-v0"
+    id: "brass-cheap-v0"
     name: "Brass Cheap"
     version: 0
     author: "symcrash"
-    seed_u32: 0x42524348  # "BRCH"
+    seed: 0x42524348
 
-  # Control axis defaults (WSE-STD-MACRO v0)
-  control:
-    brightness: 0.7        # Bright for brass
-    density: 0.5           # Medium body
-    energy_intent: 0.55    # Slightly aggressive
-    risk: 0.02             # Very stable (cheap preset)
-    material: 0.6          # Toward metallic
-
-  # Matrix Envelope System (WSE-STD-ENVELOPE-MATRIX-v0)
-  # Modulator decays faster than carrier for brightness transient
-  envelopes:
-    - id: "carrier_env"
-      adsr:
-        a_ms: 6.0          # Fast attack
-        d_ms: 120.0        # Medium decay
-        s: 0.75            # Strong sustain
-        r_ms: 80.0         # Quick release
-      targets:
-        - FM_OP1
-        - FM_OP2
-        - FM_OP3
-        - FM_OP4
-
-    - id: "mod_env"
-      adsr:
-        a_ms: 6.0          # Same fast attack
-        d_ms: 40.0         # Faster decay (brightness fades)
-        s: 0.35            # Lower sustain (less modulation)
-        r_ms: 80.0
-      targets:
-        - FM_OP5
-        - FM_OP6
-
-  io:
-    sample_rate_hz: 48000
+  audio:
+    sample_rate: 48000
     block_size: 64
 
-  layers:
-    L0_graph:
-      nodes:
-        - id: "fm6"
-          type: "FM6"
-          params:
-            algorithm: 19       # Split to 3 carriers
-            feedback: 1         # Light feedback
+  graph:
+    fm6:
+      type: FM6
+      output: amp1
+      algorithm: 19
+      feedback: 1
+      operators:
+        - ratio: 1.0
+          level: 1.0
+        - ratio: 1.00145
+          level: 1.0
+        - ratio: 0.99855
+          level: 1.0
+        - ratio: 1.0029
+          level: 0.875
+        - ratio: 1.0
+          level: 0.375
+        - ratio: 1.0
+          level: 0.25
+    amp1:
+      type: Amp
+      attack: 6.0
+      decay: 100.0
+      sustain: 0.7
+      release: 80.0
 
-            # Operator frequency ratios and output levels
-            # Tight unison for brass section feel
-            # Full carriers, reduced modulators for warmth
-            operators:
-              - ratio: 1.0           # Op1: carrier (anchor, fundamental)
-                level: 1.0           # Full output
-              - ratio: 1.00145       # Op2: carrier (+2.5 cents detune)
-                level: 1.0           # Full output
-              - ratio: 0.99855       # Op3: carrier (-2.5 cents detune)
-                level: 1.0           # Full output
-              - ratio: 1.0029        # Op4: carrier (+5 cents detune)
-                level: 0.875         # Slightly reduced for balance
-              - ratio: 1.0           # Op5: modulator (warm harmonic)
-                level: 0.375         # Warm modulation depth
-              - ratio: 1.0           # Op6: modulator (gentle feedback source)
-                level: 0.25          # Gentle feedback level
+  controls:
+    Brightness: 0.7
+    Body: 0.5
 
-        - id: "amp1"
-          type: "Amp"
-          params:
-            adsr:
-              a_ms: 6.0
-              d_ms: 100.0
-              s: 0.7
-              r_ms: 80.0
+  character:
+    brightness: 0.7
+    density: 0.5
+    energy_intent: 0.55
+    risk: 0.02
+    material: 0.6
 
-      edges:
-        - src: "fm6"
-          dst: "amp1"
+  envelopes:
+    carrier_env:
+      attack: 6.0
+      decay: 120.0
+      sustain: 0.75
+      release: 80.0
+      targets: [FM_OP1, FM_OP2, FM_OP3, FM_OP4]
+    mod_env:
+      attack: 6.0
+      decay: 40.0
+      sustain: 0.35
+      release: 80.0
+      targets: [FM_OP5, FM_OP6]
 
-      macros:
-        - id: "M_BRIGHT"
-          name: "Brightness"
-          default: 0.7
-        - id: "M_BODY"
-          name: "Body"
-          default: 0.5
-
-    # CMMM Configuration - Cheap-First Operator Design
-    # Core operators are Tier A (DIAG/BANDED, K-scaling)
-    L3_cmmm:
-      emit_templates:
-        # IDLE: Minimal processing
-        T_IDLE:
-          families:
-            CONSTRAINT: 1.0
-            CALM: 1.0
-          ops_enable: ["FineClamp"]  # Tail MIN only
-          trees:
-            A: "T1"
-            B: "T1"
-            beta: 0.0
-
-        # ATTACK: Core cheap operators for transient
-        # Tilt + IntraMix = spectral shaping + body
-        T_ATTACK:
-          families:
-            COLOR: 0.7
-            LOCAL: 0.6
-            CONSTRAINT: 1.0
-            CALM: 0.2
-          ops_enable: ["Tilt", "IntraMix", "FineClamp"]
-          trees:
-            A: "T1"
-            B: "T1"
-            beta: 0.1
-
-        # STABLE: Add DiffuseDown for warmth
-        # Still cheap: all Tier A operators
-        T_STABLE:
-          families:
-            COLOR: 0.6
-            TRANSPORT: 0.4
-            LOCAL: 0.5
-            CONSTRAINT: 1.0
-            CALM: 0.5
-          ops_enable: ["Tilt", "DiffuseDown", "IntraMix", "FineClamp"]
-          trees:
-            A: "T1"
-            B: "T1"
-            beta: 0.15
-
-        # RECOVERY: Gentle return to idle
-        T_RECOVERY:
-          families:
-            CONSTRAINT: 1.0
-            CALM: 0.8
-          ops_enable: ["IntraMix", "FineClamp"]
-          trees:
-            A: "T1"
-            B: "T1"
-            beta: 0.0
+  behavior:
+    idle:
+      processing: [FineClamp]
+      emphasis: {CONSTRAINT: 1.0, CALM: 1.0}
+      trees: {A: T1, B: T1, blend: 0.0}
+    attack:
+      processing: [Tilt, IntraMix, FineClamp]
+      emphasis: {COLOR: 0.7, LOCAL: 0.6, CONSTRAINT: 1.0, CALM: 0.2}
+      trees: {A: T1, B: T1, blend: 0.1}
+    stable:
+      processing: [Tilt, DiffuseDown, IntraMix, FineClamp]
+      emphasis: {COLOR: 0.6, TRANSPORT: 0.4, LOCAL: 0.5, CONSTRAINT: 1.0, CALM: 0.5}
+      trees: {A: T1, B: T1, blend: 0.15}
+    recovery:
+      processing: [IntraMix, FineClamp]
+      emphasis: {CONSTRAINT: 1.0, CALM: 0.8}
+      trees: {A: T1, B: T1, blend: 0.0}
 
   compile:
     material:
-      beta_start: 0.0
-      beta_target: 0.125       # Light material blend
-      beta_ramp_blocks: 8
+      blend: 0.0
+      target: 0.125
+      ramp: 8

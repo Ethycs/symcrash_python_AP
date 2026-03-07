@@ -21,151 +21,91 @@
 #          [3] -> [2*]
 #                 [1*]
 # Multiple carriers for rich harmonic decay
+# Conformance: P2 (full CMMM synthesis)
 
 instrument_ir_v0:
   meta:
-    instrument_id: "pluck-cheap-v0"
+    id: "pluck-cheap-v0"
     name: "Pluck Cheap"
     version: 0
     author: "symcrash"
-    seed_u32: 0x504C4348  # "PLCH"
+    seed: 0x504C4348
 
-  # Control axis defaults (WSE-STD-MACRO v0)
-  control:
-    brightness: 0.6        # Bright attack
-    density: 0.4           # Light body
-    energy_intent: 0.7     # Percussive character
-    risk: 0.01             # Very stable
-    material: 0.55         # Slightly metallic
-
-  # Matrix Envelope System
-  # Fast attack, mod decays faster for brightness transient
-  envelopes:
-    - id: "carrier_env"
-      adsr:
-        a_ms: 1.0          # Instant attack
-        d_ms: 300.0        # Long decay
-        s: 0.0             # No sustain (pluck)
-        r_ms: 100.0        # Quick release
-      targets:
-        - FM_OP1
-        - FM_OP2
-        - FM_OP4
-
-    - id: "mod_env"
-      adsr:
-        a_ms: 1.0          # Instant attack
-        d_ms: 80.0         # Fast decay (brightness fades quickly)
-        s: 0.0             # No sustain
-        r_ms: 50.0
-      targets:
-        - FM_OP3
-        - FM_OP5
-        - FM_OP6
-
-  io:
-    sample_rate_hz: 48000
+  audio:
+    sample_rate: 48000
     block_size: 64
 
-  layers:
-    L0_graph:
-      nodes:
-        - id: "fm6"
-          type: "FM6"
-          params:
-            algorithm: 22       # Rhodes-like: 3 carriers
-            feedback: 0         # No feedback (clean pluck)
+  graph:
+    fm6:
+      type: FM6
+      output: amp1
+      algorithm: 22
+      feedback: 0
+      operators:
+        - ratio: 1.0
+          level: 1.0
+        - ratio: 1.0
+          level: 0.75002
+        - ratio: 2.0
+          level: 0.5
+        - ratio: 1.0
+          level: 0.62502
+        - ratio: 3.0
+          level: 0.375
+        - ratio: 4.0
+          level: 0.25
+    amp1:
+      type: Amp
+      attack: 1.0
+      decay: 300.0
+      sustain: 0.0
+      release: 100.0
 
-            # Operator frequency ratios and output levels
-            # Bell-like harmonic ratios
-            # Carriers full, mods for bell character
-            operators:
-              - ratio: 1.0           # Op1: carrier (fundamental)
-                level: 1.0           # Full output
-              - ratio: 1.0           # Op2: carrier (fundamental reinforcement)
-                level: 0.75002       # Slightly reduced for balance
-              - ratio: 2.0           # Op3: modulator (octave, brightness)
-                level: 0.5           # Half depth for brightness transient
-              - ratio: 1.0           # Op4: carrier (fundamental)
-                level: 0.62502       # Moderate output
-              - ratio: 3.0           # Op5: modulator (3rd harmonic, bell tone)
-                level: 0.375         # Bell modulation depth
-              - ratio: 4.0           # Op6: modulator (4th harmonic, shimmer)
-                level: 0.25          # Subtle shimmer depth
+  controls:
+    Brightness: 0.6
+    Decay: 0.5
 
-        - id: "amp1"
-          type: "Amp"
-          params:
-            adsr:
-              a_ms: 1.0
-              d_ms: 300.0
-              s: 0.0
-              r_ms: 100.0
+  character:
+    brightness: 0.6
+    density: 0.4
+    energy_intent: 0.7
+    risk: 0.01
+    material: 0.55
 
-      edges:
-        - src: "fm6"
-          dst: "amp1"
+  envelopes:
+    carrier_env:
+      attack: 1.0
+      decay: 300.0
+      sustain: 0.0
+      release: 100.0
+      targets: [FM_OP1, FM_OP2, FM_OP4]
+    mod_env:
+      attack: 1.0
+      decay: 80.0
+      sustain: 0.0
+      release: 50.0
+      targets: [FM_OP3, FM_OP5, FM_OP6]
 
-      macros:
-        - id: "M_BRIGHT"
-          name: "Brightness"
-          default: 0.6
-        - id: "M_DECAY"
-          name: "Decay"
-          default: 0.5
-
-    # CMMM Configuration - Cheap-First Operator Design
-    # Minimal operators - character from envelope
-    L3_cmmm:
-      emit_templates:
-        # IDLE: Nothing (pluck doesn't sustain)
-        T_IDLE:
-          families:
-            CONSTRAINT: 1.0
-            CALM: 1.0
-          ops_enable: ["FineClamp"]
-          trees:
-            A: "T1"
-            B: "T1"
-            beta: 0.0
-
-        # ATTACK: Light spectral shaping
-        T_ATTACK:
-          families:
-            COLOR: 0.5        # Light Tilt
-            CONSTRAINT: 1.0
-            CALM: 0.3
-          ops_enable: ["Tilt", "FineClamp"]
-          trees:
-            A: "T1"
-            B: "T1"
-            beta: 0.05
-
-        # STABLE: Minimal - let envelope do the work
-        T_STABLE:
-          families:
-            COLOR: 0.3        # Conservative Tilt
-            CONSTRAINT: 1.0
-            CALM: 0.6
-          ops_enable: ["Tilt", "FineClamp"]
-          trees:
-            A: "T1"
-            B: "T1"
-            beta: 0.0
-
-        # RECOVERY: Clean fadeout
-        T_RECOVERY:
-          families:
-            CONSTRAINT: 1.0
-            CALM: 1.0
-          ops_enable: ["FineClamp"]
-          trees:
-            A: "T1"
-            B: "T1"
-            beta: 0.0
+  behavior:
+    idle:
+      processing: [FineClamp]
+      emphasis: {CONSTRAINT: 1.0, CALM: 1.0}
+      trees: {A: T1, B: T1, blend: 0.0}
+    attack:
+      processing: [Tilt, FineClamp]
+      emphasis: {COLOR: 0.5, CONSTRAINT: 1.0, CALM: 0.3}
+      trees: {A: T1, B: T1, blend: 0.05}
+    stable:
+      processing: [Tilt, FineClamp]
+      emphasis: {COLOR: 0.3, CONSTRAINT: 1.0, CALM: 0.6}
+      trees: {A: T1, B: T1, blend: 0.0}
+    recovery:
+      processing: [FineClamp]
+      emphasis: {CONSTRAINT: 1.0, CALM: 1.0}
+      trees: {A: T1, B: T1, blend: 0.0}
 
   compile:
     material:
-      beta_start: 0.0
-      beta_target: 0.09375     # Light material
-      beta_ramp_blocks: 4      # Fast ramp for pluck
+      blend: 0.0
+      target: 0.09375
+      ramp: 4

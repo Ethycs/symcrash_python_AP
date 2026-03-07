@@ -34,8 +34,8 @@ from ..vm.harmonic_bank import LFOState, LFOWaveform, LFOSyncMode, LFOTarget, LF
 # Import canonical primitives (single source of truth)
 from ..primitives import K_LADDER_MASKS, TailMode as _TailMode, Q15_ONE, Q15_HALF, Q16_ONE
 
-# Import human-readable conversion helpers
-from ..instrument_ir import float_or_q15, _auto_detect_ratios, _auto_detect_levels
+# Import human-readable conversion helpers and shared modulators parser
+from ..instrument_ir import float_or_q15, _auto_detect_ratios, _auto_detect_levels, _parse_modulators
 
 # Import central registry for validation
 from .central_registry import get_central_registry
@@ -473,117 +473,9 @@ class PresetCompiler:
         """
         Parse LFO definitions from modulators section.
 
-        Expected YAML format:
-            modulators:
-              lfos:
-                - id: "vibrato"
-                  waveform: "sine"
-                  rate_hz: 5.5
-                  depth_q15: 8192
-                  delay_ms: 300
-                  ramp_ms: 200
-                  sync_mode: "free"
-                  targets:
-                    - type: "pitch"
-                      amount: 1.0
-
-        Returns:
-            List of LFOState instances
+        Delegates to the shared _parse_modulators() in instrument_ir.py.
         """
-        lfos = []
-        modulators_section = preset_dict.get('modulators', {})
-        lfos_list = modulators_section.get('lfos', [])
-
-        # Waveform name to enum mapping
-        waveform_map = {
-            'sine': LFOWaveform.SINE,
-            'triangle': LFOWaveform.TRIANGLE,
-            'saw_up': LFOWaveform.SAW_UP,
-            'saw': LFOWaveform.SAW_UP,
-            'square': LFOWaveform.SQUARE,
-        }
-
-        # Sync mode name to enum mapping
-        sync_mode_map = {
-            'free': LFOSyncMode.FREE,
-            'gate_reset': LFOSyncMode.GATE_RESET,
-            'legato_reset': LFOSyncMode.LEGATO_RESET,
-        }
-
-        # Target name to enum mapping
-        target_map = {
-            'pitch': LFOTarget.PITCH,
-            'gain': LFOTarget.GAIN,
-            'pwm_width': LFOTarget.PWM_WIDTH,
-            'pwm': LFOTarget.PWM_WIDTH,
-            'tilt': LFOTarget.TILT,
-            'brightness': LFOTarget.TILT,
-            'harmonic_rolloff': LFOTarget.TILT,  # Alias for tilt
-            'filter_cutoff': LFOTarget.FILTER_CUTOFF,
-            'cutoff': LFOTarget.FILTER_CUTOFF,
-            'filter_reso': LFOTarget.FILTER_RESO,
-            'resonance': LFOTarget.FILTER_RESO,
-            'band_scale': LFOTarget.BAND_SCALE,
-        }
-
-        # Assign arc slots sequentially (MAX_ARCS = 8)
-        arc_slot = 0
-
-        for lfo_def in lfos_list:
-            # Parse waveform
-            waveform_str = lfo_def.get('waveform', 'sine').lower()
-            waveform = waveform_map.get(waveform_str, LFOWaveform.SINE)
-
-            # Parse sync mode
-            sync_mode_str = lfo_def.get('sync_mode', 'free').lower()
-            sync_mode = sync_mode_map.get(sync_mode_str, LFOSyncMode.FREE)
-
-            # Parse targets
-            routings = []
-            for target_def in lfo_def.get('targets', []):
-                target_str = target_def.get('type', 'pitch').lower()
-                target = target_map.get(target_str, LFOTarget.PITCH)
-                amount = target_def.get('amount', 1.0)
-                amount_q15 = int(amount * Q15_ONE)
-                routings.append(LFORouting(
-                    target=target,
-                    amount_q15=amount_q15,
-                ))
-
-            # Resolve depth with float alternative
-            depth = float_or_q15(lfo_def, 'depth', 'depth_q15', Q15_HALF)
-
-            # Create LFO state with arc_slot for unified phase storage
-            lfo = LFOState(
-                id=lfo_def.get('id', ''),
-                waveform=waveform,
-                sync_mode=sync_mode,
-                routings=routings,
-                depth_q15=depth,
-                arc_slot=arc_slot,
-            )
-
-            # Configure timing (includes arc_slot)
-            lfo.configure_lfo(
-                rate_hz=lfo_def.get('rate_hz', 5.0),
-                depth_q15=depth,
-                waveform=waveform,
-                sync_mode=sync_mode,
-                delay_ms=lfo_def.get('delay_ms', 0.0),
-                ramp_ms=lfo_def.get('ramp_ms', 0.0),
-                routings=routings,
-                arc_slot=arc_slot,
-            )
-
-            lfos.append(lfo)
-            arc_slot += 1
-
-            # Warn if exceeding MAX_ARCS (8 slots available)
-            if arc_slot > 8:
-                import warnings
-                warnings.warn(f"LFO '{lfo.id}' exceeds MAX_ARCS=8 slots, phase storage may conflict")
-
-        return lfos
+        return _parse_modulators(preset_dict)
 
     def compile_file(self, filepath: str) -> CompiledPreset:
         """

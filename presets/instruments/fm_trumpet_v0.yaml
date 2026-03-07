@@ -16,91 +16,62 @@
 # - Integer ratios (1:1, 2:1, 3:1) create harmonic overtones
 # - Higher ratios = brighter, more cutting
 # - Feedback adds buzz/edge
+# Conformance: P2 (full CMMM synthesis)
 
 instrument_ir_v0:
   meta:
-    instrument_id: "fm-trumpet-v0"
+    id: "fm-trumpet-v0"
     name: "FM Trumpet"
     version: 0
     author: "symcrash"
-    seed_u32: 0x54525550
+    seed: 0x54525550
 
-  io:
-    sample_rate_hz: 48000
+  audio:
+    sample_rate: 48000
     block_size: 64
 
-  layers:
-    L0_graph:
-      nodes:
-        - id: "fm6"
-          type: "FM6"
-          params:
-            algorithm: 16         # 5 modulators into 1 carrier
-            feedback: 3           # Moderate feedback for edge
+  graph:
+    fm6:
+      type: FM6
+      output: amp1
+      algorithm: 16
+      feedback: 3
+      operators:
+        - ratio: 1.0
+          level: 1.0
+        - ratio: 1.0
+          level: 0.5
+        - ratio: 2.0
+          level: 0.4
+        - ratio: 3.0
+          level: 0.3
+        - ratio: 4.0
+          level: 0.2
+        - ratio: 2.0
+          level: 0.5
+    amp1:
+      type: Amp
+      attack: 8.0
+      decay: 100.0
+      sustain: 0.65
+      release: 150.0
 
-            # Operator frequency ratios and output levels
-            # Harmonic series for bright brass
-            # Carrier full, modulators create harmonic content
-            operators:
-              - ratio: 1.0        # Op1: carrier (fundamental)
-                level: 1.0        # Full output
-              - ratio: 1.0        # Op2: modulator (fundamental reinforcement)
-                level: 0.5        # Half depth
-              - ratio: 2.0        # Op3: modulator (2nd harmonic, octave)
-                level: 0.4        # Moderate harmonic content
-              - ratio: 3.0        # Op4: modulator (3rd harmonic, fifth+octave)
-                level: 0.3        # Moderate harmonic content
-              - ratio: 4.0        # Op5: modulator (4th harmonic, 2 octaves)
-                level: 0.2        # Subtle upper harmonic
-              - ratio: 2.0        # Op6: modulator (with feedback, adds edge)
-                level: 0.5        # Feedback modulation depth
+  controls:
+    Brightness: 0.8
+    Edge: 0.6
 
-        - id: "amp1"
-          type: "Amp"
-          params:
-            adsr:
-              a_ms: 8.0           # Brass attack
-              d_ms: 100.0         # Quick decay
-              s: 0.65             # Strong sustain
-              r_ms: 150.0         # Release
-
-      edges:
-        - src: "fm6"
-          dst: "amp1"
-
-      macros:
-        - id: "M_BRIGHT"
-          name: "Brightness"
-          default: 0.8
-        - id: "M_EDGE"
-          name: "Edge"
-          default: 0.6
-
-    L3_cmmm:
-      emit_templates:
-        T_IDLE:
-          families:
-            CONSTRAINT: 1.0
-            CALM: 1.0
-          ops_enable: ["NormalizeScale", "FineClamp"]
-          trees:
-            A: "T1"
-            B: "T1"
-            beta: 0.0
-
-        T_STABLE:
-          families:
-            COLOR: 0.6
-            CONSTRAINT: 1.0
-            CALM: 0.4
-          ops_enable: ["Tilt", "NormalizeScale", "FineClamp"]
-          trees:
-            A: "T1"
-            B: "T1"
-            beta: 0.3
+  behavior:
+    idle:
+      processing: [NormalizeScale, FineClamp]
+      emphasis: {CONSTRAINT: 1.0, CALM: 1.0}
+      trees: {A: T1, B: T1, blend: 0.0}
+    stable:
+      processing: [Tilt, NormalizeScale, FineClamp]
+      emphasis: {COLOR: 0.6, CONSTRAINT: 1.0, CALM: 0.4}
+      trees: {A: T1, B: T1, blend: 0.3}
 
   compile:
     material:
-      beta_start: 0.0
-      beta_target: 0.25
-      beta_ramp_blocks: 16
+      blend: 0.0
+      target: 0.25
+      ramp: 16

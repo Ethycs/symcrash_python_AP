@@ -12,101 +12,58 @@
 #
 # Custom harmonic profile from real violin analysis:
 # H1=94%, H2=100%, H3=21%, H4=73%, H5=11%, H6=19%, H7=4%, H8=4%
+# Conformance: P2 (full CMMM synthesis)
 
 instrument_ir_v0:
   meta:
-    instrument_id: "violin-ir-v1"
+    id: "violin-ir-v1"
     name: "Violin IR"
     version: 1
     author: "symcrash"
-    seed_u32: 0x56494F4C
+    seed: 0x56494F4C
 
-  io:
-    sample_rate_hz: 48000
+  audio:
+    sample_rate: 48000
     block_size: 64
 
-  layers:
-    L0_graph:
-      nodes:
-        - id: "osc1"
-          type: "Osc"
-          params:
-            waveform: "partials"
-            # Custom harmonic profile - H2 strongest (characteristic violin)
-            partials:
-              - 30890    # H1: 94.3%
-              - 32767    # H2: 100.0% (STRONGEST)
-              - 6926     # H3: 21.1%
-              - 23969    # H4: 73.2% (body resonance)
-              - 3673     # H5: 11.2%
-              - 6138     # H6: 18.7%
-              - 1164     # H7: 3.6%
-              - 1228     # H8: 3.7%
+  graph:
+    osc1:
+      type: Osc
+      output: amp1
+      waveform: partials
+      partials: [30890, 32767, 6926, 23969, 3673, 6138, 1164, 1228]
+    amp1:
+      type: Amp
+      attack: 30.0
+      decay: 250.0
+      sustain: 0.8
+      release: 550.0
 
-        - id: "amp1"
-          type: "Amp"
-          params:
-            adsr:
-              a_ms: 30.0          # Slow attack for bow contact
-              d_ms: 250.0         # Medium decay
-              s: 0.80             # High sustain
-              r_ms: 550.0         # Long release for natural decay
+  controls:
+    Vibrato: 0.5
+    Brightness: 0.5
+    Body: 0.5
+    Attack: 0.25
+    Release: 0.45
 
-      edges:
-        - src: "osc1"
-          dst: "amp1"
-
-      macros:
-        - id: "M_VIBRATO"
-          name: "Vibrato"
-          default: 0.5
-        - id: "M_BRIGHT"
-          name: "Brightness"
-          default: 0.5
-        - id: "M_BODY"
-          name: "Body"
-          default: 0.5
-        - id: "M_ATTACK"
-          name: "Attack"
-          default: 0.25
-        - id: "M_RELEASE"
-          name: "Release"
-          default: 0.45
-
-    L3_cmmm:
-      emit_templates:
-        T_IDLE:
-          families:
-            CONSTRAINT: 1.0
-            CALM: 1.0
-          ops_enable: ["NormalizeScale", "FineClamp"]
-          trees:
-            A: "T1"
-            B: "T1"
-            beta: 0.0
-          # CMMM Runtime Control (WSE-STD-070)
-          cmmm:
-            node_mask: 0x000000FF    # K=8 minimal for idle
-            tail_mode: "MIN"         # Only FineClamp
-
-        T_STABLE:
-          families:
-            CONSTRAINT: 1.0
-            CALM: 0.8
-          ops_enable: ["NormalizeScale", "FineClamp"]
-          trees:
-            A: "T1"
-            B: "T1"
-            beta: 0.0
-          # CMMM Runtime Control (WSE-STD-070)
-          cmmm:
-            node_mask: 0xFFFFFFFF    # K=32 full resolution for violin
-            mask_ramp_blocks: 15     # Smooth bow-like onset
-            tail_mode: "FULL"        # All tail ops for clean tone
-            traction: 1.0             # Hard projection
+  behavior:
+    idle:
+      processing: [NormalizeScale, FineClamp]
+      emphasis: {CONSTRAINT: 1.0, CALM: 1.0}
+      trees: {A: T1, B: T1, blend: 0.0}
+      resolution: 8
+      safety: MIN
+    stable:
+      processing: [NormalizeScale, FineClamp]
+      emphasis: {CONSTRAINT: 1.0, CALM: 0.8}
+      trees: {A: T1, B: T1, blend: 0.0}
+      resolution: 32
+      safety: FULL
+      ramp: 15
+      traction: 1.0
 
   compile:
     material:
-      beta_start: 0.0           # Pure carrier (no CMMM processing)
-      beta_target: 0.0          # Stay pure
-      beta_ramp_blocks: 1
+      blend: 0.0
+      target: 0.0
+      ramp: 1

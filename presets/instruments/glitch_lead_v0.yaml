@@ -19,206 +19,100 @@
 # - RISK: Glitch trigger (> 0.7 enters glitch)
 # - BRIGHT: Tilt amount
 # - BODY: Density
+# Conformance: P2 (full CMMM synthesis)
 
 instrument_ir_v0:
   meta:
-    instrument_id: "glitch-lead-v0"
+    id: "glitch-lead-v0"
     name: "Glitch Lead"
     version: 0
     author: "symcrash"
-    seed_u32: 0xDEADBEEF
+    seed: 0xDEADBEEF
 
-  io:
-    sample_rate_hz: 48000
+  audio:
+    sample_rate: 48000
     block_size: 64
 
-  layers:
-    L0_graph:
-      nodes:
-        - id: "osc1"
-          type: "Osc"
-          params:
-            waveform: "saw"
-        - id: "amp1"
-          type: "Amp"
-          params:
-            adsr:
-              a_ms: 5.0
-              d_ms: 80.0
-              s: 0.7
-              r_ms: 150.0
-      edges:
-        - src: "osc1"
-          dst: "amp1"
-      macros:
-        - id: "M_RISK"
-          name: "Risk"
-          default: 0.0
-        - id: "M_BRIGHT"
-          name: "Brightness"
-          default: 0.6
-        - id: "M_BODY"
-          name: "Body"
-          default: 0.5
+  graph:
+    osc1:
+      type: Osc
+      output: amp1
+      waveform: saw
+    amp1:
+      type: Amp
+      attack: 5.0
+      decay: 80.0
+      sustain: 0.7
+      release: 150.0
 
-    L2_regimes:
-      regime_nodes:
-        - id: "R0_IDLE"
-          kind: "Idle"
-          emit_template: "T_IDLE"
+  controls:
+    Risk: 0.0
+    Brightness: 0.6
+    Body: 0.5
 
-        - id: "R1_ATTACK"
-          kind: "Transient"
-          emit_template: "T_ATTACK"
-          dwell_ms: 15
+  behavior:
+    states:
+      idle: {kind: Idle}
+      attack: {kind: Transient, dwell: 15}
+      stable: {kind: StableTone}
+      glitch: {kind: GlitchChatter, dwell: 80}
+      recovery: {kind: Recovery, dwell: 60}
 
-        - id: "R2_STABLE"
-          kind: "StableTone"
-          emit_template: "T_STABLE"
+    transitions:
+      - from: idle
+        to: attack
+        when: "Gate rises"
+      - from: attack
+        to: stable
+        when: "dwell_done"
+      - from: stable
+        to: glitch
+        when: "risk > 0.7"
+        hysteresis: {enter: 0.7, exit: 0.3}
+      - from: glitch
+        to: recovery
+        when: "dwell_done"
+      - from: recovery
+        to: stable
+        when: "dwell_done"
+      - from: any
+        to: idle
+        when: "Gate falls"
 
-        - id: "R3_GLITCH"
-          kind: "GlitchChatter"
-          emit_template: "T_GLITCH"
-          dwell_ms: 80
-
-        - id: "R4_RECOVERY"
-          kind: "Recovery"
-          emit_template: "T_RECOVERY"
-          dwell_ms: 60
-
-      transitions:
-        # Normal flow
-        - from: "R0_IDLE"
-          to: "R1_ATTACK"
-          when: "Gate rises"
-
-        - from: "R1_ATTACK"
-          to: "R2_STABLE"
-          when: "dwell_done"
-
-        # Glitch trigger (risk-driven with hysteresis)
-        - from: "R2_STABLE"
-          to: "R3_GLITCH"
-          when: "risk > 0.7"
-          hysteresis:
-            enter: 0.7
-            exit: 0.3
-
-        # Glitch recovery
-        - from: "R3_GLITCH"
-          to: "R4_RECOVERY"
-          when: "dwell_done"
-
-        - from: "R4_RECOVERY"
-          to: "R2_STABLE"
-          when: "dwell_done"
-
-        # Note-off from any state
-        - from: "any"
-          to: "R0_IDLE"
-          when: "Gate falls"
-
-    L3_cmmm:
-      emit_templates:
-        T_IDLE:
-          families:
-            CONSTRAINT: 1.0
-            CALM: 1.0
-          ops_enable:
-            - "NormalizeScale"
-            - "FineClamp"
-          trees:
-            A: "T1"
-            B: "T1"
-            beta: 0.0
-          # CMMM Runtime Control (WSE-STD-070)
-          cmmm:
-            node_mask: 0x000000FF    # K=8 minimal for idle
-            tail_mode: "MIN"         # Only FineClamp
-
-        T_ATTACK:
-          families:
-            COLOR: 0.7
-            EXCITE: 1.0
-            CONSTRAINT: 1.0
-          ops_enable:
-            - "Tilt"
-            - "IntraMix"
-            - "NormalizeScale"
-            - "FineClamp"
-          trees:
-            A: "T1"
-            B: "T1"
-            beta: 0.0
-          # CMMM Runtime Control (WSE-STD-070)
-          cmmm:
-            node_mask: 0x0000FFFF    # K=16 ramp up during attack
-            mask_ramp_blocks: 8      # Fast ramp
-            tail_mode: "MID"         # FineClamp + NormalizeScale
-
-        T_STABLE:
-          families:
-            COLOR: 0.5
-            COHERENCE: 0.4
-            CONSTRAINT: 1.0
-            CALM: 0.6
-          ops_enable:
-            - "Tilt"
-            - "LowRankMorph"
-            - "NormalizeScale"
-            - "FineClamp"
-            - "SheafProject"
-          trees:
-            A: "T1"
-            B: "T1"
-            beta: 0.0
-          # CMMM Runtime Control (WSE-STD-070)
-          cmmm:
-            node_mask: 0xFFFFFFFF    # K=32 full resolution
-            mask_ramp_blocks: 12     # Smooth ramp to full
-            tail_mode: "FULL"        # All tail ops
-            traction: 1.0             # Hard projection
-
-        T_GLITCH:
-          families:
-            TOPOLOGY: 0.9
-            CATASTROPHE: 0.7
-            CONSTRAINT: 0.3
-            COLOR: 0.3
-          ops_enable:
-            - "BandShear"
-            - "SwapBands"
-            - "RotateNodes"
-            - "FoldPressure"
-            - "FineClamp"
-          trees:
-            A: "T1"
-            B: "T2"
-            beta: 0.5
-          # CMMM Runtime Control (WSE-STD-070)
-          cmmm:
-            node_mask: 0x00FFFFFF    # K=24 degraded during glitch
-            mask_ramp_blocks: 4      # Fast transition into chaos
-            tail_mode: "MIN"         # Minimal safety - let chaos through
-            traction: 0.25            # Soft projection
-
-        T_RECOVERY:
-          families:
-            COHERENCE: 0.5
-            CONSTRAINT: 1.0
-            CALM: 0.8
-          ops_enable:
-            - "GluePair"
-            - "SheafProject"
-            - "NormalizeScale"
-            - "FineClamp"
-          trees:
-            A: "T1"
-            B: "T1"
-            beta: 0.0
-          # CMMM Runtime Control (WSE-STD-070)
-          cmmm:
-            node_mask: 0xFFFFFFFF    # K=32 restore full resolution
-            mask_ramp_blocks: 16     # Slow recovery ramp
-            tail_mode: "FULL"        # Full safety operators
-            traction: 0.75            # Medium-hard projection
+    idle:
+      processing: [NormalizeScale, FineClamp]
+      emphasis: {CONSTRAINT: 1.0, CALM: 1.0}
+      trees: {A: T1, B: T1, blend: 0.0}
+      resolution: 8
+      safety: MIN
+    attack:
+      processing: [Tilt, IntraMix, NormalizeScale, FineClamp]
+      emphasis: {COLOR: 0.7, EXCITE: 1.0, CONSTRAINT: 1.0}
+      trees: {A: T1, B: T1, blend: 0.0}
+      resolution: 16
+      safety: MID
+      ramp: 8
+    stable:
+      processing: [Tilt, LowRankMorph, NormalizeScale, FineClamp, SheafProject]
+      emphasis: {COLOR: 0.5, COHERENCE: 0.4, CONSTRAINT: 1.0, CALM: 0.6}
+      trees: {A: T1, B: T1, blend: 0.0}
+      resolution: 32
+      safety: FULL
+      ramp: 12
+      traction: 1.0
+    glitch:
+      processing: [BandShear, SwapBands, RotateNodes, FoldPressure, FineClamp]
+      emphasis: {TOPOLOGY: 0.9, CATASTROPHE: 0.7, CONSTRAINT: 0.3, COLOR: 0.3}
+      trees: {A: T1, B: T2, blend: 0.5}
+      resolution: 24
+      safety: MIN
+      ramp: 4
+      traction: 0.25
+    recovery:
+      processing: [GluePair, SheafProject, NormalizeScale, FineClamp]
+      emphasis: {COHERENCE: 0.5, CONSTRAINT: 1.0, CALM: 0.8}
+      trees: {A: T1, B: T1, blend: 0.0}
+      resolution: 32
+      safety: FULL
+      ramp: 16
+      traction: 0.75

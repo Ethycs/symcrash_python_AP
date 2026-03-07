@@ -8,41 +8,32 @@
 # - Instant attack (~1ms)
 # - Long decay to zero (no sustain)
 # - Saw harmonics
+# Conformance: P0 (static synthesis)
 
 instrument_ir_v0:
   meta:
-    instrument_id: "pluck-v0"
+    id: "pluck-v0"
     name: "Pluck"
     version: 0
     author: "symcrash"
-    seed_u32: 0x504C554B
+    seed: 0x504C554B
 
-  io:
-    sample_rate_hz: 48000
+  audio:
+    sample_rate: 48000
     block_size: 64
 
-  layers:
-    L0_graph:
-      nodes:
-        - id: "osc1"
-          type: "Osc"
-          params:
-            waveform: "saw"
-        - id: "amp1"
-          type: "Amp"
-          params:
-            adsr:
-              a_ms: 1.0
-              d_ms: 160.0
-              s: 0.0
-              r_ms: 120.0
-      edges:
-        - src: "osc1"
-          dst: "amp1"
-      macros:
-        - id: "M_BRIGHT"
-          name: "Brightness"
-          default: 0.55
-        - id: "M_DECAY"
-          name: "Decay"
-          default: 0.5
+  graph:
+    osc1:
+      type: Osc
+      output: amp1
+      waveform: saw
+    amp1:
+      type: Amp
+      attack: 1.0
+      decay: 160.0
+      sustain: 0.0
+      release: 120.0
+
+  controls:
+    Brightness: 0.55
+    Decay: 0.5

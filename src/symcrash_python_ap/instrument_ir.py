@@ -39,6 +39,11 @@ from .primitives import (
     Q15_ONE,
 )
 
+# Import LFO types for modulators section
+from .vm.harmonic_bank import (
+    LFOState, LFOWaveform, LFOSyncMode, LFOTarget, LFORouting,
+)
+
 # Lazy import for central registry (avoid circular imports)
 def _get_central_registry():
     """Lazy import of CentralRegistry to avoid circular imports."""
@@ -1508,6 +1513,7 @@ class InstrumentIR:
     io: IOConfig = field(default_factory=IOConfig)
     layers: Layers = field(default_factory=Layers)
     compile: CompileConfig = field(default_factory=CompileConfig)
+    modulators: List['LFOState'] = field(default_factory=list)
 
     # DEPRECATED: These are now in their proper Tower layers
     # Kept for backwards compatibility - will be migrated to layers on load
@@ -2576,6 +2582,418 @@ def _parse_layers(data: dict) -> Layers:
 
 
 # =============================================================================
+# MODULATOR PARSING
+# =============================================================================
+
+# Mapping tables for LFO YAML parsing (shared between instrument_ir and preset_compiler)
+LFO_WAVEFORM_MAP = {
+    'sine': LFOWaveform.SINE,
+    'triangle': LFOWaveform.TRIANGLE,
+    'saw_up': LFOWaveform.SAW_UP,
+    'saw': LFOWaveform.SAW_UP,
+    'square': LFOWaveform.SQUARE,
+}
+
+LFO_SYNC_MODE_MAP = {
+    'free': LFOSyncMode.FREE,
+    'gate_reset': LFOSyncMode.GATE_RESET,
+    'legato_reset': LFOSyncMode.LEGATO_RESET,
+}
+
+LFO_TARGET_MAP = {
+    'pitch': LFOTarget.PITCH,
+    'gain': LFOTarget.GAIN,
+    'pwm_width': LFOTarget.PWM_WIDTH,
+    'pwm': LFOTarget.PWM_WIDTH,
+    'tilt': LFOTarget.TILT,
+    'brightness': LFOTarget.TILT,
+    'harmonic_rolloff': LFOTarget.TILT,
+    'filter_cutoff': LFOTarget.FILTER_CUTOFF,
+    'cutoff': LFOTarget.FILTER_CUTOFF,
+    'filter_reso': LFOTarget.FILTER_RESO,
+    'resonance': LFOTarget.FILTER_RESO,
+    'band_scale': LFOTarget.BAND_SCALE,
+}
+
+
+def _parse_modulators(data: dict) -> List[LFOState]:
+    """
+    Parse modulators section from instrument_ir_v0 YAML.
+
+    Expected format:
+        modulators:
+          lfos:
+            - id: "vibrato"
+              waveform: "sine"
+              rate_hz: 5.5
+              depth: 0.2
+              delay_ms: 300
+              ramp_ms: 200
+              sync_mode: "free"
+              targets:
+                - type: "pitch"
+                  amount: 1.0
+
+    Args:
+        data: The inner instrument_ir_v0 dict (after unwrapping top-level key)
+
+    Returns:
+        List of LFOState instances
+    """
+    modulators_section = data.get('modulators', {})
+    if not modulators_section:
+        return []
+
+    lfos_list = modulators_section.get('lfos', [])
+    if not lfos_list:
+        return []
+
+    result = []
+    arc_slot = 0
+
+    for lfo_def in lfos_list:
+        # Parse waveform
+        waveform_str = lfo_def.get('waveform', 'sine').lower()
+        waveform = LFO_WAVEFORM_MAP.get(waveform_str, LFOWaveform.SINE)
+
+        # Parse sync mode
+        sync_mode_str = lfo_def.get('sync_mode', 'free').lower()
+        sync_mode = LFO_SYNC_MODE_MAP.get(sync_mode_str, LFOSyncMode.FREE)
+
+        # Parse targets
+        routings = []
+        for target_def in lfo_def.get('targets', []):
+            target_str = target_def.get('type', 'pitch').lower()
+            target = LFO_TARGET_MAP.get(target_str, LFOTarget.PITCH)
+            amount = target_def.get('amount', 1.0)
+            amount_q15 = int(amount * Q15_ONE)
+            routings.append(LFORouting(
+                target=target,
+                amount_q15=amount_q15,
+            ))
+
+        # Resolve depth: float (0.0-1.0) preferred, fallback to depth_q15
+        depth = float_or_q15(lfo_def, 'depth', 'depth_q15', Q15_ONE // 2)
+
+        # Create LFO state
+        lfo = LFOState(
+            id=lfo_def.get('id', ''),
+            waveform=waveform,
+            sync_mode=sync_mode,
+            routings=routings,
+            depth_q15=depth,
+            arc_slot=arc_slot,
+        )
+
+        # Configure timing
+        lfo.configure_lfo(
+            rate_hz=lfo_def.get('rate_hz', 5.0),
+            depth_q15=depth,
+            waveform=waveform,
+            sync_mode=sync_mode,
+            delay_ms=lfo_def.get('delay_ms', 0.0),
+            ramp_ms=lfo_def.get('ramp_ms', 0.0),
+            routings=routings,
+            arc_slot=arc_slot,
+        )
+
+        result.append(lfo)
+        arc_slot += 1
+
+        if arc_slot > 8:
+            import warnings
+            warnings.warn(f"LFO '{lfo.id}' exceeds MAX_ARCS=8 slots, phase storage may conflict")
+
+    return result
+
+
+# =============================================================================
+# SOUND-DESIGN FORMAT TRANSLATION
+# =============================================================================
+
+# Resolution (K value) → node_mask mapping for sound-design format
+RESOLUTION_TO_MASK = {
+    1:  0x00000001,   # K=1
+    4:  0x0000000F,   # K=4
+    8:  0x000000FF,   # K=8
+    12: 0x00000FFF,   # K=12
+    16: 0x0000FFFF,   # K=16
+    24: 0x00FFFFFF,   # K=24
+    32: 0xFFFFFFFF,   # K=32
+}
+
+
+def _translate_sound_design_format(data: dict) -> dict:
+    """
+    Translate sound-design YAML format to internal layer format.
+
+    Converts the object-centric format (graph:, controls:, behavior:, etc.)
+    into the layer-based format (layers:, L0_graph:, L3_cmmm:, etc.) that
+    existing parsers expect.
+
+    The sound-design format uses natural sound engineering vocabulary:
+      - graph: signal flow with output: on each node
+      - controls: user-facing knobs (dict keyed by display name)
+      - character: sonic intent defaults
+      - behavior: state machine + processing
+      - attack/decay/sustain/release instead of a_ms/d_ms/s/r_ms
+      - processing instead of ops_enable
+      - resolution instead of node_mask
+      - safety instead of tail_mode
+    """
+    result = {}
+
+    # Meta: translate shorthand keys (id → instrument_id, seed → seed_u32)
+    meta = dict(data.get('meta', {}))
+    if 'id' in meta and 'instrument_id' not in meta:
+        meta['instrument_id'] = meta.pop('id')
+    if 'seed' in meta and 'seed_u32' not in meta:
+        meta['seed_u32'] = meta.pop('seed')
+    result['meta'] = meta
+
+    # Audio → IO (sample_rate → sample_rate_hz)
+    audio = data.get('audio', data.get('io', {}))
+    io_config = {}
+    if 'sample_rate' in audio:
+        io_config['sample_rate_hz'] = audio['sample_rate']
+    elif 'sample_rate_hz' in audio:
+        io_config['sample_rate_hz'] = audio['sample_rate_hz']
+    io_config['block_size'] = audio.get('block_size', 64)
+    result['io'] = io_config
+
+    # Graph → layers.L0_graph (nodes, edges, macros)
+    graph = data.get('graph', {})
+    nodes = []
+    edges = []
+    for node_id, node_data in graph.items():
+        node_dict = dict(node_data)
+        node_type = node_dict.pop('type', '')
+        output = node_dict.pop('output', None)
+
+        # Build params dict from flat node properties
+        params = {}
+        if node_type == 'Amp':
+            # Translate flat ADSR keys into params.adsr sub-dict
+            adsr = {}
+            if 'attack' in node_dict:
+                adsr['a_ms'] = float(node_dict.pop('attack'))
+            if 'decay' in node_dict:
+                adsr['d_ms'] = float(node_dict.pop('decay'))
+            if 'sustain' in node_dict:
+                adsr['s'] = float(node_dict.pop('sustain'))
+            if 'release' in node_dict:
+                adsr['r_ms'] = float(node_dict.pop('release'))
+            if adsr:
+                params['adsr'] = adsr
+            # Pass any remaining keys as-is
+            params.update(node_dict)
+        else:
+            # All other node types: flat params pass through
+            params = node_dict
+
+        nodes.append({
+            'id': node_id,
+            'type': node_type,
+            'params': params,
+        })
+
+        # output: field → edge
+        if output:
+            edges.append({'src': node_id, 'dst': output})
+
+    # Controls → macros list (name → M_NAME auto-ID)
+    macros = []
+    controls = data.get('controls', {})
+    for name, value in controls.items():
+        macro_id = 'M_' + name.upper().replace(' ', '_')
+        if isinstance(value, (int, float)):
+            macros.append({'id': macro_id, 'name': name, 'default': value})
+        elif isinstance(value, dict):
+            macro_dict = {'id': value.get('id', macro_id), 'name': name}
+            if 'default' in value:
+                macro_dict['default'] = value['default']
+            if 'range' in value:
+                macro_dict['range'] = value['range']
+            macros.append(macro_dict)
+
+    l0_graph = {'nodes': nodes, 'edges': edges, 'macros': macros}
+
+    # Behavior → L3_cmmm (+ L2_regimes for complex state machines)
+    layers = {'L0_graph': l0_graph}
+    behavior = data.get('behavior', {})
+    if behavior:
+        has_states = 'states' in behavior
+        has_transitions = 'transitions' in behavior
+
+        if has_states and has_transitions:
+            # Complex behavior: states + transitions → L2_regimes
+            states_data = behavior['states']
+            transitions_data = behavior['transitions']
+
+            regime_nodes = []
+            state_to_regime_id = {}
+            for i, (state_name, state_def) in enumerate(states_data.items()):
+                regime_id = f'R{i}_{state_name.upper()}'
+                state_to_regime_id[state_name] = regime_id
+                node = {
+                    'id': regime_id,
+                    'kind': state_def.get('kind', ''),
+                    'emit_template': f'T_{state_name.upper()}',
+                }
+                if state_def.get('dwell') is not None:
+                    node['dwell_ms'] = state_def['dwell']
+                regime_nodes.append(node)
+
+            transitions = []
+            for t in transitions_data:
+                from_name = t.get('from', '')
+                to_name = t.get('to', '')
+                from_regime = state_to_regime_id.get(from_name, from_name)
+                to_regime = state_to_regime_id.get(to_name, to_name)
+                trans = {'from': from_regime, 'to': to_regime, 'when': t.get('when', '')}
+                if 'hysteresis' in t:
+                    trans['hysteresis'] = t['hysteresis']
+                transitions.append(trans)
+
+            layers['L2_regimes'] = {
+                'regime_nodes': regime_nodes,
+                'transitions': transitions,
+            }
+
+        # Build emit templates from behavior state dicts
+        emit_templates = {}
+        reserved_keys = {'states', 'transitions'}
+        for state_name, state_def in behavior.items():
+            if state_name in reserved_keys:
+                continue
+            if not isinstance(state_def, dict):
+                continue
+
+            template_name = f'T_{state_name.upper()}'
+            template = {}
+
+            # processing → ops_enable
+            if 'processing' in state_def:
+                template['ops_enable'] = state_def['processing']
+
+            # emphasis → families
+            if 'emphasis' in state_def:
+                template['families'] = state_def['emphasis']
+
+            # trees: blend → beta
+            if 'trees' in state_def:
+                trees = dict(state_def['trees'])
+                if 'blend' in trees and 'beta' not in trees:
+                    trees['beta'] = trees.pop('blend')
+                template['trees'] = trees
+
+            # CMMM control: resolution/safety/ramp/traction
+            cmmm = {}
+            if 'resolution' in state_def:
+                k = state_def['resolution']
+                cmmm['node_mask'] = RESOLUTION_TO_MASK.get(k, 0xFFFFFFFF)
+            if 'safety' in state_def:
+                cmmm['tail_mode'] = state_def['safety']
+            if 'ramp' in state_def:
+                cmmm['mask_ramp_blocks'] = state_def['ramp']
+            if 'traction' in state_def:
+                cmmm['traction'] = state_def['traction']
+            if cmmm:
+                template['cmmm'] = cmmm
+
+            emit_templates[template_name] = template
+
+        if emit_templates:
+            layers['L3_cmmm'] = {'emit_templates': emit_templates}
+
+    result['layers'] = layers
+
+    # Character → control
+    if 'character' in data:
+        result['control'] = data['character']
+
+    # Envelopes: dict format → list format with ADSR translation
+    envelopes_data = data.get('envelopes', {})
+    if isinstance(envelopes_data, dict) and envelopes_data:
+        envelopes_list = []
+        for env_id, env_def in envelopes_data.items():
+            env_dict = {'id': env_id}
+            # Translate flat ADSR keys
+            adsr = {}
+            if 'attack' in env_def:
+                adsr['a_ms'] = float(env_def['attack'])
+            if 'decay' in env_def:
+                adsr['d_ms'] = float(env_def['decay'])
+            if 'sustain' in env_def:
+                adsr['s'] = float(env_def['sustain'])
+            if 'release' in env_def:
+                adsr['r_ms'] = float(env_def['release'])
+            # Also accept old adsr: sub-dict
+            if 'adsr' in env_def:
+                adsr = env_def['adsr']
+            if adsr:
+                env_dict['adsr'] = adsr
+            if 'targets' in env_def:
+                env_dict['targets'] = env_def['targets']
+            envelopes_list.append(env_dict)
+        result['envelopes'] = envelopes_list
+    elif isinstance(envelopes_data, list):
+        # Already in old list format
+        result['envelopes'] = envelopes_data
+
+    # Modulators: dict format → modulators.lfos list format
+    modulators_data = data.get('modulators', {})
+    if isinstance(modulators_data, dict) and modulators_data:
+        if 'lfos' not in modulators_data:
+            # New format: dict of named LFOs → lfos list
+            lfos_list = []
+            for lfo_id, lfo_def in modulators_data.items():
+                lfo_dict = dict(lfo_def)
+                lfo_dict['id'] = lfo_id
+                # Translate shorthand keys
+                if 'rate' in lfo_dict and 'rate_hz' not in lfo_dict:
+                    lfo_dict['rate_hz'] = lfo_dict.pop('rate')
+                if 'delay' in lfo_dict and 'delay_ms' not in lfo_dict:
+                    lfo_dict['delay_ms'] = lfo_dict.pop('delay')
+                if 'ramp' in lfo_dict and 'ramp_ms' not in lfo_dict:
+                    lfo_dict['ramp_ms'] = lfo_dict.pop('ramp')
+                if 'sync' in lfo_dict and 'sync_mode' not in lfo_dict:
+                    lfo_dict['sync_mode'] = lfo_dict.pop('sync')
+                # Translate targets: [{pitch: 1.0}] → [{type: "pitch", amount: 1.0}]
+                if 'targets' in lfo_dict:
+                    new_targets = []
+                    for t in lfo_dict['targets']:
+                        if isinstance(t, dict) and 'type' not in t:
+                            for target_type, amount in t.items():
+                                new_targets.append({'type': target_type, 'amount': amount})
+                        else:
+                            new_targets.append(t)
+                    lfo_dict['targets'] = new_targets
+                lfos_list.append(lfo_dict)
+            result['modulators'] = {'lfos': lfos_list}
+        else:
+            # Already has lfos key (old format)
+            result['modulators'] = modulators_data
+
+    # Compile: translate material vocabulary (blend/target/ramp → beta_start/beta_target/beta_ramp_blocks)
+    compile_data = data.get('compile', {})
+    if compile_data:
+        result_compile = dict(compile_data)
+        if 'material' in result_compile:
+            material = dict(result_compile['material'])
+            if 'blend' in material and 'beta_start' not in material:
+                material['beta_start'] = material.pop('blend')
+            if 'target' in material and 'beta_target' not in material:
+                material['beta_target'] = material.pop('target')
+            if 'ramp' in material and 'beta_ramp_blocks' not in material:
+                material['beta_ramp_blocks'] = material.pop('ramp')
+            result_compile['material'] = material
+        result['compile'] = result_compile
+
+    return result
+
+
+# =============================================================================
 # LOADER FUNCTIONS
 # =============================================================================
 
@@ -2631,6 +3049,15 @@ def load_instrument_from_dict(data: dict) -> InstrumentIR:
             "See PRESET-AUTHORING-GUIDE.md for the canonical format."
         )
 
+    # Format detection: sound-design format (graph:) vs layer format (layers:)
+    has_graph = 'graph' in data
+    has_layers = 'layers' in data
+    if has_graph and has_layers:
+        raise ValueError("Preset cannot have both 'graph:' and 'layers:' — use one format.")
+    if has_graph:
+        # Translate sound-design format to layer format for existing parsers
+        data = _translate_sound_design_format(data)
+
     # Parse envelope bindings (Matrix Envelope System)
     envelopes = [
         _parse_envelope_binding(env)
@@ -2642,12 +3069,16 @@ def load_instrument_from_dict(data: dict) -> InstrumentIR:
     if 'control' in data:
         control = _parse_control_config(data['control'])
 
+    # Parse modulators (LFOs)
+    modulators = _parse_modulators(data)
+
     # Create IR object
     ir = InstrumentIR(
         meta=_parse_instrument_meta(data.get('meta', {})),
         io=_parse_io_config(data.get('io', {})),
         layers=_parse_layers(data.get('layers', {})),
         compile=_parse_compile_config(data.get('compile', {})),
+        modulators=modulators,
     )
 
     # Set envelopes and control via property setters (migrates to proper Tower layers)

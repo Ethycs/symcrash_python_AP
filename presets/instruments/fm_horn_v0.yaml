@@ -15,91 +15,62 @@
 # - Sub-harmonic (0.5x) adds warmth
 # - Minimal feedback for smooth tone
 # - Slight detune for ensemble feel
+# Conformance: P2 (full CMMM synthesis)
 
 instrument_ir_v0:
   meta:
-    instrument_id: "fm-horn-v0"
+    id: "fm-horn-v0"
     name: "FM French Horn"
     version: 0
     author: "symcrash"
-    seed_u32: 0x484F524E
+    seed: 0x484F524E
 
-  io:
-    sample_rate_hz: 48000
+  audio:
+    sample_rate: 48000
     block_size: 64
 
-  layers:
-    L0_graph:
-      nodes:
-        - id: "fm6"
-          type: "FM6"
-          params:
-            algorithm: 22         # Classic brass (4 carriers + 2 mods)
-            feedback: 1           # Very light feedback (smooth)
+  graph:
+    fm6:
+      type: FM6
+      output: amp1
+      algorithm: 22
+      feedback: 1
+      operators:
+        - ratio: 1.0
+          level: 1.0
+        - ratio: 1.001
+          level: 0.7
+        - ratio: 0.999
+          level: 0.7
+        - ratio: 1.00201
+          level: 0.5
+        - ratio: 0.5
+          level: 0.5
+        - ratio: 1.0
+          level: 0.3
+    amp1:
+      type: Amp
+      attack: 25.0
+      decay: 200.0
+      sustain: 0.6
+      release: 250.0
 
-            # Operator frequency ratios and output levels
-            # Sub-harmonic on Op5 adds warmth, 1:1 mod on Op6
-            # Lower mod levels for darker, smoother tone
-            operators:
-              - ratio: 1.0        # Op1: carrier (anchor, fundamental)
-                level: 1.0        # Full output
-              - ratio: 1.001      # Op2: carrier (+1.7 cents detune)
-                level: 0.7        # Slightly reduced
-              - ratio: 0.999      # Op3: carrier (-1.7 cents detune)
-                level: 0.7        # Slightly reduced
-              - ratio: 1.00201    # Op4: carrier (+3.4 cents detune)
-                level: 0.5        # Half output
-              - ratio: 0.5        # Op5: modulator (sub-harmonic warmth)
-                level: 0.5        # Sub-harmonic modulation depth
-              - ratio: 1.0        # Op6: modulator (with feedback)
-                level: 0.3        # Low feedback for smooth tone
+  controls:
+    Warmth: 0.7
+    Body: 0.6
 
-        - id: "amp1"
-          type: "Amp"
-          params:
-            adsr:
-              a_ms: 25.0          # Slower attack (horn character)
-              d_ms: 200.0         # Long decay
-              s: 0.6              # Moderate sustain
-              r_ms: 250.0         # Smooth release
-
-      edges:
-        - src: "fm6"
-          dst: "amp1"
-
-      macros:
-        - id: "M_WARMTH"
-          name: "Warmth"
-          default: 0.7
-        - id: "M_BODY"
-          name: "Body"
-          default: 0.6
-
-    L3_cmmm:
-      emit_templates:
-        T_IDLE:
-          families:
-            CONSTRAINT: 1.0
-            CALM: 1.0
-          ops_enable: ["NormalizeScale", "FineClamp"]
-          trees:
-            A: "T1"
-            B: "T1"
-            beta: 0.0
-
-        T_STABLE:
-          families:
-            COLOR: 0.3
-            CONSTRAINT: 1.0
-            CALM: 0.7
-          ops_enable: ["Tilt", "NormalizeScale", "FineClamp"]
-          trees:
-            A: "T1"
-            B: "T1"
-            beta: 0.15
+  behavior:
+    idle:
+      processing: [NormalizeScale, FineClamp]
+      emphasis: {CONSTRAINT: 1.0, CALM: 1.0}
+      trees: {A: T1, B: T1, blend: 0.0}
+    stable:
+      processing: [Tilt, NormalizeScale, FineClamp]
+      emphasis: {COLOR: 0.3, CONSTRAINT: 1.0, CALM: 0.7}
+      trees: {A: T1, B: T1, blend: 0.15}
 
   compile:
     material:
-      beta_start: 0.0
-      beta_target: 0.125          # Less material processing
-      beta_ramp_blocks: 24
+      blend: 0.0
+      target: 0.125
+      ramp: 24

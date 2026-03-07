@@ -8,41 +8,32 @@
 # - Fast attack (~3ms)
 # - Medium decay to high sustain
 # - Square wave base
+# Conformance: P0 (static synthesis)
 
 instrument_ir_v0:
   meta:
-    instrument_id: "wobble-bass-v0"
+    id: "wobble-bass-v0"
     name: "Wobble Bass"
     version: 0
     author: "symcrash"
-    seed_u32: 0x574F4242
+    seed: 0x574F4242
 
-  io:
-    sample_rate_hz: 48000
+  audio:
+    sample_rate: 48000
     block_size: 64
 
-  layers:
-    L0_graph:
-      nodes:
-        - id: "osc1"
-          type: "Osc"
-          params:
-            waveform: "square"
-        - id: "amp1"
-          type: "Amp"
-          params:
-            adsr:
-              a_ms: 3.0
-              d_ms: 80.0
-              s: 0.92
-              r_ms: 90.0
-      edges:
-        - src: "osc1"
-          dst: "amp1"
-      macros:
-        - id: "M_BRIGHT"
-          name: "Brightness"
-          default: 0.2
-        - id: "M_WOBBLE"
-          name: "Wobble Rate"
-          default: 0.35
+  graph:
+    osc1:
+      type: Osc
+      output: amp1
+      waveform: square
+    amp1:
+      type: Amp
+      attack: 3.0
+      decay: 80.0
+      sustain: 0.92
+      release: 90.0
+
+  controls:
+    Brightness: 0.2
+    Wobble Rate: 0.35

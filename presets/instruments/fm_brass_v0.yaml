@@ -20,133 +20,83 @@
 # Matrix envelope system enables proper FM brass voicing:
 # - Carrier envelope: standard ADSR for amplitude
 # - Modulator envelope: faster decay for brightness transient
+# Conformance: P2 (full CMMM synthesis)
 
 instrument_ir_v0:
   meta:
-    instrument_id: "fm-brass-v0"
+    id: "fm-brass-v0"
     name: "FM Brass"
     version: 0
     author: "symcrash"
-    seed_u32: 0x464D4252
+    seed: 0x464D4252
 
-  # Control axis defaults for cockpit integration (WSE-STD-MACRO v0)
-  # These define semantic control axis defaults that MacroRuntime applies at load
-  control:
-    brightness: 0.75         # High brightness for brass blat
-    density: 0.55            # Medium-high body for brass section
-    energy_intent: 0.6       # Slightly aggressive character
-    risk: 0.05               # Subtle instability for organic feel
-    material: 0.65           # Toward metallic (metal = high)
-
-  # Matrix Envelope System (WSE-STD-ENVELOPE-MATRIX-v0)
-  # Named envelopes routed to multiple targets
-  envelopes:
-    # Carrier envelope: standard brass ADSR for amplitude
-    # Applies to all 4 carriers (Op1-4)
-    - id: "carrier_env"
-      adsr:
-        a_ms: 8.0           # Fast attack for brass "blat"
-        d_ms: 150.0         # Medium decay to sustain
-        s: 0.7              # Strong sustain level
-        r_ms: 100.0         # Quick release
-      targets:
-        - FM_OP1
-        - FM_OP2
-        - FM_OP3
-        - FM_OP4
-
-    # Modulator envelope: fast decay for brightness transient
-    # Modulators decay much faster than carriers (50ms vs 150ms)
-    # This creates the characteristic brass "blat" where attack is bright
-    # but sustain is warmer
-    - id: "mod_env"
-      adsr:
-        a_ms: 8.0           # Same fast attack
-        d_ms: 50.0          # Much faster decay (brightness fades quickly)
-        s: 0.3              # Lower sustain (less modulation = less brightness)
-        r_ms: 100.0         # Same release
-      targets:
-        - FM_OP5
-        - FM_OP6
-
-  io:
-    sample_rate_hz: 48000
+  audio:
+    sample_rate: 48000
     block_size: 64
 
-  layers:
-    L0_graph:
-      nodes:
-        # 6-operator FM for brass character
-        - id: "fm6"
-          type: "FM6"
-          params:
-            algorithm: 19         # Jump brass algorithm (4 carriers + 2 mods)
-            feedback: 1           # Very light feedback (Q15_ONE // 16 equivalent)
+  graph:
+    fm6:
+      type: FM6
+      output: amp1
+      algorithm: 19
+      feedback: 1
+      operators:
+        - ratio: 1.0
+          level: 1.0
+        - ratio: 1.0029
+          level: 1.0
+        - ratio: 0.9971
+          level: 1.0
+        - ratio: 1.0058
+          level: 0.875
+        - ratio: 1.0
+          level: 0.33332
+        - ratio: 1.0
+          level: 0.24998
+    amp1:
+      type: Amp
+      attack: 2.0
+      decay: 140.0
+      sustain: 0.5
+      release: 100.0
 
-            # Operator frequency ratios and output levels
-            # Reduced carrier detune to eliminate beating/electric shaver sound
-            # +/-5 cents provides warmth without audible AM artifacts
-            # Based on configure_jump_brass: full carriers, reduced mod depth
-            operators:
-              - ratio: 1.0        # Op1: carrier (anchor, fundamental)
-                level: 1.0        # Full output
-              - ratio: 1.0029     # Op2: carrier (+5 cents detune)
-                level: 1.0        # Full output
-              - ratio: 0.9971     # Op3: carrier (-5 cents detune)
-                level: 1.0        # Full output
-              - ratio: 1.0058     # Op4: carrier (+10 cents detune)
-                level: 0.875      # Slightly reduced for wide detune
-              - ratio: 1.0        # Op5: modulator (warm harmonics)
-                level: 0.33332    # Subtle warmth
-              - ratio: 1.0        # Op6: modulator (with feedback)
-                level: 0.24998    # Gentle feedback depth
+  controls:
+    Brightness: 0.75
+    Brass Edge: 0.55
 
-        - id: "amp1"
-          type: "Amp"
-          params:
-            adsr:
-              a_ms: 2.0           # Fast attack (Jump style)
-              d_ms: 140.0         # Slow decay
-              s: 0.5              # Sustain level
-              r_ms: 100.0         # Release
+  character:
+    brightness: 0.75
+    density: 0.55
+    energy_intent: 0.6
+    risk: 0.05
+    material: 0.65
 
-      edges:
-        - src: "fm6"
-          dst: "amp1"
+  envelopes:
+    carrier_env:
+      attack: 8.0
+      decay: 150.0
+      sustain: 0.7
+      release: 100.0
+      targets: [FM_OP1, FM_OP2, FM_OP3, FM_OP4]
+    mod_env:
+      attack: 8.0
+      decay: 50.0
+      sustain: 0.3
+      release: 100.0
+      targets: [FM_OP5, FM_OP6]
 
-      macros:
-        - id: "M_BRIGHT"
-          name: "Brightness"
-          default: 0.75
-        - id: "M_TEXTURE"
-          name: "Brass Edge"
-          default: 0.55
-
-    L3_cmmm:
-      emit_templates:
-        T_IDLE:
-          families:
-            CONSTRAINT: 1.0
-            CALM: 1.0
-          ops_enable: ["NormalizeScale", "FineClamp"]
-          trees:
-            A: "T1"
-            B: "T1"
-            beta: 0.0
-
-        T_STABLE:
-          families:
-            COLOR: 0.5
-            CONSTRAINT: 1.0
-            CALM: 0.5
-          ops_enable: ["Tilt", "NormalizeScale", "FineClamp"]
-          trees:
-            A: "T1"
-            B: "T1"
-            beta: 0.25
+  behavior:
+    idle:
+      processing: [NormalizeScale, FineClamp]
+      emphasis: {CONSTRAINT: 1.0, CALM: 1.0}
+      trees: {A: T1, B: T1, blend: 0.0}
+    stable:
+      processing: [Tilt, NormalizeScale, FineClamp]
+      emphasis: {COLOR: 0.5, CONSTRAINT: 1.0, CALM: 0.5}
+      trees: {A: T1, B: T1, blend: 0.25}
 
   compile:
     material:
-      beta_start: 0.0
-      beta_target: 0.25           # Light material blend
-      beta_ramp_blocks: 16
+      blend: 0.0
+      target: 0.25
+      ramp: 16

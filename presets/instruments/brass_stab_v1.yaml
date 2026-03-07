@@ -24,126 +24,72 @@
 # - Very fast attack (~3ms)
 # - Bright, buzzy sustain
 # - Rich harmonic content with "screaming" quality
+# Conformance: P2 (full CMMM synthesis)
 
 instrument_ir_v0:
   meta:
-    instrument_id: "brass-stab-v1"
+    id: "brass-stab-v1"
     name: "Synth Brass"
     version: 1
     author: "symcrash"
-    seed_u32: 0x42525354
+    seed: 0x42525354
 
-  io:
-    sample_rate_hz: 48000
+  audio:
+    sample_rate: 48000
     block_size: 64
 
-  layers:
-    L0_graph:
-      nodes:
-        # 6-operator FM - all modulators into one carrier
-        - id: "fm6"
-          type: "FM6"
-          params:
-            algorithm: 16         # 5 modulators into 1 carrier
-            feedback: 5           # Higher feedback for buzz
+  graph:
+    fm6:
+      type: FM6
+      output: amp1
+      algorithm: 16
+      feedback: 5
+      operators:
+        - ratio: 1.0
+          level: 1.0
+        - ratio: 2.0
+          level: 0.5
+        - ratio: 3.0
+          level: 0.33335
+        - ratio: 4.0
+          level: 0.25
+        - ratio: 5.0
+          level: 0.20002
+        - ratio: 2.0
+          level: 0.62502
+    amp1:
+      type: Amp
+      attack: 3.0
+      decay: 120.0
+      sustain: 0.7
+      release: 80.0
 
-            # Operator frequency ratios and output levels
-            # Harmonic series for sawtooth-like spectrum
-            # Weighted to approximate 1/n rolloff + boost on feedback mod
-            operators:
-              - ratio: 1.0        # Op1: carrier (fundamental)
-                level: 1.0        # Full output
-              - ratio: 2.0        # Op2: modulator (2nd harmonic)
-                level: 0.5        # 1/2 rolloff
-              - ratio: 3.0        # Op3: modulator (3rd harmonic)
-                level: 0.33335    # ~1/3 rolloff
-              - ratio: 4.0        # Op4: modulator (4th harmonic)
-                level: 0.25       # 1/4 rolloff
-              - ratio: 5.0        # Op5: modulator (5th harmonic)
-                level: 0.20002    # ~1/5 rolloff
-              - ratio: 2.0        # Op6: modulator (with feedback, adds buzz)
-                level: 0.62502    # Boosted for aggressive edge
+  controls:
+    Brightness: 0.85
+    Buzz: 0.7
+    Attack: 0.1
+    Decay: 0.5
+    Sustain: 0.75
+    Release: 0.25
 
-        - id: "amp1"
-          type: "Amp"
-          params:
-            adsr:
-              a_ms: 3.0           # Very fast attack
-              d_ms: 120.0         # Medium decay
-              s: 0.7              # High sustain for lead
-              r_ms: 80.0          # Quick release
-
-      edges:
-        - src: "fm6"
-          dst: "amp1"
-
-      macros:
-        - id: "M_BRIGHT"
-          name: "Brightness"
-          default: 0.85
-        - id: "M_BUZZ"
-          name: "Buzz"
-          default: 0.7
-        - id: "M_ATTACK"
-          name: "Attack"
-          default: 0.1
-        - id: "M_DECAY"
-          name: "Decay"
-          default: 0.5
-        - id: "M_SUSTAIN"
-          name: "Sustain"
-          default: 0.75
-        - id: "M_RELEASE"
-          name: "Release"
-          default: 0.25
-
-    L3_cmmm:
-      emit_templates:
-        T_IDLE:
-          families:
-            CONSTRAINT: 1.0
-            CALM: 1.0
-          ops_enable: ["NormalizeScale", "FineClamp"]
-          trees:
-            A: "T1"
-            B: "T1"
-            beta: 0.0
-        T_ATTACK:
-          families:
-            COLOR: 0.9
-            EXCITE: 1.0
-            CONSTRAINT: 1.0
-            CALM: 0.1
-          ops_enable: ["Tilt", "IntraMix", "Impulse", "GlobalPulse", "NormalizeScale", "FineClamp"]
-          trees:
-            A: "T1"
-            B: "T1"
-            beta: 0.2
-        T_STABLE:
-          families:
-            COLOR: 0.8
-            COHERENCE: 0.3
-            CONSTRAINT: 1.0
-            CALM: 0.4
-          ops_enable: ["Tilt", "DiffuseDown", "IntraMix", "NormalizeScale", "FineClamp"]
-          trees:
-            A: "T1"
-            B: "T1"
-            beta: 0.3
-        T_RECOVERY:
-          families:
-            COHERENCE: 0.3
-            CONSTRAINT: 1.0
-            CALM: 1.0
-          ops_enable: ["GluePair", "SheafProject", "NormalizeScale", "FineClamp"]
-          trees:
-            A: "T1"
-            B: "T1"
-            beta: 0.0
+  behavior:
+    idle:
+      processing: [NormalizeScale, FineClamp]
+      emphasis: {CONSTRAINT: 1.0, CALM: 1.0}
+      trees: {A: T1, B: T1, blend: 0.0}
+    attack:
+      processing: [Tilt, IntraMix, Impulse, GlobalPulse, NormalizeScale, FineClamp]
+      emphasis: {COLOR: 0.9, EXCITE: 1.0, CONSTRAINT: 1.0, CALM: 0.1}
+      trees: {A: T1, B: T1, blend: 0.2}
+    stable:
+      processing: [Tilt, DiffuseDown, IntraMix, NormalizeScale, FineClamp]
+      emphasis: {COLOR: 0.8, COHERENCE: 0.3, CONSTRAINT: 1.0, CALM: 0.4}
+      trees: {A: T1, B: T1, blend: 0.3}
+    recovery:
+      processing: [GluePair, SheafProject, NormalizeScale, FineClamp]
+      emphasis: {COHERENCE: 0.3, CONSTRAINT: 1.0, CALM: 1.0}
+      trees: {A: T1, B: T1, blend: 0.0}
 
   compile:
     completion_policy:
-      default_tree:
-        A: "T1"
-        B: "T1"
-        beta: 0.25
+      default_tree: {A: T1, B: T1, beta: 0.25}

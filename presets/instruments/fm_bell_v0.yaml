@@ -18,63 +18,46 @@
 # - Instant attack (~1ms)
 # - Long decay to zero
 # - Inharmonic bell-like partials
+# Conformance: P0 (static synthesis)
 
 instrument_ir_v0:
   meta:
-    instrument_id: "fm-bell-v0"
+    id: "fm-bell-v0"
     name: "FM Bell"
     version: 0
     author: "symcrash"
-    seed_u32: 0x464D424C
+    seed: 0x464D424C
 
-  io:
-    sample_rate_hz: 48000
+  audio:
+    sample_rate: 48000
     block_size: 64
 
-  layers:
-    L0_graph:
-      nodes:
-        # 6-operator FM configuration
-        - id: "fm6"
-          type: "FM6"
-          params:
-            algorithm: 5          # DX7 Algorithm 5 (dual stack)
-            feedback: 1           # Light feedback for shimmer
+  graph:
+    fm6:
+      type: FM6
+      output: amp1
+      algorithm: 5
+      feedback: 1
+      operators:
+        - ratio: 1.0
+          level: 1.0
+        - ratio: 1.0
+          level: 0.25
+        - ratio: 3.5
+          level: 0.2
+        - ratio: 2.0
+          level: 0.33332
+        - ratio: 4.5
+          level: 0.15
+        - ratio: 14.0
+          level: 0.09998
+    amp1:
+      type: Amp
+      attack: 1.0
+      decay: 800.0
+      sustain: 0.0
+      release: 400.0
 
-            # Operator frequency ratios and output levels
-            # Inharmonic ratios create the bell "clang"
-            # Lower modulation for cleaner bell tone
-            operators:
-              - ratio: 1.0        # Op1: carrier (fundamental)
-                level: 1.0        # Full output
-              - ratio: 1.0        # Op2: modulator (adds body)
-                level: 0.25       # Subtle body modulation
-              - ratio: 3.5        # Op3: modulator (inharmonic shimmer)
-                level: 0.2        # Subtle shimmer
-              - ratio: 2.0        # Op4: modulator (octave harmonics)
-                level: 0.33332    # Adds harmonics
-              - ratio: 4.5        # Op5: modulator (inharmonic partial)
-                level: 0.15       # Subtle inharmonic content
-              - ratio: 14.0       # Op6: modulator (classic E.Piano ratio)
-                level: 0.09998    # Feedback op - keep low
-
-        - id: "amp1"
-          type: "Amp"
-          params:
-            adsr:
-              a_ms: 1.0           # Instant attack
-              d_ms: 800.0         # Long decay (bell-like)
-              s: 0.0              # No sustain
-              r_ms: 400.0         # Medium release
-
-      edges:
-        - src: "fm6"
-          dst: "amp1"
-
-      macros:
-        - id: "M_BRIGHT"
-          name: "Brightness"
-          default: 0.5
-        - id: "M_INDEX"
-          name: "FM Index"
-          default: 0.6
+  controls:
+    Brightness: 0.5
+    FM Index: 0.6

@@ -9,77 +9,47 @@
 #
 # The golden ratio spacing creates partials that are close to
 # harmonic but slightly off, producing a rich, evolving texture.
+# Conformance: P2 (full CMMM synthesis)
 
 instrument_ir_v0:
   meta:
-    instrument_id: "oeis-pad-v0"
+    id: "oeis-pad-v0"
     name: "OEIS Pad (Golden)"
     version: 0
     author: "symcrash"
-    seed_u32: 0x474F4C44  # "GOLD"
+    seed: 0x474F4C44
 
-  io:
-    sample_rate_hz: 48000
+  audio:
+    sample_rate: 48000
     block_size: 64
 
-  layers:
-    L0_graph:
-      nodes:
-        # Mode B oscillator with golden ratio partials
-        - id: "osc1"
-          type: "Osc"
-          params:
-            coeff_osc_mode: 1           # Mode B (Harmonic Bank)
-            oeis_sequence_id: 2         # BEATTY_PHI (A001950 - golden ratio)
-            oeis_rolloff_db: -4.0       # Steeper rolloff for warmth
-            H_request: 32
+  graph:
+    osc1:
+      type: Osc
+      output: amp1
+    amp1:
+      type: Amp
+      attack: 300.0
+      decay: 500.0
+      sustain: 0.7
+      release: 600.0
 
-        - id: "amp1"
-          type: "Amp"
-          params:
-            adsr:
-              a_ms: 300.0         # Slow swell
-              d_ms: 500.0
-              s: 0.7              # High sustain
-              r_ms: 600.0         # Long release
+  controls:
+    Shimmer: 0.5
+    Warmth: 0.6
 
-      edges:
-        - src: "osc1"
-          dst: "amp1"
-
-      macros:
-        - id: "M_SHIMMER"
-          name: "Shimmer"
-          default: 0.5
-        - id: "M_WARMTH"
-          name: "Warmth"
-          default: 0.6
-
-  # L3 CMMM: DiffuseUp for shimmer
-  L3_cmmm:
-    regimes:
-      - name: "attack"
-        ops: []
-      - name: "sustain"
-        ops: ["TILT", "DIFFUSE_UP"]
-      - name: "release"
-        ops: ["DIFFUSE_UP"]
-
-    transitions:
-      - from: "attack"
-        to: "sustain"
-        trigger: "time"
-        time_ms: 200
-
-    tail:
-      mode: "lite"
-      tree:
-        A: "T1"
-        B: "T2"
-        beta: 0.3
+  behavior:
+    idle:
+      processing: [FineClamp]
+      emphasis: {CONSTRAINT: 1.0, CALM: 1.0}
+      trees: {A: T1, B: T2, blend: 0.3}
+    stable:
+      processing: [Tilt, DiffuseUp, FineClamp]
+      emphasis: {COLOR: 0.5, LOCAL: 0.5, CONSTRAINT: 1.0}
+      trees: {A: T1, B: T2, blend: 0.3}
 
   compile:
     material:
-      beta_start: 0.0
-      beta_target: 0.625
-      beta_ramp_blocks: 16
+      blend: 0.0
+      target: 0.625
+      ramp: 16
