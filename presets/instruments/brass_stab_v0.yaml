@@ -46,25 +46,22 @@ instrument_ir_v0:
             algorithm: 22         # Classic DX7 brass algorithm
             feedback: 4           # Moderate feedback for brass edge
 
-            # Operator frequency ratios (Q16: 65536 = 1.0x)
+            # Operator frequency ratios and output levels
             # Carriers mostly 1:1 with slight detune, modulator at 2:1
-            op_ratios:
-              - 65536             # Op 1: 1.0x (carrier, anchor fundamental)
-              - 65602             # Op 2: 1.001x (carrier, +1.7 cents detune)
-              - 65470             # Op 3: 0.999x (carrier, -1.7 cents detune)
-              - 65668             # Op 4: 1.002x (carrier, +3.4 cents detune)
-              - 65536             # Op 5: 1.0x (modulator - creates 2nd harmonic)
-              - 131072            # Op 6: 2.0x (modulator - creates 3rd harmonic + brass edge)
-
-            # Operator output levels (Q15)
             # Balanced carriers, higher modulator levels for brass bite
-            op_levels:
-              - 32767             # Op 1: Full (anchor carrier, unmodulated)
-              - 24576             # Op 2: 0.75 (modulated carrier)
-              - 24576             # Op 3: 0.75 (modulated carrier)
-              - 20480             # Op 4: 0.625 (modulated carrier)
-              - 20480             # Op 5: 0.625 (modulator - main mod depth)
-              - 16384             # Op 6: 0.5 (modulator w/feedback - adds edge)
+            operators:
+              - ratio: 1.0        # Op1: carrier (anchor, unmodulated fundamental)
+                level: 1.0        # Full output
+              - ratio: 1.001      # Op2: carrier (+1.7 cents detune)
+                level: 0.75002    # Modulated carrier output
+              - ratio: 0.999      # Op3: carrier (-1.7 cents detune)
+                level: 0.75002    # Modulated carrier output
+              - ratio: 1.00201    # Op4: carrier (+3.4 cents detune)
+                level: 0.62502    # Modulated carrier, slightly reduced
+              - ratio: 1.0        # Op5: modulator (creates 2nd harmonic)
+                level: 0.62502    # Main modulation depth
+              - ratio: 2.0        # Op6: modulator (3rd harmonic + brass edge)
+                level: 0.5        # Feedback modulator adds edge
 
         - id: "amp1"
           type: "Amp"

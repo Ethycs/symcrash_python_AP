@@ -37,25 +37,22 @@ instrument_ir_v0:
             algorithm: 22         # Classic brass (4 carriers + 2 mods)
             feedback: 1           # Very light feedback (smooth)
 
-            # Operator frequency ratios (Q16: 65536 = 1.0x)
+            # Operator frequency ratios and output levels
             # Sub-harmonic on Op5 adds warmth, 1:1 mod on Op6
-            op_ratios:
-              - 65536             # Op1: 1.0x (anchor carrier)
-              - 65602             # Op2: +1.7 cents (slight detune)
-              - 65470             # Op3: -1.7 cents
-              - 65668             # Op4: +3.4 cents
-              - 32768             # Op5: 0.5x (sub-harmonic mod!)
-              - 65536             # Op6: 1.0x (with feedback)
-
-            # Operator output levels (Q15: 32767 = 1.0)
             # Lower mod levels for darker, smoother tone
-            op_levels:
-              - 32767             # Op1: Full (anchor)
-              - 22937             # Op2: 0.7
-              - 22937             # Op3: 0.7
-              - 16384             # Op4: 0.5
-              - 16384             # Op5: 0.5 (sub mod)
-              - 9830              # Op6: 0.3 (low feedback mod)
+            operators:
+              - ratio: 1.0        # Op1: carrier (anchor, fundamental)
+                level: 1.0        # Full output
+              - ratio: 1.001      # Op2: carrier (+1.7 cents detune)
+                level: 0.7        # Slightly reduced
+              - ratio: 0.999      # Op3: carrier (-1.7 cents detune)
+                level: 0.7        # Slightly reduced
+              - ratio: 1.00201    # Op4: carrier (+3.4 cents detune)
+                level: 0.5        # Half output
+              - ratio: 0.5        # Op5: modulator (sub-harmonic warmth)
+                level: 0.5        # Sub-harmonic modulation depth
+              - ratio: 1.0        # Op6: modulator (with feedback)
+                level: 0.3        # Low feedback for smooth tone
 
         - id: "amp1"
           type: "Amp"
@@ -103,6 +100,6 @@ instrument_ir_v0:
 
   compile:
     material:
-      beta_start_q15: 0
-      beta_target_q15: 4096       # Less material processing
+      beta_start: 0.0
+      beta_target: 0.125          # Less material processing
       beta_ramp_blocks: 24

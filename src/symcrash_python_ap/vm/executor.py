@@ -18,7 +18,7 @@ from .tables import Tables, DEFAULT_TABLES, BLOCK_SAMPLES, VM_K
 from .lanes import (
     lane_inject,
     dispatch_coeff_op,
-    dispatch_coeff_op_crossfade,  # WSE-STD-070: crossfade-aware dispatch
+    dispatch_coeff_op_crossfade,  # WSE-STD-070: mask-aware dispatch
     lane_tail,
     lane_ccs_render,
 )
@@ -45,7 +45,7 @@ def _process_cmmm_events(state: VMState, frame: 'VoiceFrame') -> None:
     Process CMMM event payloads from VoiceFrame.
 
     Updates the ExecutorLatch based on CMMM events:
-    - 0x30 (NODEMASK_SET): Changes node mask with optional ramp
+    - 0x30 (NODEMASK_SET): Changes node mask (immediate)
     - 0x31 (TAILMODE_SET): Changes tail mode with traction
 
     Also advances CMMM enrichment state:
@@ -59,10 +59,7 @@ def _process_cmmm_events(state: VMState, frame: 'VoiceFrame') -> None:
     """
     latch = state.executor_latch
 
-    # Step 1: Advance mask ramp (must happen every block)
-    latch.step_mask_ramp()
-
-    # Step 2: Process node mask event (payload_type 0x30)
+    # Step 1: Process node mask event (payload_type 0x30)
     node_mask = getattr(frame, 'cmmm_node_mask', None)
     if node_mask is not None:
         ramp_blocks = getattr(frame, 'cmmm_mask_ramp_blocks', 5)
@@ -91,7 +88,7 @@ def _process_cmmm_events(state: VMState, frame: 'VoiceFrame') -> None:
     else:
         intent_energy = Q15_HALF  # Default mid-level intent
 
-    is_transition = latch.is_ramping() or latch.is_timbral_ramping()
+    is_transition = latch.is_timbral_ramping()
     state.cmmm_memory.step(intent_energy, is_transition)
 
 
@@ -531,7 +528,7 @@ def vm_step_block(
                 state.coeff_state[leaf * VM_K + k] = int(np.clip(coeffs_64[leaf], Q15_NEG_ONE, Q15_ONE))
 
         # Apply coefficient-domain operators (may be empty, but lane_inject/tail still apply)
-        # Use crossfade-aware dispatch for smooth mask transitions (WSE-STD-070)
+        # Use mask-aware dispatch (WSE-STD-070)
         lane_inject(state, cfg)
         for instr in cfg.backbone_instrs:
             dispatch_coeff_op_crossfade(state, instr)
@@ -740,7 +737,7 @@ def vm_step_block(
     backbone_instrs = _get_dynamic_backbone(state, frame, cfg)
 
     # Steps 2-5: Backbone lanes (operators modify carrier)
-    # Use crossfade-aware dispatch for smooth mask transitions (WSE-STD-070)
+    # Use mask-aware dispatch (WSE-STD-070)
     for instr in backbone_instrs:
         dispatch_coeff_op_crossfade(state, instr)
 

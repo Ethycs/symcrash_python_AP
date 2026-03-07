@@ -76,25 +76,22 @@ instrument_ir_v0:
             algorithm: 22       # Rhodes-like: 3 carriers
             feedback: 0         # No feedback (clean pluck)
 
-            # Operator frequency ratios (Q16: 65536 = 1.0x)
+            # Operator frequency ratios and output levels
             # Bell-like harmonic ratios
-            op_ratios:
-              - 65536           # Op1: 1.0x (carrier)
-              - 65536           # Op2: 1.0x (carrier)
-              - 131072          # Op3: 2.0x (brightness mod)
-              - 65536           # Op4: 1.0x (carrier)
-              - 196608          # Op5: 3.0x (bell mod)
-              - 262144          # Op6: 4.0x (shimmer)
-
-            # Operator output levels (Q15)
             # Carriers full, mods for bell character
-            op_levels:
-              - 32767           # Op1: Full
-              - 24576           # Op2: 0.75
-              - 16384           # Op3: 0.5 (brightness)
-              - 20480           # Op4: 0.625
-              - 12288           # Op5: 0.375 (bell)
-              - 8192            # Op6: 0.25 (shimmer)
+            operators:
+              - ratio: 1.0           # Op1: carrier (fundamental)
+                level: 1.0           # Full output
+              - ratio: 1.0           # Op2: carrier (fundamental reinforcement)
+                level: 0.75002       # Slightly reduced for balance
+              - ratio: 2.0           # Op3: modulator (octave, brightness)
+                level: 0.5           # Half depth for brightness transient
+              - ratio: 1.0           # Op4: carrier (fundamental)
+                level: 0.62502       # Moderate output
+              - ratio: 3.0           # Op5: modulator (3rd harmonic, bell tone)
+                level: 0.375         # Bell modulation depth
+              - ratio: 4.0           # Op6: modulator (4th harmonic, shimmer)
+                level: 0.25          # Subtle shimmer depth
 
         - id: "amp1"
           type: "Amp"
@@ -169,6 +166,6 @@ instrument_ir_v0:
 
   compile:
     material:
-      beta_start_q15: 0
-      beta_target_q15: 3072    # Light material
+      beta_start: 0.0
+      beta_target: 0.09375     # Light material
       beta_ramp_blocks: 4      # Fast ramp for pluck

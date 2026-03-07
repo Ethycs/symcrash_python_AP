@@ -29,7 +29,7 @@ modulators:
     - id: "vibrato"
       waveform: "sine"
       rate_hz: 5.5
-      depth_q15: 6553           # ~20 cents max deviation
+      depth: 0.2                # ~20 cents max deviation
       delay_ms: 400             # Wait before vibrato starts
       ramp_ms: 300              # Gradual onset
       sync_mode: "free"         # Continuous across notes
@@ -41,7 +41,7 @@ modulators:
     - id: "pwm_sweep"
       waveform: "triangle"
       rate_hz: 0.8              # Slow sweep
-      depth_q15: 8192           # ~25% width modulation
+      depth: 0.25               # ~25% width modulation
       delay_ms: 0
       ramp_ms: 0
       sync_mode: "free"
@@ -53,7 +53,7 @@ modulators:
     - id: "brightness"
       waveform: "sine"
       rate_hz: 0.15             # Very slow
-      depth_q15: 4096           # Subtle
+      depth: 0.125              # Subtle
       delay_ms: 0
       ramp_ms: 0
       sync_mode: "gate_reset"   # Restart on each note
@@ -65,7 +65,7 @@ modulators:
 carrier:
   model: "PULSE"
   role: "AUDIBLE"
-  pwm_width_q15: 16384          # 50% duty (modulated by pwm_sweep)
+  pwm_width: 0.5                # 50% duty (modulated by pwm_sweep)
   # Saw-like harmonic content for pulse wave
   harmonic_amps_q15: [32767, 16383, 10922, 8191, 6553, 5461, 4681, 4096]
 
@@ -73,7 +73,7 @@ latch_defaults:
   tail_mode: "FULL"
   tree_a_id: 0
   tree_b_id: 1
-  tree_blend_q15: 0
+  tree_blend: 0.0
 
 # Envelope - string-like attack with long sustain
 env:
@@ -85,20 +85,20 @@ env:
 
 # Material blend
 material:
-  beta_start_q15: 0
-  beta_target_q15: 24576        # ~75% wet
+  beta_start: 0.0
+  beta_target: 0.75             # 75% wet
   beta_ramp_blocks: 8
 
 # Backbone operators - subtle coloring
 backbone:
   - op: "TILT"
-    strength_q15: 16384
+    strength: 0.5
   - op: "DIFFUSE_DOWN"
-    strength_q15: 8192
+    strength: 0.25
 
 # CMMM runtime control
 cmmm:
   node_mask: 0xFFFFFFFF
   mask_ramp_blocks: 5
   tail_mode: "FULL"
-  traction_q15: 32767
+  traction: 1.0

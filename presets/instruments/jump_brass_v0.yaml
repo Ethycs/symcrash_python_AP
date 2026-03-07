@@ -45,26 +45,22 @@ instrument_ir_v0:
             algorithm: 19         # Split to 3 carriers (same topology as 22)
             feedback: 3           # Moderate feedback
 
-            # Operator frequency ratios (Q16: 65536 = 1.0x)
+            # Operator frequency ratios and output levels
             # Heavy carrier detune for thickness, 1:1 modulators for warmth
-            # Each 38 Q16 units ≈ 1 cent
-            op_ratios:
-              - 65536             # Op 1: 1.0x (carrier, anchor)
-              - 66106             # Op 2: 1.0087x (carrier, +15 cents)
-              - 64966             # Op 3: 0.9913x (carrier, -15 cents)
-              - 66486             # Op 4: 1.0145x (carrier, +25 cents)
-              - 65536             # Op 5: 1.0x (modulator - warm 2nd harmonic)
-              - 65536             # Op 6: 1.0x (modulator - adds body)
-
-            # Operator output levels (Q15)
             # Full carriers, REDUCED mod depth for warmth over brightness
-            op_levels:
-              - 32767             # Op 1: Full (anchor)
-              - 32767             # Op 2: Full (detuned carrier)
-              - 32767             # Op 3: Full (detuned carrier)
-              - 28672             # Op 4: 0.875 (slightly lower for balance)
-              - 10922             # Op 5: 0.33 (subtle warmth)
-              - 8192              # Op 6: 0.25 (gentle feedback)
+            operators:
+              - ratio: 1.0           # Op1: carrier (anchor, fundamental)
+                level: 1.0           # Full output
+              - ratio: 1.0087        # Op2: carrier (+15 cents detune)
+                level: 1.0           # Full output
+              - ratio: 0.9913        # Op3: carrier (-15 cents detune)
+                level: 1.0           # Full output
+              - ratio: 1.0145        # Op4: carrier (+25 cents detune)
+                level: 0.87503       # Slightly lower for balance
+              - ratio: 1.0           # Op5: modulator (warm 2nd harmonic)
+                level: 0.33332       # Subtle warmth
+              - ratio: 1.0           # Op6: modulator (adds body, feedback source)
+                level: 0.25          # Gentle feedback level
 
         - id: "amp1"
           type: "Amp"

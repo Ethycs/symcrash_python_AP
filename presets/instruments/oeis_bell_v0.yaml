@@ -80,6 +80,6 @@ instrument_ir_v0:
 
   compile:
     material:
-      beta_start_q15: 0
-      beta_target_q15: 24576
+      beta_start: 0.0
+      beta_target: 0.75
       beta_ramp_blocks: 4

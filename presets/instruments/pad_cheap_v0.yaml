@@ -76,25 +76,22 @@ instrument_ir_v0:
             algorithm: 32       # Two-voice: [6->5->4*] + [3->2->1*]
             feedback: 0         # No feedback (clean pad)
 
-            # Operator frequency ratios (Q16: 65536 = 1.0x)
+            # Operator frequency ratios and output levels
             # Detuned voices for stereo width
-            op_ratios:
-              - 65536           # Op1: 1.0x (carrier A)
-              - 65536           # Op2: 1.0x (mod A)
-              - 65536           # Op3: 1.0x (mod A)
-              - 65631           # Op4: +2.5 cents (carrier B - detuned)
-              - 65536           # Op5: 1.0x (mod B)
-              - 65536           # Op6: 1.0x (mod B)
-
-            # Operator output levels (Q15)
             # Equal carriers, very gentle modulation for soft pad
-            op_levels:
-              - 32767           # Op1: Full (carrier A)
-              - 6144            # Op2: 0.19 (soft mod)
-              - 4096            # Op3: 0.125 (subtle)
-              - 32767           # Op4: Full (carrier B)
-              - 6144            # Op5: 0.19 (soft mod)
-              - 4096            # Op6: 0.125 (subtle)
+            operators:
+              - ratio: 1.0           # Op1: carrier A (fundamental)
+                level: 1.0           # Full output
+              - ratio: 1.0           # Op2: modulator A (soft harmonic)
+                level: 0.1875        # Soft modulation
+              - ratio: 1.0           # Op3: modulator A (subtle texture)
+                level: 0.125         # Subtle depth
+              - ratio: 1.00145       # Op4: carrier B (+2.5 cents detune for width)
+                level: 1.0           # Full output
+              - ratio: 1.0           # Op5: modulator B (soft harmonic)
+                level: 0.1875        # Soft modulation
+              - ratio: 1.0           # Op6: modulator B (subtle texture)
+                level: 0.125         # Subtle depth
 
         - id: "amp1"
           type: "Amp"
@@ -174,6 +171,6 @@ instrument_ir_v0:
 
   compile:
     material:
-      beta_start_q15: 0
-      beta_target_q15: 6144    # Moderate material blend
+      beta_start: 0.0
+      beta_target: 0.1875      # Moderate material blend
       beta_ramp_blocks: 24     # Slow ramp for pad

@@ -34,6 +34,9 @@ from ..vm.harmonic_bank import LFOState, LFOWaveform, LFOSyncMode, LFOTarget, LF
 # Import canonical primitives (single source of truth)
 from ..primitives import K_LADDER_MASKS, TailMode as _TailMode, Q15_ONE, Q15_HALF, Q16_ONE
 
+# Import human-readable conversion helpers
+from ..instrument_ir import float_or_q15, _auto_detect_ratios, _auto_detect_levels
+
 # Import central registry for validation
 from .central_registry import get_central_registry
 
@@ -80,17 +83,22 @@ class FM6Config:
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> 'FM6Config':
-        """Parse FM6 config from dict."""
+        """Parse FM6 config from dict.
+
+        Supports both raw Q15/Q16 integer format and human-readable floats.
+        Float ratios (e.g., [1.0, 2.0, 3.5]) are auto-detected and converted to Q16.
+        Float levels (e.g., [1.0, 0.75, 0.5]) are auto-detected and converted to Q15.
+        """
         # Support both 'algorithm_id' and 'algorithm' keys
         algorithm_id = d.get('algorithm_id', d.get('algorithm', 1))
 
-        # Parse operator ratios (Q16: Q16_ONE = 1.0)
-        op_ratios = d.get('op_ratios', [Q16_ONE]*6)
+        # Parse operator ratios with auto-detection (Q16: Q16_ONE = 1.0)
+        op_ratios = _auto_detect_ratios(d.get('op_ratios', [Q16_ONE]*6))
         if len(op_ratios) < 6:
             op_ratios = op_ratios + [Q16_ONE] * (6 - len(op_ratios))
 
-        # Parse operator levels (Q15: Q15_ONE = 1.0)
-        op_levels = d.get('op_levels', [Q15_ONE]*6)
+        # Parse operator levels with auto-detection (Q15: Q15_ONE = 1.0)
+        op_levels = _auto_detect_levels(d.get('op_levels', [Q15_ONE]*6))
         if len(op_levels) < 6:
             op_levels = op_levels + [Q15_ONE] * (6 - len(op_levels))
 
@@ -150,7 +158,7 @@ class CarrierConfig:
             role=role_map.get(role_str, CarrierRole.AUDIBLE),
             transition=transition_map.get(transition_str, TransitionKind.RETRIGGER),
             detune_cents=d.get('detune_cents', 0),
-            pulse_width_q15=d.get('pulse_width_q15', Q15_HALF),
+            pulse_width_q15=float_or_q15(d, 'pulse_width', 'pulse_width_q15', Q15_HALF),
         )
 
 
@@ -167,10 +175,15 @@ class MaterialConfig:
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> 'MaterialConfig':
-        """Parse material config from dict."""
+        """Parse material config from dict.
+
+        Supports both raw Q15 keys (e.g., beta_target_q15: 16384)
+        and human-readable float keys (e.g., beta_target: 0.5).
+        Float keys take priority when both are present.
+        """
         return cls(
-            beta_start_q15=d.get('beta_start_q15', 0),
-            beta_target_q15=d.get('beta_target_q15', Q15_HALF),
+            beta_start_q15=float_or_q15(d, 'beta_start', 'beta_start_q15', 0),
+            beta_target_q15=float_or_q15(d, 'beta_target', 'beta_target_q15', Q15_HALF),
             beta_ramp_blocks=d.get('beta_ramp_blocks', 8),
         )
 
@@ -202,7 +215,7 @@ class LatchDefaults:
             tail_mode=tail_mode_map.get(tail_mode_str, 0),
             tree_a_id=d.get('tree_a_id', 0),
             tree_b_id=d.get('tree_b_id', 0),
-            tree_blend_q15=d.get('tree_blend_q15', 0),
+            tree_blend_q15=float_or_q15(d, 'tree_blend', 'tree_blend_q15', 0),
             carrier=CarrierConfig.from_dict(carrier_dict),
         )
 
@@ -261,7 +274,7 @@ class CmmmDefaults:
             node_mask_u32=node_mask_u32,
             mask_ramp_blocks=d.get('mask_ramp_blocks', 5),
             tail_mode=int(tail_mode),
-            traction_q15=d.get('traction_q15', Q15_ONE),
+            traction_q15=float_or_q15(d, 'traction', 'traction_q15', Q15_ONE),
         )
 
 
@@ -400,15 +413,12 @@ class PresetCompiler:
         for op_entry in backbone_section:
             if isinstance(op_entry, dict):
                 op_name = op_entry.get('op', 'IDENTITY').upper()
-                strength = op_entry.get('strength_q15', Q15_ONE)
-                # Also check for float strength (0.0-1.0)
-                if 'strength' in op_entry:
-                    strength = int(op_entry['strength'] * Q15_ONE)
+                strength = float_or_q15(op_entry, 'strength', 'strength_q15', Q15_ONE)
                 backbone.append(BackboneOp(
                     op=op_name,
                     strength_q15=strength,
-                    param0_q15=op_entry.get('param0_q15', 0),
-                    param1_q15=op_entry.get('param1_q15', 0),
+                    param0_q15=float_or_q15(op_entry, 'param0', 'param0_q15', 0),
+                    param1_q15=float_or_q15(op_entry, 'param1', 'param1_q15', 0),
                 ))
             elif isinstance(op_entry, str):
                 backbone.append(BackboneOp(op=op_entry.upper()))
@@ -434,7 +444,7 @@ class PresetCompiler:
 
         # Parse PWM width from carrier section
         carrier_section = preset_dict.get('carrier', {})
-        pwm_width_q15 = carrier_section.get('pwm_width_q15', Q15_HALF)
+        pwm_width_q15 = float_or_q15(carrier_section, 'pwm_width', 'pwm_width_q15', Q15_HALF)
 
         # Parse LFO modulators (Phase 2 Mod Matrix)
         lfos = self._parse_lfos(preset_dict)
@@ -540,20 +550,23 @@ class PresetCompiler:
                     amount_q15=amount_q15,
                 ))
 
+            # Resolve depth with float alternative
+            depth = float_or_q15(lfo_def, 'depth', 'depth_q15', Q15_HALF)
+
             # Create LFO state with arc_slot for unified phase storage
             lfo = LFOState(
                 id=lfo_def.get('id', ''),
                 waveform=waveform,
                 sync_mode=sync_mode,
                 routings=routings,
-                depth_q15=lfo_def.get('depth_q15', Q15_HALF),
+                depth_q15=depth,
                 arc_slot=arc_slot,
             )
 
             # Configure timing (includes arc_slot)
             lfo.configure_lfo(
                 rate_hz=lfo_def.get('rate_hz', 5.0),
-                depth_q15=lfo_def.get('depth_q15', Q15_HALF),
+                depth_q15=depth,
                 waveform=waveform,
                 sync_mode=sync_mode,
                 delay_ms=lfo_def.get('delay_ms', 0.0),
@@ -700,6 +713,95 @@ class PresetCompiler:
 
 
 # =============================================================================
+# PRESET VALIDATION (instrument_ir_v0 format)
+# =============================================================================
+
+def validate_preset(data: Dict[str, Any]) -> List[str]:
+    """
+    Validate a preset dictionary for common authoring errors.
+
+    Works with both the flat 'preset:' format (delegates to PresetCompiler.validate)
+    and the 'instrument_ir_v0:' format (checks node/edge consistency, FM6, macros).
+
+    Returns:
+        List of error/warning strings (empty if valid)
+    """
+    errors = []
+
+    # Flat preset format
+    if 'preset' in data:
+        compiler = PresetCompiler()
+        return compiler.validate(data)
+
+    # instrument_ir_v0 format
+    ir_data = data.get('instrument_ir_v0', data)
+    layers = ir_data.get('layers', {})
+    l0 = layers.get('L0_graph', {})
+
+    # Check nodes and edges consistency
+    nodes = l0.get('nodes', [])
+    edges = l0.get('edges', [])
+    node_ids = {n.get('id', '') for n in nodes if isinstance(n, dict)}
+
+    for i, edge in enumerate(edges):
+        if not isinstance(edge, dict):
+            continue
+        src = edge.get('src', '')
+        dst = edge.get('dst', '')
+        if src and src not in node_ids:
+            errors.append(f"Edge {i}: src '{src}' not found in nodes")
+        if dst and dst not in node_ids:
+            errors.append(f"Edge {i}: dst '{dst}' not found in nodes")
+
+    # Check macro defaults in range
+    macros = l0.get('macros', [])
+    for macro in macros:
+        if not isinstance(macro, dict):
+            continue
+        default = macro.get('default')
+        name = macro.get('id', macro.get('name', '?'))
+        if default is not None:
+            if not isinstance(default, (int, float)):
+                errors.append(f"Macro '{name}': default must be a number")
+            elif default < 0.0 or default > 1.0:
+                errors.append(f"Macro '{name}': default {default} outside [0.0, 1.0]")
+
+    # Check FM6 operator count
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        params = node.get('params', {})
+        if node.get('type') == 'FM6':
+            # Check operators format
+            if 'operators' in params:
+                ops = params['operators']
+                if len(ops) != 6:
+                    errors.append(f"FM6 node '{node.get('id', '?')}': expected 6 operators, got {len(ops)}")
+            # Check ratios/levels count
+            for key in ('op_ratios', 'op_levels'):
+                vals = params.get(key)
+                if vals is not None and len(vals) != 6:
+                    errors.append(f"FM6 node '{node.get('id', '?')}': {key} has {len(vals)} entries, expected 6")
+            # Check ratios are positive
+            ratios = params.get('op_ratios', params.get('operators', []))
+            if isinstance(ratios, list):
+                for j, r in enumerate(ratios):
+                    val = r.get('ratio', 1.0) if isinstance(r, dict) else r
+                    if isinstance(val, (int, float)) and val < 0:
+                        errors.append(f"FM6 node '{node.get('id', '?')}': op_ratios[{j}] is negative")
+
+        # Check ADSR values are non-negative
+        adsr = params.get('adsr', {})
+        if isinstance(adsr, dict):
+            for adsr_key in ('a_ms', 'd_ms', 's', 'r_ms'):
+                val = adsr.get(adsr_key)
+                if val is not None and isinstance(val, (int, float)) and val < 0:
+                    errors.append(f"Node '{node.get('id', '?')}': adsr.{adsr_key} is negative ({val})")
+
+    return errors
+
+
+# =============================================================================
 # EXPORTS
 # =============================================================================
 
@@ -713,4 +815,5 @@ __all__ = [
     'CompiledPreset',
     'PresetCompileError',
     'PresetCompiler',
+    'validate_preset',
 ]

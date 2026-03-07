@@ -38,25 +38,22 @@ instrument_ir_v0:
             algorithm: 16         # 5 modulators into 1 carrier
             feedback: 3           # Moderate feedback for edge
 
-            # Operator frequency ratios (Q16: 65536 = 1.0x)
+            # Operator frequency ratios and output levels
             # Harmonic series for bright brass
-            op_ratios:
-              - 65536             # Op1: 1.0x (carrier)
-              - 65536             # Op2: 1.0x
-              - 131072            # Op3: 2.0x (octave)
-              - 196608            # Op4: 3.0x (fifth above octave)
-              - 262144            # Op5: 4.0x (2 octaves)
-              - 131072            # Op6: 2.0x (with feedback)
-
-            # Operator output levels (Q15: 32767 = 1.0)
             # Carrier full, modulators create harmonic content
-            op_levels:
-              - 32767             # Op1: Full (carrier)
-              - 16384             # Op2: 0.5 (fundamental mod)
-              - 13107             # Op3: 0.4 (2nd harmonic)
-              - 9830              # Op4: 0.3 (3rd harmonic)
-              - 6553              # Op5: 0.2 (4th harmonic)
-              - 16384             # Op6: 0.5 (feedback mod)
+            operators:
+              - ratio: 1.0        # Op1: carrier (fundamental)
+                level: 1.0        # Full output
+              - ratio: 1.0        # Op2: modulator (fundamental reinforcement)
+                level: 0.5        # Half depth
+              - ratio: 2.0        # Op3: modulator (2nd harmonic, octave)
+                level: 0.4        # Moderate harmonic content
+              - ratio: 3.0        # Op4: modulator (3rd harmonic, fifth+octave)
+                level: 0.3        # Moderate harmonic content
+              - ratio: 4.0        # Op5: modulator (4th harmonic, 2 octaves)
+                level: 0.2        # Subtle upper harmonic
+              - ratio: 2.0        # Op6: modulator (with feedback, adds edge)
+                level: 0.5        # Feedback modulation depth
 
         - id: "amp1"
           type: "Amp"
@@ -104,6 +101,6 @@ instrument_ir_v0:
 
   compile:
     material:
-      beta_start_q15: 0
-      beta_target_q15: 8192
+      beta_start: 0.0
+      beta_target: 0.25
       beta_ramp_blocks: 16

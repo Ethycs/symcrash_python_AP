@@ -75,25 +75,22 @@ instrument_ir_v0:
             algorithm: 19       # Split to 3 carriers
             feedback: 1         # Light feedback
 
-            # Operator frequency ratios (Q16: 65536 = 1.0x)
+            # Operator frequency ratios and output levels
             # Tight unison for brass section feel
-            op_ratios:
-              - 65536           # Op1: 1.0x (anchor)
-              - 65631           # Op2: +2.5 cents
-              - 65441           # Op3: -2.5 cents
-              - 65726           # Op4: +5 cents
-              - 65536           # Op5: 1.0x (modulator)
-              - 65536           # Op6: 1.0x (modulator)
-
-            # Operator output levels (Q15)
             # Full carriers, reduced modulators for warmth
-            op_levels:
-              - 32767           # Op1: Full
-              - 32767           # Op2: Full
-              - 32767           # Op3: Full
-              - 28671           # Op4: 0.875
-              - 12288           # Op5: 0.375 (warm mod)
-              - 8192            # Op6: 0.25 (gentle feedback)
+            operators:
+              - ratio: 1.0           # Op1: carrier (anchor, fundamental)
+                level: 1.0           # Full output
+              - ratio: 1.00145       # Op2: carrier (+2.5 cents detune)
+                level: 1.0           # Full output
+              - ratio: 0.99855       # Op3: carrier (-2.5 cents detune)
+                level: 1.0           # Full output
+              - ratio: 1.0029        # Op4: carrier (+5 cents detune)
+                level: 0.875         # Slightly reduced for balance
+              - ratio: 1.0           # Op5: modulator (warm harmonic)
+                level: 0.375         # Warm modulation depth
+              - ratio: 1.0           # Op6: modulator (gentle feedback source)
+                level: 0.25          # Gentle feedback level
 
         - id: "amp1"
           type: "Amp"
@@ -173,6 +170,6 @@ instrument_ir_v0:
 
   compile:
     material:
-      beta_start_q15: 0
-      beta_target_q15: 4096    # Light material blend
+      beta_start: 0.0
+      beta_target: 0.125       # Light material blend
       beta_ramp_blocks: 8

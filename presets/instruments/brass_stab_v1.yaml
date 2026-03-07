@@ -47,25 +47,22 @@ instrument_ir_v0:
             algorithm: 16         # 5 modulators into 1 carrier
             feedback: 5           # Higher feedback for buzz
 
-            # Operator frequency ratios (Q16: 65536 = 1.0x)
+            # Operator frequency ratios and output levels
             # Harmonic series for sawtooth-like spectrum
-            op_ratios:
-              - 65536             # Op 1: 1.0x (carrier)
-              - 131072            # Op 2: 2.0x (2nd harmonic)
-              - 196608            # Op 3: 3.0x (3rd harmonic)
-              - 262144            # Op 4: 4.0x (4th harmonic)
-              - 327680            # Op 5: 5.0x (5th harmonic)
-              - 131072            # Op 6: 2.0x (with feedback - adds buzz)
-
-            # Operator output levels (Q15)
             # Weighted to approximate 1/n rolloff + boost on feedback mod
-            op_levels:
-              - 32767             # Op 1: Full (carrier output)
-              - 16384             # Op 2: 0.5 (2nd harmonic)
-              - 10923             # Op 3: 0.33 (3rd harmonic)
-              - 8192              # Op 4: 0.25 (4th harmonic)
-              - 6554              # Op 5: 0.2 (5th harmonic)
-              - 20480             # Op 6: 0.625 (feedback buzz - louder for edge)
+            operators:
+              - ratio: 1.0        # Op1: carrier (fundamental)
+                level: 1.0        # Full output
+              - ratio: 2.0        # Op2: modulator (2nd harmonic)
+                level: 0.5        # 1/2 rolloff
+              - ratio: 3.0        # Op3: modulator (3rd harmonic)
+                level: 0.33335    # ~1/3 rolloff
+              - ratio: 4.0        # Op4: modulator (4th harmonic)
+                level: 0.25       # 1/4 rolloff
+              - ratio: 5.0        # Op5: modulator (5th harmonic)
+                level: 0.20002    # ~1/5 rolloff
+              - ratio: 2.0        # Op6: modulator (with feedback, adds buzz)
+                level: 0.62502    # Boosted for aggressive edge
 
         - id: "amp1"
           type: "Amp"

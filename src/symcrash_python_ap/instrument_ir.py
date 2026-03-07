@@ -86,7 +86,75 @@ def pct_to_q15(pct: float) -> int:
         >>> pct_to_q15(1.0)
         32767
     """
-    return int(max(0.0, min(1.0, pct)) * Q15_ONE)
+    return round(max(0.0, min(1.0, pct)) * Q15_ONE)
+
+
+def float_or_q15(d: dict, float_key: str, q15_key: str, default: int = 0) -> int:
+    """
+    Read a parameter as either float (0.0-1.0) or raw Q15 integer.
+
+    Float key takes priority if both are present.
+
+    Args:
+        d: Dictionary to read from
+        float_key: Key for the human-readable float value (0.0-1.0)
+        q15_key: Key for the raw Q15 integer value (0-32767)
+        default: Default Q15 value if neither key exists
+
+    Returns:
+        Q15 integer value (0-32767)
+
+    Example:
+        >>> float_or_q15({'beta_target': 0.5}, 'beta_target', 'beta_target_q15')
+        16384
+        >>> float_or_q15({'beta_target_q15': 8192}, 'beta_target', 'beta_target_q15')
+        8192
+    """
+    if float_key in d:
+        return round(max(0.0, min(1.0, d[float_key])) * Q15_ONE)
+    return d.get(q15_key, default)
+
+
+def _auto_detect_ratios(raw: list) -> list:
+    """
+    Auto-detect whether a list of FM6 operator ratios is in Q16 fixed-point
+    or human-readable float format, and return Q16 integers.
+
+    Heuristic: if any value is a Python float, or all values are < 100
+    (which cannot be valid Q16 since the minimum useful Q16 is 32768 = 0.5x),
+    treat as float frequency multipliers and convert to Q16.
+
+    Args:
+        raw: List of ratio values (float or int)
+
+    Returns:
+        List of Q16 integer ratios
+    """
+    if not raw:
+        return raw
+    if any(isinstance(v, float) for v in raw) or all(v < 100 for v in raw):
+        return [round(r * 65536) for r in raw]
+    return raw
+
+
+def _auto_detect_levels(raw: list) -> list:
+    """
+    Auto-detect whether a list of FM6 operator levels is in Q15 fixed-point
+    or human-readable float format, and return Q15 integers.
+
+    Heuristic: if any value is a Python float, treat as 0.0-1.0 and convert.
+
+    Args:
+        raw: List of level values (float or int)
+
+    Returns:
+        List of Q15 integer levels
+    """
+    if not raw:
+        return raw
+    if any(isinstance(v, float) for v in raw):
+        return [round(l * 32767) for l in raw]
+    return raw
 
 
 def q15_to_pct(q15: int) -> float:
@@ -1945,18 +2013,20 @@ def _parse_node_params(data: dict) -> NodeParams:
         for op in operators:
             # Convert float ratio to Q16 (65536 = 1.0)
             ratio = op.get('ratio', 1.0)
-            ratios.append(int(ratio * 65536))
+            ratios.append(round(ratio * 65536))
             # Convert float level to Q15 (32767 = 1.0)
             level = op.get('level', 1.0)
-            levels.append(int(level * 32767))
+            levels.append(round(level * 32767))
         params.op_ratios = ratios
         params.op_levels = levels
     else:
-        # Legacy integer format
+        # Legacy integer format with auto-detection for human-readable floats
+        # Float ratios (e.g., [1.0, 2.0, 3.5]) are auto-detected and converted to Q16
+        # Float levels (e.g., [1.0, 0.75, 0.5]) are auto-detected and converted to Q15
         if 'op_ratios' in data:
-            params.op_ratios = data['op_ratios']
+            params.op_ratios = _auto_detect_ratios(data['op_ratios'])
         if 'op_levels' in data:
-            params.op_levels = data['op_levels']
+            params.op_levels = _auto_detect_levels(data['op_levels'])
 
     if 'fm6_topo_a' in data:
         params.fm6_topo_a = data['fm6_topo_a']
@@ -2257,12 +2327,16 @@ def _parse_event_policy(data: dict) -> EventPolicy:
 
 
 def _parse_cmmm_control(data: dict) -> CmmmControl:
-    """Parse CMMM control from dict."""
+    """Parse CMMM control from dict.
+
+    Supports both raw Q15 key (traction_q15: 16384)
+    and human-readable float key (traction: 0.5).
+    """
     return CmmmControl(
         node_mask=data.get('node_mask', 0xFFFFFFFF),
         mask_ramp_blocks=data.get('mask_ramp_blocks', 5),
         tail_mode=data.get('tail_mode', 0),
-        traction_q15=data.get('traction_q15', 32767),
+        traction_q15=float_or_q15(data, 'traction', 'traction_q15', 32767),
     )
 
 
@@ -2435,11 +2509,20 @@ def _parse_frame_emitter_policy(data: dict) -> FrameEmitterPolicy:
 
 
 def _parse_material_config(data: dict) -> MaterialConfig:
-    """Parse material config from dict."""
+    """Parse material config from dict.
+
+    Supports both raw Q15 keys (e.g., beta_target_q15: 16384)
+    and human-readable float keys (e.g., beta_target: 0.5).
+    Float keys take priority when both are present.
+    """
     return MaterialConfig(
-        beta_start_q15=data.get('beta_start_q15', 0),
-        beta_target_q15=data.get('beta_target_q15', 16384),
+        beta_start_q15=float_or_q15(data, 'beta_start', 'beta_start_q15', 0),
+        beta_target_q15=float_or_q15(data, 'beta_target', 'beta_target_q15', 16384),
         beta_ramp_blocks=data.get('beta_ramp_blocks', 8),
+        tape_saturation_q15=float_or_q15(data, 'tape_saturation', 'tape_saturation_q15', 8192),
+        catastrophe_threshold_q15=float_or_q15(data, 'catastrophe_threshold', 'catastrophe_threshold_q15', 24576),
+        rank_filter_order=data.get('rank_filter_order', 3),
+        tropical_blend_q15=float_or_q15(data, 'tropical_blend', 'tropical_blend_q15', 16384),
     )
 
 
@@ -3061,7 +3144,8 @@ class Tower:
 
 __all__ = [
     # Unit conversion helpers
-    'ms_to_blocks', 'pct_to_q15', 'q15_to_pct',
+    'ms_to_blocks', 'pct_to_q15', 'q15_to_pct', 'float_or_q15',
+    '_auto_detect_ratios', '_auto_detect_levels',
     # Enums
     'NodeType', 'WaveformType', 'NoiseColor', 'FilterMode',
     'RegimeKind', 'TransitionType', 'OverlayKind', 'EventLane',

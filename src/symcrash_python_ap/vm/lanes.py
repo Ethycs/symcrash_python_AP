@@ -523,50 +523,17 @@ def dispatch_coeff_op_crossfade(
     instr: BackboneEntry,
 ) -> None:
     """
-    Dispatch a backbone operator with crossfade support for smooth mask transitions.
+    Dispatch a backbone operator using the current node mask.
 
-    Uses the executor latch's crossfade weights to blend between start and target
-    masks during a mask ramp. This prevents clicks when K changes.
+    Mask changes are applied immediately — the coefficient vector is continuous
+    across mask transitions, and tail operators guarantee bounded output.
+    No double-dispatch crossfade is needed.
 
     Args:
         state: VM state (modified in place)
         instr: Backbone instruction
     """
-    latch = state.executor_latch
-
-    if not latch.is_ramping():
-        # Not ramping - use current mask directly
-        dispatch_coeff_op(state, instr, latch.node_mask_u32)
-        return
-
-    # Get crossfade weights
-    start_weight, target_weight, start_mask, target_mask = latch.get_crossfade_weights()
-
-    # If masks are identical, just use one
-    if start_mask == target_mask:
-        dispatch_coeff_op(state, instr, start_mask)
-        return
-
-    # Save current coefficients
-    coeff_backup = state.coeff_state.copy()
-
-    # Apply operator with START mask
-    dispatch_coeff_op(state, instr, start_mask)
-    coeff_start = state.coeff_state.copy()
-
-    # Restore and apply operator with TARGET mask
-    state.coeff_state[:] = coeff_backup
-    dispatch_coeff_op(state, instr, target_mask)
-    coeff_target = state.coeff_state  # Current state has target result
-
-    # Blend: result = start * start_weight + target * target_weight
-    # Both weights sum to ~32767
-    for i in range(len(state.coeff_state)):
-        blended = (
-            (int(coeff_start[i]) * start_weight +
-             int(coeff_target[i]) * target_weight) >> 15
-        )
-        state.coeff_state[i] = clamp_q15(blended)
+    dispatch_coeff_op(state, instr, state.executor_latch.node_mask_u32)
 
 
 def lane_diag(state: VMState, instr: BackboneEntry, mask: int) -> None:

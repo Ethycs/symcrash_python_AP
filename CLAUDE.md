@@ -10,9 +10,9 @@ The InstrumentIR Tower is now runtime-meaningful with all layers compiling to ex
 
 ### Key Components
 
-- **ExecutorLatch** (`vm/state.py`): Holds CMMM event state (node mask, tail mode) with crossfade support
+- **ExecutorLatch** (`vm/state.py`): Holds CMMM event state (node mask, tail mode)
 - **CMMM Events** (`vm/executor.py`): Decodes 0x30 (NODEMASK_SET) and 0x31 (TAILMODE_SET) payloads
-- **Crossfade Dispatch** (`vm/lanes.py`): `dispatch_coeff_op_crossfade()` blends operator outputs during mask transitions
+- **Mask-Aware Dispatch** (`vm/lanes.py`): `dispatch_coeff_op_crossfade()` dispatches operators with current node mask
 - **Registries** (`library/regime_registry.py`, `library/tree_registry.py`): Runtime storage for regime graphs and tree families
 - **Canonical Tables** (`tables/`): Pattern table, operator costs, tail modes
 
@@ -27,6 +27,6 @@ The InstrumentIR Tower is now runtime-meaningful with all layers compiling to ex
 
 ### Test Coverage
 
-- `tests/test_crossfade_dispatch.py` - ExecutorLatch weights and ramp behavior
+- `tests/test_crossfade_dispatch.py` - ExecutorLatch mask and dispatch behavior
 - `tests/test_cmmm_events.py` - Event roundtrip and K computation
 - `tests/test_golden_voiceframe_stream.py` - Deterministic replay verification

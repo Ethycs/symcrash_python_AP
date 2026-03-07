@@ -65,25 +65,22 @@ instrument_ir_v0:
             algorithm: 1        # Stack: 6->5->4->3->2->1*
             feedback: 2         # Light feedback for growl
 
-            # Operator frequency ratios (Q16: 65536 = 1.0x)
+            # Operator frequency ratios and output levels
             # 2:1 modulator ratios for FM bass character
-            op_ratios:
-              - 65536           # Op1: 1.0x (carrier)
-              - 131072          # Op2: 2.0x (adds growl)
-              - 65536           # Op3: 1.0x (reinforces fundamental)
-              - 131072          # Op4: 2.0x
-              - 65536           # Op5: 1.0x
-              - 131072          # Op6: 2.0x (with feedback)
-
-            # Operator output levels (Q15)
             # Heavy carrier, moderate modulation
-            op_levels:
-              - 32767           # Op1: Full (carrier)
-              - 14336           # Op2: 0.44 (controlled mod)
-              - 10922           # Op3: 0.33
-              - 8192            # Op4: 0.25
-              - 6144            # Op5: 0.19
-              - 8192            # Op6: 0.25 (feedback growl)
+            operators:
+              - ratio: 1.0           # Op1: carrier (fundamental)
+                level: 1.0           # Full output
+              - ratio: 2.0           # Op2: modulator (octave, adds growl)
+                level: 0.4375        # Controlled modulation depth
+              - ratio: 1.0           # Op3: modulator (reinforces fundamental)
+                level: 0.33332       # Moderate depth
+              - ratio: 2.0           # Op4: modulator (octave)
+                level: 0.25          # Light modulation
+              - ratio: 1.0           # Op5: modulator (fundamental reinforcement)
+                level: 0.1875        # Subtle depth
+              - ratio: 2.0           # Op6: modulator (octave, feedback growl source)
+                level: 0.25          # Feedback growl level
 
         - id: "amp1"
           type: "Amp"
@@ -161,6 +158,6 @@ instrument_ir_v0:
 
   compile:
     material:
-      beta_start_q15: 0
-      beta_target_q15: 2048    # Very light material
+      beta_start: 0.0
+      beta_target: 0.0625      # Very light material
       beta_ramp_blocks: 4

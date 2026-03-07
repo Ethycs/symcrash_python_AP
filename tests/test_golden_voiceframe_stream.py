@@ -168,49 +168,33 @@ class TestDeterministicReplay:
             assert np.array_equal(o1, o2), f"Block {i} mismatch"
 
 
-class TestCrossfadeRampBehavior:
-    """Test that crossfade ramps behave correctly during mask transitions."""
+class TestImmediateMaskBehavior:
+    """Test that mask changes apply immediately (no crossfade ramp)."""
 
-    def test_ramp_progress_during_transition(self):
-        """Verify ramp progresses smoothly during mask transition."""
-        # Frame 0: No event
-        # Frame 1: Event with 5-block ramp → ramp_remaining = 5, then step → 4
-        # Frame 2-6: Step ramp down to 0
+    def test_mask_applied_immediately(self):
+        """Mask event should take effect on the same block."""
         frames = [
             create_test_voiceframe(note=60),
             create_test_voiceframe(note=60, cmmm_node_mask=0x0000FFFF, cmmm_mask_ramp_blocks=5),
             create_test_voiceframe(note=60),
-            create_test_voiceframe(note=60),
-            create_test_voiceframe(note=60),
-            create_test_voiceframe(note=60),
-            create_test_voiceframe(note=60),  # Ramp should be complete after this
         ]
 
         state = VMState()
-        ramp_remaining = []
+        masks = []
 
         for frame in frames:
             state, _ = vm_step_block(state, frame)
-            ramp_remaining.append(state.executor_latch.mask_ramp_remaining)
+            masks.append(state.executor_latch.node_mask_u32)
 
-        # After first frame: no event yet
-        assert ramp_remaining[0] == 0
-
-        # After event frame: ramp started (step happens first, then event applies)
-        # So we get ramp applied, then immediately stepped once
-        assert ramp_remaining[1] >= 3, f"Expected ramp to start, got {ramp_remaining[1]}"
-
-        # Should decrease monotonically or stay at 0
-        for i in range(2, len(ramp_remaining)):
-            if ramp_remaining[i-1] > 0:
-                assert ramp_remaining[i] <= ramp_remaining[i-1], \
-                    f"Ramp should decrease: {ramp_remaining[i-1]} -> {ramp_remaining[i]}"
-
-        # Final frame should have completed
-        assert ramp_remaining[-1] == 0, f"Ramp not complete: {ramp_remaining}"
+        # Frame 0: default mask
+        assert masks[0] == 0xFFFFFFFF
+        # Frame 1: mask applied immediately (ramp_blocks ignored)
+        assert masks[1] == 0x0000FFFF
+        # Frame 2: stays at new mask
+        assert masks[2] == 0x0000FFFF
 
     def test_mask_arrives_at_target(self):
-        """Verify mask reaches target after ramp completes."""
+        """Mask should be at target immediately after event."""
         state = VMState()
         target_mask = 0x0000FFFF
 
@@ -218,7 +202,7 @@ class TestCrossfadeRampBehavior:
         frame1 = create_test_voiceframe(note=60)
         state, _ = vm_step_block(state, frame1)
 
-        # Event frame with short ramp
+        # Event frame
         frame2 = create_test_voiceframe(
             note=60,
             cmmm_node_mask=target_mask,
@@ -226,13 +210,8 @@ class TestCrossfadeRampBehavior:
         )
         state, _ = vm_step_block(state, frame2)
 
-        # Complete ramp
-        for _ in range(3):
-            state, _ = vm_step_block(state, create_test_voiceframe(note=60))
-
-        # Verify final mask
+        # Verify mask is already at target
         assert state.executor_latch.node_mask_u32 == target_mask
-        assert not state.executor_latch.is_ramping()
 
 
 class TestStateSnapshot:
@@ -259,8 +238,7 @@ class TestStateSnapshot:
         restored = VMState.restore(snapshot)
 
         # Verify latch state
-        assert restored.executor_latch.mask_target_u32 == state.executor_latch.mask_target_u32
-        assert restored.executor_latch.mask_ramp_remaining == state.executor_latch.mask_ramp_remaining
+        assert restored.executor_latch.node_mask_u32 == state.executor_latch.node_mask_u32
         assert restored.executor_latch.tail_mode == state.executor_latch.tail_mode
         assert restored.executor_latch.traction_q15 == state.executor_latch.traction_q15
 

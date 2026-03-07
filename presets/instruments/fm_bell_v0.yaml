@@ -41,25 +41,22 @@ instrument_ir_v0:
             algorithm: 5          # DX7 Algorithm 5 (dual stack)
             feedback: 1           # Light feedback for shimmer
 
-            # Operator frequency ratios (Q16: 65536 = 1.0x)
+            # Operator frequency ratios and output levels
             # Inharmonic ratios create the bell "clang"
-            op_ratios:
-              - 65536             # Op 1: 1.0x (carrier/fundamental)
-              - 65536             # Op 2: 1.0x (adds body)
-              - 229376            # Op 3: 3.5x (inharmonic shimmer)
-              - 131072            # Op 4: 2.0x (octave)
-              - 294912            # Op 5: 4.5x (inharmonic)
-              - 917504            # Op 6: 14.0x (classic E.Piano ratio)
-
-            # Operator output levels (Q15)
             # Lower modulation for cleaner bell tone
-            op_levels:
-              - 32767             # Op 1: Full (carrier)
-              - 8192              # Op 2: 0.25 (subtle body mod)
-              - 6553              # Op 3: 0.20 (subtle shimmer)
-              - 10922             # Op 4: 0.33 (adds harmonics)
-              - 4915              # Op 5: 0.15 (subtle)
-              - 3276              # Op 6: 0.10 (feedback op - keep low)
+            operators:
+              - ratio: 1.0        # Op1: carrier (fundamental)
+                level: 1.0        # Full output
+              - ratio: 1.0        # Op2: modulator (adds body)
+                level: 0.25       # Subtle body modulation
+              - ratio: 3.5        # Op3: modulator (inharmonic shimmer)
+                level: 0.2        # Subtle shimmer
+              - ratio: 2.0        # Op4: modulator (octave harmonics)
+                level: 0.33332    # Adds harmonics
+              - ratio: 4.5        # Op5: modulator (inharmonic partial)
+                level: 0.15       # Subtle inharmonic content
+              - ratio: 14.0       # Op6: modulator (classic E.Piano ratio)
+                level: 0.09998    # Feedback op - keep low
 
         - id: "amp1"
           type: "Amp"

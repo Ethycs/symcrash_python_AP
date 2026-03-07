@@ -143,23 +143,15 @@ class ExecutorLatch:
 
     Attributes:
         node_mask_u32: Current node mask (32-bit, one bit per node)
-        mask_target_u32: Target mask for ramping
-        mask_ramp_remaining: Blocks remaining in mask ramp
         tail_mode: Current tail mode (0=FULL, 1=MID, 2=MIN, 3=EMERGENCY)
         traction_q15: Projection hardness (0-32767)
     """
     # Node mask control (payload_type 0x30)
     node_mask_u32: int = 0xFFFFFFFF      # Current active node mask
-    mask_target_u32: int = 0xFFFFFFFF    # Target mask for ramping
-    mask_ramp_remaining: int = 0          # Blocks remaining in crossfade
 
     # Tail mode control (payload_type 0x31)
     tail_mode: int = 0                    # TailMode enum value (0=FULL)
     traction_q15: int = Q15_ONE            # Projection hardness
-
-    # Ramp tracking for crossfade
-    _mask_ramp_total: int = 0             # Total blocks for current ramp
-    _mask_start_u32: int = 0xFFFFFFFF     # Mask at ramp start
 
     # -------------------------------------------------------------------------
     # Symbol Engine Mode (CMMM Enrichment Gap G1)
@@ -175,26 +167,19 @@ class ExecutorLatch:
     timbral_target: int = 0               # Target timbral mode for ramping
     timbral_ramp_blocks: int = 0          # Blocks remaining in timbral ramp
 
-    def apply_nodemask_event(self, new_mask: int, ramp_blocks: int = 5) -> None:
+    def apply_nodemask_event(self, new_mask: int, ramp_blocks: int = 0) -> None:
         """
         Apply a node mask change event (payload_type 0x30).
 
+        Mask changes are immediate. The coefficient vector is continuous across
+        mask transitions, and tail operators guarantee bounded output.
+        The ramp_blocks parameter is accepted for API compatibility but ignored.
+
         Args:
             new_mask: New target node mask
-            ramp_blocks: Number of blocks to crossfade (0 = immediate)
+            ramp_blocks: Ignored (kept for API compatibility)
         """
-        if ramp_blocks <= 0:
-            # Immediate change
-            self.node_mask_u32 = new_mask
-            self.mask_target_u32 = new_mask
-            self.mask_ramp_remaining = 0
-            self._mask_ramp_total = 0
-        else:
-            # Start ramping - save current mask as start
-            self._mask_start_u32 = self.node_mask_u32
-            self.mask_target_u32 = new_mask
-            self.mask_ramp_remaining = ramp_blocks
-            self._mask_ramp_total = ramp_blocks
+        self.node_mask_u32 = new_mask
 
     def apply_tailmode_event(self, tail_mode: int, traction_q15: int = Q15_ONE) -> None:
         """
@@ -207,54 +192,9 @@ class ExecutorLatch:
         self.tail_mode = tail_mode
         self.traction_q15 = traction_q15
 
-    def step_mask_ramp(self) -> None:
-        """
-        Advance mask ramp by one block.
-
-        Call this at the start of each block to update the current mask
-        based on the ramp progress.
-        """
-        if self.mask_ramp_remaining > 0:
-            self.mask_ramp_remaining -= 1
-            if self.mask_ramp_remaining <= 0:
-                # Ramp complete: snap to target
-                self.node_mask_u32 = self.mask_target_u32
-            # Note: Intermediate mask blending happens in the operator dispatcher
-
     def get_effective_k(self) -> int:
         """Get active node count (K) from current mask."""
         return (self.node_mask_u32 & 0xFFFFFFFF).bit_count()
-
-    def get_crossfade_weights(self) -> tuple:
-        """
-        Get crossfade weights for smooth mask transitions.
-
-        During a mask ramp, returns (start_weight_q15, target_weight_q15, start_mask, target_mask)
-        where weights sum to ~32767.
-
-        If not ramping, returns (0, 32767, 0, current_mask).
-
-        Returns:
-            (start_weight_q15, target_weight_q15, start_mask, target_mask)
-        """
-        if self._mask_ramp_total <= 0 or self.mask_ramp_remaining <= 0:
-            # Not ramping - use target mask at full weight
-            return (0, 32767, 0, self.node_mask_u32)
-
-        # Compute blend factor: how far through the ramp
-        # ramp_remaining=total → progress=0 (all start)
-        # ramp_remaining=0 → progress=1 (all target)
-        progress_blocks = self._mask_ramp_total - self.mask_ramp_remaining
-        alpha_q15 = (progress_blocks * 32767) // self._mask_ramp_total
-
-        start_weight = Q15_ONE - alpha_q15
-        target_weight = alpha_q15
-
-        return (start_weight, target_weight, self._mask_start_u32, self.mask_target_u32)
-
-    def is_ramping(self) -> bool:
-        """Check if currently in a mask ramp transition."""
-        return self.mask_ramp_remaining > 0
 
     # -------------------------------------------------------------------------
     # Symbol Mode Methods (CMMM Enrichment Gap G1)
@@ -756,12 +696,8 @@ class VMState:
             'prev_fm_mod_buffer': self.prev_fm_mod_buffer.tolist(),
             # CMMM Executor Latch (WSE-STD-070)
             'executor_latch_node_mask': self.executor_latch.node_mask_u32,
-            'executor_latch_mask_target': self.executor_latch.mask_target_u32,
-            'executor_latch_mask_ramp': self.executor_latch.mask_ramp_remaining,
             'executor_latch_tail_mode': self.executor_latch.tail_mode,
             'executor_latch_traction': self.executor_latch.traction_q15,
-            'executor_latch_mask_ramp_total': self.executor_latch._mask_ramp_total,
-            'executor_latch_mask_start': self.executor_latch._mask_start_u32,
             # CMMM Enrichment: Symbol mode and timbral mode
             'executor_latch_symbol_mode': self.executor_latch.symbol_mode,
             'executor_latch_mode_dwell': self.executor_latch.mode_dwell_blocks,
@@ -827,12 +763,8 @@ class VMState:
         # Restore CMMM Executor Latch (WSE-STD-070)
         if 'executor_latch_node_mask' in snapshot:
             state.executor_latch.node_mask_u32 = snapshot['executor_latch_node_mask']
-            state.executor_latch.mask_target_u32 = snapshot['executor_latch_mask_target']
-            state.executor_latch.mask_ramp_remaining = snapshot['executor_latch_mask_ramp']
             state.executor_latch.tail_mode = snapshot['executor_latch_tail_mode']
             state.executor_latch.traction_q15 = snapshot['executor_latch_traction']
-            state.executor_latch._mask_ramp_total = snapshot.get('executor_latch_mask_ramp_total', 0)
-            state.executor_latch._mask_start_u32 = snapshot.get('executor_latch_mask_start', 0xFFFFFFFF)
             # CMMM Enrichment: Symbol mode and timbral mode
             state.executor_latch.symbol_mode = snapshot.get('executor_latch_symbol_mode', 1)
             state.executor_latch.mode_dwell_blocks = snapshot.get('executor_latch_mode_dwell', 0)

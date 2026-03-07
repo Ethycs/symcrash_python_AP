@@ -1,8 +1,8 @@
 """
-Test CMMM event roundtrip: VoiceFrame → Executor → Latch.
+Test CMMM event roundtrip: VoiceFrame -> Executor -> Latch.
 
 Verifies WSE-STD-070 event bindings:
-- 0x30 (NODEMASK_SET): Node mask changes with ramp
+- 0x30 (NODEMASK_SET): Node mask changes (immediate)
 - 0x31 (TAILMODE_SET): Tail mode changes with traction
 """
 
@@ -31,7 +31,7 @@ class TestNodeMaskEventRoundtrip:
     """Test 0x30 NODEMASK_SET event roundtrip."""
 
     def test_nodemask_event_updates_latch(self):
-        """NODEMASK_SET event should update executor latch."""
+        """NODEMASK_SET event should update executor latch immediately."""
         state = VMState()
         frame = MockVoiceFrame(
             cmmm_node_mask=0x0000FFFF,  # 16 nodes
@@ -40,14 +40,13 @@ class TestNodeMaskEventRoundtrip:
 
         _process_cmmm_events(state, frame)
 
-        # Latch should be ramping to new mask
+        # Latch should have new mask applied immediately
         latch = state.executor_latch
-        assert latch.mask_target_u32 == 0x0000FFFF
-        assert latch.mask_ramp_remaining == 10
-        assert latch.is_ramping()
+        assert latch.node_mask_u32 == 0x0000FFFF
+        assert latch.get_effective_k() == 16
 
-    def test_nodemask_event_preserves_start_mask(self):
-        """Start mask should be preserved for crossfade."""
+    def test_nodemask_event_immediate_regardless_of_ramp(self):
+        """Mask change should be immediate even with ramp_blocks specified."""
         state = VMState()
         state.executor_latch.node_mask_u32 = 0xFFFFFFFF  # 32 nodes
 
@@ -58,46 +57,41 @@ class TestNodeMaskEventRoundtrip:
 
         _process_cmmm_events(state, frame)
 
-        # Check crossfade weights show correct start mask
-        start_w, target_w, start_m, target_m = state.executor_latch.get_crossfade_weights()
-        assert start_m == 0xFFFFFFFF  # Original mask
-        assert target_m == 0x000000FF  # New target
+        # Should be immediately at target
+        assert state.executor_latch.node_mask_u32 == 0x000000FF
+        assert state.executor_latch.get_effective_k() == 8
 
-    def test_no_nodemask_event_advances_ramp(self):
-        """Without event, ramp should still advance."""
+    def test_no_nodemask_event_preserves_mask(self):
+        """Without event, mask should be unchanged."""
         state = VMState()
-        state.executor_latch.apply_nodemask_event(0x0000FFFF, ramp_blocks=5)
-        initial_remaining = state.executor_latch.mask_ramp_remaining
+        state.executor_latch.node_mask_u32 = 0x0000FFFF
 
         # Process frame without event
         frame = MockVoiceFrame()  # No events
         _process_cmmm_events(state, frame)
 
-        # Ramp should have advanced by 1
-        assert state.executor_latch.mask_ramp_remaining == initial_remaining - 1
+        # Mask should be unchanged
+        assert state.executor_latch.node_mask_u32 == 0x0000FFFF
 
-    def test_nodemask_ramp_completes(self):
-        """Ramp should complete after specified blocks."""
+    def test_sequential_nodemask_events(self):
+        """Sequential mask events should each apply immediately."""
         state = VMState()
         state.executor_latch.node_mask_u32 = 0xFFFFFFFF
 
-        # Start ramp
-        frame = MockVoiceFrame(cmmm_node_mask=0x0000FFFF, cmmm_mask_ramp_blocks=3)
-        _process_cmmm_events(state, frame)
-
-        # Process 3 more frames (first frame already stepped once)
-        for _ in range(2):
-            _process_cmmm_events(state, MockVoiceFrame())
-
-        # Still ramping after 2 more steps
-        assert state.executor_latch.mask_ramp_remaining == 1
-
-        # Final step
-        _process_cmmm_events(state, MockVoiceFrame())
-
-        # Now complete
-        assert not state.executor_latch.is_ramping()
+        # First mask change
+        frame1 = MockVoiceFrame(cmmm_node_mask=0x0000FFFF)
+        _process_cmmm_events(state, frame1)
         assert state.executor_latch.node_mask_u32 == 0x0000FFFF
+
+        # Second mask change
+        frame2 = MockVoiceFrame(cmmm_node_mask=0x000000FF)
+        _process_cmmm_events(state, frame2)
+        assert state.executor_latch.node_mask_u32 == 0x000000FF
+
+        # Third mask change
+        frame3 = MockVoiceFrame(cmmm_node_mask=0x00000001)
+        _process_cmmm_events(state, frame3)
+        assert state.executor_latch.node_mask_u32 == 0x00000001
 
 
 class TestTailModeEventRoundtrip:
@@ -148,33 +142,32 @@ class TestCombinedEvents:
         _process_cmmm_events(state, frame)
 
         latch = state.executor_latch
-        # Node mask
-        assert latch.mask_target_u32 == 0x00FF00FF
-        assert latch.mask_ramp_remaining == 8
+        # Node mask — immediate
+        assert latch.node_mask_u32 == 0x00FF00FF
+        assert latch.get_effective_k() == 16
         # Tail mode
         assert latch.tail_mode == 3
         assert latch.traction_q15 == 32767
 
-    def test_new_mask_event_interrupts_ramp(self):
-        """New mask event during ramp should start new ramp."""
+    def test_new_mask_event_replaces_previous(self):
+        """New mask event should simply overwrite previous mask."""
         state = VMState()
         state.executor_latch.node_mask_u32 = 0xFFFFFFFF
 
-        # Start first ramp
-        frame1 = MockVoiceFrame(cmmm_node_mask=0x0000FFFF, cmmm_mask_ramp_blocks=10)
+        # First mask change
+        frame1 = MockVoiceFrame(cmmm_node_mask=0x0000FFFF)
         _process_cmmm_events(state, frame1)
+        assert state.executor_latch.node_mask_u32 == 0x0000FFFF
 
-        # Advance a few blocks
+        # A few frames without events
         for _ in range(3):
             _process_cmmm_events(state, MockVoiceFrame())
+        assert state.executor_latch.node_mask_u32 == 0x0000FFFF
 
-        # Interrupt with new mask event
-        frame2 = MockVoiceFrame(cmmm_node_mask=0x000000FF, cmmm_mask_ramp_blocks=5)
+        # New mask event overwrites
+        frame2 = MockVoiceFrame(cmmm_node_mask=0x000000FF)
         _process_cmmm_events(state, frame2)
-
-        # Should be ramping to new target
-        assert state.executor_latch.mask_target_u32 == 0x000000FF
-        assert state.executor_latch.mask_ramp_remaining == 5
+        assert state.executor_latch.node_mask_u32 == 0x000000FF
 
 
 class TestKDegradationStaircase:

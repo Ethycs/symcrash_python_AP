@@ -103,10 +103,10 @@ instrument_ir_v0:
             node_mask: 0xFFFFFFFF    # K=32 full resolution for violin
             mask_ramp_blocks: 15     # Smooth bow-like onset
             tail_mode: "FULL"        # All tail ops for clean tone
-            traction_q15: 32767      # Hard projection
+            traction: 1.0             # Hard projection
 
   compile:
     material:
-      beta_start_q15: 0         # Pure carrier (no CMMM processing)
-      beta_target_q15: 0        # Stay pure
+      beta_start: 0.0           # Pure carrier (no CMMM processing)
+      beta_target: 0.0          # Stay pure
       beta_ramp_blocks: 1
