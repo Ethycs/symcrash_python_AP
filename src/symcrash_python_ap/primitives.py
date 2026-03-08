@@ -234,7 +234,7 @@ class SystemMacro(IntEnum):
     """
     # System macros (0-10)
     ENERGY_STATE = 0      # Envelope-owned state (read-only to controller)
-    ENERGY_INTENT = 1     # Controller → CMMM: playing intensity
+    ENERGY = 1            # Controller → CMMM: playing intensity
     MOTION = 2            # Movement / modulation amount
     FOCUS = 3             # Attention / emphasis (spectral concentration)
     BRIGHTNESS = 4        # Timbral brightness (harmonic content)
@@ -249,6 +249,10 @@ class SystemMacro(IntEnum):
     VIBRATO = 11          # Vibrato / tremolo depth
     LEGATO = 12           # Legato / portamento mode
 
+    # Cockpit controls (13-14)
+    DREAM = 13            # Entropy freedom, fine-scale scramble permission
+    SLIP = 14             # Cross-scale transport / diffusion amount
+
 
 class MacroInfo(NamedTuple):
     """System macro metadata."""
@@ -260,7 +264,7 @@ class MacroInfo(NamedTuple):
 
 MACRO_TABLE: Dict[int, MacroInfo] = {
     0: MacroInfo(0, "ENERGY_STATE", "Envelope", "NONE"),
-    1: MacroInfo(1, "ENERGY_INTENT", "Controller", "ONE_POLE(2048)"),
+    1: MacroInfo(1, "ENERGY", "Controller", "ONE_POLE(2048)"),
     2: MacroInfo(2, "MOTION", "Controller", "ONE_POLE(2048)"),
     3: MacroInfo(3, "FOCUS", "Controller", "ONE_POLE(2048)"),
     4: MacroInfo(4, "BRIGHTNESS", "Controller", "ONE_POLE(2048)"),
@@ -272,6 +276,8 @@ MACRO_TABLE: Dict[int, MacroInfo] = {
     10: MacroInfo(10, "UNITY", "Controller", "NBLOCK(32)"),
     11: MacroInfo(11, "VIBRATO", "Controller", "ONE_POLE(4096)"),
     12: MacroInfo(12, "LEGATO", "Controller", "NONE"),
+    13: MacroInfo(13, "DREAM", "Controller", "ONE_POLE(2048)"),
+    14: MacroInfo(14, "SLIP", "Controller", "ONE_POLE(2048)"),
 }
 
 

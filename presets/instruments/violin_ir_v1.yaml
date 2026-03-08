@@ -31,7 +31,7 @@ instrument_ir_v0:
       type: Osc
       output: amp1
       waveform: partials
-      partials: [30890, 32767, 6926, 23969, 3673, 6138, 1164, 1228]
+      partials: [0.943, 1.0, 0.211, 0.731, 0.112, 0.187, 0.036, 0.037]
     amp1:
       type: Amp
       attack: 30.0
@@ -49,14 +49,14 @@ instrument_ir_v0:
   behavior:
     idle:
       processing: [NormalizeScale, FineClamp]
-      emphasis: {CONSTRAINT: 1.0, CALM: 1.0}
-      trees: {A: T1, B: T1, blend: 0.0}
+      emphasis: {stability: 1.0, settling: 1.0}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
       resolution: 8
       safety: MIN
     stable:
       processing: [NormalizeScale, FineClamp]
-      emphasis: {CONSTRAINT: 1.0, CALM: 0.8}
-      trees: {A: T1, B: T1, blend: 0.0}
+      emphasis: {stability: 1.0, settling: 0.8}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
       resolution: 32
       safety: FULL
       ramp: 15

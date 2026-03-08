@@ -3943,7 +3943,7 @@ def apply_macros_to_intent(intent: IntentVector, macro_runtime: 'MacroRuntime') 
     direct semantic control over intent lanes.
 
     Mapping:
-    - ENERGY_INTENT (1) -> I_TONE, I_BOW boost
+    - ENERGY (1) -> I_TONE, I_BOW boost
     - FOCUS (3) -> I_TONE boost, I_AIR reduction
     - RISK (6) -> I_GLITCH boost
     - AGE (7) -> I_CALM boost, I_SNAP reduction (older voices settle)
@@ -3959,7 +3959,7 @@ def apply_macros_to_intent(intent: IntentVector, macro_runtime: 'MacroRuntime') 
     from ..macro_runtime import SystemMacro
 
     # Get macro values
-    energy_intent = macro_runtime.get_system_macro(SystemMacro.ENERGY_INTENT)
+    energy = macro_runtime.get_system_macro(SystemMacro.ENERGY)
     focus = macro_runtime.get_system_macro(SystemMacro.FOCUS)
     risk = macro_runtime.get_system_macro(SystemMacro.RISK)
     age = macro_runtime.get_system_macro(SystemMacro.AGE)
@@ -3968,8 +3968,8 @@ def apply_macros_to_intent(intent: IntentVector, macro_runtime: 'MacroRuntime') 
     # Create modified intent
     new_lanes = list(intent.lanes)
 
-    # ENERGY_INTENT -> boost TONE and BOW
-    intent_boost = energy_intent >> 2  # Up to 25% boost
+    # ENERGY -> boost TONE and BOW
+    intent_boost = energy >> 2  # Up to 25% boost
     new_lanes[I_TONE] = sat16(new_lanes[I_TONE] + intent_boost)
     new_lanes[I_BOW] = sat16(new_lanes[I_BOW] + intent_boost)
 

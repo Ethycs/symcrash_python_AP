@@ -176,7 +176,7 @@ class ControlProgram:
         runtime.apply_control_defaults(control)
 
     Semantic meanings:
-    - energy_intent: Playing intensity / attack character
+    - energy: Playing intensity / attack character
     - motion: Movement / modulation amount (gesture tracking)
     - focus: Attention / emphasis (spectral concentration)
     - brightness: Timbral brightness (harmonic content)
@@ -185,9 +185,11 @@ class ControlProgram:
     - space: Spatial / reverb character
     - material: Surface texture (wood=low, metal=mid, glass=high)
     - unity: Coherence / blend (how much voices blend together)
+    - dream: Entropy freedom, fine-scale scramble permission
+    - slip: Cross-scale transport / diffusion amount
     """
     # Controller → CMMM axes (Q15 unsigned, 0=minimum, 32767=maximum)
-    energy_intent_q15: int = 16384    # 0.5 = neutral intensity
+    energy_q15: int = 16384           # 0.5 = neutral intensity
     motion_q15: int = 0               # 0.0 = no modulation
     focus_q15: int = 16384            # 0.5 = balanced emphasis
     brightness_q15: int = 16384       # 0.5 = neutral brightness
@@ -196,6 +198,8 @@ class ControlProgram:
     space_q15: int = 8192             # 0.25 = subtle spatial
     material_q15: int = 16384         # 0.5 = neutral (neither wood nor glass)
     unity_q15: int = 16384            # 0.5 = balanced blend
+    dream_q15: int = 0                # 0.0 = precise, no entropy
+    slip_q15: int = 0                 # 0.0 = no cross-scale diffusion
 
     def to_macro_dict(self) -> Dict[int, int]:
         """
@@ -205,7 +209,7 @@ class ControlProgram:
             Dict mapping SystemMacroID -> Q15 value
         """
         return {
-            SystemMacroID.ENERGY_INTENT: self.energy_intent_q15,
+            SystemMacroID.ENERGY: self.energy_q15,
             SystemMacroID.MOTION: self.motion_q15,
             SystemMacroID.FOCUS: self.focus_q15,
             SystemMacroID.BRIGHTNESS: self.brightness_q15,
@@ -214,6 +218,8 @@ class ControlProgram:
             SystemMacroID.SPACE: self.space_q15,
             SystemMacroID.MATERIAL: self.material_q15,
             SystemMacroID.UNITY: self.unity_q15,
+            SystemMacroID.DREAM: self.dream_q15,
+            SystemMacroID.SLIP: self.slip_q15,
         }
 
 

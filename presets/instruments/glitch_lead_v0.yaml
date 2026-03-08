@@ -81,37 +81,37 @@ instrument_ir_v0:
 
     idle:
       processing: [NormalizeScale, FineClamp]
-      emphasis: {CONSTRAINT: 1.0, CALM: 1.0}
-      trees: {A: T1, B: T1, blend: 0.0}
+      emphasis: {stability: 1.0, settling: 1.0}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
       resolution: 8
       safety: MIN
     attack:
       processing: [Tilt, IntraMix, NormalizeScale, FineClamp]
-      emphasis: {COLOR: 0.7, EXCITE: 1.0, CONSTRAINT: 1.0}
-      trees: {A: T1, B: T1, blend: 0.0}
+      emphasis: {tone: 0.7, energy: 1.0, stability: 1.0}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
       resolution: 16
       safety: MID
       ramp: 8
     stable:
       processing: [Tilt, LowRankMorph, NormalizeScale, FineClamp, SheafProject]
-      emphasis: {COLOR: 0.5, COHERENCE: 0.4, CONSTRAINT: 1.0, CALM: 0.6}
-      trees: {A: T1, B: T1, blend: 0.0}
+      emphasis: {tone: 0.5, clarity: 0.4, stability: 1.0, settling: 0.6}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
       resolution: 32
       safety: FULL
       ramp: 12
       traction: 1.0
     glitch:
       processing: [BandShear, SwapBands, RotateNodes, FoldPressure, FineClamp]
-      emphasis: {TOPOLOGY: 0.9, CATASTROPHE: 0.7, CONSTRAINT: 0.3, COLOR: 0.3}
-      trees: {A: T1, B: T2, blend: 0.5}
+      emphasis: {warp: 0.9, chaos: 0.7, stability: 0.3, tone: 0.3}
+      trees: {A: harmonic, B: texture, blend: 0.5}
       resolution: 24
       safety: MIN
       ramp: 4
       traction: 0.25
     recovery:
       processing: [GluePair, SheafProject, NormalizeScale, FineClamp]
-      emphasis: {COHERENCE: 0.5, CONSTRAINT: 1.0, CALM: 0.8}
-      trees: {A: T1, B: T1, blend: 0.0}
+      emphasis: {clarity: 0.5, stability: 1.0, settling: 0.8}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
       resolution: 32
       safety: FULL
       ramp: 16

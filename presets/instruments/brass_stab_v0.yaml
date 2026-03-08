@@ -76,20 +76,20 @@ instrument_ir_v0:
   behavior:
     idle:
       processing: [NormalizeScale, FineClamp]
-      emphasis: {CONSTRAINT: 1.0, CALM: 1.0}
-      trees: {A: T1, B: T1, blend: 0.0}
+      emphasis: {stability: 1.0, settling: 1.0}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
     attack:
       processing: [Tilt, IntraMix, Impulse, GlobalPulse, NormalizeScale, FineClamp]
-      emphasis: {COLOR: 0.85, EXCITE: 1.0, CONSTRAINT: 1.0, CALM: 0.2}
-      trees: {A: T1, B: T1, blend: 0.15}
+      emphasis: {tone: 0.85, energy: 1.0, stability: 1.0, settling: 0.2}
+      trees: {A: harmonic, B: harmonic, blend: 0.15}
     stable:
       processing: [Tilt, DiffuseDown, IntraMix, NormalizeScale, FineClamp]
-      emphasis: {COLOR: 0.7, COHERENCE: 0.4, CONSTRAINT: 1.0, CALM: 0.5}
-      trees: {A: T1, B: T1, blend: 0.25}
+      emphasis: {tone: 0.7, clarity: 0.4, stability: 1.0, settling: 0.5}
+      trees: {A: harmonic, B: harmonic, blend: 0.25}
     recovery:
       processing: [GluePair, SheafProject, NormalizeScale, FineClamp]
-      emphasis: {COHERENCE: 0.3, CONSTRAINT: 1.0, CALM: 1.0}
-      trees: {A: T1, B: T1, blend: 0.0}
+      emphasis: {clarity: 0.3, stability: 1.0, settling: 1.0}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
 
   compile:
     completion_policy:

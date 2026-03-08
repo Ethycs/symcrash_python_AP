@@ -253,18 +253,18 @@ class TestL3Cmmm:
     def test_tree_target_defaults(self):
         """Tree target should have sensible defaults."""
         target = TreeTarget()
-        assert target.A == "T1"
-        assert target.B == "T1"
+        assert target.A == "harmonic"
+        assert target.B == "harmonic"
         assert target.beta == 0.0
 
     def test_emit_template(self):
         """Emit template should store families and ops."""
         template = EmitTemplate(
-            families={'COLOR': 0.5, 'CALM': 0.7},
+            families={'tone': 0.5, 'settling': 0.7},
             ops_enable=['Tilt', 'FineClamp'],
-            trees=TreeTarget(A='T1', B='T2', beta=0.5),
+            trees=TreeTarget(A='harmonic', B='texture', beta=0.5),
         )
-        assert template.families['COLOR'] == 0.5
+        assert template.families['tone'] == 0.5
         assert 'Tilt' in template.ops_enable
         assert template.trees.beta == 0.5
 
@@ -317,12 +317,12 @@ class TestL3Cmmm:
             enable_when='Chaos > 0.5',
             kind='conditional',
             add=OverlayAdd(
-                families={'TOPOLOGY': 0.5},
+                families={'warp': 0.5},
                 events=[],
             ),
         )
         assert overlay.id == 'O_CHAOS'
-        assert overlay.add.families['TOPOLOGY'] == 0.5
+        assert overlay.add.families['warp'] == 0.5
 
 
 # =============================================================================
@@ -437,7 +437,7 @@ class TestLoader:
         assert ir.layers.L2_regimes.regime_nodes[1].dwell_ms == 20
 
     def test_load_from_dict_emit_templates(self):
-        """Load IR with emit templates."""
+        """Load IR with emit templates (legacy format translates to sound-eng names)."""
         data = {
             'layers': {
                 'L3_cmmm': {
@@ -454,8 +454,9 @@ class TestLoader:
         ir = load_instrument_from_dict(data)
         assert 'T_IDLE' in ir.layers.L3_cmmm.emit_templates
         template = ir.layers.L3_cmmm.emit_templates['T_IDLE']
-        assert template.families['CALM'] == 1.0
+        assert template.families['settling'] == 1.0
         assert 'FineClamp' in template.ops_enable
+        assert template.trees.A == 'harmonic'
 
     @pytest.mark.skip(reason="yaml module not installed")
     def test_load_from_yaml_file(self):

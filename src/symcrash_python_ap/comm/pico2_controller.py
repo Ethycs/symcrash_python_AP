@@ -15,7 +15,7 @@ Path A (VoiceEngine):
 Path B (MacroRuntime):
     - Pot 0: BRIGHT → brightness (system macro 4)
     - Pot 1: BODY → density (system macro 5)
-    - Pot 2: IMPACT → energy_intent (system macro 1)
+    - Pot 2: IMPACT → energy (system macro 1)
 
 Usage:
     from symcrash_python_ap.voice import VoiceEngine
@@ -59,7 +59,7 @@ from ..macro_runtime import MacroRuntime
 POT_TO_PRESET_MACRO = {
     0: "BRIGHT",   # Pot 0 -> BRIGHT -> brightness (system macro 4)
     1: "BODY",     # Pot 1 -> BODY -> density (system macro 5)
-    2: "IMPACT",   # Pot 2 -> IMPACT -> energy_intent (system macro 1)
+    2: "IMPACT",   # Pot 2 -> IMPACT -> energy (system macro 1)
 }
 
 

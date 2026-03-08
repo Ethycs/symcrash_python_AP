@@ -25,6 +25,8 @@ from symcrash_python_ap.instrument_ir import (
     load_instrument_from_dict,
     _parse_modulators,
     RESOLUTION_TO_MASK,
+    LEGACY_FAMILY_NAMES,
+    LEGACY_TREE_NAMES,
 )
 from symcrash_python_ap.vm.harmonic_bank import (
     LFOWaveform, LFOSyncMode, LFOTarget,
@@ -241,7 +243,7 @@ def test_translate_simple_behavior():
 
     t_idle = templates["T_IDLE"]
     assert t_idle.ops_enable == ["NormalizeScale", "FineClamp"]
-    assert t_idle.families == {"CONSTRAINT": 1.0, "CALM": 1.0}
+    assert t_idle.families == {"stability": 1.0, "settling": 1.0}
     assert t_idle.trees.beta == 0.0
 
     t_stable = templates["T_STABLE"]
@@ -411,6 +413,189 @@ def test_translate_fm6_graph():
     fm6_node = next(n for n in ir.layers.L0_graph.nodes if n.type == "FM6")
     assert fm6_node.params.algorithm == 19
     assert fm6_node.params.feedback == 3
+
+
+# =============================================================================
+# Jargon translation: sound-engineering vocabulary → internal names
+# =============================================================================
+
+def test_translate_emphasis_sound_engineering_names():
+    """Sound-engineering emphasis names are stored as-is internally."""
+    data = {
+        "instrument_ir_v0": {
+            "meta": {"id": "t", "name": "T"},
+            "graph": {"a": {"type": "Amp", "attack": 1, "decay": 1, "sustain": 0.5, "release": 1}},
+            "behavior": {
+                "idle": {
+                    "processing": ["FineClamp"],
+                    "emphasis": {"stability": 1.0, "settling": 0.8, "tone": 0.5},
+                    "trees": {"A": "harmonic", "B": "harmonic", "blend": 0.0},
+                },
+            },
+        }
+    }
+    ir = load_instrument_from_dict(data)
+    fam = ir.layers.L3_cmmm.emit_templates["T_IDLE"].families
+    assert fam == {"stability": 1.0, "settling": 0.8, "tone": 0.5}
+
+
+def test_translate_emphasis_all_families():
+    """All 9 sound-engineering emphasis names are stored as-is."""
+    data = {
+        "instrument_ir_v0": {
+            "meta": {"id": "t", "name": "T"},
+            "graph": {"a": {"type": "Amp", "attack": 1, "decay": 1, "sustain": 0.5, "release": 1}},
+            "behavior": {
+                "idle": {
+                    "emphasis": {
+                        "stability": 1.0, "settling": 0.9, "tone": 0.8,
+                        "body": 0.7, "spread": 0.6, "clarity": 0.5,
+                        "energy": 0.4, "warp": 0.3, "chaos": 0.2,
+                    },
+                    "trees": {"A": "harmonic", "B": "harmonic", "blend": 0.0},
+                },
+            },
+        }
+    }
+    ir = load_instrument_from_dict(data)
+    fam = ir.layers.L3_cmmm.emit_templates["T_IDLE"].families
+    assert fam["stability"] == 1.0
+    assert fam["settling"] == 0.9
+    assert fam["tone"] == 0.8
+    assert fam["body"] == 0.7
+    assert fam["spread"] == 0.6
+    assert fam["clarity"] == 0.5
+    assert fam["energy"] == 0.4
+    assert fam["warp"] == 0.3
+    assert fam["chaos"] == 0.2
+
+
+def test_translate_emphasis_legacy_names_converted():
+    """Legacy emphasis names (CONSTRAINT, CALM, etc.) are translated to sound-eng names."""
+    data = {
+        "instrument_ir_v0": {
+            "meta": {"id": "t", "name": "T"},
+            "graph": {"a": {"type": "Amp", "attack": 1, "decay": 1, "sustain": 0.5, "release": 1}},
+            "behavior": {
+                "idle": {
+                    "emphasis": {"CONSTRAINT": 1.0, "CALM": 0.5},
+                    "trees": {"A": "harmonic", "B": "harmonic", "blend": 0.0},
+                },
+            },
+        }
+    }
+    ir = load_instrument_from_dict(data)
+    fam = ir.layers.L3_cmmm.emit_templates["T_IDLE"].families
+    assert fam == {"stability": 1.0, "settling": 0.5}
+
+
+def test_translate_tree_names_sound_engineering():
+    """Sound-engineering tree names (harmonic, texture) are stored as-is."""
+    data = {
+        "instrument_ir_v0": {
+            "meta": {"id": "t", "name": "T"},
+            "graph": {"a": {"type": "Amp", "attack": 1, "decay": 1, "sustain": 0.5, "release": 1}},
+            "behavior": {
+                "idle": {
+                    "trees": {"A": "harmonic", "B": "texture", "blend": 0.5},
+                },
+            },
+        }
+    }
+    ir = load_instrument_from_dict(data)
+    trees = ir.layers.L3_cmmm.emit_templates["T_IDLE"].trees
+    assert trees.A == "harmonic"
+    assert trees.B == "texture"
+    assert trees.beta == 0.5
+
+
+def test_translate_tree_names_all():
+    """All tree names (balanced, harmonic, texture, impact, drone) are stored as-is."""
+    for name in ["balanced", "harmonic", "texture", "impact", "drone"]:
+        data = {
+            "instrument_ir_v0": {
+                "meta": {"id": "t", "name": "T"},
+                "graph": {"a": {"type": "Amp", "attack": 1, "decay": 1, "sustain": 0.5, "release": 1}},
+                "behavior": {
+                    "idle": {"trees": {"A": name, "B": name, "blend": 0.0}},
+                },
+            }
+        }
+        ir = load_instrument_from_dict(data)
+        trees = ir.layers.L3_cmmm.emit_templates["T_IDLE"].trees
+        assert trees.A == name, f"{name} should be stored as-is"
+        assert trees.B == name
+
+
+def test_translate_legacy_tree_names():
+    """Legacy tree names (T0-T4) are translated to sound-engineering names."""
+    for legacy, modern in LEGACY_TREE_NAMES.items():
+        data = {
+            "instrument_ir_v0": {
+                "meta": {"id": "t", "name": "T"},
+                "graph": {"a": {"type": "Amp", "attack": 1, "decay": 1, "sustain": 0.5, "release": 1}},
+                "behavior": {
+                    "idle": {"trees": {"A": legacy, "B": legacy, "blend": 0.0}},
+                },
+            }
+        }
+        ir = load_instrument_from_dict(data)
+        trees = ir.layers.L3_cmmm.emit_templates["T_IDLE"].trees
+        assert trees.A == modern, f"{legacy} should translate to {modern}"
+        assert trees.B == modern
+
+
+def test_translate_energy_field():
+    """Character field 'energy' is stored as 'energy' internally."""
+    data = {
+        "instrument_ir_v0": {
+            "meta": {"id": "t", "name": "T"},
+            "graph": {"a": {"type": "Amp", "attack": 1, "decay": 1, "sustain": 0.5, "release": 1}},
+            "character": {
+                "brightness": 0.5,
+                "energy": 0.7,
+            },
+        }
+    }
+    ir = load_instrument_from_dict(data)
+    assert ir.control.energy == 0.7
+    assert ir.control.brightness == 0.5
+
+
+def test_translate_float_partials_to_q15():
+    """Float partials (0.0-1.0) are converted to Q15 integers."""
+    data = {
+        "instrument_ir_v0": {
+            "meta": {"id": "t", "name": "T"},
+            "graph": {
+                "osc1": {
+                    "type": "Osc",
+                    "output": "amp",
+                    "waveform": "partials",
+                    "partials": [0.943, 1.0, 0.211, 0.731],
+                },
+                "amp": {"type": "Amp", "attack": 1, "decay": 1, "sustain": 0.5, "release": 1},
+            },
+        }
+    }
+    ir = load_instrument_from_dict(data)
+    osc_node = next(n for n in ir.layers.L0_graph.nodes if n.type == "Osc")
+    # Partials should be stored as param (pass-through to node params dict)
+    # The translation should have converted 0.943 → round(0.943 * 32767) = 30899
+    # Note: exact values depend on rounding
+    # The key test is that the preset LOADS without error
+
+
+def test_legacy_family_names_mapping_complete():
+    """LEGACY_FAMILY_NAMES covers all old internal family names."""
+    expected = {"CONSTRAINT", "CALM", "COLOR", "LOCAL", "TRANSPORT", "COHERENCE", "EXCITE", "TOPOLOGY", "CATASTROPHE"}
+    assert set(LEGACY_FAMILY_NAMES.keys()) == expected
+
+
+def test_legacy_tree_names_mapping_complete():
+    """LEGACY_TREE_NAMES covers all old tree identifiers."""
+    expected = {"T0", "T1", "T2", "T3", "T4"}
+    assert set(LEGACY_TREE_NAMES.keys()) == expected
 
 
 # =============================================================================

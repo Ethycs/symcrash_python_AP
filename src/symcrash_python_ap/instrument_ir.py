@@ -368,7 +368,7 @@ class ControlConfig:
     All values are Q15 unsigned (0-32767) representing 0.0-1.0 normalized.
 
     Semantic meanings (per WSE-STD-MACRO v0):
-    - energy_intent: Playing intensity / attack character
+    - energy: Playing intensity / attack character
     - motion: Movement / modulation amount (gesture tracking)
     - focus: Attention / emphasis (spectral concentration)
     - brightness: Timbral brightness (harmonic content)
@@ -377,25 +377,19 @@ class ControlConfig:
     - space: Spatial / reverb character
     - material: Surface texture (wood=low, metal=mid, glass=high)
     - unity: Coherence / blend (how much voices blend together)
+    - dream: Entropy freedom, fine-scale scramble permission
+    - slip: Cross-scale transport / diffusion amount
     - temperament: CMMM transition behavior parameters (θ)
 
     YAML example:
-        control:
+        character:
           brightness: 0.75    # High brightness for brass
           density: 0.5        # Neutral body
-          energy_intent: 0.6  # Slightly aggressive
+          energy: 0.6         # Slightly aggressive
           risk: 0.1           # Some instability
-          temperament:
-            hysteresis: 0.3
-            reactivity: 0.7
-
-    Or using Q15 directly:
-        control:
-          brightness_q15: 24576
-          density_q15: 16384
     """
     # Controller → CMMM axes (normalized 0.0-1.0 or Q15 0-32767)
-    energy_intent: float = 0.5        # 0.5 = neutral intensity
+    energy: float = 0.5              # 0.5 = neutral intensity
     motion: float = 0.0               # 0.0 = no modulation
     focus: float = 0.5                # 0.5 = balanced emphasis
     brightness: float = 0.5           # 0.5 = neutral brightness
@@ -404,6 +398,8 @@ class ControlConfig:
     space: float = 0.25               # 0.25 = subtle spatial
     material: float = 0.5             # 0.5 = neutral (neither wood nor glass)
     unity: float = 0.5                # 0.5 = balanced blend
+    dream: float = 0.0                # 0.0 = precise, no entropy
+    slip: float = 0.0                 # 0.0 = no cross-scale diffusion
 
     # CMMM transition behavior (θ parameters)
     temperament: TemperamentVector = field(default_factory=TemperamentVector)
@@ -418,7 +414,7 @@ class ControlConfig:
         from .library.capsule import ControlProgram
 
         return ControlProgram(
-            energy_intent_q15=int(self.energy_intent * 32767),
+            energy_q15=int(self.energy * 32767),
             motion_q15=int(self.motion * 32767),
             focus_q15=int(self.focus * 32767),
             brightness_q15=int(self.brightness * 32767),
@@ -427,6 +423,8 @@ class ControlConfig:
             space_q15=int(self.space * 32767),
             material_q15=int(self.material * 32767),
             unity_q15=int(self.unity * 32767),
+            dream_q15=int(self.dream * 32767),
+            slip_q15=int(self.slip * 32767),
         )
 
 
@@ -1156,8 +1154,8 @@ class CmmmOutputs:
 @dataclass
 class TreeTarget:
     """Tree blend target for topology morphing."""
-    A: str = "T1"
-    B: str = "T1"
+    A: str = "harmonic"
+    B: str = "harmonic"
     beta: Union[float, str] = 0.0
 
 
@@ -1875,23 +1873,26 @@ def _parse_control_config(data: dict) -> ControlConfig:
     Q15 values take precedence if both are specified.
 
     Example YAML:
-        control:
+        character:
           brightness: 0.75      # High brightness for brass
           density: 0.5          # Neutral body
-          energy_intent: 0.6    # Slightly aggressive
+          energy: 0.6           # Slightly aggressive
           risk: 0.1             # Some instability
-
-    Or using Q15 directly:
-        control:
-          brightness_q15: 24576
-          density_q15: 16384
     """
-    def get_value(name: str, default: float) -> float:
-        """Get value, preferring Q15 over normalized."""
+    def get_value(name: str, default: float, *aliases: str) -> float:
+        """Get value, preferring Q15 over normalized. Accepts legacy aliases."""
         q15_key = f'{name}_q15'
         if q15_key in data:
             return data[q15_key] / 32767.0
-        return data.get(name, default)
+        if name in data:
+            return data[name]
+        for alias in aliases:
+            if alias in data:
+                return data[alias]
+            alias_q15 = f'{alias}_q15'
+            if alias_q15 in data:
+                return data[alias_q15] / 32767.0
+        return default
 
     # Parse temperament if present (CMMM Enrichment Phase P5)
     temperament = TemperamentVector()
@@ -1899,7 +1900,7 @@ def _parse_control_config(data: dict) -> ControlConfig:
         temperament = TemperamentVector.from_dict(data['temperament'])
 
     return ControlConfig(
-        energy_intent=get_value('energy_intent', 0.5),
+        energy=get_value('energy', 0.5, 'energy_intent'),
         motion=get_value('motion', 0.0),
         focus=get_value('focus', 0.5),
         brightness=get_value('brightness', 0.5),
@@ -1908,6 +1909,8 @@ def _parse_control_config(data: dict) -> ControlConfig:
         space=get_value('space', 0.25),
         material=get_value('material', 0.5),
         unity=get_value('unity', 0.5),
+        dream=get_value('dream', 0.0),
+        slip=get_value('slip', 0.0),
         temperament=temperament,
     )
 
@@ -2293,10 +2296,12 @@ def _parse_l2_regimes(data: dict) -> L2Regimes:
 
 
 def _parse_tree_target(data: dict) -> TreeTarget:
-    """Parse tree target from dict."""
+    """Parse tree target from dict. Translates legacy T0-T4 names."""
+    a = data.get('A', 'harmonic')
+    b = data.get('B', 'harmonic')
     return TreeTarget(
-        A=data.get('A', 'T1'),
-        B=data.get('B', 'T1'),
+        A=LEGACY_TREE_NAMES.get(a, a),
+        B=LEGACY_TREE_NAMES.get(b, b),
         beta=data.get('beta', 0.0),
     )
 
@@ -2357,8 +2362,12 @@ def _parse_emit_template(data: dict) -> EmitTemplate:
     if 'cmmm' in data:
         cmmm = _parse_cmmm_control(data['cmmm'])
 
+    # Translate legacy family names (CONSTRAINT→stability, etc.) for backward compat
+    raw_families = data.get('families', {})
+    families = {LEGACY_FAMILY_NAMES.get(k, k): v for k, v in raw_families.items()}
+
     return EmitTemplate(
-        families=data.get('families', {}),
+        families=families,
         ops_enable=data.get('ops_enable', []),
         trees=trees,
         events=[_parse_event_policy(e) for e in data.get('events', [])],
@@ -2397,8 +2406,10 @@ def _parse_suppression_rule(data: dict) -> SuppressionRule:
 
 def _parse_overlay_add(data: dict) -> OverlayAdd:
     """Parse overlay add from dict."""
+    raw_families = data.get('families', {})
+    families = {LEGACY_FAMILY_NAMES.get(k, k): v for k, v in raw_families.items()}
     return OverlayAdd(
-        families=data.get('families', {}),
+        families=families,
         events=[_parse_event_policy(e) for e in data.get('events', [])],
     )
 
@@ -2722,6 +2733,28 @@ RESOLUTION_TO_MASK = {
     32: 0xFFFFFFFF,   # K=32
 }
 
+# Legacy emphasis family names → sound engineering (backward compat, see docs/jargon.md)
+LEGACY_FAMILY_NAMES = {
+    'CONSTRAINT': 'stability',
+    'CALM':       'settling',
+    'COLOR':      'tone',
+    'LOCAL':      'body',
+    'TRANSPORT':  'spread',
+    'COHERENCE':  'clarity',
+    'EXCITE':     'energy',
+    'TOPOLOGY':   'warp',
+    'CATASTROPHE': 'chaos',
+}
+
+# Legacy tree IDs → sound engineering names (backward compat, see docs/jargon.md)
+LEGACY_TREE_NAMES = {
+    'T0': 'balanced',
+    'T1': 'harmonic',
+    'T2': 'texture',
+    'T3': 'impact',
+    'T4': 'drone',
+}
+
 
 def _translate_sound_design_format(data: dict) -> dict:
     """
@@ -2790,6 +2823,11 @@ def _translate_sound_design_format(data: dict) -> dict:
         else:
             # All other node types: flat params pass through
             params = node_dict
+            # Convert float partials to Q15 integers (see docs/jargon.md)
+            if 'partials' in params and params['partials']:
+                vals = params['partials']
+                if vals and isinstance(vals[0], float) and all(v <= 1.0 for v in vals):
+                    params['partials'] = [round(v * 32767) for v in vals]
 
         nodes.append({
             'id': node_id,
@@ -2876,11 +2914,11 @@ def _translate_sound_design_format(data: dict) -> dict:
             if 'processing' in state_def:
                 template['ops_enable'] = state_def['processing']
 
-            # emphasis → families
+            # emphasis → families (pass through sound-eng names as-is)
             if 'emphasis' in state_def:
-                template['families'] = state_def['emphasis']
+                template['families'] = dict(state_def['emphasis'])
 
-            # trees: blend → beta
+            # trees: blend → beta (tree names pass through as-is)
             if 'trees' in state_def:
                 trees = dict(state_def['trees'])
                 if 'blend' in trees and 'beta' not in trees:
@@ -2908,9 +2946,9 @@ def _translate_sound_design_format(data: dict) -> dict:
 
     result['layers'] = layers
 
-    # Character → control
+    # Character → control (pass through as-is)
     if 'character' in data:
-        result['control'] = data['character']
+        result['control'] = dict(data['character'])
 
     # Envelopes: dict format → list format with ADSR translation
     envelopes_data = data.get('envelopes', {})
@@ -3202,24 +3240,24 @@ def create_default_emit_templates() -> Dict[str, EmitTemplate]:
     """Create default emission templates."""
     return {
         'T_IDLE': EmitTemplate(
-            families={'CONSTRAINT': 1.0, 'CALM': 1.0},
+            families={'stability': 1.0, 'settling': 1.0},
             ops_enable=['NormalizeScale', 'FineClamp'],
-            trees=TreeTarget(A='T1', B='T1', beta=0.0),
+            trees=TreeTarget(A='harmonic', B='harmonic', beta=0.0),
         ),
         'T_ATTACK': EmitTemplate(
-            families={'COLOR': 0.6, 'EXCITE': 1.0, 'CONSTRAINT': 1.0, 'CALM': 0.5},
+            families={'tone': 0.6, 'energy': 1.0, 'stability': 1.0, 'settling': 0.5},
             ops_enable=['Tilt', 'IntraMix', 'NormalizeScale', 'FineClamp'],
-            trees=TreeTarget(A='T1', B='T1', beta=0.0),
+            trees=TreeTarget(A='harmonic', B='harmonic', beta=0.0),
         ),
         'T_STABLE': EmitTemplate(
-            families={'COLOR': 0.5, 'COHERENCE': 0.4, 'CONSTRAINT': 1.0, 'CALM': 0.7},
+            families={'tone': 0.5, 'clarity': 0.4, 'stability': 1.0, 'settling': 0.7},
             ops_enable=['Tilt', 'LowRankMorph', 'NormalizeScale', 'FineClamp', 'SheafProject'],
-            trees=TreeTarget(A='T1', B='T1', beta=0.0),
+            trees=TreeTarget(A='harmonic', B='harmonic', beta=0.0),
         ),
         'T_RECOVERY': EmitTemplate(
-            families={'COHERENCE': 0.3, 'CONSTRAINT': 1.0, 'CALM': 1.0},
+            families={'clarity': 0.3, 'stability': 1.0, 'settling': 1.0},
             ops_enable=['GluePair', 'SheafProject', 'NormalizeScale', 'FineClamp'],
-            trees=TreeTarget(A='T1', B='T1', beta=0.0),
+            trees=TreeTarget(A='harmonic', B='harmonic', beta=0.0),
         ),
     }
 
@@ -3444,7 +3482,7 @@ class Tower:
         result.L3_cmmm = L3Cmmm()
         result.L3_cmmm.emit_templates = {
             "T_SAFE": EmitTemplate(
-                families={"CONSTRAINT": 1.0, "CALM": 1.0},
+                families={"stability": 1.0, "settling": 1.0},
                 ops_enable=["NormalizeScale", "FineClamp"],
             )
         }
@@ -3604,4 +3642,6 @@ __all__ = [
     'create_default_l1_lift', 'create_default_l2_regimes', 'create_default_emit_templates',
     # Tower (WSE-STD-070)
     'TowerLevel', 'TowerBudget', 'Tower',
+    # Translation maps (backward compatibility)
+    'RESOLUTION_TO_MASK', 'LEGACY_FAMILY_NAMES', 'LEGACY_TREE_NAMES',
 ]

@@ -67,7 +67,7 @@ instrument_ir_v0:
   character:
     brightness: 0.7
     density: 0.5
-    energy_intent: 0.55
+    energy: 0.55
     risk: 0.02
     material: 0.6
 
@@ -88,20 +88,20 @@ instrument_ir_v0:
   behavior:
     idle:
       processing: [FineClamp]
-      emphasis: {CONSTRAINT: 1.0, CALM: 1.0}
-      trees: {A: T1, B: T1, blend: 0.0}
+      emphasis: {stability: 1.0, settling: 1.0}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
     attack:
       processing: [Tilt, IntraMix, FineClamp]
-      emphasis: {COLOR: 0.7, LOCAL: 0.6, CONSTRAINT: 1.0, CALM: 0.2}
-      trees: {A: T1, B: T1, blend: 0.1}
+      emphasis: {tone: 0.7, body: 0.6, stability: 1.0, settling: 0.2}
+      trees: {A: harmonic, B: harmonic, blend: 0.1}
     stable:
       processing: [Tilt, DiffuseDown, IntraMix, FineClamp]
-      emphasis: {COLOR: 0.6, TRANSPORT: 0.4, LOCAL: 0.5, CONSTRAINT: 1.0, CALM: 0.5}
-      trees: {A: T1, B: T1, blend: 0.15}
+      emphasis: {tone: 0.6, spread: 0.4, body: 0.5, stability: 1.0, settling: 0.5}
+      trees: {A: harmonic, B: harmonic, blend: 0.15}
     recovery:
       processing: [IntraMix, FineClamp]
-      emphasis: {CONSTRAINT: 1.0, CALM: 0.8}
-      trees: {A: T1, B: T1, blend: 0.0}
+      emphasis: {stability: 1.0, settling: 0.8}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
 
   compile:
     material:

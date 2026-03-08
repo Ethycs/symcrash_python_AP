@@ -7,7 +7,7 @@ Runtime macro state with slew filters per WSE-STD-MACRO v0.
 MacroMap Lite v0 provides 3 preset macros:
 - BRIGHT → brightness (macro 4)
 - BODY → density (macro 5)
-- IMPACT → energy_intent (macro 1)
+- IMPACT → energy (macro 1)
 
 All macros use Q15 unsigned values (0-32767).
 Slew policies are applied at block boundaries.
@@ -54,7 +54,7 @@ class SlewConfig:
 # Default slew table from WSE-STD-MACRO v0 §6
 DEFAULT_SLEW_TABLE: Dict[int, SlewConfig] = {
     SystemMacro.ENERGY_STATE: SlewConfig(SlewPolicy.NONE),          # Envelope-owned
-    SystemMacro.ENERGY_INTENT: SlewConfig(SlewPolicy.ONE_POLE, 2048),
+    SystemMacro.ENERGY: SlewConfig(SlewPolicy.ONE_POLE, 2048),
     SystemMacro.MOTION: SlewConfig(SlewPolicy.ONE_POLE, 2048),
     SystemMacro.FOCUS: SlewConfig(SlewPolicy.ONE_POLE, 2048),
     SystemMacro.BRIGHTNESS: SlewConfig(SlewPolicy.ONE_POLE, 2048),
@@ -64,6 +64,8 @@ DEFAULT_SLEW_TABLE: Dict[int, SlewConfig] = {
     SystemMacro.SPACE: SlewConfig(SlewPolicy.ONE_POLE, 2048),
     SystemMacro.MATERIAL: SlewConfig(SlewPolicy.NBLOCK, 32),
     SystemMacro.UNITY: SlewConfig(SlewPolicy.NBLOCK, 32),
+    SystemMacro.DREAM: SlewConfig(SlewPolicy.ONE_POLE, 2048),
+    SystemMacro.SLIP: SlewConfig(SlewPolicy.ONE_POLE, 2048),
 }
 
 
@@ -90,7 +92,7 @@ class MacroBinding:
 MACROMAP_LITE_V0: List[MacroBinding] = [
     MacroBinding("BRIGHT", SystemMacro.BRIGHTNESS, "AFFINE_Q15", Q15_ONE, 0),
     MacroBinding("BODY", SystemMacro.DENSITY, "AFFINE_Q15", Q15_ONE, 0),
-    MacroBinding("IMPACT", SystemMacro.ENERGY_INTENT, "AFFINE_Q15", Q15_ONE, 0),
+    MacroBinding("IMPACT", SystemMacro.ENERGY, "AFFINE_Q15", Q15_ONE, 0),
 ]
 
 
@@ -116,8 +118,8 @@ class MacroRuntime:
     slew_table: Dict[int, SlewConfig] = field(default_factory=lambda: dict(DEFAULT_SLEW_TABLE))
 
     # Macro state (per system macro ID)
-    macro_target_q15: Dict[int, int] = field(default_factory=lambda: {i: 0 for i in range(11)})
-    macro_curr_q15: Dict[int, int] = field(default_factory=lambda: {i: 0 for i in range(11)})
+    macro_target_q15: Dict[int, int] = field(default_factory=lambda: {i: 0 for i in range(15)})
+    macro_curr_q15: Dict[int, int] = field(default_factory=lambda: {i: 0 for i in range(15)})
 
     # AGE integrator parameters (per WSE-STD-MACRO v0 §7)
     # These control how fast AGE accumulates during note-on vs decays during release

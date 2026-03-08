@@ -41,12 +41,12 @@ instrument_ir_v0:
   behavior:
     idle:
       processing: [FineClamp]
-      emphasis: {CONSTRAINT: 1.0, CALM: 1.0}
-      trees: {A: T1, B: T2, blend: 0.3}
+      emphasis: {stability: 1.0, settling: 1.0}
+      trees: {A: harmonic, B: texture, blend: 0.3}
     stable:
       processing: [Tilt, DiffuseUp, FineClamp]
-      emphasis: {COLOR: 0.5, LOCAL: 0.5, CONSTRAINT: 1.0}
-      trees: {A: T1, B: T2, blend: 0.3}
+      emphasis: {tone: 0.5, body: 0.5, stability: 1.0}
+      trees: {A: harmonic, B: texture, blend: 0.3}
 
   compile:
     material:
