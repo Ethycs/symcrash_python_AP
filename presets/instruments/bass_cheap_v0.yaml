@@ -18,7 +18,7 @@
 # Algorithm 1 (DX7 Stack):
 #   [6] -> [5] -> [4] -> [3] -> [2] -> [1*]
 # Single carrier stack - clean bass foundation
-# Conformance: P2 (full CMMM synthesis)
+# Conformance: Expressive (full articulation)
 
 instrument_ir_v0:
   meta:
@@ -77,22 +77,22 @@ instrument_ir_v0:
       release: 60.0
       targets: [FM_OP1, FM_OP2, FM_OP3, FM_OP4, FM_OP5, FM_OP6]
 
+  # Re-voiced to the 7-axis control vector (no operator names — axes derive
+  # processing continuously).  Axes chosen to match the original operator
+  # intent: body→IntraMix (weight/thickness), color→Tilt (conservative
+  # brightness).  Safety (NormalizeScale, FineClamp) is always-on.
   behavior:
     idle:
-      processing: [FineClamp]
-      emphasis: {stability: 1.0, settling: 1.0}
+      emphasis: {}
       trees: {A: harmonic, B: harmonic, blend: 0.0}
     attack:
-      processing: [IntraMix, FineClamp]
-      emphasis: {body: 0.8, tone: 0.3, stability: 1.0, settling: 0.3}
+      emphasis: {body: 0.8}
       trees: {A: harmonic, B: harmonic, blend: 0.0}
     stable:
-      processing: [IntraMix, Tilt, FineClamp]
-      emphasis: {body: 0.7, tone: 0.25, stability: 1.0, settling: 0.5}
+      emphasis: {body: 0.7, color: 0.25}
       trees: {A: harmonic, B: harmonic, blend: 0.0}
     recovery:
-      processing: [IntraMix, FineClamp]
-      emphasis: {body: 0.5, stability: 1.0, settling: 0.8}
+      emphasis: {body: 0.5}
       trees: {A: harmonic, B: harmonic, blend: 0.0}
 
   compile:

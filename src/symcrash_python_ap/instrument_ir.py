@@ -2746,6 +2746,136 @@ LEGACY_FAMILY_NAMES = {
     'CATASTROPHE': 'chaos',
 }
 
+# ---------------------------------------------------------------------------
+# Canonical 7-axis control vocabulary (see docs/jargon.md, WSE-STD-070 §3.1).
+#
+# Authors describe a sound with 7 continuous axes.  Each axis maps 1:1 onto an
+# existing internal Family slot (the 8th family, TAIL, is always-on safety and
+# not author-facing), so the internal family currency is UNCHANGED — this is an
+# authoring-layer collapse, not an ABI change.  Older emphasis names are
+# accepted on load and aliased to their canonical axis, so existing presets and
+# the WSE-STD-GESTURE intent path keep working unchanged.
+# ---------------------------------------------------------------------------
+
+# canonical axis -> Family slot index (primitives.Family enum values)
+AXIS_FAMILY_SLOT = {
+    'color':  1,   # F_COLOR       - spectral tilt / timbral coloring
+    'spread': 2,   # F_TRANSPORT   - cross-band energy redistribution
+    'body':   3,   # F_LOCAL       - within-band weight / thickness
+    'warp':   4,   # F_TOPOLOGY    - structural permutation
+    'glue':   5,   # F_GLUE        - coherence / stability / settle
+    'snap':   6,   # F_EVENTS      - transient / energy injection
+    'chaos':  7,   # F_CATASTROPHE - controlled extreme transforms
+}
+
+# legacy emphasis/character name -> canonical axis (backward compat; jargon.md)
+AXIS_ALIASES = {
+    # legacy emphasis names
+    'tone':      'color',
+    'energy':    'snap',
+    'clarity':   'glue',
+    'stability': 'glue',
+    'settling':  'glue',
+    # legacy character knobs (now thin aliases of the canonical axes)
+    'brightness': 'color',
+    'density':    'body',
+    'risk':       'chaos',
+    'dream':      'warp',
+    'slip':       'spread',
+}
+
+
+def canonical_axis(name: str) -> str:
+    """Map any axis name (legacy emphasis/character or canonical) to its axis."""
+    return AXIS_ALIASES.get(name, name)
+
+
+# Back-compat: EMPHASIS_FAMILY_MAP spans both canonical and legacy names so any
+# weight dict (preset emphasis, intent, character alias) resolves to a slot.
+EMPHASIS_FAMILY_MAP = {
+    name: AXIS_FAMILY_SLOT[canonical_axis(name)]
+    for name in list(AXIS_FAMILY_SLOT) + list(AXIS_ALIASES)
+}
+
+# canonical axis -> operators it recruits, in normative apply order (the
+# per-family "op_share" recipe).  Operator *strength* is carried continuously by
+# the family weight downstream; this table only decides which operators appear.
+# Insertion order preserves the historical emission order (WSE-STD-030: the
+# executor MUST NOT reorder), so migrated presets render identically.
+AXIS_OPERATORS = {
+    'color':  ['Tilt'],
+    'body':   ['IntraMix'],
+    'spread': ['DiffuseDown', 'DiffuseUp'],
+    'snap':   ['Impulse', 'GlobalPulse'],
+    'glue':   ['GluePair', 'SheafProject'],
+    'warp':   ['BandShear', 'SwapBands', 'RotateNodes'],
+    'chaos':  ['FoldPressure'],
+}
+
+# Always-on safety operators (applied regardless of axis weights).
+SAFETY_OPERATORS = ['NormalizeScale', 'FineClamp']
+
+
+def emphasis_to_family_base(emphasis: Dict[str, float], q15_one: int = 32767) -> List[int]:
+    """
+    Convert control-axis weights (0.0-1.0) to an 8-slot Q15 family_base array.
+
+    Accepts canonical axis names (color, body, spread, warp, glue, snap, chaos)
+    and legacy emphasis/character names, which are aliased to their canonical
+    axis.  Names mapping to the same family slot are summed and clamped.
+
+    Args:
+        emphasis: Dict mapping axis name to weight (0.0-1.0)
+        q15_one: Q15 full-scale value (default 32767)
+
+    Returns:
+        8-element list of Q15 family weights
+    """
+    base = [0] * 8
+    for name, weight in emphasis.items():
+        slot = EMPHASIS_FAMILY_MAP.get(name)
+        if slot is not None:
+            base[slot] = min(q15_one, base[slot] + int(weight * q15_one))
+    return base
+
+
+def derive_operators_from_emphasis(emphasis: Dict[str, float],
+                                   epsilon: float = 0.0) -> List[str]:
+    """
+    Derive an operator list from control-axis weights — continuously.
+
+    When a behavior state has axis weights but no explicit ``processing`` list,
+    this generates the operator list.  An axis recruits its operators when its
+    (aggregated) weight exceeds ``epsilon`` (default 0 — any nonzero weight).
+    There are NO magic thresholds: a low weight still recruits the operator, but
+    its *strength* is scaled continuously by the family weight at runtime (see
+    :func:`emphasis_to_family_base`).  Safety operators are always first.
+
+    Accepts both canonical axis names and legacy emphasis/character names.
+
+    Args:
+        emphasis: Dict mapping axis name to weight (0.0-1.0)
+        epsilon: Recruitment floor (default 0.0 — recruit on any nonzero weight)
+
+    Returns:
+        List of operator names, in normative apply order
+    """
+    # Fold all names (legacy + canonical) onto canonical axes, summing weights.
+    axis_weight: Dict[str, float] = {}
+    for name, weight in emphasis.items():
+        axis = canonical_axis(name)
+        if axis in AXIS_OPERATORS:
+            axis_weight[axis] = axis_weight.get(axis, 0.0) + float(weight)
+
+    ops = list(SAFETY_OPERATORS)
+    for axis, operators in AXIS_OPERATORS.items():
+        if axis_weight.get(axis, 0.0) > epsilon:
+            for op in operators:
+                if op not in ops:
+                    ops.append(op)
+    return ops
+
+
 # Legacy tree IDs → sound engineering names (backward compat, see docs/jargon.md)
 LEGACY_TREE_NAMES = {
     'T0': 'balanced',
@@ -2910,9 +3040,12 @@ def _translate_sound_design_format(data: dict) -> dict:
             template_name = f'T_{state_name.upper()}'
             template = {}
 
-            # processing → ops_enable
+            # processing → ops_enable (explicit list, or derived from emphasis)
             if 'processing' in state_def:
                 template['ops_enable'] = state_def['processing']
+            elif 'emphasis' in state_def:
+                # No explicit processing list — derive operators from emphasis
+                template['ops_enable'] = derive_operators_from_emphasis(state_def['emphasis'])
 
             # emphasis → families (pass through sound-eng names as-is)
             if 'emphasis' in state_def:
@@ -3644,4 +3777,8 @@ __all__ = [
     'TowerLevel', 'TowerBudget', 'Tower',
     # Translation maps (backward compatibility)
     'RESOLUTION_TO_MASK', 'LEGACY_FAMILY_NAMES', 'LEGACY_TREE_NAMES',
+    # Control axes → Family translation (7-axis canonical vocabulary)
+    'AXIS_FAMILY_SLOT', 'AXIS_ALIASES', 'AXIS_OPERATORS', 'SAFETY_OPERATORS',
+    'canonical_axis', 'EMPHASIS_FAMILY_MAP', 'emphasis_to_family_base',
+    'derive_operators_from_emphasis',
 ]

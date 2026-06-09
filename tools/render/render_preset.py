@@ -85,6 +85,10 @@ def extract_waveform(ir) -> int:
                 return 2
             elif wf == "tri":
                 return 3
+            elif wf == "partials":
+                # 0 lets the custom harmonic profile (partials) drive the
+                # spectrum; a non-zero waveform_type would OVERRIDE it.
+                return 0
     return 1  # Default to saw
 
 
@@ -232,6 +236,22 @@ def render_preset_note(
                 template = get_emit_template(ir, template_name)
                 ops_enable = template['ops_enable']
                 families = template['families']
+        else:
+            # No explicit L2 regime graph (simple-form preset): drive the emit
+            # templates by envelope phase so the behaviour-state operators still
+            # reach the audio.  Without this, simple-form presets render with no
+            # operators applied and emphasis edits are inaudible.
+            phase_to_template = {
+                'ATTACK': 'T_ATTACK', 'DECAY': 'T_STABLE',
+                'SUSTAIN': 'T_STABLE', 'RELEASE': 'T_RECOVERY',
+            }
+            templates = ir.layers.L3_cmmm.emit_templates
+            for cand in (phase_to_template.get(phase, 'T_STABLE'), 'T_STABLE', 'T_IDLE'):
+                if cand in templates:
+                    tmpl = get_emit_template(ir, cand)
+                    ops_enable = tmpl['ops_enable']
+                    families = tmpl['families']
+                    break
 
         # Create frame
         frame = VoiceFrame(
