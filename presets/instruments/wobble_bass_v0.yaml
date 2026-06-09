@@ -8,7 +8,7 @@
 # - Fast attack (~3ms)
 # - Medium decay to high sustain
 # - Square wave base
-# Conformance: P0 (static synthesis)
+# Conformance: Basic (static sound)
 
 instrument_ir_v0:
   meta:
@@ -37,3 +37,18 @@ instrument_ir_v0:
   controls:
     Brightness: 0.2
     Wobble Rate: 0.35
+
+  # 7-axis CMMM voicing: thick body with a snap of attack energy.
+  behavior:
+    idle:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    attack:
+      emphasis: {body: 0.6, snap: 0.4}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    stable:
+      emphasis: {body: 0.6}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    recovery:
+      emphasis: {body: 0.4}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}

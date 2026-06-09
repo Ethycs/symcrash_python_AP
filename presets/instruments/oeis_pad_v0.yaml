@@ -9,7 +9,7 @@
 #
 # The golden ratio spacing creates partials that are close to
 # harmonic but slightly off, producing a rich, evolving texture.
-# Conformance: P2 (full CMMM synthesis)
+# Conformance: Expressive (full articulation)
 
 instrument_ir_v0:
   meta:
@@ -38,14 +38,18 @@ instrument_ir_v0:
     Shimmer: 0.5
     Warmth: 0.6
 
+  # Re-voiced to the 7-axis control vector (axes derive processing
+  # continuously; safety NormalizeScale+FineClamp is always-on).
+  # States that keep an explicit processing: list use a partial operator
+  # family (e.g. one diffusion direction) that axes cannot express —
+  # the documented escape hatch in docs/jargon.md.
   behavior:
     idle:
-      processing: [FineClamp]
-      emphasis: {stability: 1.0, settling: 1.0}
+      emphasis: {}
       trees: {A: harmonic, B: texture, blend: 0.3}
     stable:
       processing: [Tilt, DiffuseUp, FineClamp]
-      emphasis: {tone: 0.5, body: 0.5, stability: 1.0}
+      emphasis: {color: 0.5}
       trees: {A: harmonic, B: texture, blend: 0.3}
 
   compile:

@@ -8,7 +8,7 @@
 # - Fast attack (~4ms)
 # - Quick decay to very high sustain
 # - Sine wave (fundamental only)
-# Conformance: P0 (static synthesis)
+# Conformance: Basic (static sound)
 
 instrument_ir_v0:
   meta:
@@ -37,3 +37,12 @@ instrument_ir_v0:
   controls:
     Brightness: 0.1
     Body: 0.75
+
+  # 7-axis CMMM voicing: minimal — sub bass wants purity, light body only.
+  behavior:
+    idle:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    stable:
+      emphasis: {body: 0.3}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}

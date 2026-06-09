@@ -9,7 +9,7 @@
 #
 # This demonstrates the OEIS partial selection feature from
 # THEORETICAL-TECHNIQUES-ROADMAP item 2.4.
-# Conformance: P2 (full CMMM synthesis)
+# Conformance: Expressive (full articulation)
 
 instrument_ir_v0:
   meta:
@@ -38,14 +38,17 @@ instrument_ir_v0:
     Brightness: 0.6
     Decay: 0.7
 
+  # Re-voiced to the 7-axis control vector (axes derive processing
+  # continuously; safety NormalizeScale+FineClamp is always-on).
+  # States that keep an explicit processing: list use a partial operator
+  # family (e.g. one diffusion direction) that axes cannot express —
+  # the documented escape hatch in docs/jargon.md.
   behavior:
     idle:
-      processing: [FineClamp]
-      emphasis: {stability: 1.0, settling: 1.0}
+      emphasis: {}
       trees: {A: harmonic, B: texture, blend: 0.2}
     stable:
-      processing: [Tilt, FineClamp]
-      emphasis: {tone: 0.5, stability: 1.0}
+      emphasis: {color: 0.5}
       trees: {A: harmonic, B: texture, blend: 0.2}
 
   compile:

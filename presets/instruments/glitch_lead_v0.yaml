@@ -19,7 +19,7 @@
 # - RISK: Glitch trigger (> 0.7 enters glitch)
 # - BRIGHT: Tilt amount
 # - BODY: Density
-# Conformance: P2 (full CMMM synthesis)
+# Conformance: Expressive (full articulation)
 
 instrument_ir_v0:
   meta:

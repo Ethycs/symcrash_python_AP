@@ -8,7 +8,7 @@
 # - Instant attack (~1ms)
 # - Long decay to zero (no sustain)
 # - Saw harmonics
-# Conformance: P0 (static synthesis)
+# Conformance: Basic (static sound)
 
 instrument_ir_v0:
   meta:
@@ -37,3 +37,19 @@ instrument_ir_v0:
   controls:
     Brightness: 0.55
     Decay: 0.5
+
+  # 7-axis CMMM voicing: bright attack settling to mellow sustain
+  # (mirrors pluck_cheap_v0).
+  behavior:
+    idle:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    attack:
+      emphasis: {color: 0.5}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    stable:
+      emphasis: {color: 0.3}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    recovery:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}

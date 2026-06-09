@@ -8,7 +8,7 @@
 # - Fast attack (~3ms)
 # - Medium decay to sustain
 # - Rich saw harmonics with movement
-# Conformance: P0 (static synthesis)
+# Conformance: Basic (static sound)
 
 instrument_ir_v0:
   meta:
@@ -37,3 +37,18 @@ instrument_ir_v0:
   controls:
     Brightness: 0.55
     Body: 0.5
+
+  # 7-axis CMMM voicing: bright snappy lead, settles with glue.
+  behavior:
+    idle:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    attack:
+      emphasis: {color: 0.7, snap: 0.5}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    stable:
+      emphasis: {color: 0.6, body: 0.3}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    recovery:
+      emphasis: {glue: 0.6}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}

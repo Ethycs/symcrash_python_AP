@@ -8,7 +8,7 @@
 # - Slow attack (~50ms)
 # - No decay (full sustain)
 # - Sine-based with slight harmonics
-# Conformance: P0 (static synthesis)
+# Conformance: Basic (static sound)
 
 instrument_ir_v0:
   meta:
@@ -37,3 +37,12 @@ instrument_ir_v0:
   controls:
     Brightness: 0.35
     Glide Time: 0.3
+
+  # 7-axis CMMM voicing: pure tone — state machine + safety only, no coloring.
+  behavior:
+    idle:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    stable:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}

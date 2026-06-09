@@ -21,7 +21,7 @@
 #          [3] -> [2*]
 #                 [1*]
 # Multiple carriers for rich harmonic decay
-# Conformance: P2 (full CMMM synthesis)
+# Conformance: Expressive (full articulation)
 
 instrument_ir_v0:
   meta:
@@ -86,22 +86,23 @@ instrument_ir_v0:
       release: 50.0
       targets: [FM_OP3, FM_OP5, FM_OP6]
 
+  # Re-voiced to the 7-axis control vector (axes derive processing
+  # continuously; safety NormalizeScale+FineClamp is always-on).
+  # States that keep an explicit processing: list use a partial operator
+  # family (e.g. one diffusion direction) that axes cannot express —
+  # the documented escape hatch in docs/jargon.md.
   behavior:
     idle:
-      processing: [FineClamp]
-      emphasis: {stability: 1.0, settling: 1.0}
+      emphasis: {}
       trees: {A: harmonic, B: harmonic, blend: 0.0}
     attack:
-      processing: [Tilt, FineClamp]
-      emphasis: {tone: 0.5, stability: 1.0, settling: 0.3}
+      emphasis: {color: 0.5}
       trees: {A: harmonic, B: harmonic, blend: 0.05}
     stable:
-      processing: [Tilt, FineClamp]
-      emphasis: {tone: 0.3, stability: 1.0, settling: 0.6}
+      emphasis: {color: 0.3}
       trees: {A: harmonic, B: harmonic, blend: 0.0}
     recovery:
-      processing: [FineClamp]
-      emphasis: {stability: 1.0, settling: 1.0}
+      emphasis: {}
       trees: {A: harmonic, B: harmonic, blend: 0.0}
 
   compile:

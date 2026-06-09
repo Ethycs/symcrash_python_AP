@@ -1,0 +1,73 @@
+# Violin Opt v0 - fitted to violin.wav (real recording, A4)
+# ===========================================================
+#
+# Analysis-driven preset: harmonic profile measured directly from
+# violin.wav (closed loop via tools/optimize_instrument.py analysis).
+# Supersedes violin_ir_v1's profile, whose H2=1.0 does not match the
+# real instrument (measured H2=0.093).
+#
+# Validated recipe (user-auditioned 2026-06-09, "as good as a violin"):
+# - Real-analysis partials, 16 harmonics (weak H2/H3, formant bump H4-H6)
+# - NO coloring operators — color/body push H3 0.08->0.23 (buzz);
+#   empty emphasis derives safety ops only (NormalizeScale, FineClamp)
+# - Bow attack ~120ms, sustain 0.79, release 250ms
+#
+# Performance layer (apply at render/performance time, not in this preset):
+# - Vibrato: 6 Hz, ~22 cents, fading in ~0.35s after attack. In-engine
+#   per-block cents is now phase-continuous (see tests/test_partials_and_vibrato.py);
+#   the audition reference is audio_out/violin_V3.wav.
+# - Bow-strike noise transient at onset (placeholder layer in V3;
+#   route through noise exciter when available).
+# - Brightness decay attack->sustain over ~250ms (time-varying partials).
+# Conformance: Basic (static sound)
+
+instrument_ir_v0:
+  meta:
+    id: "violin-opt-v0"
+    name: "Violin Opt"
+    version: 0
+    author: "symcrash"
+    seed: 0x56494F50
+
+  audio:
+    sample_rate: 48000
+    block_size: 64
+
+  graph:
+    osc1:
+      type: Osc
+      output: amp1
+      waveform: partials
+      partials: [1.000, 0.093, 0.085, 0.177, 0.275, 0.136, 0.021, 0.093, 0.024, 0.012, 0.015, 0.004, 0.003, 0.005, 0.002, 0.002]
+    amp1:
+      type: Amp
+      attack: 120.0
+      decay: 150.0
+      sustain: 0.79
+      release: 250.0
+
+  controls:
+    Brightness: 0.5
+    Body: 0.5
+    Attack: 0.3
+    Release: 0.4
+
+  behavior:
+    idle:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+      resolution: 8
+      safety: MIN
+    stable:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+      resolution: 32
+      safety: FULL
+      ramp: 15
+      traction: 1.0
+
+  compile:
+    material:
+      blend: 0.0
+      target: 0.0
+      ramp: 1

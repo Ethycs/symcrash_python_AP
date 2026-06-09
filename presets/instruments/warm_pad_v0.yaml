@@ -1,0 +1,68 @@
+# Warm Pad v0 - WSE-STD-PRESET v0
+# ================================
+#
+# Lush evolving pad with warm low-end and gentle movement.
+# No operator names — emphasis drives all processing.
+#
+# Target sound: warm analog-style pad
+# - Slow attack, long release
+# - Rich low harmonics (body emphasis)
+# - Gentle spectral drift (tone + clarity)
+# Conformance: Basic (static sound)
+
+instrument_ir_v0:
+  meta:
+    id: "warm-pad-v0"
+    name: "Warm Pad"
+    version: 0
+    author: "symcrash"
+    seed: 0x5741524D
+
+  audio:
+    sample_rate: 48000
+    block_size: 64
+
+  graph:
+    osc:
+      type: Osc
+      waveform: saw
+      output: amp1
+    amp1:
+      type: Amp
+      attack: 250.0
+      decay: 400.0
+      sustain: 0.85
+      release: 600.0
+
+  controls:
+    Brightness: 0.4
+    Warmth: 0.7
+    Movement: 0.3
+    Attack: 0.8
+    Release: 0.7
+
+  character:
+    brightness: 0.4
+    density: 0.7
+    energy: 0.3
+    risk: 0.0
+    dream: 0.1
+    slip: 0.05
+
+  behavior:
+    idle:
+      emphasis: {stability: 1.0, settling: 1.0}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    attack:
+      emphasis: {tone: 0.5, body: 0.8, energy: 0.4, stability: 0.8}
+      trees: {A: harmonic, B: drone, blend: 0.15}
+    stable:
+      emphasis: {tone: 0.6, body: 0.9, clarity: 0.5, stability: 0.9, settling: 0.3}
+      trees: {A: harmonic, B: drone, blend: 0.2}
+    recovery:
+      emphasis: {clarity: 0.4, stability: 1.0, settling: 1.0}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+
+  compile:
+    completion_policy:
+      default_tree: {A: T1, B: T4, beta: 0.2}

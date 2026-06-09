@@ -20,7 +20,7 @@
 #   [6] -> [5] -> [4*]
 #   [3] -> [2] -> [1*]
 # Two detuned carrier streams for pad width
-# Conformance: P2 (full CMMM synthesis)
+# Conformance: Expressive (full articulation)
 
 instrument_ir_v0:
   meta:
@@ -86,22 +86,27 @@ instrument_ir_v0:
       release: 600.0
       targets: [FM_OP2, FM_OP3, FM_OP5, FM_OP6]
 
+  # Re-voiced to the 7-axis control vector (axes derive processing
+  # continuously; safety NormalizeScale+FineClamp is always-on).
+  # States that keep an explicit processing: list use a partial operator
+  # family (e.g. one diffusion direction) that axes cannot express —
+  # the documented escape hatch in docs/jargon.md.
   behavior:
     idle:
       processing: [DiffuseUp, FineClamp]
-      emphasis: {spread: 0.2, stability: 1.0, settling: 1.0}
+      emphasis: {spread: 0.2}
       trees: {A: harmonic, B: harmonic, blend: 0.0}
     attack:
       processing: [DiffuseUp, IntraMix, FineClamp]
-      emphasis: {spread: 0.4, body: 0.5, stability: 1.0, settling: 0.6}
+      emphasis: {body: 0.5, spread: 0.4}
       trees: {A: harmonic, B: harmonic, blend: 0.1}
     stable:
       processing: [DiffuseUp, IntraMix, FineClamp]
-      emphasis: {spread: 0.5, body: 0.6, stability: 1.0, settling: 0.5}
+      emphasis: {body: 0.6, spread: 0.5}
       trees: {A: harmonic, B: harmonic, blend: 0.15}
     recovery:
       processing: [DiffuseUp, IntraMix, FineClamp]
-      emphasis: {spread: 0.3, body: 0.4, stability: 1.0, settling: 0.9}
+      emphasis: {body: 0.4, spread: 0.3}
       trees: {A: harmonic, B: harmonic, blend: 0.05}
 
   compile:

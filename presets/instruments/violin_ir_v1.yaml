@@ -10,15 +10,19 @@
 # - High sustain for bowed string
 # - Long release for natural decay
 #
-# Custom harmonic profile from real violin analysis:
-# H1=94%, H2=100%, H3=21%, H4=73%, H5=11%, H6=19%, H7=4%, H8=4%
-# Conformance: P2 (full CMMM synthesis)
+# Custom harmonic profile measured from violin.wav (A4=440, repo root):
+# H1-H12: 1.000 0.093 0.085 0.177 0.275 0.136 0.021 0.093 0.024 0.012 0.015 0.004
+# (dominant fundamental, weak H2/H3, formant bump at H4-H6)
+# Previous v1 partials (H2=1.0) were wrong vs the real analysis.
+# Vibrato: 6 Hz, ~22 cents, fading in ~0.35 s after the attack — now rendered
+# in-engine (phase-continuous cents path), no audio-domain post-processing.
+# Conformance: Expressive (full articulation)
 
 instrument_ir_v0:
   meta:
     id: "violin-ir-v1"
     name: "Violin IR"
-    version: 1
+    version: 2
     author: "symcrash"
     seed: 0x56494F4C
 
@@ -31,7 +35,7 @@ instrument_ir_v0:
       type: Osc
       output: amp1
       waveform: partials
-      partials: [0.943, 1.0, 0.211, 0.731, 0.112, 0.187, 0.036, 0.037]
+      partials: [1.0, 0.093, 0.085, 0.177, 0.275, 0.136, 0.021, 0.093, 0.024, 0.012, 0.015, 0.004]
     amp1:
       type: Amp
       attack: 30.0
@@ -46,16 +50,33 @@ instrument_ir_v0:
     Attack: 0.25
     Release: 0.45
 
+  modulators:
+    lfos:
+      - id: "vibrato"
+        waveform: "sine"
+        rate_hz: 6.0
+        # peak cents = 32767 * depth * amount * VIBRATO macro -> ~22 cents
+        depth: 0.67
+        delay_ms: 150
+        ramp_ms: 350
+        sync_mode: "free"
+        targets:
+          - type: "pitch"
+            amount: 0.001
+
+  # Re-voiced to the 7-axis control vector (axes derive processing
+  # continuously; safety NormalizeScale+FineClamp is always-on).
+  # States that keep an explicit processing: list use a partial operator
+  # family (e.g. one diffusion direction) that axes cannot express —
+  # the documented escape hatch in docs/jargon.md.
   behavior:
     idle:
-      processing: [NormalizeScale, FineClamp]
-      emphasis: {stability: 1.0, settling: 1.0}
+      emphasis: {}
       trees: {A: harmonic, B: harmonic, blend: 0.0}
       resolution: 8
       safety: MIN
     stable:
-      processing: [NormalizeScale, FineClamp]
-      emphasis: {stability: 1.0, settling: 0.8}
+      emphasis: {}
       trees: {A: harmonic, B: harmonic, blend: 0.0}
       resolution: 32
       safety: FULL

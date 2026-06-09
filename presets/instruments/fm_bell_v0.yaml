@@ -18,7 +18,7 @@
 # - Instant attack (~1ms)
 # - Long decay to zero
 # - Inharmonic bell-like partials
-# Conformance: P0 (static synthesis)
+# Conformance: Basic (static sound)
 
 instrument_ir_v0:
   meta:
@@ -61,3 +61,12 @@ instrument_ir_v0:
   controls:
     Brightness: 0.5
     FM Index: 0.6
+
+  # 7-axis CMMM voicing: gentle spectral tilt for bell shimmer.
+  behavior:
+    idle:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    stable:
+      emphasis: {color: 0.4}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}

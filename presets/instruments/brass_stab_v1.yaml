@@ -24,7 +24,7 @@
 # - Very fast attack (~3ms)
 # - Bright, buzzy sustain
 # - Rich harmonic content with "screaming" quality
-# Conformance: P2 (full CMMM synthesis)
+# Conformance: Expressive (full articulation)
 
 instrument_ir_v0:
   meta:
@@ -72,22 +72,25 @@ instrument_ir_v0:
     Sustain: 0.75
     Release: 0.25
 
+  # Re-voiced to the 7-axis control vector (axes derive processing
+  # continuously; safety NormalizeScale+FineClamp is always-on).
+  # States that keep an explicit processing: list use a partial operator
+  # family (e.g. one diffusion direction) that axes cannot express —
+  # the documented escape hatch in docs/jargon.md.
   behavior:
     idle:
-      processing: [NormalizeScale, FineClamp]
-      emphasis: {stability: 1.0, settling: 1.0}
+      emphasis: {}
       trees: {A: harmonic, B: harmonic, blend: 0.0}
     attack:
       processing: [Tilt, IntraMix, Impulse, GlobalPulse, NormalizeScale, FineClamp]
-      emphasis: {tone: 0.9, energy: 1.0, stability: 1.0, settling: 0.1}
+      emphasis: {color: 0.9, snap: 1}
       trees: {A: harmonic, B: harmonic, blend: 0.2}
     stable:
       processing: [Tilt, DiffuseDown, IntraMix, NormalizeScale, FineClamp]
-      emphasis: {tone: 0.8, clarity: 0.3, stability: 1.0, settling: 0.4}
+      emphasis: {color: 0.8}
       trees: {A: harmonic, B: harmonic, blend: 0.3}
     recovery:
-      processing: [GluePair, SheafProject, NormalizeScale, FineClamp]
-      emphasis: {clarity: 0.3, stability: 1.0, settling: 1.0}
+      emphasis: {glue: 1}
       trees: {A: harmonic, B: harmonic, blend: 0.0}
 
   compile:

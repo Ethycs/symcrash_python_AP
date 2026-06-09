@@ -8,7 +8,7 @@
 # - Slow attack (~160ms)
 # - Long decay to high sustain
 # - Rich saw harmonics
-# Conformance: P0 (static synthesis)
+# Conformance: Basic (static sound)
 
 instrument_ir_v0:
   meta:
@@ -37,3 +37,18 @@ instrument_ir_v0:
   controls:
     Brightness: 0.4
     Body: 0.6
+
+  # 7-axis CMMM voicing: lush width (spread) + body, coherent release (glue).
+  behavior:
+    idle:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    attack:
+      emphasis: {body: 0.5, spread: 0.3}
+      trees: {A: harmonic, B: harmonic, blend: 0.1}
+    stable:
+      emphasis: {body: 0.6, spread: 0.4, glue: 0.4}
+      trees: {A: harmonic, B: harmonic, blend: 0.1}
+    recovery:
+      emphasis: {glue: 0.8}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}

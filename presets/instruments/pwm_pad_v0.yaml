@@ -8,7 +8,7 @@
 # - Slow attack (~100ms)
 # - Long decay to high sustain
 # - Pulse wave base
-# Conformance: P0 (static synthesis)
+# Conformance: Basic (static sound)
 
 instrument_ir_v0:
   meta:
@@ -38,3 +38,18 @@ instrument_ir_v0:
   controls:
     Brightness: 0.4
     PWM Depth: 0.45
+
+  # 7-axis CMMM voicing: air (spread) + warmth (body), mirrors pad_cheap_v0.
+  behavior:
+    idle:
+      emphasis: {spread: 0.2}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    attack:
+      emphasis: {body: 0.5, spread: 0.4}
+      trees: {A: harmonic, B: harmonic, blend: 0.1}
+    stable:
+      emphasis: {body: 0.6, spread: 0.5}
+      trees: {A: harmonic, B: harmonic, blend: 0.15}
+    recovery:
+      emphasis: {body: 0.4, spread: 0.3}
+      trees: {A: harmonic, B: harmonic, blend: 0.05}
