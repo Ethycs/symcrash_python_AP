@@ -1915,6 +1915,20 @@ def _parse_control_config(data: dict) -> ControlConfig:
     )
 
 
+def _parse_harmonic_profile(vals: list) -> HarmonicProfile:
+    """
+    Normalize a partials list to a HarmonicProfile (amplitudes 0-1).
+
+    Accepts authoring floats (0.0-1.0) or Q15 integers (0-32767);
+    Q15 is detected by any value exceeding 1.
+    """
+    if any(v > 1 for v in vals):
+        amps = [v / 32767.0 for v in vals]
+    else:
+        amps = [float(v) for v in vals]
+    return HarmonicProfile(amplitudes=amps)
+
+
 def _parse_node_params(data: dict) -> NodeParams:
     """Parse node params from dict."""
     params = NodeParams()
@@ -1922,6 +1936,10 @@ def _parse_node_params(data: dict) -> NodeParams:
     # Oscillator basics
     if 'waveform' in data:
         params.waveform = data['waveform']
+    if data.get('partials'):
+        params.harmonics = _parse_harmonic_profile(data['partials'])
+    elif data.get('harmonics'):
+        params.harmonics = _parse_harmonic_profile(data['harmonics'])
     if 'detune_cents' in data:
         params.detune_cents = data['detune_cents']
     if 'pw' in data:
@@ -3292,6 +3310,22 @@ def load_instrument(path) -> InstrumentIR:
     return load_instrument_from_dict(data)
 
 
+def extract_partials_q15(ir: InstrumentIR) -> Optional[List[int]]:
+    """
+    Extract custom harmonic amplitudes (Q15) from an instrument's Osc node.
+
+    Returns the harmonic profile of the first Osc node that has one, as a
+    Q15 list suitable for VoiceFrame.partial_amps_q15, or None if the
+    preset defines no partials (caller should fall back to waveform_type).
+    """
+    for node in ir.layers.L0_graph.nodes:
+        if node.type == "Osc" and node.params.harmonics:
+            amps = node.params.harmonics.amplitudes
+            if amps:
+                return [max(0, min(32767, round(a * 32767))) for a in amps]
+    return None
+
+
 def save_instrument(ir: InstrumentIR, path) -> None:
     """
     Save InstrumentIR to a YAML or JSON file.
@@ -3771,6 +3805,7 @@ __all__ = [
     'VoiceModel', 'InstrumentMeta', 'IOConfig', 'Layers', 'InstrumentIR',
     # Functions
     'load_instrument', 'load_instrument_from_dict', 'save_instrument',
+    'extract_partials_q15',
     'complete_instrument',
     'create_default_l1_lift', 'create_default_l2_regimes', 'create_default_emit_templates',
     # Tower (WSE-STD-070)

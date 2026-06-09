@@ -280,6 +280,13 @@ class SynthMaster:
                     'op_levels': getattr(node.params, 'op_levels', [32767, 0, 0, 0, 0, 0]),
                 }
 
+        # Custom partials (waveform: partials) take priority over the
+        # waveform-derived harmonic profiles above
+        from .instrument_ir import extract_partials_q15
+        partials = extract_partials_q15(ir)
+        if partials:
+            self._harmonic_amps = partials
+
         # Extract Material config from IR
         if hasattr(ir, 'compile') and hasattr(ir.compile, 'material'):
             mat_cfg = ir.compile.material

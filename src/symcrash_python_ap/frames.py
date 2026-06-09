@@ -99,10 +99,10 @@ class VoiceFrame:
     # Harmonic amplitudes for leaf generation (Q15)
     # Index 0 = fundamental, index 1 = 2nd harmonic, etc.
     # These are distributed across leaves via Gaussian soft assignment
-    # Default: pure sine (fundamental only), use harmonics knob to add richness
-    partial_amps_q15: List[int] = field(
-        default_factory=lambda: [Q15_ONE, 0, 0, 0, 0, 0, 0, 0]
-    )
+    # Empty = no custom harmonics: waveform_type (or OEIS) drives the spectrum
+    # and the carrier falls back to fundamental-only. Non-empty values are
+    # treated as explicit custom partials and override waveform_type.
+    partial_amps_q15: List[int] = field(default_factory=list)
 
     # Transient window flag
     # If True, snappy parameter changes are allowed (note attack, percussive hit)

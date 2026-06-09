@@ -328,8 +328,13 @@ def vm_step_block(
             # Set harmonic weights using helper
             _setup_mode_b_harmonic_weights(mb_state, params)
         elif pitch_changed or mb_state.note != params.note:
-            # Pitch changed: use legato_mode to decide how to handle
-            if params.legato_mode:
+            # Pitch changed: use legato_mode to decide how to handle.
+            # A cents-only change (same note) is vibrato or pitch bend, not a
+            # retrigger — always take the phase-continuous path, otherwise
+            # per-block LFO vibrato hard-resets phase every block (a ~750 Hz
+            # discontinuity comb that swamps the spectrum with inharmonics).
+            cents_only = mb_state.note == params.note
+            if params.legato_mode or cents_only:
                 # Legato: preserve phase for smooth transition
                 mb_state.set_pitch_legato(note=params.note, phase_inc=params.phase_inc)
                 mb_state.H_active = min(params.H_request, mb_state.H_bandlimit)
@@ -366,13 +371,19 @@ def vm_step_block(
 
         # Determine which synthesis method to use:
         # - Matrix method: PL waveforms (SQUARE, SAW, TRIANGLE) without FM/PWM
-        # - Harmonic bank: SINE, PWM-modulated, FM-modulated signals
+        # - Harmonic bank: SINE, custom/OEIS harmonics, PWM/FM-modulated signals
+        #
+        # The matrix LUT is keyed only by waveform_type and never reads
+        # mb_state.weights, so custom harmonics and OEIS selections must
+        # force the harmonic-bank path or they are silently ignored.
         waveform_type = getattr(params, 'waveform_type', WaveformType.SINE)
         use_matrix_method = (
             waveform_type in (WaveformType.SQUARE, WaveformType.SAW,
                               WaveformType.SAW_DOWN, WaveformType.TRIANGLE)
             and not params.pwm_enabled
             and params.fm_depth_q15 == 0
+            and not params.custom_harmonics
+            and getattr(params, 'oeis_sequence_id', -1) < 0
         )
 
         if use_matrix_method:

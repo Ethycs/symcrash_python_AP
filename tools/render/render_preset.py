@@ -27,7 +27,7 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-from symcrash_python_ap.instrument_ir import load_instrument
+from symcrash_python_ap.instrument_ir import load_instrument, extract_partials_q15
 from symcrash_python_ap.vm.executor import vm_step_block
 from symcrash_python_ap.vm.harmonic_bank import clear_basis_atlas
 from symcrash_python_ap.vm.state import VMState
@@ -73,23 +73,26 @@ def extract_envelope_params(ir) -> dict:
 
 
 def extract_waveform(ir) -> int:
-    """Extract waveform type from InstrumentIR."""
+    """Extract waveform type from InstrumentIR (canonical WaveformType values:
+    0=SINE, 1=SQUARE, 2=PULSE, 3=SAW, 4=SAW_DOWN, 5=TRIANGLE)."""
     for node in ir.layers.L0_graph.nodes:
         if node.type == "Osc" and node.params.waveform:
             wf = node.params.waveform.lower()
             if wf == "sine":
                 return 0
-            elif wf == "saw":
+            elif wf in ("square",):
                 return 1
-            elif wf == "pulse" or wf == "square":
+            elif wf == "pulse":
                 return 2
-            elif wf == "tri":
+            elif wf == "saw":
                 return 3
+            elif wf in ("tri", "triangle"):
+                return 5
             elif wf == "partials":
                 # 0 lets the custom harmonic profile (partials) drive the
-                # spectrum; a non-zero waveform_type would OVERRIDE it.
+                # spectrum via the harmonic bank.
                 return 0
-    return 1  # Default to saw
+    return 3  # Default to saw
 
 
 def get_regime_info(ir) -> list:
@@ -151,8 +154,10 @@ def render_preset_note(
     state = VMState.create(voice_id=0)
     state.reset_for_note_on(note=note)
 
-    # Default harmonic profile (saw-like)
-    harmonic_amps = [32767, 16383, 10922, 8191, 6553, 5461, 4681, 4096]
+    # Harmonic profile: use the preset's partials when defined; otherwise pass
+    # no custom harmonics so waveform_type drives the spectrum (custom
+    # harmonics always win over waveform_type in the executor).
+    harmonic_amps = extract_partials_q15(ir) or []
 
     samples = []
 
@@ -257,7 +262,7 @@ def render_preset_note(
         frame = VoiceFrame(
             note=note,
             coeff_osc_mode=1,  # Mode B
-            H_request=len(harmonic_amps),
+            H_request=len(harmonic_amps) or 16,
             gain_q15=gain_q15,
             beta_target_q15=0,
             partial_amps_q15=harmonic_amps,
