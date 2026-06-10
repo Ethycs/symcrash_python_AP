@@ -267,6 +267,18 @@ class EnvelopeBinding:
     adsr: ADSR = field(default_factory=ADSR)  # Envelope shape
     targets: List[str] = field(default_factory=list)  # Target names
 
+    # Velocity sensitivity (WSE-STD-PRESET-AUTHORING 3.3): scales this
+    # envelope's output by (1 - sens + sens * velocity). 0 = insensitive
+    # (legacy behavior); 1 = fully velocity-scaled. Routing an FM
+    # modulator's envelope with nonzero sens gives velocity -> modulation
+    # index - harder hits get brighter/clackier (the DX dynamic).
+    velocity_sens: float = 0.0
+
+    # EG key scaling (DX7-style rate scaling): time constants scale by
+    # 2^(-ks * (note - 60) / 24) - at ks=1, an octave above middle C
+    # shortens A/D/R times by ~25%, two octaves halves them. 0 = none.
+    key_scale_rate: float = 0.0
+
 
 @dataclass
 class TemperamentVector:
@@ -494,6 +506,24 @@ class NodeParams:
     # Harmonic profile (for Mode B synthesis)
     harmonics: Optional[HarmonicProfile] = None
 
+    # Per-harmonic start-phase dispersion for custom partials (0.0-1.0).
+    # 0 = phase-aligned (buzzy/"electric"); 1 = full golden-angle spread.
+    phase_spread: float = 0.0
+
+    # Amp node dynamics (WSE-STD-PRESET-AUTHORING 3.3)
+    # velocity_sens: gain scales by (1 - sens + sens * velocity).
+    #   1.0 = raw velocity scaling (legacy engine behavior); 0 = constant.
+    # key_scale_rate: amp ADSR times scale by 2^(-ks * (note - 60) / 24)
+    #   (higher notes ring shorter, DX7-style rate scaling).
+    velocity_sens: float = 1.0
+    key_scale_rate: float = 0.0
+
+    # Filter authoring fields (Hz-domain, consumed by render harnesses and
+    # baked/applied per-block; see WSE-STD-PRESET-AUTHORING 3.2)
+    cutoff_hz: Optional[float] = None
+    resonance: float = 0.0
+    env_amount: float = 0.0
+
     # Modulation parameters (DEPRECATED: moved to L1Lift for Tower conformance)
     # Keep for backwards compatibility with existing presets
     vibrato: Optional[VibratoParams] = None           # Prefer L1Lift.vibrato
@@ -552,6 +582,7 @@ class NodeParams:
     # Topology morphing (topo_a, topo_b, blend) moved to L1Lift.fm6_morph
     algorithm: Optional[int] = None          # DX7 algorithm 1-32
     feedback: Optional[int] = None           # Feedback level 0-7
+    post_filter_hz: Optional[float] = None   # FM6 post-LPF cutoff (warmth)
     op_ratios: Optional[List[int]] = None    # 6 Q16.16 frequency ratios
     op_levels: Optional[List[int]] = None    # 6 Q0.15 output levels
     # Legacy fields for backwards compatibility (prefer L1Lift.fm6_morph)
@@ -1862,6 +1893,8 @@ def _parse_envelope_binding(data: dict) -> EnvelopeBinding:
         id=data.get('id', ''),
         adsr=_parse_adsr(data.get('adsr', {})),
         targets=data.get('targets', []),
+        velocity_sens=float(data.get('velocity_sens', 0.0)),
+        key_scale_rate=float(data.get('key_scale_rate', 0.0)),
     )
 
 
@@ -1940,6 +1973,16 @@ def _parse_node_params(data: dict) -> NodeParams:
         params.harmonics = _parse_harmonic_profile(data['partials'])
     elif data.get('harmonics'):
         params.harmonics = _parse_harmonic_profile(data['harmonics'])
+    if 'phase_spread' in data:
+        params.phase_spread = float(data['phase_spread'])
+
+    # Filter authoring fields (Hz-domain)
+    if 'cutoff_hz' in data:
+        params.cutoff_hz = float(data['cutoff_hz'])
+    if 'resonance' in data:
+        params.resonance = float(data['resonance'])
+    if 'env_amount' in data:
+        params.env_amount = float(data['env_amount'])
     if 'detune_cents' in data:
         params.detune_cents = data['detune_cents']
     if 'pw' in data:
@@ -2018,6 +2061,10 @@ def _parse_node_params(data: dict) -> NodeParams:
     # Amp / FX Send
     if 'adsr' in data:
         params.adsr = _parse_adsr(data['adsr'])
+    if 'velocity_sens' in data:
+        params.velocity_sens = float(data['velocity_sens'])
+    if 'key_scale_rate' in data:
+        params.key_scale_rate = float(data['key_scale_rate'])
     if 'send_a' in data:
         params.send_a = data['send_a']
     if 'send_b' in data:
@@ -2028,6 +2075,8 @@ def _parse_node_params(data: dict) -> NodeParams:
         params.algorithm = data['algorithm']
     if 'feedback' in data:
         params.feedback = data['feedback']
+    if 'post_filter_hz' in data:
+        params.post_filter_hz = float(data['post_filter_hz'])
 
     # Support both legacy integer format and new float format per WSE-STD-FM-PROFILE-v0
     # Legacy: op_ratios: [65536, 65700, ...], op_levels: [32767, 32767, ...]
@@ -3124,6 +3173,10 @@ def _translate_sound_design_format(data: dict) -> dict:
                 env_dict['adsr'] = adsr
             if 'targets' in env_def:
                 env_dict['targets'] = env_def['targets']
+            if 'velocity_sens' in env_def:
+                env_dict['velocity_sens'] = env_def['velocity_sens']
+            if 'key_scale_rate' in env_def:
+                env_dict['key_scale_rate'] = env_def['key_scale_rate']
             envelopes_list.append(env_dict)
         result['envelopes'] = envelopes_list
     elif isinstance(envelopes_data, list):
@@ -3323,6 +3376,36 @@ def extract_partials_q15(ir: InstrumentIR) -> Optional[List[int]]:
             amps = node.params.harmonics.amplitudes
             if amps:
                 return [max(0, min(32767, round(a * 32767))) for a in amps]
+    return None
+
+
+def extract_phase_spread_q15(ir: InstrumentIR) -> int:
+    """
+    Extract the partials phase-spread (Q15) from an instrument's Osc node.
+
+    Returns 0 (phase-aligned, legacy behavior) when no Osc declares one.
+    """
+    for node in ir.layers.L0_graph.nodes:
+        if node.type == "Osc" and getattr(node.params, 'phase_spread', 0.0):
+            return max(0, min(32767, round(node.params.phase_spread * 32767)))
+    return 0
+
+
+def extract_filter_params(ir: InstrumentIR) -> Optional[dict]:
+    """
+    Extract Hz-domain filter authoring params from the first Filter node.
+
+    Returns {'cutoff_hz', 'resonance', 'env_amount'} or None. Render
+    harnesses apply this as a per-block reshaping of the harmonic profile
+    (there is no general filter in the Mode B VM path yet).
+    """
+    for node in ir.layers.L0_graph.nodes:
+        if node.type == "Filter" and node.params.cutoff_hz:
+            return {
+                'cutoff_hz': node.params.cutoff_hz,
+                'resonance': node.params.resonance,
+                'env_amount': node.params.env_amount,
+            }
     return None
 
 
@@ -3805,7 +3888,7 @@ __all__ = [
     'VoiceModel', 'InstrumentMeta', 'IOConfig', 'Layers', 'InstrumentIR',
     # Functions
     'load_instrument', 'load_instrument_from_dict', 'save_instrument',
-    'extract_partials_q15',
+    'extract_partials_q15', 'extract_phase_spread_q15', 'extract_filter_params',
     'complete_instrument',
     'create_default_l1_lift', 'create_default_l2_regimes', 'create_default_emit_templates',
     # Tower (WSE-STD-070)

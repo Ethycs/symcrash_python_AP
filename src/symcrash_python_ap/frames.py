@@ -104,6 +104,11 @@ class VoiceFrame:
     # treated as explicit custom partials and override waveform_type.
     partial_amps_q15: List[int] = field(default_factory=list)
 
+    # Per-harmonic start-phase dispersion for custom partials (Q15).
+    # 0 = phase-aligned (legacy "electric" buzz), 32767 = full golden-angle
+    # spread. Magnitude spectrum is unchanged; deterministic, no RNG.
+    partial_phase_spread_q15: int = 0
+
     # Transient window flag
     # If True, snappy parameter changes are allowed (note attack, percussive hit)
     # If False, all changes must be smoothed/slewed

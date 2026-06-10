@@ -111,8 +111,11 @@ def _setup_mode_b_harmonic_weights(mb_state, params) -> None:
         rolloff = getattr(params, 'oeis_rolloff_db', -3.0)
         mb_state.weights.set_oeis(oeis_id, mb_state.H_active, rolloff)
     elif params.custom_harmonics:
-        mb_state.weights.set_custom(params.custom_harmonics)
+        spread = getattr(params, 'phase_spread_q15', 0)
+        mb_state.weights.set_custom(params.custom_harmonics, spread)
         mb_state.H_active = min(len(params.custom_harmonics), mb_state.H_bandlimit)
+        # Latch for per-block spectral motion detection
+        mb_state.last_custom_harmonics = (list(params.custom_harmonics), spread)
     else:
         waveform_type = getattr(params, 'waveform_type', 0)
         mb_state.weights.set_from_waveform_type(
@@ -346,6 +349,18 @@ def vm_step_block(
                 mb_state.H_active = min(params.H_request, mb_state.H_bandlimit)
                 # Set harmonic weights using helper
                 _setup_mode_b_harmonic_weights(mb_state, params)
+
+        # Per-block spectral motion: re-latch custom harmonics when the
+        # frame's partials (or phase spread) change mid-note. Weights-only —
+        # the phase accumulator is untouched, so this is phase-continuous.
+        if params.custom_harmonics:
+            spread = getattr(params, 'phase_spread_q15', 0)
+            latch = (params.custom_harmonics, spread)
+            prev = getattr(mb_state, 'last_custom_harmonics', None)
+            if prev is None or list(prev[0]) != list(latch[0]) or prev[1] != latch[1]:
+                mb_state.weights.set_custom(params.custom_harmonics, spread)
+                mb_state.H_active = min(len(params.custom_harmonics), mb_state.H_bandlimit)
+                mb_state.last_custom_harmonics = (list(params.custom_harmonics), spread)
 
         # Update FM depth from VoiceFrame (modulator signal comes from fm_mod_buffer)
         # Phase 3 FM/PM will provide the modulator via operator graph

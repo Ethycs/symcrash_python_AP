@@ -267,6 +267,75 @@ class TestVibratoPhaseContinuity:
             "note change did not retrigger — non-legato reset semantics changed"
         )
 
+    def test_per_block_partials_motion_is_phase_continuous(self):
+        """Changing partials mid-note must move the spectrum (per-block
+        re-latch) without resetting phase (no block-rate comb)."""
+        note = 69
+        bright = [32767, 26214, 19660, 14746, 11059, 8192, 6553, 4915]
+        dark = [32767, 8192, 2048, 512, 0, 0, 0, 0]
+        n_blocks = 300
+        frames = []
+        for i in range(n_blocks):
+            t = i / (n_blocks - 1)
+            amps = [round(b + (d - b) * t) for b, d in zip(bright, dark)]
+            frames.append(_make_frame(note=note, partials=amps))
+        _, out = _render(frames, note=note)
+
+        def _centroid(seg):
+            seg = seg.astype(np.float64)
+            seg = (seg - seg.mean()) * np.hanning(len(seg))
+            sp = np.abs(np.fft.rfft(seg)) ** 2
+            fr = np.fft.rfftfreq(len(seg), 1.0 / FS)
+            return float((fr * sp).sum() / max(sp.sum(), 1e-12))
+
+        early = _centroid(out[len(out) // 8: len(out) // 4])
+        late = _centroid(out[3 * len(out) // 4: 7 * len(out) // 8])
+        assert late < early * 0.7, (
+            f"spectrum did not darken ({early:.0f} -> {late:.0f} Hz): "
+            "per-block partials are not re-latching"
+        )
+
+        # No 750 Hz block-rate comb from the re-latch
+        seg = out[len(out) // 2: 3 * len(out) // 4].astype(np.float64)
+        seg = (seg - seg.mean()) * np.hanning(len(seg))
+        sp = np.abs(np.fft.rfft(seg))
+        fr = np.fft.rfftfreq(len(seg), 1.0 / FS)
+        fundamental = _band_energy(sp, fr, 440 - 60, 440 + 60)
+        inter = _band_energy(sp, fr, 660, 780)
+        assert inter < fundamental / 30, "re-latch injected block-rate hash"
+
+    def test_phase_spread_preserves_magnitude_spectrum(self):
+        """phase_spread changes the waveform, not the harmonic magnitudes."""
+        n_blocks = 200
+        aligned = [_make_frame(partials=VIOLIN_PARTIALS_Q15) for _ in range(n_blocks)]
+        spread_frames = []
+        for _ in range(n_blocks):
+            f = _make_frame(partials=VIOLIN_PARTIALS_Q15)
+            f.partial_phase_spread_q15 = 26214  # 0.8
+            spread_frames.append(f)
+        _, out_a = _render(aligned, note=69)
+        _, out_s = _render(spread_frames, note=69)
+
+        assert not np.array_equal(out_a, out_s), "phase spread had no effect"
+
+        def _harms(out):
+            seg = out[len(out) // 2:].astype(np.float64)
+            seg = (seg - seg.mean()) * np.hanning(len(seg))
+            sp = np.abs(np.fft.rfft(seg))
+            fr = np.fft.rfftfreq(len(seg), 1.0 / FS)
+            vals = []
+            for h in range(1, 9):
+                m = (fr > 440 * h - 100) & (fr < 440 * h + 100)
+                vals.append(float(sp[m].max()))
+            peak = max(vals) or 1.0
+            return [v / peak for v in vals]
+
+        ha, hs = _harms(out_a), _harms(out_s)
+        for h, (a, s) in enumerate(zip(ha, hs), start=1):
+            assert abs(a - s) < 0.15, (
+                f"H{h} magnitude changed too much with phase spread: {a:.3f} vs {s:.3f}"
+            )
+
     def test_vibrato_does_not_smear_spectrum(self):
         """6 Hz / 22-cent vibrato must not produce the block-rate (750 Hz)
         discontinuity comb between harmonics."""

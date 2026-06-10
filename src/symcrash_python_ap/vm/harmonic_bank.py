@@ -183,30 +183,47 @@ class HarmonicWeights:
         self.b_h_q15[:len(b_h)] = b_h
         self.H_active = min(H, len(self.a_h_q15))
 
-    def set_custom(self, harmonic_amps_q15: list) -> None:
+    def set_custom(self, harmonic_amps_q15: list, phase_spread_q15: int = 0) -> None:
         """
         Configure with custom harmonic amplitudes.
 
-        Sets sine-phase harmonics (a_h) directly from provided Q15 amplitudes.
-        This enables arbitrary timbres like violin, brass, woodwinds, etc.
+        With phase_spread_q15 == 0 (default), harmonics are pure sine-phase
+        (a_h only, b_h=0) — bit-exact with historical behavior. All partials
+        start phase-aligned, which is audibly "electric organ"-like: the
+        waveform is perfectly periodic with a hard phase lock.
 
-        The harmonics are pure sine-phase (a_h only, b_h=0), which produces
-        a waveform that starts at zero crossing. For most musical sounds
-        this is appropriate since phase relationships don't affect timbre
-        perception significantly.
+        Nonzero phase_spread_q15 (Q15, 32767 = full) distributes per-harmonic
+        start phases along a deterministic golden-angle sequence, splitting
+        each amplitude between a_h and b_h. The magnitude spectrum is
+        unchanged; only the phase relationships (and thus the waveform shape
+        and its perceived "buzziness") change. Fully deterministic — no RNG.
 
         Args:
             harmonic_amps_q15: List of Q15 amplitudes [H1, H2, H3, ...]
                               Index 0 = fundamental, index 1 = 2nd harmonic, etc.
+            phase_spread_q15: 0 = phase-aligned (legacy); 32767 = full
+                              golden-angle phase dispersion.
         """
         self.dc_q15 = 0
         self.a_h_q15.fill(0)
         self.b_h_q15.fill(0)
 
-        # Copy provided amplitudes to sine weights
-        for i, amp in enumerate(harmonic_amps_q15):
-            if i < len(self.a_h_q15):
-                self.a_h_q15[i] = SAT16(int(amp))
+        if phase_spread_q15:
+            # Per-harmonic Q32 phase: h * spread * golden angle.
+            # 0x9E3779B9 is the golden-ratio conjugate scaled to 2^32.
+            step = (phase_spread_q15 * 0x9E3779B9) >> 15
+            for i, amp in enumerate(harmonic_amps_q15):
+                if i < len(self.a_h_q15):
+                    phase = ((i + 1) * step) & PHASE_MASK
+                    sin_v, cos_v = sin_cos_q15(phase)
+                    a = SAT16(int(amp))
+                    self.a_h_q15[i] = RSHIFT_RNE(a * cos_v, 15)
+                    self.b_h_q15[i] = RSHIFT_RNE(a * sin_v, 15)
+        else:
+            # Copy provided amplitudes to sine weights (legacy bit-exact path)
+            for i, amp in enumerate(harmonic_amps_q15):
+                if i < len(self.a_h_q15):
+                    self.a_h_q15[i] = SAT16(int(amp))
 
         self.H_active = min(len(harmonic_amps_q15), len(self.a_h_q15))
 

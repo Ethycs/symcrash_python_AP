@@ -1996,6 +1996,16 @@ class InstrumentProgram:
     # Event modifiers (legacy - use event_policy instead)
     event_probability: List[int] = field(default_factory=lambda: [Q15_HALF] * NUM_EVENTS)
 
+    # ==========================================================================
+    # EMPHASIS OVERRIDES (from preset behavior section)
+    # ==========================================================================
+
+    # Per-regime emphasis weights from the preset's behavior section.
+    # Maps Regime enum value (int) → emphasis dict (e.g., {tone: 0.9, energy: 1.0}).
+    # When present, emphasis_to_family_base() is used to derive family_base
+    # instead of the hardcoded RegimeSpec defaults.
+    per_regime_emphasis: Dict[int, Dict[str, float]] = field(default_factory=dict)
+
     def get_regime_spec(self, regime: Regime) -> RegimeSpec:
         """Get spec for regime, or create default."""
         if regime in self.regime_specs:
@@ -2822,6 +2832,13 @@ class VoiceEngine:
         else:
             state.amp_envelope = EnvelopeScheduler(spec=ADSRSpec())
 
+        # Amp dynamics (WSE-STD-PRESET-AUTHORING 3.3): velocity curve and
+        # DX7-style EG key scaling. Defaults preserve legacy behavior.
+        state.amp_env_base_spec = state.amp_envelope.spec
+        state.amp_key_scale_rate = float(getattr(preset, 'amp_key_scale_rate', 0.0))
+        state.amp_velocity_sens_q15 = int(
+            getattr(preset, 'amp_velocity_sens', 1.0) * 32767)
+
         # Initialize LFOs from preset
         lfos = getattr(preset, 'lfos', None)
         if lfos:
@@ -2850,13 +2867,22 @@ class VoiceEngine:
                 if target_ids:
                     state.envelope_matrix[binding.id] = (
                         EnvelopeScheduler(spec=spec),
-                        target_ids
+                        target_ids,
+                        int(getattr(binding, 'velocity_sens', 0.0) * 32767),
+                        float(getattr(binding, 'key_scale_rate', 0.0)),
+                        spec,  # base (unscaled) spec for key scaling
                     )
 
         # Initialize tree morph from preset
         state.tree_morph.tree_a_id = preset.latch.tree_a_id
         state.tree_morph.tree_b_id = preset.latch.tree_b_id
         state.tree_morph.blend_q15 = preset.latch.tree_blend_q15
+
+        # Push preset character defaults to MacroRuntime
+        control_config = getattr(preset, 'control_config', None)
+        if control_config is not None and self.macro_runtime is not None:
+            control_program = control_config.to_control_program()
+            self.macro_runtime.apply_control_defaults(control_program)
 
         self.voices[voice_id] = state
         return voice_id
@@ -2898,12 +2924,33 @@ class VoiceEngine:
         state.phase = VoicePhase.ATTACK
         state.phase_block = 0
 
+        # DX7-style EG key scaling: rescale envelope times for this note
+        # (2^(-ks * (note - 60) / 24): higher notes ring shorter)
+        from ..envelope_scheduler import ADSRSpec as _ADSRSpec
+
+        def _key_scaled(base_spec, ks):
+            mult = 2.0 ** (-ks * (note - 60) / 24.0)
+            return _ADSRSpec(
+                attack_ms=base_spec.attack_ms * mult,
+                decay_ms=base_spec.decay_ms * mult,
+                sustain=base_spec.sustain,
+                release_ms=base_spec.release_ms * mult,
+            )
+
         # Trigger main envelope
         if state.amp_envelope:
+            ks_amp = getattr(state, 'amp_key_scale_rate', 0.0)
+            base = getattr(state, 'amp_env_base_spec', None)
+            if ks_amp and base is not None:
+                state.amp_envelope.spec = _key_scaled(base, ks_amp)
             state.amp_envelope.trigger_note()
 
-        # Trigger all matrix envelopes
-        for scheduler, _ in state.envelope_matrix.values():
+        # Trigger all matrix envelopes (with per-binding key scaling)
+        for entry in state.envelope_matrix.values():
+            scheduler = entry[0]
+            ks = entry[3] if len(entry) > 3 else 0.0
+            if ks and len(entry) > 4:
+                scheduler.spec = _key_scaled(entry[4], ks)
             scheduler.trigger_note()
 
         # Handle LFO sync modes on note-on
@@ -2935,7 +2982,7 @@ class VoiceEngine:
             state.amp_envelope.release_note()
 
         # Release all matrix envelopes
-        for scheduler, _ in state.envelope_matrix.values():
+        for scheduler, *_ in state.envelope_matrix.values():
             scheduler.release_note()
 
     def note_on(self, voice_id: int, gesture: Optional[GestureBasis] = None,
@@ -3091,13 +3138,24 @@ class VoiceEngine:
     def _compute_family_weights_with_regime(self, state: VoiceStateWithProgram) -> List[int]:
         """
         Compute family weights using RegimeSpec policies.
+
+        If the program carries per-regime emphasis (from the preset's behavior
+        section), those weights are used as family_base instead of the hardcoded
+        RegimeSpec defaults.  This lets preset authors control family dispatch
+        using musical vocabulary (tone, body, energy, …) without touching
+        tower internals.
         """
+        from ..instrument_ir import emphasis_to_family_base
+
         intent = state.intent
         regime = state.regime
         regime_spec = self.regime_graph.regime_specs.get(regime)
 
-        # Start with base weights from regime spec
-        if regime_spec:
+        # Start with base weights — prefer preset emphasis over hardcoded defaults
+        emphasis = state.program.per_regime_emphasis.get(int(regime))
+        if emphasis:
+            weights = emphasis_to_family_base(emphasis)
+        elif regime_spec:
             weights = list(regime_spec.family_base)
         else:
             weights = [0] * NUM_FAMILIES
@@ -3452,7 +3510,11 @@ class VoiceEngine:
             gain_q15 = Q15_ONE if state.phase != VoicePhase.RELEASE else 0
 
         # Apply velocity scaling
-        gain_q15 = (gain_q15 * state.velocity_q15) >> 15
+        # Velocity -> gain through the Amp velocity curve:
+        # scale = (1 - sens) + sens * velocity (sens=1.0 -> legacy raw scaling)
+        amp_sens_q15 = getattr(state, 'amp_velocity_sens_q15', 32767)
+        vel_scale = 32767 - amp_sens_q15 + ((amp_sens_q15 * state.velocity_q15) >> 15)
+        gain_q15 = (gain_q15 * vel_scale) >> 15
 
         # Compute beta ramp
         if state.block_count < state.beta_ramp_blocks and state.beta_ramp_blocks > 1:
@@ -3520,8 +3582,14 @@ class VoiceEngine:
         env_targets_q15 = None
         if state.envelope_matrix:
             env_targets_q15 = {}
-            for env_id, (scheduler, target_ids) in state.envelope_matrix.items():
+            for env_id, entry in state.envelope_matrix.items():
+                scheduler, target_ids = entry[0], entry[1]
+                sens_q15 = entry[2] if len(entry) > 2 else 0
                 value = scheduler.tick()
+                if sens_q15:
+                    # velocity_sens: value *= (1 - sens + sens*velocity)
+                    scale = 32767 - sens_q15 + ((sens_q15 * state.velocity_q15) >> 15)
+                    value = (value * scale) >> 15
                 for target_id in target_ids:
                     env_targets_q15[target_id] = value
 

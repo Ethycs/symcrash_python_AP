@@ -102,6 +102,7 @@ class CoeffOscParams:
     drone_mode: bool = False      # Drone/Pad mode (reduces base_mix for slow evolution)
     legato_mode: bool = False     # Legato mode (preserve phase/coefficients on pitch change)
     custom_harmonics: list = None # Custom harmonic amplitudes (Q15) - overrides waveform_type
+    phase_spread_q15: int = 0     # Per-harmonic phase dispersion for custom harmonics
     oeis_sequence_id: int = -1    # OEIS sequence for partial selection (-1=disabled, 0-7=sequence)
     oeis_rolloff_db: float = -3.0 # OEIS rolloff (dB/octave, negative = decay)
 
@@ -310,6 +311,7 @@ def decode_frame(
     if hasattr(frame, 'partial_amps_q15') and frame.partial_amps_q15:
         # Use custom harmonics from frame
         custom_harmonics = list(frame.partial_amps_q15)
+    phase_spread_q15 = getattr(frame, 'partial_phase_spread_q15', 0) or 0
 
     # OEIS sequence for partial selection (-1 = disabled)
     oeis_sequence_id = getattr(frame, 'oeis_sequence_id', -1)
@@ -335,6 +337,7 @@ def decode_frame(
         drone_mode=drone_mode,
         legato_mode=legato_mode,
         custom_harmonics=custom_harmonics,
+        phase_spread_q15=phase_spread_q15,
         oeis_sequence_id=oeis_sequence_id,
         oeis_rolloff_db=oeis_rolloff_db,
     )
@@ -378,8 +381,7 @@ def decode_frame(
             # Get operator ID from name
             op_id = _op_name_to_id(op_name)
             if op_id is not None:
-                strength = int(families.get(op_name, 1.0) * 32767)
-                strength = max(0, min(32767, strength))
+                strength = int(max(0.0, min(1.0, _op_strength(op_name, families))) * 32767)
                 plan.backbone_instrs.append(BackboneEntry(
                     op_id=op_id,
                     strength_q15=strength,
@@ -471,6 +473,67 @@ _OP_NAME_TO_ID: dict[str, int] = {
 def _op_name_to_id(name: str) -> Optional[int]:
     """Convert operator name to ID."""
     return _OP_NAME_TO_ID.get(name.lower().replace('-', '_').replace(' ', '_'))
+
+
+# Family-vector slot for axis / legacy emphasis / legacy family names
+# (docs/jargon.md; slot 0 = TAIL, always-on safety, never author-weighted).
+_FAMILY_NAME_SLOT = {
+    'color': 1, 'spread': 2, 'body': 3, 'warp': 4,
+    'glue': 5, 'snap': 6, 'chaos': 7,
+    # legacy emphasis / character names
+    'tone': 1, 'brightness': 1, 'slip': 2, 'density': 3, 'dream': 4,
+    'clarity': 5, 'stability': 5, 'settling': 5, 'energy': 6, 'risk': 7,
+    # legacy emit-template family names (pre 7-axis collapse)
+    'COLOR': 1, 'TRANSPORT': 2, 'LOCAL': 3, 'TOPOLOGY': 4,
+    'COHERENCE': 5, 'GLUE': 5, 'EXCITE': 6, 'EVENTS': 6, 'CATASTROPHE': 7,
+}
+
+# Operator -> owning family slot (AXIS_OPERATORS in instrument_ir.py, plus
+# escape-hatch TOP ops with a clear family). Unmapped ops (safety/TAIL,
+# LowRankMorph, NoiseBand, ...) run at full strength.
+_OP_FAMILY_SLOT = {
+    'Tilt': 1,
+    'DiffuseDown': 2, 'DiffuseUp': 2,
+    'IntraMix': 3,
+    'BandShear': 4, 'SwapBands': 4, 'RotateNodes': 4,
+    'QuasiRotate': 4, 'GateMask': 4,
+    'GluePair': 5, 'SheafProject': 5,
+    'Impulse': 6, 'GlobalPulse': 6,
+    'FoldPressure': 7, 'CuspInjection': 7, 'SwallowtailMask': 7,
+}
+
+
+def _op_strength(op_name: str, families) -> float:
+    """
+    Resolve an enabled operator's strength from the frame's family weights.
+
+    families may be a dict keyed by axis / legacy emphasis / legacy family /
+    operator name (weights 0.0-1.0), or an 8-slot family vector (floats or
+    Q15 ints). An operator is scaled only when its family carries an explicit
+    weight; otherwise it runs at full strength (preserves curated presets
+    whose lists predate the 7-axis weights).
+    """
+    if isinstance(families, dict):
+        if op_name in families:
+            return float(families[op_name])  # direct per-op override
+        slot = _OP_FAMILY_SLOT.get(op_name)
+        if slot is not None:
+            total = None
+            for name, weight in families.items():
+                if _FAMILY_NAME_SLOT.get(name) == slot:
+                    total = (total or 0.0) + float(weight)
+            if total is not None:
+                return min(1.0, total)
+        return 1.0
+    if isinstance(families, (list, tuple)) and families:
+        slot = _OP_FAMILY_SLOT.get(op_name)
+        if slot is not None and slot < len(families):
+            value = families[slot]
+            if isinstance(value, int) and value > 1:
+                return value / 32767.0  # Q15 family vector
+            return float(value)
+        return 1.0
+    return 1.0
 
 
 __all__ = [
