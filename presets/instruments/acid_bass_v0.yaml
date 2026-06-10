@@ -1,0 +1,79 @@
+# Acid Bass v0 - Welsh Cookbook translation
+# ==========================================
+#
+# Source: Welsh's Synthesizer Cookbook "Acid Bass" (p.95):
+#   Osc1 pulse 25% (-12dB) + Osc2 square -2oct, LPF 450 Hz res 60%,
+#   amp A=0 D=0.45s S=15% R=0.26s.
+# Two-osc mix baked into RAW partials (root = square; pulse at 4x);
+# the 450 Hz resonant filter is applied live, swept by filter_env -
+# that sweep is the acid squelch. phase_spread breaks the phase-locked
+# organ buzz.
+# Conformance: Expressive (full articulation)
+
+instrument_ir_v0:
+  meta:
+    id: "acid-bass-v0"
+    name: "Acid Bass"
+    version: 1
+    author: "symcrash"
+    seed: 0x41434442
+
+  audio:
+    sample_rate: 48000
+    block_size: 64
+
+  graph:
+    osc1:
+      type: Osc
+      output: flt1
+      waveform: partials
+      partials: [1.0, 0.0, 0.33, 0.5, 0.2, 0.0, 0.14, 0.35, 0.11, 0.0, 0.09, 0.12, 0.08, 0.0, 0.07, 0.09]
+      phase_spread: 0.25
+    flt1:
+      type: Filter
+      output: amp1
+      mode: lpf
+      cutoff_hz: 450.0
+      resonance: 0.6
+      env_amount: 0.85
+    amp1:
+      type: Amp
+      attack: 1.0
+      decay: 450.0
+      sustain: 0.15
+      release: 260.0
+
+  controls:
+    Squelch: 0.6
+    Body: 0.6
+
+  envelopes:
+    filter_env:
+      attack: 1.0
+      decay: 350.0
+      sustain: 0.08
+      release: 200.0
+      targets: [FILTER_CUTOFF]
+
+  behavior:
+    idle:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    # Safety-only: coefficient operators add broadband hash on partials
+    # carriers (see violin findings) — the acid character is in the baked
+    # filter curve and the snappy envelope.
+    attack:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    stable:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    recovery:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+
+  compile:
+    material:
+      blend: 0.0
+      target: 0.0
+      ramp: 1

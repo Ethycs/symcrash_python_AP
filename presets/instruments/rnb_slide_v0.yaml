@@ -1,0 +1,92 @@
+# R&B Slide v0 - Welsh Cookbook translation
+# ==========================================
+#
+# Source: Welsh's Synthesizer Cookbook "R&B Slide" (p.93):
+#   Triangle +1oct + triangle +3oct (-6dB), LPF 1.9 kHz res 45%,
+#   amp A=0.02s D=max S=100% R=0.6s. Welsh: "play in higher octaves".
+# Octave-stacked triangles baked into partials over the played root
+# (sounding pitch is one octave up). Glide is a live-path macro; a
+# light slow vibrato stands in for the slide expressiveness.
+# Conformance: Expressive (full articulation)
+
+instrument_ir_v0:
+  meta:
+    id: "rnb-slide-v0"
+    name: "R&B Slide"
+    version: 1
+    author: "symcrash"
+    seed: 0x524E4253
+
+  audio:
+    sample_rate: 48000
+    block_size: 64
+
+  graph:
+    osc1:
+      type: Osc
+      output: flt1
+      waveform: partials
+      partials: [0.0, 1.0, 0.0, 0.0, 0.0, 0.11, 0.0, 0.78, 0.0, 0.04, 0.0, 0.0, 0.0, 0.02, 0.0, 0.0]
+      phase_spread: 0.3
+    flt1:
+      type: Filter
+      output: amp1
+      mode: lpf
+      cutoff_hz: 1900.0
+      resonance: 0.45
+      env_amount: 0.3
+    amp1:
+      type: Amp
+      attack: 20.0
+      decay: 600.0
+      sustain: 1.0
+      release: 600.0
+
+  controls:
+    Glide: 0.3
+    Brightness: 0.45
+
+  envelopes:
+    # Welsh: LPF 1.9 kHz res 45% with 65% envelope - bright onset, warm hold
+    filter_env:
+      attack: 15.0
+      decay: 450.0
+      sustain: 0.4
+      release: 400.0
+      targets: [FILTER_CUTOFF]
+
+  modulators:
+    lfos:
+      - id: "slide_vibrato"
+        waveform: "sine"
+        rate_hz: 5.5
+        # peak cents = 32767 * depth * amount * VIBRATO macro -> ~9 cents
+        depth: 0.27
+        delay_ms: 200
+        ramp_ms: 300
+        sync_mode: "free"
+        targets:
+          - type: "pitch"
+            amount: 0.001
+
+  behavior:
+    idle:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    # Safety-only: smooth lead — character from octave-stacked partials
+    # and the slow vibrato; operators hash partials carriers.
+    attack:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    stable:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    recovery:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+
+  compile:
+    material:
+      blend: 0.0
+      target: 0.0
+      ramp: 1

@@ -1,0 +1,85 @@
+# Prime Storm v0 - Wild: prime-numbered partials under structural warp
+# =====================================================================
+#
+# Only prime-numbered harmonics sound (H2 H3 H5 H7 H11 H13) - a hollow,
+# clangorous spectrum no analog oscillator produces. The warp axis
+# (BandShear + SwapBands + RotateNodes) permutes the wavelet structure
+# in the sustain while chaos adds a pinch of FoldPressure; glue pulls
+# the recovery back together. A slow tilt LFO breathes the brightness.
+# Conformance: Expressive (full articulation)
+
+instrument_ir_v0:
+  meta:
+    id: "prime-storm-v0"
+    name: "Prime Storm"
+    version: 1
+    author: "symcrash"
+    seed: 0x5052494D
+
+  audio:
+    sample_rate: 48000
+    block_size: 64
+
+  graph:
+    osc1:
+      type: Osc
+      output: amp1
+      waveform: partials
+      partials: [0.0, 1.0, 0.8, 0.0, 0.6, 0.0, 0.45, 0.0, 0.0, 0.0, 0.3, 0.0, 0.25, 0.0, 0.0, 0.0]
+      phase_spread: 0.7
+    amp1:
+      type: Amp
+      attack: 5.0
+      decay: 300.0
+      sustain: 0.6
+      release: 400.0
+
+  controls:
+    Storm: 0.5
+    Brightness: 0.55
+
+  modulators:
+    lfos:
+      - id: "storm_drift"
+        waveform: "sine"
+        rate_hz: 0.3
+        # peak cents = 32767 * depth * amount -> ~5 cents wobble
+        depth: 0.32
+        delay_ms: 500
+        ramp_ms: 1500
+        sync_mode: "free"
+        targets:
+          - type: "pitch"
+            amount: 0.0005
+      - id: "storm_swell"
+        waveform: "sine"
+        rate_hz: 0.19
+        depth: 0.45
+        delay_ms: 300
+        ramp_ms: 1200
+        sync_mode: "free"
+        targets:
+          - type: "gain"
+            amount: 0.15
+
+  behavior:
+    idle:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    # Operator hash is the aesthetic here — but seasoning, not soup:
+    # weights kept low so the prime spectrum still reads through.
+    attack:
+      emphasis: {snap: 0.5}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    stable:
+      emphasis: {color: 0.15, warp: 0.2, chaos: 0.1}
+      trees: {A: harmonic, B: harmonic, blend: 0.2}
+    recovery:
+      emphasis: {glue: 0.4}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+
+  compile:
+    material:
+      blend: 0.0
+      target: 0.0
+      ramp: 1

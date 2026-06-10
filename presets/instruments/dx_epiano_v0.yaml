@@ -1,0 +1,97 @@
+# DX E.Piano v0 - Classic FM Electric Piano
+# ===========================================
+#
+# The DX7 "E.PIANO 1" archetype: three 2-op pairs (algorithm 5).
+# - Pairs 1+2 / 3+4: body (1:1 ratio, warm FM)
+# - Pair 5+6: the tine - 14x inharmonic modulator with a fast decay
+# Modulators decay much faster than carriers: bright bell-like strike
+# softening into a mellow sustain.
+#
+# Algorithm 5 (E.Piano):
+#   [2] -> [1*]   [4] -> [3*]   [6 fb] -> [5*]
+# Conformance: Expressive (full articulation)
+
+instrument_ir_v0:
+  meta:
+    id: "dx-epiano-v0"
+    name: "DX E.Piano"
+    version: 2
+    author: "symcrash"
+    seed: 0x44455031
+
+  audio:
+    sample_rate: 48000
+    block_size: 64
+
+  graph:
+    fm6:
+      type: FM6
+      output: amp1
+      algorithm: 5
+      feedback: 2
+      operators:
+        # Carrier levels sum to ~0.54 (FM6 chain saturates above ~0.5 -
+        # this was the "harsh/MIDI" grit: 22% H3 clip distortion)
+        - ratio: 1.0      # Op1 carrier - body
+          level: 0.23
+        - ratio: 1.0      # Op2 modulator - warmth
+          level: 0.30
+        - ratio: 1.002    # Op3 carrier - body 2, detuned (slow beating)
+          level: 0.19
+        - ratio: 1.002    # Op4 modulator
+          level: 0.22
+        - ratio: 0.998    # Op5 carrier - tine body, detuned low
+          level: 0.12
+        - ratio: 14.0     # Op6 modulator - the tine (inharmonic)
+          level: 0.28
+    amp1:
+      type: Amp
+      attack: 2.0
+      decay: 1400.0
+      sustain: 0.12
+      release: 350.0
+
+  controls:
+    Brightness: 0.5
+    Tine: 0.4
+    Release: 0.35
+
+  envelopes:
+    carrier_env:
+      attack: 2.0
+      decay: 1400.0
+      sustain: 0.12
+      release: 350.0
+      targets: [FM_OP1, FM_OP3, FM_OP5]
+    mod_env:
+      attack: 1.0
+      decay: 180.0
+      sustain: 0.08
+      release: 200.0
+      targets: [FM_OP2, FM_OP4]
+    tine_env:
+      attack: 1.0
+      decay: 60.0
+      sustain: 0.0
+      release: 60.0
+      targets: [FM_OP6]
+
+  behavior:
+    idle:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    attack:
+      emphasis: {snap: 0.3}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    stable:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    recovery:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+
+  compile:
+    material:
+      blend: 0.0
+      target: 0.0
+      ramp: 1

@@ -1,0 +1,100 @@
+# DX Marimba v0 - faithful Operator recipe translation
+# =====================================================
+#
+# 1:1 mapping of the Ableton Operator marimba recipe - every line of it
+# is now engine-expressible:
+#   1. Two-op stack, sine carrier <- sine modulator at 2:1   -> alg 5 pair
+#   2. Amp env A=0 D=~500ms S=0 R=50-100ms                   -> 1/500/0/80
+#      Mod env A=0 D=100-200ms, Osc B level ~40%             -> 150ms, 0.40
+#   3. Key Track on the modulator envelope (shorter decay
+#      on higher notes, like real bars)                      -> key_scale_rate
+#   4. Subtle lowpass to warm the wood                       -> post_filter_hz
+#      Reverb/delay for space                                -> output FX stage
+# Retained extensions beyond the recipe (validated in earlier rounds):
+#   - quiet detuned second pair (+0.4%): slow beat, reads as bar resonance
+#   - velocity_sens on mod env (velocity -> index) and amp (gentle curve)
+#   - carrier levels sum to ~0.50: FM6->FWPT chain saturates above ~0.5
+# Mod level taste range per the recipe: raise toward 0.55 for metallic/
+# tubular strike, lower toward 0.30 for a softer wooden hit.
+# Sibling voicings: acoustic_marimba_v0 (real-instrument fit),
+# dream_marimba_v0 (floaty ambient).
+#
+# Algorithm 5 (pairs):
+#   [2] -> [1*]   [4] -> [3*] (detuned)   ([5][6] silent)
+# Conformance: Expressive (full articulation)
+
+instrument_ir_v0:
+  meta:
+    id: "dx-marimba-v0"
+    name: "DX Marimba"
+    version: 11
+    author: "symcrash"
+    seed: 0x444D5242
+
+  audio:
+    sample_rate: 48000
+    block_size: 64
+
+  graph:
+    fm6:
+      type: FM6
+      output: amp1
+      algorithm: 5
+      feedback: 0
+      post_filter_hz: 5500.0
+      operators:
+        - ratio: 1.0      # Op1 carrier - sine (recipe Osc A)
+          level: 0.40
+        - ratio: 2.0      # Op2 modulator - sine at 2:1 (recipe Osc B)
+          level: 0.40
+        - ratio: 1.004    # Op3 carrier - detuned double (slow beat)
+          level: 0.10
+        - ratio: 2.008    # Op4 modulator - detuned knock
+          level: 0.28
+        - ratio: 1.0
+          level: 0.0
+        - ratio: 1.0
+          level: 0.0
+    amp1:
+      type: Amp
+      attack: 1.0
+      decay: 500.0
+      sustain: 0.0
+      release: 80.0
+      velocity_sens: 0.5
+
+  controls:
+    Hardness: 0.4
+    Decay: 0.5
+
+  envelopes:
+    # Recipe mod envelope: instant attack, 100-200 ms percussive decay,
+    # key-tracked so higher notes ring shorter (recipe step 3)
+    mod_env:
+      attack: 0.5
+      decay: 150.0
+      sustain: 0.0
+      release: 60.0
+      velocity_sens: 0.5
+      key_scale_rate: 0.6
+      targets: [FM_OP2, FM_OP4]
+
+  behavior:
+    idle:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    attack:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    stable:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    recovery:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+
+  compile:
+    material:
+      blend: 0.0
+      target: 0.0
+      ramp: 1

@@ -1,0 +1,82 @@
+# DX Clav v0 - FM Clavinet
+# =========================
+#
+# Bitey FM clav: TWO detuned modulator stacks (algorithm 4, carriers
+# 1 and 4) beating against each other at ~1 Hz - the ensemble motion a
+# single phase-locked stack can't make. Modulators decay to a simmer
+# over ~160 ms: sharp pluck attack, funky hollow sustain.
+#
+# Algorithm 4 (dual stacks):
+#   [3] -> [2] -> [1*]    [6] -> [5] -> [4*] (detuned +0.3%)
+# Conformance: Expressive (full articulation)
+
+instrument_ir_v0:
+  meta:
+    id: "dx-clav-v0"
+    name: "DX Clav"
+    version: 2
+    author: "symcrash"
+    seed: 0x44434C56
+
+  audio:
+    sample_rate: 48000
+    block_size: 64
+
+  graph:
+    fm6:
+      type: FM6
+      output: amp1
+      algorithm: 4
+      feedback: 2
+      operators:
+        # Carrier levels sum to ~0.54 (FM6 chain saturates above ~0.5)
+        - ratio: 1.0      # Op1 carrier - stack A
+          level: 0.29
+        - ratio: 3.0      # Op2 modulator - hollow odd-harmonic bite
+          level: 0.58
+        - ratio: 9.0      # Op3 modulator - pluck edge
+          level: 0.22
+        - ratio: 1.003    # Op4 carrier - stack B, detuned (~1 Hz beat)
+          level: 0.25
+        - ratio: 3.01     # Op5 modulator - stack B bite
+          level: 0.5
+        - ratio: 9.02     # Op6 modulator - stack B edge
+          level: 0.15
+    amp1:
+      type: Amp
+      attack: 1.0
+      decay: 380.0
+      sustain: 0.22
+      release: 70.0
+
+  controls:
+    Bite: 0.55
+    Body: 0.4
+
+  envelopes:
+    mod_env:
+      attack: 0.5
+      decay: 160.0
+      sustain: 0.35
+      release: 80.0
+      targets: [FM_OP2, FM_OP3, FM_OP5, FM_OP6]
+
+  behavior:
+    idle:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    attack:
+      emphasis: {snap: 0.4}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    stable:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    recovery:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+
+  compile:
+    material:
+      blend: 0.0
+      target: 0.0
+      ramp: 1

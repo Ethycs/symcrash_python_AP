@@ -1,0 +1,85 @@
+# Quasi Glass v0 - Wild: golden-ratio rotation on a glassy spectrum
+# ==================================================================
+#
+# Sparse glassy partials (H1 H4 H8 H9 H12 H16) processed by QuasiRotate
+# (incommensurate golden-ratio node rotation - never repeats exactly)
+# and GateMask (Sturmian binary gating). These TOP-group operators are
+# not derivable from the 7 axes, so the stable state keeps an explicit
+# processing: list (the documented escape hatch in docs/jargon.md);
+# warp/color weights drive their family strengths.
+# Conformance: Expressive (full articulation)
+
+instrument_ir_v0:
+  meta:
+    id: "quasi-glass-v0"
+    name: "Quasi Glass"
+    version: 1
+    author: "symcrash"
+    seed: 0x51475358
+
+  audio:
+    sample_rate: 48000
+    block_size: 64
+
+  graph:
+    osc1:
+      type: Osc
+      output: amp1
+      waveform: partials
+      partials: [1.0, 0.0, 0.0, 0.6, 0.0, 0.0, 0.0, 0.5, 0.45, 0.0, 0.0, 0.35, 0.0, 0.0, 0.0, 0.3]
+      phase_spread: 0.9
+    amp1:
+      type: Amp
+      attack: 2.0
+      decay: 900.0
+      sustain: 0.35
+      release: 700.0
+
+  controls:
+    Shimmer: 0.5
+    Gate: 0.4
+
+  modulators:
+    lfos:
+      - id: "shimmer_drift"
+        waveform: "sine"
+        rate_hz: 0.11
+        # peak cents = 32767 * depth * amount -> ~6 cents slow shimmer
+        depth: 0.37
+        delay_ms: 300
+        ramp_ms: 1500
+        sync_mode: "free"
+        targets:
+          - type: "pitch"
+            amount: 0.0005
+      - id: "glass_breath"
+        waveform: "sine"
+        rate_hz: 0.23
+        depth: 0.4
+        delay_ms: 0
+        ramp_ms: 1000
+        sync_mode: "free"
+        targets:
+          - type: "gain"
+            amount: 0.12
+
+  behavior:
+    idle:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    attack:
+      emphasis: {snap: 0.8}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    stable:
+      processing: [QuasiRotate, GateMask, NormalizeScale, FineClamp]
+      emphasis: {color: 0.15, warp: 0.25}
+      trees: {A: harmonic, B: harmonic, blend: 0.15}
+    recovery:
+      emphasis: {glue: 0.7}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+
+  compile:
+    material:
+      blend: 0.0
+      target: 0.0
+      ramp: 1

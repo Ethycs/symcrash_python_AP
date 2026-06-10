@@ -1,0 +1,86 @@
+# Analog Strings v0 - Welsh Cookbook translation
+# ===============================================
+#
+# Source: Welsh's Synthesizer Cookbook "Strings Pulse-Width Modulation"
+# (p.94): detuned squares with a 2 Hz sine LFO sweeping pulse width 47%,
+# slow attack, full sustain, lush. The PWM motion is live-path only
+# (the offline render harness does not tick LFOs); spread/glue axes
+# provide the ensemble width. Welsh notes: thick chorus and delay.
+# Conformance: Expressive (full articulation)
+
+instrument_ir_v0:
+  meta:
+    id: "analog-strings-v0"
+    name: "Analog Strings"
+    version: 1
+    author: "symcrash"
+    seed: 0x414E5354
+
+  audio:
+    sample_rate: 48000
+    block_size: 64
+
+  graph:
+    osc1:
+      type: Osc
+      output: amp1
+      # pulse (not square) so PWM runs through the harmonic bank and the
+      # 2 Hz width LFO can actually move the spectrum
+      waveform: pulse
+      pwm_enable: true
+    amp1:
+      type: Amp
+      attack: 110.0
+      decay: 400.0
+      sustain: 1.0
+      release: 350.0
+
+  controls:
+    Ensemble: 0.5
+    Brightness: 0.5
+
+  modulators:
+    lfos:
+      - id: "pwm_motion"
+        waveform: "sine"
+        rate_hz: 2.0
+        depth: 0.47
+        delay_ms: 0
+        ramp_ms: 400
+        sync_mode: "free"
+        targets:
+          - type: "pwm"
+            amount: 0.5
+      - id: "section_drift"
+        waveform: "triangle"
+        rate_hz: 0.7
+        # peak cents = 32767 * depth * amount -> ~5 cents ensemble drift
+        depth: 0.3
+        delay_ms: 0
+        ramp_ms: 800
+        sync_mode: "free"
+        targets:
+          - type: "pitch"
+            amount: 0.0005
+
+  behavior:
+    # Safety-only: ensemble motion comes from the PWM LFO (live path);
+    # operators hash the carrier (measured 12 kHz centroid on a string pad).
+    idle:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    attack:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    stable:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    recovery:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+
+  compile:
+    material:
+      blend: 0.0
+      target: 0.0
+      ramp: 1

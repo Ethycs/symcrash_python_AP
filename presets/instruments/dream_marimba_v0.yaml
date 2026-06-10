@@ -1,0 +1,126 @@
+# Dream Marimba v0 - floaty ambient mallet
+# =========================================
+#
+# The "super floaty" voicing iterated by ear from the FM mallet
+# skeleton: cloud-soft 18 ms onset, 1.5 s ring with a 450 ms release,
+# relaxed key scaling so high notes hang too, barely-there strike pair,
+# lingering body shimmer (800 ms index decay), and a ~3-cent drift LFO
+# at 0.2 Hz so the tone breathes. Pairs with a big wet hall.
+# Carrier levels sum to ~0.50 (FM6->FWPT chain saturates above ~0.5).
+# For the percussive recipe mallet see dx_marimba_v0; for the
+# real-instrument fit see acoustic_marimba_v0.
+#
+# Algorithm 5 (pairs):
+#   [2] -> [1*]   [4] -> [3*]   [6] -> [5*]
+# Conformance: Expressive (full articulation)
+
+instrument_ir_v0:
+  meta:
+    id: "dream-marimba-v0"
+    name: "Dream Marimba"
+    version: 0
+    author: "symcrash"
+    seed: 0x44524D42
+
+  audio:
+    sample_rate: 48000
+    block_size: 64
+
+  graph:
+    fm6:
+      type: FM6
+      output: amp1
+      algorithm: 5
+      feedback: 0
+      operators:
+        # -- body pair: harmonic, low index, slow index decay
+        - ratio: 1.0      # Op1 carrier - fundamental (rings longest)
+          level: 0.40
+        - ratio: 4.0      # Op2 modulator - undercut-tuned 4x partial
+          level: 0.15
+        # -- strike pair: barely-there contact (floaty voicing)
+        - ratio: 1.0      # Op3 carrier - strike body
+          level: 0.04
+        - ratio: 6.9      # Op4 modulator - non-integer mallet "tok"
+          level: 0.15
+        # -- detune pair: quiet body double, slow beat
+        - ratio: 1.004    # Op5 carrier - detuned (+0.4%)
+          level: 0.06
+        - ratio: 4.016    # Op6 modulator - detuned 4x partial
+          level: 0.15
+    amp1:
+      type: Amp
+      # Floaty: cloud-soft onset, long ring everywhere on the keyboard
+      attack: 18.0
+      decay: 1500.0
+      sustain: 0.0
+      release: 450.0
+      velocity_sens: 0.4
+      key_scale_rate: 0.3
+
+  controls:
+    Hardness: 0.4
+    Decay: 0.5
+
+  envelopes:
+    # Body index: gentle shimmer lingering through the long ring
+    body_index_env:
+      attack: 0.5
+      decay: 800.0
+      sustain: 0.0
+      release: 300.0
+      velocity_sens: 0.2
+      key_scale_rate: 0.3
+      targets: [FM_OP2, FM_OP6]
+    # Strike index: full clatter at note-on, gone in ~35 ms.
+    # velocity -> FM index, kept moderate (0.5) so soft hits still speak
+    strike_index_env:
+      attack: 0.5
+      decay: 35.0
+      sustain: 0.0
+      release: 30.0
+      velocity_sens: 0.5
+      targets: [FM_OP4]
+    # Strike carrier: the "tok" body itself dies in ~120 ms
+    strike_carrier_env:
+      attack: 0.5
+      decay: 120.0
+      sustain: 0.0
+      release: 60.0
+      velocity_sens: 0.3
+      targets: [FM_OP3]
+
+  modulators:
+    lfos:
+      - id: "float_drift"
+        waveform: "sine"
+        rate_hz: 0.2
+        # peak cents = 32767 * depth * amount -> ~3 cents of slow drift
+        depth: 0.2
+        delay_ms: 200
+        ramp_ms: 1200
+        sync_mode: "free"
+        targets:
+          - type: "pitch"
+            amount: 0.0005
+
+  behavior:
+    idle:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    attack:
+      # No snap: the strike pair IS the transient; Impulse would double it
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    stable:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    recovery:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+
+  compile:
+    material:
+      blend: 0.0
+      target: 0.0
+      ramp: 1

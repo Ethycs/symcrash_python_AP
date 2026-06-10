@@ -1,0 +1,82 @@
+# Fold Drone v0 - Wild: catastrophe-fold drone
+# =============================================
+#
+# A dense, slow-rolloff spectrum held under continuous FoldPressure
+# (the chaos axis): the fold setup nonlinearly compresses band energy
+# so the drone seethes instead of sitting still. Body keeps it thick,
+# a 0.15 Hz tremolo breathes, glue restores coherence on release.
+# Very slow envelope - this is a pad/drone, hold the note.
+# Conformance: Expressive (full articulation)
+
+instrument_ir_v0:
+  meta:
+    id: "fold-drone-v0"
+    name: "Fold Drone"
+    version: 1
+    author: "symcrash"
+    seed: 0x464F4C44
+
+  audio:
+    sample_rate: 48000
+    block_size: 64
+
+  graph:
+    osc1:
+      type: Osc
+      output: amp1
+      waveform: partials
+      partials: [1.0, 0.9, 0.85, 0.8, 0.72, 0.66, 0.6, 0.55, 0.5, 0.46, 0.42, 0.38, 0.35, 0.32, 0.3, 0.28]
+      phase_spread: 1.0
+    amp1:
+      type: Amp
+      attack: 800.0
+      decay: 1000.0
+      sustain: 0.85
+      release: 1500.0
+
+  controls:
+    Pressure: 0.6
+    Breath: 0.3
+
+  modulators:
+    lfos:
+      - id: "breath"
+        waveform: "sine"
+        rate_hz: 0.15
+        depth: 0.5
+        delay_ms: 0
+        ramp_ms: 2000
+        sync_mode: "free"
+        targets:
+          - type: "gain"
+            amount: 0.35
+      - id: "drift"
+        waveform: "triangle"
+        rate_hz: 0.07
+        # peak cents = 32767 * depth * amount -> ~10 cents slow drift
+        depth: 0.6
+        delay_ms: 0
+        ramp_ms: 3000
+        sync_mode: "free"
+        targets:
+          - type: "pitch"
+            amount: 0.0005
+
+  behavior:
+    # Fold pressure at seething-not-swamping level (operators hash
+    # partials carriers fast — 0.2 chaos already audibly works the drone).
+    idle:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    stable:
+      emphasis: {glue: 0.2, chaos: 0.08}
+      trees: {A: harmonic, B: harmonic, blend: 0.25}
+    recovery:
+      emphasis: {glue: 0.5}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+
+  compile:
+    material:
+      blend: 0.0
+      target: 0.0
+      ramp: 1

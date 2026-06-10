@@ -1,0 +1,106 @@
+# Acoustic Marimba v0 - fitted to a real recording
+# =================================================
+#
+# Fitted against measurements of a real marimba performance
+# (reference_audio/marimba_ref.wav): strikes are nearly pure (upper
+# partials <8%), the bar's tuned mode is the double octave (4x f0,
+# fast-decaying), centroid ~233 Hz - dark and woody.
+# Realization:
+# - FM bite reduced to a transient-only knock (mod level 0.18, 90 ms)
+# - Explicit quiet 4x-f0 carrier with its own fast decay (bar mode)
+# - Post-LPF 2.6 kHz for the dark top
+# - Carrier levels sum to ~0.53 (FM6 chain saturates above ~0.5)
+# - Detuned carrier pair for slow ensemble beat
+# For the famous *synthetic* DX7-style marimba, see dx_marimba_v0.
+#
+# Algorithm 5 (pairs):
+#   [2] -> [1*]   [4] -> [3*] (detuned)   [5*] 4x bar mode ([6] silent)
+# Conformance: Expressive (full articulation)
+
+instrument_ir_v0:
+  meta:
+    id: "acoustic-marimba-v0"
+    name: "Acoustic Marimba"
+    version: 0
+    author: "symcrash"
+    seed: 0x41434D42
+
+  audio:
+    sample_rate: 48000
+    block_size: 64
+
+  graph:
+    fm6:
+      type: FM6
+      output: amp1
+      algorithm: 5
+      feedback: 0
+      post_filter_hz: 2600.0
+      operators:
+        # Fitted to a real marimba recording (reference_audio/marimba_ref):
+        # measured strikes are nearly pure - upper partials <8%, and the
+        # bar's tuned mode is the DOUBLE OCTAVE (4x f0), not 3x. A 2:1 FM
+        # modulator puts its first sideband on 3f0 (we measured 0.23 vs
+        # the reference's 0.05), so FM is reduced to a transient bite and
+        # the 4x mode is an explicit quiet carrier with a fast decay.
+        # Carrier levels sum to ~0.53: the FM6->FWPT chain saturates above
+        # ~0.5 summed carriers (measured 22% H3 distortion on a pure sine
+        # at level 1.0; clean at 0.5 - internal makeup gain keeps output hot)
+        - ratio: 1.0      # Op1 carrier - bar fundamental
+          level: 0.38
+        - ratio: 2.0      # Op2 modulator - strike bite only
+          level: 0.18
+        - ratio: 1.004    # Op3 carrier - detuned double (slow beat)
+          level: 0.11
+        - ratio: 2.008    # Op4 modulator - detuned strike
+          level: 0.10
+        - ratio: 4.0      # Op5 carrier - the tuned double-octave bar mode
+          level: 0.045
+        - ratio: 1.0
+          level: 0.0
+    amp1:
+      type: Amp
+      attack: 4.0
+      decay: 500.0
+      sustain: 0.0
+      release: 80.0
+
+  controls:
+    Hardness: 0.4
+    Decay: 0.5
+
+  envelopes:
+    mod_env:
+      attack: 0.5
+      decay: 90.0
+      sustain: 0.0
+      release: 60.0
+      targets: [FM_OP2, FM_OP4]
+    # The 4x bar mode rings shorter than the fundamental (real bars damp it)
+    bar_mode_env:
+      attack: 0.5
+      decay: 160.0
+      sustain: 0.0
+      release: 60.0
+      targets: [FM_OP5]
+
+  behavior:
+    idle:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    attack:
+      # No snap: Impulse injection reads as a harsh click on a soft mallet
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    stable:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    recovery:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+
+  compile:
+    material:
+      blend: 0.0
+      target: 0.0
+      ramp: 1

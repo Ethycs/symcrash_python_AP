@@ -1,0 +1,78 @@
+# Detroit Bass v0 - Welsh Cookbook translation
+# =============================================
+#
+# Source: Welsh's Synthesizer Cookbook "Detroit Bass" (p.96):
+#   Osc1 square -1oct + Osc2 saw -2oct, filter wide open (20 kHz),
+#   amp A=0 D=max S=100% R=0 (organ-style gate).
+# Two-osc mix baked into partials over the saw root: square adds
+# weight at H2, H6, H10, H14 - the heavy dominant-octave Detroit sound.
+# Welsh notes glide on (0.01s) - portamento is a live-path macro.
+# Conformance: Expressive (full articulation)
+
+instrument_ir_v0:
+  meta:
+    id: "detroit-bass-v0"
+    name: "Detroit Bass"
+    version: 1
+    author: "symcrash"
+    seed: 0x44544254
+
+  audio:
+    sample_rate: 48000
+    block_size: 64
+
+  graph:
+    osc1:
+      type: Osc
+      output: flt1
+      waveform: partials
+      partials: [0.67, 1.0, 0.22, 0.17, 0.13, 0.33, 0.1, 0.08, 0.07, 0.2, 0.06, 0.06, 0.05, 0.14, 0.04, 0.04]
+      phase_spread: 0.35
+    flt1:
+      type: Filter
+      output: amp1
+      mode: lpf
+      cutoff_hz: 700.0
+      resonance: 0.15
+      env_amount: 0.45
+    amp1:
+      type: Amp
+      attack: 1.0
+      decay: 600.0
+      sustain: 1.0
+      release: 30.0
+
+  controls:
+    Weight: 0.7
+    Brightness: 0.4
+
+  envelopes:
+    # Bright pluck settling into a rounder sustain (loud = bright arc)
+    filter_env:
+      attack: 1.0
+      decay: 220.0
+      sustain: 0.35
+      release: 150.0
+      targets: [FILTER_CUTOFF]
+
+  behavior:
+    idle:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    # Safety-only: the Detroit weight lives in the baked two-osc partials;
+    # operators hash partials carriers (centroid 280 Hz -> 14 kHz measured).
+    attack:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    stable:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    recovery:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+
+  compile:
+    material:
+      blend: 0.0
+      target: 0.0
+      ramp: 1
