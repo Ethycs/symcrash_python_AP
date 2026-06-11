@@ -808,9 +808,9 @@ def ccs_generate_coeffs_polyphase(
 
     # Direct 1:1 mapping - VM_K == LUT K == 8
     # Inject into 512-element state: [64 leaves × 8 k-slots]
-    for l in range(NUM_LEAVES):
-        for k in range(VM_K):
-            output_coeffs[l * VM_K + k] = subband_output[l, k]
+    # subband_output is [NUM_LEAVES, K] row-major, so this is exactly a
+    # C-order ravel (bit-exact replacement for the per-element loop).
+    output_coeffs[:NUM_LEAVES * VM_K] = subband_output[:, :VM_K].reshape(NUM_LEAVES * VM_K)
 
 
 __all__ = [

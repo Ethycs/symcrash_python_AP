@@ -165,6 +165,14 @@ class DecodedPlan:
     # Pattern ID (for reference)
     pattern_id: int = 0
 
+    # Noise exciter (Packet E4): deterministic seeded broadband transient
+    # mixed into the voice output pre-gain. level 0 = disabled.
+    noise_color: int = 0            # 0=white, 1=pink, 2=brown
+    noise_level_q15: int = 0        # Mix level (Q15; 0 = off)
+    noise_attack_blocks: int = 1    # Envelope attack (blocks)
+    noise_decay_blocks: int = 45    # Envelope decay (blocks)
+    noise_seed_u32: int = 0         # Preset meta.seed_u32
+
 
 # =============================================================================
 # EVENT LANE MAPPING
@@ -408,6 +416,16 @@ def decode_frame(
                     op_id=op_id,
                     strength_q15=strength,
                 ))
+
+    # -------------------------------------------------------------------------
+    # Noise exciter (Packet E4) - level 0 keeps the path disabled
+    # -------------------------------------------------------------------------
+    plan.noise_level_q15 = getattr(frame, 'noise_level_q15', 0) or 0
+    if plan.noise_level_q15 > 0:
+        plan.noise_color = getattr(frame, 'noise_color', 0) or 0
+        plan.noise_attack_blocks = getattr(frame, 'noise_attack_blocks', 1) or 1
+        plan.noise_decay_blocks = getattr(frame, 'noise_decay_blocks', 45) or 45
+        plan.noise_seed_u32 = getattr(frame, 'noise_seed_u32', 0) or 0
 
     # -------------------------------------------------------------------------
     # IDWPT enable

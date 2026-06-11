@@ -153,6 +153,16 @@ class VoiceFrame:
     # OEIS rolloff (dB/octave, negative = decay)
     oeis_rolloff_db: float = -3.0
 
+    # Noise exciter (Packet E4 - acoustic attack transients)
+    # Deterministic seeded broadband noise summed into the voice output
+    # pre-gain (see vm/noise_exciter.py). level 0 = disabled (bit-exact
+    # no-op: the noise path is never executed).
+    noise_color: int = 0            # 0=white, 1=pink, 2=brown
+    noise_level_q15: int = 0        # Mix level (Q15; 0 = off)
+    noise_attack_blocks: int = 1    # Envelope attack (blocks of 64 @ 48kHz)
+    noise_decay_blocks: int = 45    # Envelope decay (~60 ms)
+    noise_seed_u32: int = 0         # Preset meta.seed_u32 (replay determinism)
+
     # PWM parameters
     pwm_width_q15: int = 16384      # Duty cycle (Q15: 0=0%, 32767≈100%, 16384=50%)
     pwm_enabled: bool = False       # Enable PWM modulation

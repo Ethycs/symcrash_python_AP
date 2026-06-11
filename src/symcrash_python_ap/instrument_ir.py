@@ -510,6 +510,12 @@ class NodeParams:
     # 0 = phase-aligned (buzzy/"electric"); 1 = full golden-angle spread.
     phase_spread: float = 0.0
 
+    # OEIS partial selection (Mode B harmonic bank; WSE-STD-210 §10.2).
+    # -1 = disabled; 0-7 = vm.oeis_tables.OEISSequenceID. Outranks custom
+    # partials and waveform_type in the executor.
+    oeis_sequence_id: int = -1
+    oeis_rolloff_db: float = -3.0
+
     # Amp node dynamics (WSE-STD-PRESET-AUTHORING 3.3)
     # velocity_sens: gain scales by (1 - sens + sens * velocity).
     #   1.0 = raw velocity scaling (legacy engine behavior); 0 = constant.
@@ -546,6 +552,7 @@ class NodeParams:
     # Unison parameters
     unison_voices: int = 1            # Voice count (1-8)
     unison_spread: int = 10           # Detune spread in cents
+    unison_width: float = 1.0         # Stereo width 0=mono..1=full L/R spread
 
     # Mode flags
     drone_mode: bool = False          # Sustained coefficient mode
@@ -556,6 +563,14 @@ class NodeParams:
 
     # Noise
     color: Optional[str] = None
+
+    # Noise exciter authoring (WSE-STD-PRESET-AUTHORING 3.8): a `Noise`
+    # node (or a `noise:` block on any generator node) becomes a
+    # deterministic broadband exciter summed into the voice output
+    # pre-gain (vm/noise_exciter.py). None/0 level = no exciter.
+    noise_level: Optional[float] = None   # Mix level 0-1 (None = off)
+    noise_attack_ms: float = 1.0          # Exciter envelope attack
+    noise_decay_ms: float = 60.0          # Exciter envelope decay
 
     # Filter (legacy mode string)
     mode: Optional[str] = None
@@ -1962,6 +1977,14 @@ def _parse_harmonic_profile(vals: list) -> HarmonicProfile:
     return HarmonicProfile(amplitudes=amps)
 
 
+def _oeis_sequence_to_id(value) -> int:
+    """Resolve an OEIS sequence given as a name (e.g. 'primes') or int ID."""
+    if isinstance(value, str):
+        from .vm.oeis_tables import OEISSequenceID
+        return int(OEISSequenceID[value.upper()])
+    return int(value)
+
+
 def _parse_node_params(data: dict) -> NodeParams:
     """Parse node params from dict."""
     params = NodeParams()
@@ -1975,6 +1998,19 @@ def _parse_node_params(data: dict) -> NodeParams:
         params.harmonics = _parse_harmonic_profile(data['harmonics'])
     if 'phase_spread' in data:
         params.phase_spread = float(data['phase_spread'])
+
+    # OEIS partial selection: `oeis: {sequence: primes, rolloff_db: -3.0}`
+    # or the flat oeis_sequence_id / oeis_rolloff_db fields
+    if isinstance(data.get('oeis'), dict):
+        oeis = data['oeis']
+        if 'sequence' in oeis:
+            params.oeis_sequence_id = _oeis_sequence_to_id(oeis['sequence'])
+        if 'rolloff_db' in oeis:
+            params.oeis_rolloff_db = float(oeis['rolloff_db'])
+    if 'oeis_sequence_id' in data:
+        params.oeis_sequence_id = _oeis_sequence_to_id(data['oeis_sequence_id'])
+    if 'oeis_rolloff_db' in data:
+        params.oeis_rolloff_db = float(data['oeis_rolloff_db'])
 
     # Filter authoring fields (Hz-domain)
     if 'cutoff_hz' in data:
@@ -2018,11 +2054,25 @@ def _parse_node_params(data: dict) -> NodeParams:
     if 'fm_source' in data:
         params.fm_source = data['fm_source']
 
-    # Unison parameters
+    # Unison parameters: `unison: {voices, spread_cents, width}` block
+    # (WSE-STD-PRESET-AUTHORING; same nesting precedent as `oeis:`/`noise:`)
+    # or the flat unison_voices / unison_spread / unison_width fields
+    if isinstance(data.get('unison'), dict):
+        unison = data['unison']
+        if 'voices' in unison:
+            params.unison_voices = int(unison['voices'])
+        if 'spread_cents' in unison:
+            params.unison_spread = int(unison['spread_cents'])
+        elif 'spread' in unison:
+            params.unison_spread = int(unison['spread'])
+        if 'width' in unison:
+            params.unison_width = float(unison['width'])
     if 'unison_voices' in data:
         params.unison_voices = data['unison_voices']
     if 'unison_spread' in data:
         params.unison_spread = data['unison_spread']
+    if 'unison_width' in data:
+        params.unison_width = float(data['unison_width'])
 
     # Mode flags
     if 'drone_mode' in data:
@@ -2037,6 +2087,19 @@ def _parse_node_params(data: dict) -> NodeParams:
     # Noise
     if 'color' in data:
         params.color = data['color']
+
+    # Noise exciter: `noise: {color, attack_ms, decay_ms, level}` block
+    # (Noise-node flat keys are lifted into this block by _parse_l0_node)
+    if isinstance(data.get('noise'), dict):
+        noise = data['noise']
+        if 'color' in noise:
+            params.color = noise['color']
+        if 'attack_ms' in noise:
+            params.noise_attack_ms = float(noise['attack_ms'])
+        if 'decay_ms' in noise:
+            params.noise_decay_ms = float(noise['decay_ms'])
+        if 'level' in noise:
+            params.noise_level = float(noise['level'])
 
     # Filter (legacy mode string + new Q15 parameters)
     if 'mode' in data:
@@ -2116,10 +2179,22 @@ def _parse_node_params(data: dict) -> NodeParams:
 
 def _parse_l0_node(data: dict) -> L0Node:
     """Parse L0 node from dict."""
+    node_type = data.get('type', '')
+    params_data = data.get('params', {})
+    if node_type == 'Noise' and 'noise' not in params_data:
+        # Noise exciter node: lift flat authoring keys (color, attack_ms,
+        # decay_ms, level) into a `noise:` block so _parse_node_params can
+        # stay node-type agnostic ('level' is only meaningful here).
+        noise = {k: params_data[k]
+                 for k in ('color', 'attack_ms', 'decay_ms', 'level')
+                 if k in params_data}
+        if noise:
+            params_data = dict(params_data)
+            params_data['noise'] = noise
     return L0Node(
         id=data.get('id', ''),
-        type=data.get('type', ''),
-        params=_parse_node_params(data.get('params', {})),
+        type=node_type,
+        params=_parse_node_params(params_data),
     )
 
 
@@ -3391,6 +3466,77 @@ def extract_phase_spread_q15(ir: InstrumentIR) -> int:
     return 0
 
 
+def extract_oeis_params(ir: InstrumentIR) -> Optional[dict]:
+    """
+    Extract OEIS partial-selection params from the first Osc node using one.
+
+    Returns {'sequence_id', 'rolloff_db'} or None when no Osc opts in.
+    OEIS selection outranks custom partials and waveform_type in the
+    executor (see vm/executor.py priority order).
+    """
+    for node in ir.layers.L0_graph.nodes:
+        if node.type == "Osc" and getattr(node.params, 'oeis_sequence_id', -1) >= 0:
+            return {
+                'sequence_id': node.params.oeis_sequence_id,
+                'rolloff_db': node.params.oeis_rolloff_db,
+            }
+    return None
+
+
+# NoiseColor name -> vm/noise_exciter.py color id
+_NOISE_COLOR_IDS = {'white': 0, 'pink': 1, 'brown': 2}
+
+
+def extract_noise_params(ir: InstrumentIR) -> Optional[dict]:
+    """
+    Extract noise-exciter params from the first node authoring noise.
+
+    A node opts in via a `Noise` node type or a `noise: {color, attack_ms,
+    decay_ms, level}` block on a generator node (WSE-STD-PRESET-AUTHORING
+    3.8). A bare `Noise` node without a level defaults to 0.25.
+
+    Returns {'color', 'attack_ms', 'decay_ms', 'level_q15', 'seed_u32'}
+    or None when the preset authors no noise (the engine's bit-exact
+    no-op path: VoiceFrame noise fields stay at their level-0 defaults).
+    """
+    for node in ir.layers.L0_graph.nodes:
+        params = node.params
+        level = getattr(params, 'noise_level', None)
+        if level is None and node.type == "Noise":
+            level = 0.25  # audible default for a bare Noise node
+        if level is None or level <= 0.0:
+            continue
+        color_name = (getattr(params, 'color', None) or 'white').lower()
+        return {
+            'color': _NOISE_COLOR_IDS.get(color_name, 0),
+            'attack_ms': float(getattr(params, 'noise_attack_ms', 1.0)),
+            'decay_ms': float(getattr(params, 'noise_decay_ms', 60.0)),
+            'level_q15': max(0, min(32767, round(float(level) * 32767))),
+            'seed_u32': int(getattr(ir.meta, 'seed_u32', 0) or 0) & 0xFFFFFFFF,
+        }
+    return None
+
+
+def extract_unison_params(ir: InstrumentIR) -> Optional[dict]:
+    """
+    Extract unison/stereo-width params from the first generator node using
+    unison (Osc or FM6 with unison_voices > 1).
+
+    Returns {'voices' (2-8), 'spread_cents', 'width' (0.0-1.0)} or None
+    when the preset authors no unison — the render harness's mono path is
+    bit-exact legacy behavior in that case.
+    """
+    for node in ir.layers.L0_graph.nodes:
+        params = node.params
+        if node.type in ("Osc", "FM6") and getattr(params, 'unison_voices', 1) > 1:
+            return {
+                'voices': max(2, min(8, int(params.unison_voices))),
+                'spread_cents': int(params.unison_spread),
+                'width': max(0.0, min(1.0, float(getattr(params, 'unison_width', 1.0)))),
+            }
+    return None
+
+
 def extract_filter_params(ir: InstrumentIR) -> Optional[dict]:
     """
     Extract Hz-domain filter authoring params from the first Filter node.
@@ -3528,9 +3674,14 @@ def complete_instrument(ir: InstrumentIR) -> InstrumentIR:
     if not ir.layers.L1_lift.gesture_basis:
         ir.layers.L1_lift = create_default_l1_lift()
 
-    # Complete L2 if missing
+    # Complete L2 if missing (preserve any envelope bindings already
+    # attached to L2 — simple-form presets store `envelopes:` there
+    # without authoring regime nodes)
     if not ir.layers.L2_regimes.regime_nodes:
+        existing_envelopes = ir.layers.L2_regimes.envelopes
         ir.layers.L2_regimes = create_default_l2_regimes()
+        if existing_envelopes:
+            ir.layers.L2_regimes.envelopes = existing_envelopes
 
     # Complete L3 emit templates if missing
     if not ir.layers.L3_cmmm.emit_templates:
@@ -3889,6 +4040,7 @@ __all__ = [
     # Functions
     'load_instrument', 'load_instrument_from_dict', 'save_instrument',
     'extract_partials_q15', 'extract_phase_spread_q15', 'extract_filter_params',
+    'extract_oeis_params', 'extract_noise_params', 'extract_unison_params',
     'complete_instrument',
     'create_default_l1_lift', 'create_default_l2_regimes', 'create_default_emit_templates',
     # Tower (WSE-STD-070)

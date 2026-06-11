@@ -32,6 +32,9 @@ from ..wavelet.sine_core import sin_cos_q15, freq_to_phase_inc, PHASE_MASK
 from .tables import COEFF_LEN, VM_K
 from ..primitives import BLOCK_SIZE, NUM_LEAVES, SAMPLE_RATE_HZ
 
+# JIT hot-path kernels (bit-exact, switchable; see vm/hotpath_jit.py)
+from . import hotpath_jit as _hot
+
 # =============================================================================
 # CONSTANTS (WSE-STD-210 Section 1)
 # =============================================================================
@@ -169,8 +172,8 @@ class HarmonicWeights:
         Configure for PWM/pulse wave with given duty cycle.
 
         Uses analytical Fourier coefficients for bandlimited PWM:
-        - dc = 2d - 1
         - a_h = (2/πh) × sin(πhd)
+        (DC term omitted: AC-coupled output, see compute_pwm_harmonics)
 
         Args:
             duty_q15: Duty cycle in Q15 (16384 = 50%, 8192 = 25%)
@@ -847,17 +850,24 @@ class ModeBState:
     unison_voices: int = 1
     unison_spread_cents: int = 0
 
+    # Unison phase decorrelation (Packet E5): Q32 start phase applied by
+    # reset() instead of zero. Render harnesses set this per detuned voice
+    # copy (golden-angle sequence, same 0x9E3779B9 convention as the
+    # partial phase spread in set_custom) so unison copies don't start
+    # phase-coherent. Default 0 = bit-exact legacy behavior.
+    phase_offset_q32: int = 0
+
     # NOTE: Vibrato/LFO is now handled via LFOState in VoiceState.lfos
     # The VoiceEngine reads SystemMacro.VIBRATO to scale LFO depth globally.
     # See voice_engine.py step_voice_simple() for implementation.
 
     def reset(self, note: int, phase_inc: int) -> None:
-        """Reset state for a new note (hard reset - zeros phase)."""
+        """Reset state for a new note (hard reset - phase to its start offset)."""
         self.note = note
         self.phase_inc = phase_inc
         self.target_phase_inc = phase_inc
         self.phase_slew_rate = 0
-        self.phase = 0
+        self.phase = self.phase_offset_q32 & 0xFFFFFFFF
 
         # Compute bandlimit based on pitch
         freq_hz = 440.0 * (2.0 ** ((note - 69) / 12.0))
@@ -1363,9 +1373,9 @@ def mode_b_generate_coeffs_matrix(
         # Compute phase for this k-slot: phase + k * phase_inc
         phase_k = (state.phase + k * state.phase_inc) & PHASE_MASK
         coeffs_k = coeff_lut.sample_coeffs(phase_k)
-        for leaf in range(NUM_LEAVES):
-            idx = leaf * VM_K + k
-            output_coeffs[idx] = coeffs_k[leaf]
+        # output[leaf * VM_K + k] = coeffs_k[leaf] for all leaves
+        # (bit-exact strided-slice replacement for the per-leaf loop)
+        output_coeffs[k:NUM_LEAVES * VM_K:VM_K] = coeffs_k[:NUM_LEAVES]
 
 
 # =============================================================================
@@ -1515,11 +1525,16 @@ def compute_pwm_weights(width_q15: int, H_max: int = DEFAULT_H_MAX) -> HarmonicW
     Compute harmonic weights for PWM at given duty cycle.
 
     Per WSE-STD-210 Section 8.1, PWM weights are computed analytically:
-    - dc = 2d - 1
     - a_h = (2/πh) × sin(πhd)  (sine component)
     - b_h = 0 for standard pulse
 
     For asymmetric pulses, both a_h and b_h may be non-zero.
+
+    The raw pulse Fourier series also contains a DC term (2d - 1), but the
+    oscillator is AC-coupled: emitting it puts a duty-dependent offset on the
+    output, and when an LFO sweeps the width the moving DC becomes audible
+    LF rumble at the LFO rate (e.g. analog_strings_v0). The DC term is
+    therefore omitted; the AC spectrum (a_h) is unchanged.
 
     Args:
         width_q15: Duty cycle in Q15 (0 = 0%, 32767 = ~100%)
@@ -1534,8 +1549,8 @@ def compute_pwm_weights(width_q15: int, H_max: int = DEFAULT_H_MAX) -> HarmonicW
     weights.a_h_q15 = np.zeros(H_max, dtype=np.int16)
     weights.b_h_q15 = np.zeros(H_max, dtype=np.int16)
 
-    # DC offset: dc = 2d - 1
-    weights.dc_q15 = SAT16(int(round((2.0 * d - 1.0) * Q15_ONE)))
+    # DC term (2d - 1) intentionally omitted (AC-coupled output, see above)
+    weights.dc_q15 = 0
 
     # Harmonic weights
     for h in range(1, H_max + 1):
@@ -1804,9 +1819,13 @@ def mode_b_generate_coeffs_vectorized(
     # Vectorized sin/cos (use LUT or numpy)
     sin_hphi = np.zeros((H, K), dtype=np.int32)
     cos_hphi = np.zeros((H, K), dtype=np.int32)
-    for h in range(H):
-        for k in range(K):
-            sin_hphi[h, k], cos_hphi[h, k] = sin_cos_q15(int(h_phases[h, k]))
+    if _hot.jit_enabled():
+        # Bit-exact jitted port of sin_cos_q15 (same quarter-wave LUT)
+        _hot.sincos_hk(_hot._get_sine_lut_np(), h_phases, sin_hphi, cos_hphi)
+    else:
+        for h in range(H):
+            for k in range(K):
+                sin_hphi[h, k], cos_hphi[h, k] = sin_cos_q15(int(h_phases[h, k]))
 
     # Compute rotation weights: w_sin[h,k], w_cos[h,k]
     # w_sin = a_h*cos - b_h*sin, w_cos = a_h*sin + b_h*cos
@@ -1843,9 +1862,9 @@ def mode_b_generate_coeffs_vectorized(
     result = np.clip(result, -32768, 32767).astype(np.int16)
 
     # Interleave: output[l*K + k] = result[l, k]
-    for l in range(L):
-        for k in range(K):
-            output_coeffs[l * K + k] = result[l, k]
+    # result is [L, K] row-major, so this is exactly a C-order ravel
+    # (bit-exact replacement for the per-element loop).
+    output_coeffs[:L * K] = result.reshape(L * K)
 
 
 # =============================================================================

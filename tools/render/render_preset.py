@@ -20,6 +20,7 @@ Examples:
 
 import sys
 import argparse
+import copy
 import math
 import numpy as np
 from pathlib import Path
@@ -29,7 +30,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from symcrash_python_ap.instrument_ir import (
     load_instrument, extract_partials_q15, extract_phase_spread_q15,
-    extract_filter_params,
+    extract_filter_params, extract_oeis_params, extract_noise_params,
+    extract_unison_params,
 )
 from symcrash_python_ap.envelope_targets import EnvelopeTarget
 from symcrash_python_ap.vm.executor import vm_step_block
@@ -174,15 +176,24 @@ def get_emit_template(ir, template_name: str) -> dict:
     return {'families': {}, 'ops_enable': []}
 
 
-def render_preset_note(
+def _render_voice(
     ir,
     note: int = 60,
     duration_sec: float = 2.0,
     risk_profile: list = None,
     velocity_q15: int = 32767,
+    *,
+    cents_offset: int = 0,
+    phase_offset_q32: int = 0,
+    noise_seed_xor: int = 0,
+    verbose: bool = True,
 ) -> np.ndarray:
     """
-    Render a single note using the preset parameters.
+    Render one (mono) voice of a note using the preset parameters.
+
+    With the keyword-only offsets at their defaults this is the bit-exact
+    legacy mono render path. Unison rendering (render_preset_note) calls
+    this N times with per-copy detune/phase/noise offsets.
 
     Args:
         ir: InstrumentIR object
@@ -192,6 +203,12 @@ def render_preset_note(
         velocity_q15: Note velocity (0-32767). Scales gain (as in the live
             engine) and any envelope binding with velocity_sens > 0 — e.g.
             velocity -> FM modulation index for mallet dynamics.
+        cents_offset: Constant detune added to every frame's cents (unison).
+        phase_offset_q32: Q32 oscillator start phase (Mode B; unison
+            decorrelation via the golden-angle convention).
+        noise_seed_xor: XORed into the noise exciter seed so unison copies
+            get decorrelated attack noise.
+        verbose: Print render header info.
     """
     # Extract parameters
     env = extract_envelope_params(ir)
@@ -235,11 +252,35 @@ def render_preset_note(
     state = VMState.create(voice_id=0)
     state.reset_for_note_on(note=note)
 
+    # Unison phase decorrelation: the Mode B oscillator applies this Q32
+    # start phase on its first-time-init reset (vm/harmonic_bank.py).
+    # 0 (default) leaves the legacy zero-phase reset bit-exact.
+    if phase_offset_q32:
+        state.mode_b_state.phase_offset_q32 = phase_offset_q32 & 0xFFFFFFFF
+
     # Harmonic profile: use the preset's partials when defined; otherwise pass
     # no custom harmonics so waveform_type drives the spectrum (custom
     # harmonics always win over waveform_type in the executor).
     harmonic_amps = extract_partials_q15(ir) or []
     phase_spread_q15 = extract_phase_spread_q15(ir)
+
+    # OEIS partial selection (outranks custom partials and waveform_type
+    # in the executor)
+    oeis_params = extract_oeis_params(ir)
+
+    # Noise exciter (Packet E4): deterministic broadband attack transient.
+    # No noise authored -> kwargs stay empty and the frame keeps its
+    # level-0 defaults (bit-exact no-op in the VM).
+    noise_params = extract_noise_params(ir)
+    noise_frame_kwargs = {}
+    if noise_params:
+        noise_frame_kwargs = dict(
+            noise_color=noise_params['color'],
+            noise_level_q15=noise_params['level_q15'],
+            noise_attack_blocks=ms_to_blocks(noise_params['attack_ms']),
+            noise_decay_blocks=ms_to_blocks(noise_params['decay_ms']),
+            noise_seed_u32=(noise_params['seed_u32'] ^ noise_seed_xor) & 0xFFFFFFFF,
+        )
 
     # Filter node (Hz-domain): applied as per-block partials reshaping,
     # swept by any envelope binding targeting FILTER_CUTOFF.
@@ -253,8 +294,10 @@ def render_preset_note(
                    if int(EnvelopeTarget.FILTER_CUTOFF) in e.target_ids]
 
     # LFO modulators (vibrato / PWM motion / tremolo) — same routing
-    # semantics as voice_engine.step_voice_simple
-    lfos = list(getattr(ir, 'modulators', None) or [])
+    # semantics as voice_engine.step_voice_simple. Deep-copied so each
+    # unison voice copy advances its own LFO state from the authored
+    # initial phase (and the IR itself is never mutated).
+    lfos = [copy.deepcopy(m) for m in (getattr(ir, 'modulators', None) or [])]
 
     # PWM base width from the Osc node (pulse waveform)
     pwm_width_base = 16384
@@ -291,14 +334,15 @@ def render_preset_note(
 
     samples = []
 
-    print(f"  Rendering {total_blocks} blocks...")
-    print(f"  Envelope: A={attack_blocks} D={decay_blocks} S={sustain:.2f} R={release_blocks}")
-    print(f"  Waveform type: {waveform}")
+    if verbose:
+        print(f"  Rendering {total_blocks} blocks...")
+        print(f"  Envelope: A={attack_blocks} D={decay_blocks} S={sustain:.2f} R={release_blocks}")
+        print(f"  Waveform type: {waveform}")
 
-    if regimes:
-        print(f"  Regime graph: {len(regimes)} states")
-        for r_id, r_kind, r_template, r_dwell in regimes:
-            print(f"    {r_id} ({r_kind}) -> {r_template}, dwell={r_dwell}ms")
+        if regimes:
+            print(f"  Regime graph: {len(regimes)} states")
+            for r_id, r_kind, r_template, r_dwell in regimes:
+                print(f"    {r_id} ({r_kind}) -> {r_template}, dwell={r_dwell}ms")
 
     for block_idx in range(total_blocks):
         # Compute gain envelope (ADSR)
@@ -434,7 +478,7 @@ def render_preset_note(
         if use_fm6 and fm6_params:
             frame = VoiceFrame(
                 note=note,
-                cents=int(total_cents),
+                cents=int(total_cents) + cents_offset,
                 coeff_osc_mode=OSC_MODE_FM6,
                 gain_q15=((((gain_q15 * gain_scale_q15 + 16384) >> 15) * vel_scale_q15 + 16384) >> 15),
                 beta_target_q15=0,
@@ -447,11 +491,12 @@ def render_preset_note(
                 env_targets_q15=env_targets_q15,
                 ops_enable=ops_enable,
                 families=families,
+                **noise_frame_kwargs,
             )
         else:
             frame = VoiceFrame(
                 note=note,
-                cents=int(total_cents),
+                cents=int(total_cents) + cents_offset,
                 coeff_osc_mode=1,  # Mode B
                 H_request=len(harmonic_amps) or 16,
                 gain_q15=((((gain_q15 * gain_scale_q15 + 16384) >> 15) * vel_scale_q15 + 16384) >> 15),
@@ -461,9 +506,12 @@ def render_preset_note(
                 ops_enable=ops_enable,
                 families=families,
                 waveform_type=waveform,
+                oeis_sequence_id=oeis_params['sequence_id'] if oeis_params else -1,
+                oeis_rolloff_db=oeis_params['rolloff_db'] if oeis_params else -3.0,
                 pwm_width_q15=pwm_width,
                 pwm_enabled=pwm_enabled,
                 env_targets_q15=env_targets_q15,
+                **noise_frame_kwargs,
             )
 
         # Render block
@@ -471,6 +519,81 @@ def render_preset_note(
         samples.extend(output.tolist())
 
     return np.array(samples, dtype=np.int16)
+
+
+# Golden-ratio conjugate scaled to 2^32 — the repo's golden-angle phase
+# convention (see vm/harmonic_bank.py partial phase spread).
+_GOLDEN_Q32 = 0x9E3779B9
+
+
+def render_preset_note(
+    ir,
+    note: int = 60,
+    duration_sec: float = 2.0,
+    risk_profile: list = None,
+    velocity_q15: int = 32767,
+) -> np.ndarray:
+    """
+    Render a single note using the preset parameters.
+
+    No unison authored (the default): bit-exact legacy mono path —
+    returns a 1-D int16 array.
+
+    Unison authored (`unison: {voices, spread_cents, width}` on the Osc
+    node, Packet E5): renders `voices` detuned copies of the note and
+    returns a stereo int16 array of shape (2, n_samples) = (L, R).
+
+    Unison law:
+    - Detune: copy k at position t_k = (2k - (N-1)) / (N-1) in [-1, +1]
+      gets a constant detune of round(spread_cents * t_k) — symmetric
+      across +/-spread_cents, center voice (odd N) undetuned.
+    - Phase: copy k starts at Q32 phase (k * 0x9E3779B9) mod 2^32
+      (golden-angle sequence, same constant as the harmonic bank's
+      partial phase spread) so copies don't attack phase-coherent.
+    - Stereo: equal-power pan at position width * t_k
+      (L = cos(theta), R = sin(theta), theta = (pan+1) * pi/4), then the
+      mix is scaled by 1/sqrt(N) (decorrelated copies sum in power).
+    """
+    unison = extract_unison_params(ir)
+    if not unison:
+        return _render_voice(ir, note=note, duration_sec=duration_sec,
+                             risk_profile=risk_profile, velocity_q15=velocity_q15)
+
+    n_voices = unison['voices']
+    spread = unison['spread_cents']
+    width = unison['width']
+    print(f"  Unison: {n_voices} voices, +/-{spread} cents, width={width:.2f}")
+
+    mix_l = None
+    mix_r = None
+    for k in range(n_voices):
+        t = (2 * k - (n_voices - 1)) / (n_voices - 1)  # -1..+1, left -> right
+        phase_q32 = (k * _GOLDEN_Q32) & 0xFFFFFFFF
+        voice = _render_voice(
+            ir, note=note, duration_sec=duration_sec,
+            risk_profile=risk_profile, velocity_q15=velocity_q15,
+            cents_offset=round(spread * t),
+            phase_offset_q32=phase_q32,
+            noise_seed_xor=phase_q32,
+            verbose=(k == 0),
+        ).astype(np.float64)
+        theta = (width * t + 1.0) * (math.pi / 4.0)  # equal-power pan
+        if mix_l is None:
+            mix_l = voice * math.cos(theta)
+            mix_r = voice * math.sin(theta)
+        else:
+            mix_l += voice * math.cos(theta)
+            mix_r += voice * math.sin(theta)
+
+    # Decorrelated copies sum in power -> 1/sqrt(N), plus a deterministic
+    # peak guard (copies are still partly correlated early in the note).
+    norm = 1.0 / math.sqrt(n_voices)
+    peak = max(float(np.abs(mix_l).max()), float(np.abs(mix_r).max())) * norm
+    if peak > 32000.0:
+        norm *= 32000.0 / peak
+    left = np.clip(np.rint(mix_l * norm), -32768, 32767).astype(np.int16)
+    right = np.clip(np.rint(mix_r * norm), -32768, 32767).astype(np.int16)
+    return np.stack([left, right])
 
 
 def render_preset(preset_path: str, note: int = 60, duration: float = 2.0, with_glitch: bool = False):
@@ -510,18 +633,29 @@ def render_preset(preset_path: str, note: int = 60, duration: float = 2.0, with_
     suffix = "_glitch" if with_glitch else ""
     output_name = f"{preset_name}_note{note}{suffix}"
 
-    # Save to file
+    # Save to file (stereo when the preset authors unison, mono otherwise)
     audio_io = AudioWriter(output_dir=OUTPUT_DIR)
-    metadata = audio_io.write_audio(
-        output_name,
-        samples.tolist(),
-        subdirectory="presets",
-        timestamp=False
-    )
+    if samples.ndim == 2:
+        metadata = audio_io.write_audio(
+            output_name,
+            samples[0].tolist(),
+            samples[1].tolist(),
+            subdirectory="presets",
+            timestamp=False
+        )
+        n_samples = samples.shape[1]
+    else:
+        metadata = audio_io.write_audio(
+            output_name,
+            samples.tolist(),
+            subdirectory="presets",
+            timestamp=False
+        )
+        n_samples = len(samples)
 
     print(f"\nSaved: {metadata.filepath}")
-    print(f"Duration: {len(samples) / FS:.2f}s")
-    print(f"Samples: {len(samples)}")
+    print(f"Duration: {n_samples / FS:.2f}s")
+    print(f"Samples: {n_samples} ({metadata.channels} ch)")
 
     return samples, metadata.filepath
 

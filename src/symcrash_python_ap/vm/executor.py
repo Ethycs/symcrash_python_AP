@@ -25,8 +25,29 @@ from .lanes import (
 from ..fixed import RSHIFT_RNE
 from ..primitives import Q15_ONE, Q15_HALF, Q15_NEG_ONE, DRONE_MODE_CARRIER_MIX
 
+# JIT hot-path kernels (bit-exact, switchable; see vm/hotpath_jit.py)
+from . import hotpath_jit as _hot
+
 if TYPE_CHECKING:
     from ..frames import VoiceFrame
+
+
+def _apply_block_gain(output: np.ndarray, gain_prev: int, gain_curr: int) -> None:
+    """
+    Apply interpolated per-sample gain to one block (WSE-STD-001 compliant).
+
+    Pure-Python reference with a bit-exact JIT fast path. The caller skips
+    the call entirely when both gains are Q15_ONE (same as the reference).
+    """
+    if _hot.jit_enabled():
+        _hot.gain_interp(output, gain_prev, gain_curr)
+        return
+    # Reference implementation (conformance path)
+    for i in range(BLOCK_SAMPLES):
+        # Round-to-nearest for alpha: (i * Q15_ONE + 32) / 64
+        alpha = (i * Q15_ONE + (BLOCK_SAMPLES >> 1)) // BLOCK_SAMPLES
+        gain = gain_prev + RSHIFT_RNE((gain_curr - gain_prev) * alpha, 15)
+        output[i] = RSHIFT_RNE(int(output[i]) * gain, 15)
 
 
 # =============================================================================
@@ -90,6 +111,46 @@ def _process_cmmm_events(state: VMState, frame: 'VoiceFrame') -> None:
 
     is_transition = latch.is_timbral_ramping()
     state.cmmm_memory.step(intent_energy, is_transition)
+
+
+# =============================================================================
+# NOISE EXCITER (Packet E4 - Acoustic Attack Transients)
+# =============================================================================
+
+def _mix_noise_exciter(state: VMState, cfg: DecodedPlan,
+                       output: np.ndarray) -> None:
+    """
+    Sum the deterministic noise exciter into the voice output.
+
+    Mix point: post-IDWPT, pre-gain - the exciter is part of the voice
+    signal, so the voice gain envelope (velocity, de-click ramps) applies
+    uniformly while the exciter keeps its own attack/decay shape.
+
+    Bit-exact no-op: when the frame authors no noise (noise_level_q15 == 0,
+    the default) this returns before touching the output buffer, and after
+    the exciter envelope reaches zero the path is skipped entirely.
+    """
+    if cfg.noise_level_q15 <= 0:
+        return
+    from .noise_exciter import render_noise_block, noise_seed_base
+
+    # blocks_since_start was already incremented this block; the exciter
+    # envelope is anchored at note-on (block_index 0).
+    block_index = state.blocks_since_start - 1
+    noise = render_noise_block(
+        state.noise_state,
+        noise_seed_base(cfg.noise_seed_u32, state.voice_id),
+        block_index,
+        cfg.noise_color,
+        cfg.noise_level_q15,
+        cfg.noise_attack_blocks,
+        cfg.noise_decay_blocks,
+    )
+    if noise is None:
+        return
+    mixed = output.astype(np.int32) + noise
+    np.clip(mixed, Q15_NEG_ONE, Q15_ONE, out=mixed)
+    output[:] = mixed.astype(np.int16)
 
 
 # =============================================================================
@@ -502,7 +563,10 @@ def vm_step_block(
             # -----------------------------------------------------------------
             # FM6 DIRECT PATH: Single topology (no morphing)
             # -----------------------------------------------------------------
-            from .fm6_engine import fm6_generate_block_full
+            from .fm6_engine import (
+                fm6_generate_block_full,
+                fm6_gateway_level_overrides,
+            )
 
             # Get or create FM6 state
             fm6_state = state.fm6_state
@@ -531,9 +595,17 @@ def vm_step_block(
                 cutoff = fm_post_filter_cutoff if fm_post_filter_cutoff else 8000.0
                 fm6_state.set_post_filter(fm_post_filter_enabled, cutoff)
 
-            # FM6 generates audio directly at sample rate
+            # FM6 generates audio directly at sample rate.
+            # Gateway headroom (Packet E2): when summed CARRIER levels
+            # exceed 0.5 the FWPT below saturates (~23% H3 at sum 1.0), so
+            # carrier levels are auto-normalized to sum 0.5. The IDWPT
+            # render stage's built-in 2x makeup gain (headroom_bits 1->2)
+            # restores full-scale loudness after the nonlinear stage.
+            # No-op (None) when carriers already sum <= 0.5.
             base_phase_inc = params.phase_inc
-            fm6_audio = fm6_generate_block_full(fm6_state, base_phase_inc)
+            level_overrides = fm6_gateway_level_overrides(fm6_state)
+            fm6_audio = fm6_generate_block_full(fm6_state, base_phase_inc,
+                                                level_overrides)
 
         # -----------------------------------------------------------------
         # UNIFIED PATH: FM6 audio -> FWPT -> coeff ops -> IDWPT -> output
@@ -544,14 +616,22 @@ def vm_step_block(
         from ..wavelet.fast_lifting import fwpt_jit
 
         # FWPT analysis: 64 audio samples -> 64 wavelet coefficients
-        coeffs_64 = fwpt_jit(fm6_audio.tolist(), headroom_bits=1)
+        if _hot.jit_enabled():
+            # Bit-exact array-native port (no list round-trips)
+            coeffs_64 = np.empty(64, dtype=np.int64)
+            _hot.fwpt_64(fm6_audio, 1, coeffs_64)
+        else:
+            coeffs_64 = fwpt_jit(fm6_audio.tolist(), headroom_bits=1)
 
         # Replicate across K time slots for CCS processing
         # Layout: coeff_state[leaf * K + k] for each leaf and k-slot
+        # np.repeat replicates each leaf K times in leaf-major order, which is
+        # bit-exact with the per-element loop it replaces.
         from .tables import VM_K
-        for k in range(VM_K):
-            for leaf in range(64):
-                state.coeff_state[leaf * VM_K + k] = int(np.clip(coeffs_64[leaf], Q15_NEG_ONE, Q15_ONE))
+        clipped_64 = np.clip(
+            np.asarray(coeffs_64, dtype=np.int64), Q15_NEG_ONE, Q15_ONE
+        ).astype(np.int16)
+        state.coeff_state[:64 * VM_K] = np.repeat(clipped_64[:64], VM_K)
 
         # Apply coefficient-domain operators (may be empty, but lane_inject/tail still apply)
         # Use mask-aware dispatch (WSE-STD-070)
@@ -563,14 +643,14 @@ def vm_step_block(
         # IDWPT reconstruction back to audio
         output = lane_ccs_render(state, cfg)
 
+        # Noise exciter (Packet E4): pre-gain broadband transient
+        _mix_noise_exciter(state, cfg, output)
+
         # Apply gain interpolation
         gain_curr = cfg.gain_curr_q15
         gain_prev = cfg.gain_prev_q15
         if gain_curr != Q15_ONE or gain_prev != Q15_ONE:
-            for i in range(BLOCK_SAMPLES):
-                alpha = (i * Q15_ONE + (BLOCK_SAMPLES >> 1)) // BLOCK_SAMPLES
-                gain = gain_prev + RSHIFT_RNE((gain_curr - gain_prev) * alpha, 15)
-                output[i] = RSHIFT_RNE(int(output[i]) * gain, 15)
+            _apply_block_gain(output, gain_prev, gain_curr)
 
         # Update state and return
         state.eta_prev_q15 = cfg.eta_curr_q15
@@ -637,14 +717,14 @@ def vm_step_block(
         # IDWPT reconstruction back to audio
         output = lane_ccs_render(state, cfg)
 
+        # Noise exciter (Packet E4): pre-gain broadband transient
+        _mix_noise_exciter(state, cfg, output)
+
         # Apply gain interpolation
         gain_curr = cfg.gain_curr_q15
         gain_prev = cfg.gain_prev_q15
         if gain_curr != Q15_ONE or gain_prev != Q15_ONE:
-            for i in range(BLOCK_SAMPLES):
-                alpha = (i * Q15_ONE + (BLOCK_SAMPLES >> 1)) // BLOCK_SAMPLES
-                gain = gain_prev + RSHIFT_RNE((gain_curr - gain_prev) * alpha, 15)
-                output[i] = RSHIFT_RNE(int(output[i]) * gain, 15)
+            _apply_block_gain(output, gain_prev, gain_curr)
 
         # Update state and return
         state.eta_prev_q15 = cfg.eta_curr_q15
@@ -700,14 +780,14 @@ def vm_step_block(
         # IDWPT reconstruction back to audio
         output = lane_ccs_render(state, cfg)
 
+        # Noise exciter (Packet E4): pre-gain broadband transient
+        _mix_noise_exciter(state, cfg, output)
+
         # Apply gain interpolation
         gain_curr = cfg.gain_curr_q15
         gain_prev = cfg.gain_prev_q15
         if gain_curr != Q15_ONE or gain_prev != Q15_ONE:
-            for i in range(BLOCK_SAMPLES):
-                alpha = (i * Q15_ONE + (BLOCK_SAMPLES >> 1)) // BLOCK_SAMPLES
-                gain = gain_prev + RSHIFT_RNE((gain_curr - gain_prev) * alpha, 15)
-                output[i] = RSHIFT_RNE(int(output[i]) * gain, 15)
+            _apply_block_gain(output, gain_prev, gain_curr)
 
         # Update state and return
         state.eta_prev_q15 = cfg.eta_curr_q15
@@ -732,18 +812,22 @@ def vm_step_block(
 
     # POLYPHASE INJECTION: Each k-slot gets its own carrier value
     # This is the key to eliminating block-boundary discontinuities
-    for idx in range(COEFF_LEN):
-        carrier_val = int(carrier_512[idx])
-        old_val = int(state.coeff_state[idx])
+    if _hot.jit_enabled():
+        _hot.inject_blend(state.coeff_state, carrier_512, base_mix)
+    else:
+        # Reference implementation (conformance path)
+        for idx in range(COEFF_LEN):
+            carrier_val = int(carrier_512[idx])
+            old_val = int(state.coeff_state[idx])
 
-        # Blend: new = old * (1 - base_mix) + carrier * base_mix
-        # base_mix = Q15_ONE → pure carrier (full oscillation)
-        # base_mix = Q15_HALF → 50/50 blend
-        # base_mix = 0 → pure persistence
-        inv_mix = Q15_ONE - base_mix
-        blended = RSHIFT_RNE(old_val * inv_mix + carrier_val * base_mix, 15)
+            # Blend: new = old * (1 - base_mix) + carrier * base_mix
+            # base_mix = Q15_ONE → pure carrier (full oscillation)
+            # base_mix = Q15_HALF → 50/50 blend
+            # base_mix = 0 → pure persistence
+            inv_mix = Q15_ONE - base_mix
+            blended = RSHIFT_RNE(old_val * inv_mix + carrier_val * base_mix, 15)
 
-        state.coeff_state[idx] = np.clip(blended, Q15_NEG_ONE, Q15_ONE)
+            state.coeff_state[idx] = np.clip(blended, Q15_NEG_ONE, Q15_ONE)
 
     # Step 1: LANE_INJECT (events modify carrier-seeded coeff_state)
     lane_inject(state, cfg)
@@ -775,13 +859,17 @@ def vm_step_block(
     # - HOLD (1024): Minimal evolution (~3%)
     # - FREEZE (0): No evolution (0%)
     if evolution_rate < Q15_ONE:
-        for idx in range(COEFF_LEN):
-            new_val = int(state.coeff_state[idx])
-            old_val = int(prev_coeffs[idx])
-            delta = new_val - old_val
-            # Scale delta by evolution rate
-            scaled_delta = RSHIFT_RNE(delta * evolution_rate, 15)
-            state.coeff_state[idx] = np.clip(old_val + scaled_delta, Q15_NEG_ONE, Q15_ONE)
+        if _hot.jit_enabled():
+            _hot.evolution_scale(state.coeff_state, prev_coeffs, evolution_rate)
+        else:
+            # Reference implementation (conformance path)
+            for idx in range(COEFF_LEN):
+                new_val = int(state.coeff_state[idx])
+                old_val = int(prev_coeffs[idx])
+                delta = new_val - old_val
+                # Scale delta by evolution rate
+                scaled_delta = RSHIFT_RNE(delta * evolution_rate, 15)
+                state.coeff_state[idx] = np.clip(old_val + scaled_delta, Q15_NEG_ONE, Q15_ONE)
 
     # === FM MODULATOR EXTRACTION (Phase 3 - WSE-STD-210 Section 8.3) ===
     # Extract modulator from operator output for NEXT block's FM.
@@ -800,16 +888,15 @@ def vm_step_block(
     # the same IDWPT polyphase reconstruction as Mode A/B
     output = lane_ccs_render(state, cfg)
 
+    # Noise exciter (Packet E4): pre-gain broadband transient
+    _mix_noise_exciter(state, cfg, output)
+
     # Apply gain with proper rounding (WSE-STD-001 compliant)
     gain_curr = cfg.gain_curr_q15
     gain_prev = cfg.gain_prev_q15
     if gain_curr != Q15_ONE or gain_prev != Q15_ONE:
         # Interpolate gain across block using round-to-nearest
-        for i in range(BLOCK_SAMPLES):
-            # Round-to-nearest for alpha: (i * Q15_ONE + 32) / 64
-            alpha = (i * Q15_ONE + (BLOCK_SAMPLES >> 1)) // BLOCK_SAMPLES
-            gain = gain_prev + RSHIFT_RNE((gain_curr - gain_prev) * alpha, 15)
-            output[i] = RSHIFT_RNE(int(output[i]) * gain, 15)
+        _apply_block_gain(output, gain_prev, gain_curr)
 
     # Advance CCS phase for next block (Mode A only - Mode B advances in generate)
     if osc_mode == OSC_MODE_A:

@@ -247,12 +247,17 @@ class TestPWMWeights:
         assert abs(weights.a_h_q15[3]) < 1000  # h=4
 
     def test_pwm_25_percent(self):
-        """25% duty cycle should have specific DC offset."""
+        """25% duty: DC term omitted (AC-coupled output), AC spectrum intact."""
         weights = compute_pwm_weights(8192, H_max=16)  # 25%
 
-        # DC = 2d - 1 = 2*0.25 - 1 = -0.5
-        expected_dc = int(-0.5 * 32767)
-        assert abs(weights.dc_q15 - expected_dc) < 1000
+        # The raw pulse series has dc = 2d - 1, but the oscillator is
+        # AC-coupled: the duty-dependent DC became LF rumble under width
+        # LFOs, so compute_pwm_weights omits it (2026-06-11 fix).
+        assert weights.dc_q15 == 0
+
+        # AC fundamental: a_1 = (2/pi) * sin(pi*0.25) ~ 0.45
+        expected_a1 = int((2.0 / np.pi) * np.sin(np.pi * 0.25) * 32767)
+        assert abs(int(weights.a_h_q15[0]) - expected_a1) < 1000
 
     def test_pwm_harmonic_content(self):
         """PWM should have harmonics for non-50% duty cycles."""

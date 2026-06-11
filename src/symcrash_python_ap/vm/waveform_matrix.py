@@ -587,8 +587,8 @@ def get_theoretical_harmonics(
         for h in range(1, H_max + 1):
             amp = (2 * Q15_ONE / (math.pi * h)) * math.sin(math.pi * h * duty)
             a_h[h - 1] = SAT16(int(amp))
-        # DC offset for non-50% duty
-        dc = int((2 * duty - 1) * Q15_ONE)
+        # DC term (2*duty - 1) intentionally omitted: AC-coupled output
+        # (see compute_pwm_weights in harmonic_bank.py)
 
     elif wave_type == WaveformType.TRIANGLE:
         # Triangle: a_h = 8/(π²h²) for odd h only (alternating signs)
@@ -625,8 +625,10 @@ def compute_pwm_harmonics(
 
     duty = duty_q15 / 32768.0
 
-    # DC offset: (2D - 1) maps duty 0->-1, 0.5->0, 1->+1
-    dc = int((2 * duty - 1) * Q15_ONE)
+    # DC term (2D - 1) intentionally omitted: the oscillator is AC-coupled.
+    # Emitting it adds a duty-dependent offset that turns into LF rumble
+    # when an LFO sweeps the pulse width (see compute_pwm_weights).
+    dc = 0
 
     a_h = np.zeros(H_max, dtype=np.int16)
     b_h = np.zeros(H_max, dtype=np.int16)

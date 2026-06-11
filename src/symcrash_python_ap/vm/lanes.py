@@ -24,6 +24,9 @@ from ..wavelet.sine_core import (
 # Import canonical Q15 constants and utilities from primitives (single source of truth)
 from ..primitives import Q15_ONE, Q15_HALF, clamp_q15, iter_active_nodes
 
+# JIT hot-path kernels (bit-exact, switchable; see vm/hotpath_jit.py)
+from . import hotpath_jit as _hot
+
 
 # =============================================================================
 # BIT-EXACT INTEGER MATH (WSE-STD-VM-HYBRID determinism requirement)
@@ -500,6 +503,13 @@ def dispatch_coeff_op(state: VMState, instr: BackboneEntry, mask: int) -> None:
         instr: Backbone instruction
         mask: Active node mask
     """
+    # JIT fast path (bit-exact kernels); falls through to the pure-Python
+    # reference for anything the kernel dispatcher does not cover.
+    if _hot.jit_enabled() and _hot.dispatch_backbone_op(
+        state.coeff_state, instr.op_id, instr.strength_q15, mask
+    ):
+        return
+
     op_lane = get_operator_lane(instr.op_id)
     lane = op_lane.lane
 
@@ -800,7 +810,10 @@ def lane_tail(state: VMState, cfg: DecodedPlan) -> None:
     """
     # CCS mode: use soft energy limiter instead of NODE-based operators
     if cfg.use_coeff_osc:
-        _tail_ccs_soft_limit(state)
+        if _hot.jit_enabled():
+            _hot.tail_ccs_soft_limit(state.coeff_state)
+        else:
+            _tail_ccs_soft_limit(state)
         return
 
     # Legacy mode: use NODE-based operators
@@ -1170,6 +1183,12 @@ def lane_ccs_render(
         audio_buf: int16 array of BLOCK_SAMPLES
     """
     global _CCS_OUTPUT
+
+    # JIT fast path: K-slot interleaved polyphase IDWPT in one kernel
+    # (bit-exact with idwpt_polyphase_block; avoids list round-trips)
+    if _hot.jit_enabled():
+        _hot.idwpt_polyphase(state.coeff_state, _CCS_OUTPUT, 2)
+        return _CCS_OUTPUT
 
     # Reshape to [64 leaves, 8 k-slots] for K=8 interleaved polyphase
     coeff_2d = state.coeff_state[:COEFF_LEN].reshape(64, VM_K).astype(np.int16)

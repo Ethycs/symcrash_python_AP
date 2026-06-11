@@ -126,7 +126,14 @@ def generate_golden_sequence() -> List['VoiceFrame']:
 # =============================================================================
 # FROZEN HASHES (Generated 2026-01-21; PWM blocks 29-39 regenerated 2026-06-09:
 # VoiceFrame.partial_amps_q15 default became empty, so the PWM segment now
-# honors H_request=16 instead of being clamped to 8 by the old default list)
+# honors H_request=16 instead of being clamped to 8 by the old default list.
+# PWM blocks 30-39 regenerated 2026-06-11: compute_pwm_weights /
+# compute_pwm_harmonics no longer emit the pulse DC term (2d - 1); the
+# oscillator is AC-coupled, so the duty-dependent DC offset (which became LF
+# rumble under width LFOs, e.g. analog_strings_v0) was removed by design.
+# Block 29 is the 50%-duty pulse (dc was already 0) and is unchanged; all
+# non-PWM blocks are byte-identical. Regenerated via:
+#   pixi run python tests/artifacts/golden_trace_subtractive_v0.py --regenerate)
 # =============================================================================
 
 # SHA-256 hash of concatenated block outputs
@@ -162,16 +169,16 @@ FROZEN_BLOCK_HASHES: List[str] = [
     "670b6abe8b7aa3cdcda1d1856a5cfc8177557cf599fa337268b38cbf071ba89d",
     "ee03322dea9260416de7db1445611dce175db6ff1faf58d4308313175359a131",
     "bf46eecb7e9924c7b69331d76c5208199dfb8d9393519218c4d91937e0d8dac3",
-    "4dca113c19cedb1bce674482954212c7364fa9152471be6f38d1bb19539ca0ef",
-    "b808f8a9d4b75ba07c211e5de8b96c9c54bf9a55254589947f9e3d8e1e1be25a",
-    "aae7d31a2c97f2d5303c1dced5172267901e5eb0e0362ac10116b82ecce4711a",
-    "8c51b71f0ec7994878db3ca87bce2f8408153d214a4bda5b0497785fdfdfc718",
-    "46a006ebebbedfd701fcbc7dcc847cb0b052845ce6e2b5618e6218854426a3e6",
-    "391a19664bd18e84946aa444b03a04d551c24050549ea93a7bed40b912d33ee5",
-    "ac846d46d8f9379a9da40db1878638f5a39f79a52a4864babf63b0c7ad273bc7",
-    "6b86090ce65baab7438aeb96f40b01765b29a81ddfffb18515b356eaabc9a268",
-    "cdbdd0db7c8007b67c20512d6cb4e1cb510d1461eca6be9825b1742320cf1cae",
-    "5b60880e19bd3e3ba8f7845f7624b072f260b069c02245d41f54ad094dda3820",
+    "56832602e713220ba2ab50cf7e669bd0de158741c9f95a0352f19d24ba90a60e",
+    "90dc9122cb441c70b3f82ab62cba9e67986df8f9af248867f9e2f9ef1ec01975",
+    "2b1f62318cd2f55e8e6bd67fd20ebea3ee87754f40004493551b386097de0f5d",
+    "2a2c58f79c42bb6808923df6f83fdf777d623acf0502710cd798f3818ae2d6ab",
+    "dc599cbefa2ccf437ca410529ec7c4d77916494a00e0551758628adef7b634ec",
+    "706fa847fffa37c9074884cc56408f995945831e0852bb69a3802ec4c5bd1081",
+    "c68a00cfa65f67602c5a747e9128309237ea3ed89dda941bde48e76e6aaa2699",
+    "dbe57d8a4bc11039345d18b20a854e7de6b4f35a0bc804e16b7cfe9b808e188c",
+    "39b5048da21d4d47737bc70ae9cf3f98428584e89e6c86ffa7b09873e004e21e",
+    "8acf169bfa02bdb100c514d8065f71d5d32b2a77e6b2c7948f9aed4eee521598",
     "3340cc7e724003b2b6e916bec562302ea3441e364acf631496de7581d23baf6e",
     "90560c99816a91bb588b72155ba14fec51a040fe61f2d04d07846d0eb45b6071",
     "b23ac59f62a06a38783d05eb1a1641ef6cb861532ec2997d6ab7fe30d980cd17",
@@ -183,7 +190,7 @@ FROZEN_BLOCK_HASHES: List[str] = [
 ]
 
 # Final trace hash (hash of all block hashes concatenated)
-FROZEN_TRACE_HASH = "6fba4fbf8b056575ddbfd5506f76c2c58ec9f402001ce1715574c0a95b8fecc9"
+FROZEN_TRACE_HASH = "190cb6fb48f7edd88393ca0f6d71f5f121106a3e6be694220c5e122aae12330a"
 
 
 # =============================================================================

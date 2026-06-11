@@ -425,6 +425,13 @@ class VMState:
     _granular_state: Optional['GranularState'] = None  # type: ignore
 
     # -------------------------------------------------------------------------
+    # Noise Exciter State (Packet E4 - Acoustic Attack Transients)
+    # -------------------------------------------------------------------------
+    # Colored-noise filter state (pink/brown poles). Lazy-initialized; the
+    # PRNG itself is counter-based (no stored RNG state).
+    _noise_state: Optional['NoiseExciterState'] = None  # type: ignore
+
+    # -------------------------------------------------------------------------
     # CMMM Executor Latch (WSE-STD-070 Tower Runtime State)
     # -------------------------------------------------------------------------
     # Holds latched values for node mask and tail mode, updated by CMMM events
@@ -500,6 +507,19 @@ class VMState:
     def granular_state(self, value: 'GranularState') -> None:
         """Set Granular state."""
         self._granular_state = value
+
+    @property
+    def noise_state(self) -> 'NoiseExciterState':
+        """Get or create noise exciter state (lazy init)."""
+        if self._noise_state is None:
+            from .noise_exciter import NoiseExciterState
+            self._noise_state = NoiseExciterState()
+        return self._noise_state
+
+    @noise_state.setter
+    def noise_state(self, value: 'NoiseExciterState') -> None:
+        """Set noise exciter state."""
+        self._noise_state = value
 
     @property
     def mode_b_state(self) -> 'ModeBState':
@@ -633,6 +653,10 @@ class VMState:
         # Reset FM feedback buffer (Phase 3)
         self.prev_fm_mod_buffer.fill(0)
 
+        # Reset noise exciter filter state (Packet E4) if initialized
+        if self._noise_state is not None:
+            self._noise_state.reset()
+
         # Reset CMMM Executor Latch (WSE-STD-070)
         self.executor_latch = ExecutorLatch()
 
@@ -706,6 +730,9 @@ class VMState:
             'executor_latch_timbral_ramp': self.executor_latch.timbral_ramp_blocks,
             # CMMM Memory (CMMM Enrichment Gap G2)
             'cmmm_memory': self.cmmm_memory.to_dict(),
+            # Noise exciter filter state (Packet E4) - None when unused
+            'noise_state': (self._noise_state.to_dict()
+                            if self._noise_state is not None else None),
         }
 
     @classmethod
@@ -774,6 +801,10 @@ class VMState:
         # Restore CMMM Memory (CMMM Enrichment Gap G2)
         if 'cmmm_memory' in snapshot:
             state.cmmm_memory = CMMMemory.from_dict(snapshot['cmmm_memory'])
+        # Restore noise exciter filter state (Packet E4)
+        if snapshot.get('noise_state') is not None:
+            from .noise_exciter import NoiseExciterState
+            state._noise_state = NoiseExciterState.from_dict(snapshot['noise_state'])
         return state
 
 

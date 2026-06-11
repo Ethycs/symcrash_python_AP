@@ -37,6 +37,54 @@ except ImportError:
 from ..primitives import NUM_LEAVES
 # COEFF_LEN imported from tables.py (64 leaves × VM_K k-slots)
 
+# JIT hot-path kernels (bit-exact, switchable; see vm/hotpath_jit.py)
+from . import hotpath_jit as _hot
+
+# =============================================================================
+# FM6 -> FWPT Gateway Headroom (Packet E2)
+# =============================================================================
+# The FWPT analysis stage (headroom_bits=1) saturates its int16 lifting
+# coefficients when the FM6 audio block exceeds ~half scale: a pure sine
+# carrier at level 1.0 renders ~23% H3 distortion, while 0.5 is clean.
+# The render stage (IDWPT at headroom_bits=2) provides a built-in 2x
+# makeup gain after the nonlinear stage, so a carrier sum of exactly 0.5
+# already reconstructs at FULL scale - normalizing costs no loudness.
+#
+# The gateway therefore auto-normalizes: when the summed CARRIER levels
+# (per the algorithm topology in fm_algorithms.py; modulators exempt)
+# exceed 0.5, the carrier levels are scaled proportionally so they sum to
+# 0.5 before synthesis. Presets can use musical level values (carriers
+# summing to 1.0) without distortion. Below the threshold the gateway is
+# a strict no-op (bit-exact with the pre-gateway pipeline).
+
+FM6_CARRIER_SUM_MAX_Q15 = 16384  # 0.5 in Q15: FWPT saturation threshold
+
+
+def fm6_gateway_level_overrides(state: 'FM6State', alg: 'FMAlgorithm' = None):
+    """
+    Compute carrier-level normalization for the FM6->FWPT gateway.
+
+    Returns None when the summed carrier levels are <= 0.5 (gateway is a
+    no-op), otherwise a 6-entry list of effective Q15 levels where the
+    carrier levels are scaled proportionally (integer floor) so they sum
+    to FM6_CARRIER_SUM_MAX_Q15. Modulator levels are passed through
+    unchanged (modulation index is exempt).
+
+    All arithmetic is integer-only (Q15); no float contamination.
+    """
+    if alg is None:
+        alg = get_algorithm(state.algorithm_id)
+    carriers = alg.get_carriers()
+    carrier_sum = 0
+    for c in carriers:
+        carrier_sum += state.operators[c].level_q15
+    if carrier_sum <= FM6_CARRIER_SUM_MAX_Q15:
+        return None
+    overrides = [op.level_q15 for op in state.operators]
+    for c in carriers:
+        overrides[c] = (overrides[c] * FM6_CARRIER_SUM_MAX_Q15) // carrier_sum
+    return overrides
+
 
 def _sat16(x: int) -> int:
     """Saturate to int16 range."""
@@ -148,7 +196,8 @@ def fm6_generate_block(state: FM6State, base_phase_inc: int) -> np.ndarray:
     return np.clip(output_k, -32768, 32767).astype(np.int16)
 
 
-def fm6_generate_block_full(state: FM6State, base_phase_inc: int) -> np.ndarray:
+def fm6_generate_block_full(state: FM6State, base_phase_inc: int,
+                            level_overrides=None) -> np.ndarray:
     """
     Generate one block of FM audio at SAMPLE rate (64 samples).
 
@@ -158,6 +207,9 @@ def fm6_generate_block_full(state: FM6State, base_phase_inc: int) -> np.ndarray:
     Args:
         state: FM6State with operators and algorithm
         base_phase_inc: Q32 phase increment for fundamental frequency
+        level_overrides: Optional 6-entry list of effective Q15 operator
+            levels (FM6->FWPT gateway headroom; see
+            fm6_gateway_level_overrides). None uses state levels verbatim.
 
     Returns:
         output: [64] audio samples (int16)
@@ -166,12 +218,21 @@ def fm6_generate_block_full(state: FM6State, base_phase_inc: int) -> np.ndarray:
     ops = state.operators
     num_samples = 64
 
+    # JIT fast path (bit-exact kernel; see vm/hotpath_jit.py)
+    if _hot.jit_enabled():
+        return _fm6_generate_block_full_jit(state, alg, base_phase_inc,
+                                            level_overrides)
+
     # Temporary storage for operator outputs at sample rate
     op_outputs_sample = np.zeros((6, num_samples), dtype=np.int32)
 
     # Evaluate in topological order
     for op_idx in alg.eval_order:
         op = ops[op_idx]
+
+        # Effective level (gateway headroom may scale carrier levels)
+        level_q15 = (level_overrides[op_idx] if level_overrides is not None
+                     else op.level_q15)
 
         # Compute operator phase increment (includes ratio and detune)
         op_phase_inc = op.compute_phase_inc(base_phase_inc)
@@ -205,7 +266,7 @@ def fm6_generate_block_full(state: FM6State, base_phase_inc: int) -> np.ndarray:
             sin_val, _ = sin_cos_q15(effective_phase)
 
             # Apply envelope and level
-            output = _rshift_rne(sin_val * op.level_q15, 15)
+            output = _rshift_rne(sin_val * level_q15, 15)
             output = _rshift_rne(output * op.env_value_q15, 15)
 
             op_outputs_sample[op_idx, s] = _sat16(output)
@@ -230,6 +291,72 @@ def fm6_generate_block_full(state: FM6State, base_phase_inc: int) -> np.ndarray:
 
     # Saturate to int16
     output = np.clip(output, -32768, 32767).astype(np.int16)
+
+    # Apply post-filter if enabled (softens harsh FM harmonics)
+    if state.post_filter_enabled:
+        output = state.apply_post_filter(output)
+
+    return output
+
+
+def _fm6_generate_block_full_jit(state: FM6State, alg: FMAlgorithm, base_phase_inc: int,
+                                 level_overrides=None) -> np.ndarray:
+    """
+    JIT wrapper for fm6_generate_block_full.
+
+    Gathers per-operator state into arrays, runs the bit-exact kernel
+    (hotpath_jit.fm6_block_full) and writes the updated phases / feedback
+    buffer back, mirroring the reference implementation exactly.
+    """
+    ops = state.operators
+
+    eval_order = np.array(alg.eval_order, dtype=np.int64)
+    mod_matrix = alg.modulation_matrix.astype(np.uint8)
+    phases = np.array([op.phase for op in ops], dtype=np.int64)
+    phase_incs = np.array(
+        [op.compute_phase_inc(base_phase_inc) for op in ops], dtype=np.int64
+    )
+    if level_overrides is not None:
+        levels = np.array(level_overrides, dtype=np.int64)
+    else:
+        levels = np.array([op.level_q15 for op in ops], dtype=np.int64)
+    envs = np.array([op.env_value_q15 for op in ops], dtype=np.int64)
+
+    feedback_op = alg.feedback_op
+    feedback_q15 = ops[feedback_op].feedback_q15 if feedback_op >= 0 else 0
+    fb_prev = int(state.feedback_buffer[VM_K - 1]) if len(state.feedback_buffer) > 0 else 0
+
+    carriers = alg.get_carriers()
+    fb_row = np.zeros(64, dtype=np.int64)
+    output = np.zeros(64, dtype=np.int16)
+
+    _hot.fm6_block_full(
+        _hot._get_sine_lut_np(),
+        eval_order,
+        mod_matrix,
+        feedback_op,
+        feedback_q15,
+        fb_prev,
+        phases,
+        phase_incs,
+        levels,
+        envs,
+        alg.carrier_mask,
+        len(carriers),
+        state.master_level_q15,
+        fb_row,
+        output,
+    )
+
+    # Write back per-operator phase accumulators
+    for i, op in enumerate(ops):
+        op.phase = int(phases[i])
+
+    # Store last few samples for next block's feedback (mirrors reference)
+    for k in range(VM_K):
+        state.feedback_buffer[k] = (
+            fb_row[(k + 1) * (64 // VM_K) - 1] if alg.feedback_op >= 0 else 0
+        )
 
     # Apply post-filter if enabled (softens harsh FM harmonics)
     if state.post_filter_enabled:
@@ -294,9 +421,14 @@ def fm6_generate_coeffs(state: FM6State, output: np.ndarray, base_phase_inc: int
     """
     from ..wavelet.fast_lifting import fwpt_jit
 
+    # Gateway headroom: normalize carrier levels so their sum stays <= 0.5
+    # (FWPT saturates above; IDWPT's built-in 2x makeup preserves loudness).
+    # No-op (None) for already-compliant level sets.
+    level_overrides = fm6_gateway_level_overrides(state)
+
     # Step 1: Generate 64 audio samples at SAMPLE RATE
     # This gives authentic DX7-style FM with proper feedback
-    audio_block = fm6_generate_block_full(state, base_phase_inc)
+    audio_block = fm6_generate_block_full(state, base_phase_inc, level_overrides)
 
     # Step 2: Transform to coefficients via FWPT (analysis transform)
     # headroom_bits=1 prevents overflow during lifting steps
@@ -576,6 +708,9 @@ __all__ = [
     'fm6_generate_block',
     'fm6_generate_block_full',
     'fm6_generate_audio',
+    # FM6->FWPT gateway headroom (Packet E2)
+    'FM6_CARRIER_SUM_MAX_Q15',
+    'fm6_gateway_level_overrides',
     # FWPT adapter (on-demand coefficient conversion)
     'fwpt_analyze_block',
     'replicate_coeffs_to_polyphase',
