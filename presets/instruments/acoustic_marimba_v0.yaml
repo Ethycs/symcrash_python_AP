@@ -11,6 +11,9 @@
 # - Post-LPF 2.6 kHz for the dark top
 # - Carrier levels sum to ~0.53 (FM6 chain saturates above ~0.5)
 # - Detuned carrier pair for slow ensemble beat
+# - v1: mallet-contact "tok" via the noise exciter (pink, 25 ms) - the
+#   broadband residual a real yarn mallet leaves at contact, which the
+#   FM transient bite alone can't supply
 # For the famous *synthetic* DX7-style marimba, see dx_marimba_v0.
 #
 # Algorithm 5 (pairs):
@@ -21,7 +24,7 @@ instrument_ir_v0:
   meta:
     id: "acoustic-marimba-v0"
     name: "Acoustic Marimba"
-    version: 0
+    version: 1
     author: "symcrash"
     seed: 0x41434D42
 
@@ -36,6 +39,13 @@ instrument_ir_v0:
       algorithm: 5
       feedback: 0
       post_filter_hz: 2600.0
+      # Mallet-contact "tok": deterministic pink-noise exciter, summed into
+      # the voice pre-gain (seeded by meta.seed - replays are bit-exact)
+      noise:
+        color: pink
+        attack_ms: 1.0
+        decay_ms: 25.0
+        level: 0.18
       operators:
         # Fitted to a real marimba recording (reference_audio/marimba_ref):
         # measured strikes are nearly pure - upper partials <8%, and the

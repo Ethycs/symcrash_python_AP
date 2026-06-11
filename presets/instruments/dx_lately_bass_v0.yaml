@@ -28,7 +28,9 @@ instrument_ir_v0:
       algorithm: 1
       feedback: 3
       operators:
-        # Carrier at 0.5: FM6 chain saturates above ~0.5 summed carriers
+        # Carrier at 0.5 = full scale. The FM6->FWPT gateway now auto-
+        # normalizes carrier sums above 0.5 (no clip distortion); <=0.5
+        # renders bit-exactly as before.
         - ratio: 1.0      # Op1 carrier
           level: 0.5
         - ratio: 1.0      # Op2 modulator - punch

@@ -1,0 +1,60 @@
+# Super Saw v0 - WSE-STD-PRESET v0
+# =================================
+#
+# Stereo super saw pad/lead (Packet E5 unison demo).
+# 7 detuned saw copies spread +/-25 cents across the full stereo field:
+# - Symmetric linear detune law, center voice undetuned
+# - Golden-angle start-phase decorrelation per copy (0x9E3779B9 Q32)
+# - Equal-power pan, width 1.0 = full L/R spread
+#
+# Target sound: classic JP-8000 style super saw
+# - Soft-ish attack so the detune beating blooms
+# - Long release pad tail
+# Conformance: Basic (static sound) + unison (stereo render)
+
+instrument_ir_v0:
+  meta:
+    id: "super-saw-v0"
+    name: "Super Saw"
+    version: 0
+    author: "symcrash"
+    seed: 0x53555057
+
+  audio:
+    sample_rate: 48000
+    block_size: 64
+
+  graph:
+    osc1:
+      type: Osc
+      output: amp1
+      waveform: saw
+      unison:
+        voices: 7
+        spread_cents: 25
+        width: 1.0
+    amp1:
+      type: Amp
+      attack: 12.0
+      decay: 120.0
+      sustain: 0.8
+      release: 350.0
+
+  controls:
+    Brightness: 0.6
+    Body: 0.5
+
+  # 7-axis CMMM voicing: wide bright mass, settles with glue.
+  behavior:
+    idle:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    attack:
+      emphasis: {color: 0.6, snap: 0.3}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    stable:
+      emphasis: {color: 0.55, body: 0.4}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    recovery:
+      emphasis: {glue: 0.6}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}

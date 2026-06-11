@@ -29,7 +29,9 @@ instrument_ir_v0:
       algorithm: 4
       feedback: 2
       operators:
-        # Carrier levels sum to ~0.54 (FM6 chain saturates above ~0.5)
+        # Carrier levels (alg 4: Op1+Op4) sum to 0.54: slightly over the
+        # 0.5 full-scale point, so the FM6->FWPT gateway auto-normalizes
+        # them proportionally to 0.5 (replaces the former mild clip).
         - ratio: 1.0      # Op1 carrier - stack A
           level: 0.29
         - ratio: 3.0      # Op2 modulator - hollow odd-harmonic bite

@@ -15,7 +15,7 @@ instrument_ir_v0:
   meta:
     id: "oeis-bell-v0"
     name: "OEIS Bell (Primes)"
-    version: 0
+    version: 1
     author: "symcrash"
     seed: 0x4F454953
 
@@ -26,6 +26,7 @@ instrument_ir_v0:
   graph:
     osc1:
       type: Osc
+      oeis: {sequence: primes, rolloff_db: -3.0}
       output: amp1
     amp1:
       type: Amp

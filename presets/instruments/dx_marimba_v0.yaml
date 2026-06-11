@@ -13,7 +13,10 @@
 # Retained extensions beyond the recipe (validated in earlier rounds):
 #   - quiet detuned second pair (+0.4%): slow beat, reads as bar resonance
 #   - velocity_sens on mod env (velocity -> index) and amp (gentle curve)
-#   - carrier levels sum to ~0.50: FM6->FWPT chain saturates above ~0.5
+#   - carrier levels sum to ~0.50 = full scale. The FM6->FWPT gateway now
+#     auto-normalizes carrier sums above 0.5 (no more clip distortion), so
+#     0.5 is a loudness ceiling, not a folklore cap. Sums <=0.5 render
+#     bit-exactly as before.
 # Mod level taste range per the recipe: raise toward 0.55 for metallic/
 # tubular strike, lower toward 0.30 for a softer wooden hit.
 # Sibling voicings: acoustic_marimba_v0 (real-instrument fit),

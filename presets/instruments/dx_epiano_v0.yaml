@@ -30,8 +30,10 @@ instrument_ir_v0:
       algorithm: 5
       feedback: 2
       operators:
-        # Carrier levels sum to ~0.54 (FM6 chain saturates above ~0.5 -
-        # this was the "harsh/MIDI" grit: 22% H3 clip distortion)
+        # Carrier levels: the FM6->FWPT gateway auto-normalizes carrier
+        # sums above 0.5 (the old "harsh/MIDI" 22% H3 clip grit is gone);
+        # 0.5 summed carriers = full scale. Engine carriers here (alg 5:
+        # Op1) sum to 0.23, well within the bit-exact no-op range.
         - ratio: 1.0      # Op1 carrier - body
           level: 0.23
         - ratio: 1.0      # Op2 modulator - warmth
