@@ -45,7 +45,7 @@ from symcrash_python_ap.voice.snapshot_bundle import (
     SNAPSHOT_VERSION,
 )
 
-from symcrash_python_ap.voice.preset_bundle import (
+from symcrash_python_ap.library.preset_bundle import (
     ProgramPreset,
     create_default_preset,
     create_glitch_violin_preset,

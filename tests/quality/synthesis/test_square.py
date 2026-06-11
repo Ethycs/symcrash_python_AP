@@ -3,6 +3,17 @@ import numpy as np
 import scipy.io.wavfile as wav
 import sys
 from pathlib import Path
+
+import pytest
+
+# Diagnostic script that runs at import time and reads rendered WAVs from
+# audio_generation_tests/; skip collection when those artifacts are absent.
+if not Path('audio_generation_tests/audio_out/waveforms/01_sine.wav').exists():
+    pytest.skip(
+        "requires generated audio_generation_tests/audio_out artifacts",
+        allow_module_level=True,
+    )
+
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from symcrash_python_ap.vm.harmonic_bank import (
