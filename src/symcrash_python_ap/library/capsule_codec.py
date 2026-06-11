@@ -47,6 +47,7 @@ class ChunkType:
     ASSETS = 5
     SEEDS = 6
     CMMM_CONFIG = 7  # CMMM Enrichment (Phase P5): temperament, symbol_ops
+    ENVELOPES = 8    # Matrix envelope bindings + amp dynamics (packet E6)
 
 
 # =============================================================================
@@ -480,6 +481,49 @@ def unpack_cmmm_config(payload: bytes) -> dict:
 
 
 # =============================================================================
+# ENVELOPES CHUNK (Matrix Envelope System, WSE-STD-ENVELOPE-MATRIX v0)
+# =============================================================================
+
+def pack_envelopes(
+    envelopes: Optional[List[dict]],
+    amp_dynamics: Optional[dict] = None,
+) -> bytes:
+    """
+    Pack matrix envelope bindings + amp dynamics as JSON payload.
+
+    Args:
+        envelopes: List of binding dicts (id/adsr/targets/velocity_sens/
+            key_scale_rate), or None
+        amp_dynamics: Amp node dynamics dict (velocity_sens/key_scale_rate),
+            or None
+
+    Returns:
+        JSON-encoded bytes
+    """
+    data = {
+        'bindings': envelopes or [],
+        'amp': amp_dynamics or {},
+    }
+    return json.dumps(data).encode('utf-8')
+
+
+def unpack_envelopes(payload: bytes) -> Tuple[Optional[List[dict]], Optional[dict]]:
+    """
+    Unpack matrix envelope bindings + amp dynamics from JSON payload.
+
+    Returns:
+        (envelopes, amp_dynamics) - either may be None if absent
+    """
+    if not payload:
+        return None, None
+
+    data = json.loads(payload.decode('utf-8'))
+    bindings = data.get('bindings') or None
+    amp = data.get('amp') or None
+    return bindings, amp
+
+
+# =============================================================================
 # FULL CAPSULE SERIALIZATION
 # =============================================================================
 
@@ -531,6 +575,11 @@ def capsule_to_bytes(capsule: CapsuleV0) -> bytes:
         temperament = capsule.cmmm_config.get('temperament', {})
         payload = pack_cmmm_config(temperament)
         chunks.append(pack_chunk(ChunkType.CMMM_CONFIG, payload))
+
+    # Chunk 8: Matrix envelope bindings + amp dynamics (if present)
+    if capsule.envelopes or capsule.amp_dynamics:
+        payload = pack_envelopes(capsule.envelopes, capsule.amp_dynamics)
+        chunks.append(pack_chunk(ChunkType.ENVELOPES, payload))
 
     # Combine chunks
     chunk_bytes = b''.join(chunks)
@@ -602,6 +651,8 @@ def capsule_from_bytes(data: bytes) -> CapsuleV0:
     assets = []
     seeds = SeedConfig()
     cmmm_config = None  # Phase P5: CMMM enrichment
+    envelopes = None
+    amp_dynamics = None
 
     for _ in range(chunk_count):
         chunk_type, payload, offset = unpack_chunk(data, offset)
@@ -620,6 +671,8 @@ def capsule_from_bytes(data: bytes) -> CapsuleV0:
             seeds = unpack_seeds(payload)
         elif chunk_type == ChunkType.CMMM_CONFIG:
             cmmm_config = unpack_cmmm_config(payload)
+        elif chunk_type == ChunkType.ENVELOPES:
+            envelopes, amp_dynamics = unpack_envelopes(payload)
 
     if identity is None:
         raise ValueError("Missing identity chunk")
@@ -631,6 +684,8 @@ def capsule_from_bytes(data: bytes) -> CapsuleV0:
         assets=assets,
         seeds=seeds,
         cmmm_config=cmmm_config,
+        envelopes=envelopes,
+        amp_dynamics=amp_dynamics,
     )
 
 
@@ -727,6 +782,12 @@ def save_capsule_bundle(capsule: CapsuleV0, dirpath: str):
     # CMMM config (Phase P5)
     if capsule.cmmm_config is not None:
         manifest['cmmm_config'] = capsule.cmmm_config
+
+    # Matrix envelope bindings + amp dynamics (packet E6)
+    if capsule.envelopes:
+        manifest['envelopes'] = capsule.envelopes
+    if capsule.amp_dynamics:
+        manifest['amp_dynamics'] = capsule.amp_dynamics
 
     if capsule.assets:
         manifest['assets'] = [
@@ -840,6 +901,10 @@ def load_capsule_bundle(dirpath: str) -> CapsuleV0:
     # CMMM config (Phase P5)
     cmmm_config = manifest.get('cmmm_config')
 
+    # Matrix envelope bindings + amp dynamics (packet E6)
+    envelopes = manifest.get('envelopes')
+    amp_dynamics = manifest.get('amp_dynamics')
+
     return CapsuleV0(
         identity=identity,
         program=program,
@@ -847,6 +912,8 @@ def load_capsule_bundle(dirpath: str) -> CapsuleV0:
         assets=assets,
         seeds=seeds,
         cmmm_config=cmmm_config,
+        envelopes=envelopes,
+        amp_dynamics=amp_dynamics,
     )
 
 
@@ -859,6 +926,8 @@ __all__ = [
     'unpack_voice_params',
     'pack_cmmm_config',
     'unpack_cmmm_config',
+    'pack_envelopes',
+    'unpack_envelopes',
     'capsule_to_bytes',
     'capsule_from_bytes',
     'save_capsule',

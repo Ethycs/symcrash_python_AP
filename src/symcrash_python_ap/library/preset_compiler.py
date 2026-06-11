@@ -35,7 +35,7 @@ from ..vm.harmonic_bank import LFOState, LFOWaveform, LFOSyncMode, LFOTarget, LF
 from ..primitives import K_LADDER_MASKS, TailMode as _TailMode, Q15_ONE, Q15_HALF, Q16_ONE
 
 # Import human-readable conversion helpers and shared modulators parser
-from ..instrument_ir import float_or_q15, _auto_detect_ratios, _auto_detect_levels, _parse_modulators
+from ..instrument_ir import float_or_q15, _auto_detect_ratios, _auto_detect_levels, _parse_modulators, _parse_control_config, ControlConfig, load_instrument_from_dict
 
 # Import central registry for validation
 from .central_registry import get_central_registry
@@ -80,6 +80,7 @@ class FM6Config:
     op_ratios: list = field(default_factory=lambda: [Q16_ONE]*6)   # 6 × Q16 ratios
     op_levels: list = field(default_factory=lambda: [Q15_ONE]*6)   # 6 × Q15 levels
     feedback_depth: int = 0                 # DX7 feedback level (0-7)
+    post_filter_hz: Optional[float] = None  # Output LPF cutoff (None = bypass)
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> 'FM6Config':
@@ -110,6 +111,7 @@ class FM6Config:
             op_ratios=op_ratios[:6],
             op_levels=op_levels[:6],
             feedback_depth=feedback_depth,
+            post_filter_hz=d.get('post_filter_hz'),
         )
 
 
@@ -327,6 +329,20 @@ class CompiledPreset:
     # LFO modulation state (Phase 2 Mod Matrix)
     lfos: List[LFOState] = field(default_factory=list)
 
+    # Control axis defaults from preset's character section (optional)
+    # When present, pushed to MacroRuntime at voice allocation time
+    control_config: Optional['ControlConfig'] = None
+
+    # Matrix envelope bindings (instrument_ir.EnvelopeBinding list, optional).
+    # Consumed by VoiceEngine.allocate_voice_from_preset() for the envelope
+    # matrix (e.g. mod envelopes routed to FM_OP2/FM_OP4).
+    envelope_bindings: Optional[list] = None
+
+    # Amp dynamics (WSE-STD-PRESET-AUTHORING 3.3). Defaults match the
+    # getattr() fallbacks in VoiceEngine.allocate_voice_from_preset().
+    amp_velocity_sens: float = 1.0
+    amp_key_scale_rate: float = 0.0
+
     def backbone_ops(self) -> List[str]:
         """Get list of enabled operator names."""
         return [op.op for op in self.backbone]
@@ -334,6 +350,243 @@ class CompiledPreset:
     def backbone_families(self) -> Dict[str, float]:
         """Get operator name -> strength (0.0-1.0) mapping."""
         return {op.op.lower(): op.strength_q15 / Q15_ONE for op in self.backbone}
+
+
+# =============================================================================
+# INSTRUMENT IR -> COMPILED PRESET ADAPTER
+# =============================================================================
+
+# Waveform name -> default Q15 harmonic profile (matches synth_master.py)
+_WAVEFORM_HARMONICS = {
+    'sine': [Q15_ONE, 0, 0, 0, 0, 0, 0, 0],
+    'saw': [Q15_ONE, Q15_HALF, 10922, 8191, 6553, 5461, 4681, 4096],
+    'square': [Q15_ONE, 0, 10922, 0, 6553, 0, 4681, 0],
+    'pulse': [Q15_ONE, 0, 10922, 0, 6553, 0, 4681, 0],
+    'tri': [Q15_ONE, 0, 3640, 0, 1310, 0, 668, 0],
+    'triangle': [Q15_ONE, 0, 3640, 0, 1310, 0, 668, 0],
+}
+
+
+def compiled_preset_from_ir(ir) -> CompiledPreset:
+    """
+    Build a CompiledPreset from an InstrumentIR (instrument_ir_v0 format).
+
+    This is the thin adapter that lets Simple-mode consumers (VoiceFrameEmitter
+    / VoiceEngine.allocate_voice_from_preset, e.g. the live synth) load modern
+    instrument_ir_v0 presets. It extracts the Simple-mode subset of the IR:
+
+    - Amp node ADSR -> amp_env (+ velocity_sens / key_scale_rate dynamics)
+    - FM6 node -> FM6Config and osc_mode=3
+    - Osc waveform / custom partials -> harmonic_amps_q15
+    - compile.material -> MaterialConfig beta ramp
+    - envelopes -> envelope_bindings (matrix envelope system)
+    - modulators -> lfos
+    - control -> control_config (system macro defaults)
+
+    Layered behavior (L2 regimes, L3 CMMM emission) is not interpreted here;
+    that requires the full capsule path (InstrumentIR.to_capsule()).
+
+    Args:
+        ir: InstrumentIR instance (from load_instrument / load_instrument_from_dict)
+
+    Returns:
+        CompiledPreset ready for VoiceFrameEmitter / Simple-mode VoiceEngine
+    """
+    from ..instrument_ir import extract_partials_q15
+    from ..envelope_scheduler import ADSRSpec
+
+    amp_env = None
+    amp_velocity_sens = 1.0
+    amp_key_scale_rate = 0.0
+    fm6_config = None
+    osc_mode = 0
+    harmonic_amps = None
+    pwm_width_q15 = Q15_HALF
+
+    for node in ir.layers.L0_graph.nodes:
+        params = node.params
+        if node.type == "Amp" and params.adsr is not None:
+            adsr = params.adsr
+            amp_env = ADSRSpec(
+                attack_ms=adsr.a_ms,
+                decay_ms=adsr.d_ms,
+                sustain=adsr.s,
+                release_ms=adsr.r_ms,
+            )
+            amp_velocity_sens = float(getattr(params, 'velocity_sens', 1.0))
+            amp_key_scale_rate = float(getattr(params, 'key_scale_rate', 0.0))
+        elif node.type == "Osc":
+            if params.pwm_enable:
+                pwm_width_q15 = params.pwm_width_q15
+            wf = (params.waveform or '').lower()
+            if wf in _WAVEFORM_HARMONICS:
+                harmonic_amps = list(_WAVEFORM_HARMONICS[wf])
+        elif node.type == "FM6":
+            fm6_config = FM6Config(
+                algorithm_id=params.algorithm if params.algorithm is not None else 1,
+                op_ratios=list(params.op_ratios) if params.op_ratios else [Q16_ONE] * 6,
+                op_levels=list(params.op_levels) if params.op_levels else [Q15_ONE] + [0] * 5,
+                feedback_depth=params.feedback if params.feedback is not None else 0,
+                post_filter_hz=getattr(params, 'post_filter_hz', None),
+            )
+            osc_mode = 3  # OSC_MODE_FM6
+
+    # Custom partials (waveform: partials) take priority over waveform profile
+    partials = extract_partials_q15(ir)
+    if partials:
+        harmonic_amps = partials
+    if harmonic_amps is None:
+        # Default saw harmonics: 1/n falloff
+        harmonic_amps = [Q15_ONE // n for n in range(1, 9)]
+
+    ir_material = ir.compile.material
+    material = MaterialConfig(
+        beta_start_q15=ir_material.beta_start_q15,
+        beta_target_q15=ir_material.beta_target_q15,
+        beta_ramp_blocks=ir_material.beta_ramp_blocks,
+    )
+
+    return CompiledPreset(
+        preset_id=ir.meta.instrument_id or ir.meta.name or 'instrument-ir',
+        preset_version=str(ir.meta.version),
+        author=ir.meta.author,
+        description=ir.meta.name,
+        voiceframe_std='WSE-STD-020 v1',
+        vm_std='WSE-STD-VM-HYBRID v0',
+        operator_lib_id='WSE-OPLIB-24 v0',
+        latch=LatchDefaults(),
+        amp_env=amp_env,
+        material=material,
+        backbone=[],
+        harmonic_amps_q15=harmonic_amps,
+        fm6=fm6_config,
+        osc_mode=osc_mode,
+        cmmm=CmmmDefaults(),
+        pwm_width_q15=pwm_width_q15,
+        lfos=list(ir.modulators) if ir.modulators else [],
+        control_config=ir.control,
+        envelope_bindings=list(ir.envelopes) if ir.envelopes else None,
+        amp_velocity_sens=amp_velocity_sens,
+        amp_key_scale_rate=amp_key_scale_rate,
+    )
+
+
+# =============================================================================
+# CAPSULE -> COMPILED PRESET ADAPTER
+# =============================================================================
+
+# Block duration in ms at 48kHz / 64-sample blocks (capsule ADSR is stored
+# as block counts in control_defaults)
+_MS_PER_BLOCK = 64000.0 / 48000.0  # ~1.333 ms
+
+
+def envelope_bindings_from_capsule(capsule) -> Optional[list]:
+    """
+    Rebuild instrument_ir.EnvelopeBinding objects from a capsule's
+    serialized `envelopes` dicts (CapsuleV0.envelopes).
+
+    Returns None if the capsule carries no envelope bindings.
+    """
+    from ..instrument_ir import EnvelopeBinding, ADSR
+
+    raw = getattr(capsule, 'envelopes', None)
+    if not raw:
+        return None
+
+    bindings = []
+    for b in raw:
+        adsr_d = b.get('adsr', {})
+        bindings.append(EnvelopeBinding(
+            id=b.get('id', 'env'),
+            adsr=ADSR(
+                a_ms=float(adsr_d.get('a_ms', 8.0)),
+                d_ms=float(adsr_d.get('d_ms', 80.0)),
+                s=float(adsr_d.get('s', 0.7)),
+                r_ms=float(adsr_d.get('r_ms', 180.0)),
+            ),
+            targets=list(b.get('targets', [])),
+            velocity_sens=float(b.get('velocity_sens', 0.0)),
+            key_scale_rate=float(b.get('key_scale_rate', 0.0)),
+        ))
+    return bindings or None
+
+
+def compiled_preset_from_capsule(capsule) -> CompiledPreset:
+    """
+    Build a CompiledPreset from a loaded CapsuleV0 (Simple-mode subset).
+
+    This closes the compiled-capsule -> live-engine gap: a capsule produced
+    by CapsuleCompiler.compile_from_ir() (tools/build_and_render.py
+    --compile-only) can be played through VoiceEngine.allocate_voice_from_preset
+    with its envelope bindings and amp dynamics intact.
+
+    Reconstructed from capsule data:
+    - FM6 config from defaults.voice_param_defaults (FM6_* voice params)
+    - Amp ADSR from defaults.control_defaults (ATK/DCY/SUS/REL blocks)
+    - Matrix envelope bindings from capsule.envelopes (packet E6 chunk)
+    - Amp dynamics (velocity_sens / key_scale_rate) from capsule.amp_dynamics
+
+    Not carried by the capsule format (defaults used):
+    - Material beta ramp (defaults to dry: beta 0, ramp 1)
+    - FM6 post filter, LFO modulators, custom partials
+    """
+    from ..voice.voice_engine_registry import VoiceParamID
+    from ..control_registry import ControlID
+
+    vp = capsule.defaults.voice_param_defaults or {}
+    cd = capsule.defaults.control_defaults or {}
+
+    # FM6 config from voice params
+    fm6_config = None
+    osc_mode = int(vp.get(int(VoiceParamID.OSC_MODE), 0))
+    if osc_mode == 3:
+        ratio_ids = [int(VoiceParamID.FM6_OP0_RATIO) + i for i in range(6)]
+        level_ids = [int(VoiceParamID.FM6_OP0_LEVEL) + i for i in range(6)]
+        fm6_config = FM6Config(
+            algorithm_id=int(vp.get(int(VoiceParamID.FM6_ALGORITHM), 1)),
+            op_ratios=[int(vp.get(rid, Q16_ONE)) for rid in ratio_ids],
+            op_levels=[int(vp.get(level_ids[0], Q15_ONE))] + [
+                int(vp.get(lid, 0)) for lid in level_ids[1:]
+            ],
+            feedback_depth=int(vp.get(int(VoiceParamID.FM6_FEEDBACK), 0)),
+        )
+
+    # Amp envelope from control defaults (stored as block counts)
+    amp_env = None
+    if int(ControlID.ATK_BLOCKS) in cd or int(ControlID.DCY_BLOCKS) in cd:
+        amp_env = ADSRSpec(
+            attack_ms=cd.get(int(ControlID.ATK_BLOCKS), 8) * _MS_PER_BLOCK,
+            decay_ms=cd.get(int(ControlID.DCY_BLOCKS), 32) * _MS_PER_BLOCK,
+            sustain=cd.get(int(ControlID.SUS_Q15), 24576) / Q15_ONE,
+            release_ms=cd.get(int(ControlID.REL_BLOCKS), 64) * _MS_PER_BLOCK,
+        )
+
+    # Amp dynamics (packet E6 chunk)
+    amp_dynamics = getattr(capsule, 'amp_dynamics', None) or {}
+    amp_velocity_sens = float(amp_dynamics.get('velocity_sens', 1.0))
+    amp_key_scale_rate = float(amp_dynamics.get('key_scale_rate', 0.0))
+
+    return CompiledPreset(
+        preset_id=capsule.identity.capsule_id,
+        preset_version='v0',
+        author=capsule.identity.author,
+        description=capsule.identity.name,
+        voiceframe_std='WSE-STD-020 v1',
+        vm_std='WSE-STD-VM-HYBRID v0',
+        operator_lib_id='WSE-OPLIB-24 v0',
+        latch=LatchDefaults(),
+        amp_env=amp_env,
+        # Capsules don't carry the material ramp; default to dry output
+        material=MaterialConfig(beta_start_q15=0, beta_target_q15=0,
+                                beta_ramp_blocks=1),
+        backbone=[],
+        fm6=fm6_config,
+        osc_mode=osc_mode,
+        cmmm=CmmmDefaults(),
+        envelope_bindings=envelope_bindings_from_capsule(capsule),
+        amp_velocity_sens=amp_velocity_sens,
+        amp_key_scale_rate=amp_key_scale_rate,
+    )
 
 
 # =============================================================================
@@ -367,6 +620,16 @@ class PresetCompiler:
         Raises:
             PresetCompileError: If preset is invalid or incompatible
         """
+        # instrument_ir_v0 format: route through the InstrumentIR loader and
+        # the IR -> CompiledPreset adapter (the flat 'preset:' format below
+        # is the legacy pre-IR format).
+        if 'instrument_ir_v0' in preset_dict:
+            try:
+                ir = load_instrument_from_dict(preset_dict)
+            except (ValueError, KeyError, TypeError) as e:
+                raise PresetCompileError(f"Failed to load instrument_ir_v0 preset: {e}")
+            return compiled_preset_from_ir(ir)
+
         # Validate structure
         errors = self.validate(preset_dict)
         if errors:
@@ -449,6 +712,12 @@ class PresetCompiler:
         # Parse LFO modulators (Phase 2 Mod Matrix)
         lfos = self._parse_lfos(preset_dict)
 
+        # Parse character/control defaults (pushes to MacroRuntime at load)
+        control_config = None
+        character_section = preset_dict.get('character', None)
+        if character_section and isinstance(character_section, dict):
+            control_config = _parse_control_config(character_section)
+
         return CompiledPreset(
             preset_id=preset_id,
             preset_version=preset_version,
@@ -467,6 +736,7 @@ class PresetCompiler:
             cmmm=cmmm,
             pwm_width_q15=pwm_width_q15,
             lfos=lfos,
+            control_config=control_config,
         )
 
     def _parse_lfos(self, preset_dict: Dict[str, Any]) -> List[LFOState]:
@@ -707,5 +977,8 @@ __all__ = [
     'CompiledPreset',
     'PresetCompileError',
     'PresetCompiler',
+    'compiled_preset_from_ir',
+    'compiled_preset_from_capsule',
+    'envelope_bindings_from_capsule',
     'validate_preset',
 ]

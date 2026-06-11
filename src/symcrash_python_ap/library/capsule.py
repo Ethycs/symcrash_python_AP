@@ -269,6 +269,20 @@ class CapsuleV0:
     # Stored as dict for flexibility; parsed by InstrumentIR at load time
     cmmm_config: Optional[Dict] = None
 
+    # Matrix envelope bindings (WSE-STD-ENVELOPE-MATRIX v0).
+    # JSON-friendly dicts so the capsule stays portable:
+    #   {'id': str,
+    #    'adsr': {'a_ms': float, 'd_ms': float, 's': float, 'r_ms': float},
+    #    'targets': ['FM_OP2', ...],
+    #    'velocity_sens': float, 'key_scale_rate': float}
+    # Carried through serialization so a compiled capsule retains the
+    # preset's mod envelopes (e.g. velocity -> FM index brightening).
+    envelopes: Optional[List[Dict]] = None
+
+    # Amp dynamics (WSE-STD-PRESET-AUTHORING 3.3) from the IR Amp node:
+    #   {'velocity_sens': float, 'key_scale_rate': float}
+    amp_dynamics: Optional[Dict] = None
+
     def validate(self, strict: bool = False) -> List[str]:
         """
         Validate capsule structure.

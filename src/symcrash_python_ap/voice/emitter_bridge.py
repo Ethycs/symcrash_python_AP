@@ -276,6 +276,14 @@ class VoiceEngineAdapter:
             fm_op_ratios=list(fm6_config.op_ratios) if fm6_config else None,
             fm_op_levels=list(fm6_config.op_levels) if fm6_config else None,
             fm_feedback_depth=fm6_config.feedback_depth if fm6_config else None,
+            fm_post_filter_enabled=(
+                bool(getattr(fm6_config, 'post_filter_hz', None)) or None
+                if fm6_config else None
+            ),
+            fm_post_filter_cutoff_hz=(
+                getattr(fm6_config, 'post_filter_hz', None)
+                if fm6_config else None
+            ),
             # CMMM
             cmmm_node_mask=cmmm.node_mask_u32 if cmmm else None,
             cmmm_mask_ramp_blocks=cmmm.mask_ramp_blocks if cmmm else 5,

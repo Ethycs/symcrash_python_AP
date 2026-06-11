@@ -14,7 +14,7 @@ Tests:
 
 import pytest
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 
 # Mock the preset structures for testing
@@ -58,8 +58,11 @@ class MockCompiledPreset:
     def backbone_ops(self) -> List[str]:
         return ["TILT", "COMPRESS_K"]
 
-    def backbone_families(self) -> List[int]:
-        return [32767, 16384, 8192, 0, 0, 0, 0, 0]
+    def backbone_families(self) -> Dict[str, float]:
+        # Must match the CompiledPreset contract: op name (lowercase) ->
+        # strength (0.0-1.0). VoiceEngine.step_voice_simple() calls .values()
+        # on this, so returning a list breaks emission.
+        return {"tilt": 1.0, "compress_k": 0.5}
 
 
 class TestCmmmTemplateEmission:

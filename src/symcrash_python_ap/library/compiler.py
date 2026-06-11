@@ -115,6 +115,8 @@ class CapsuleCompiler:
         assets: List[AssetRef] = None,
         capsule_id: str = None,
         control_program: 'ControlProgram' = None,
+        envelopes: List[dict] = None,
+        amp_dynamics: dict = None,
     ) -> CompileResult:
         """
         Compile inputs to CapsuleInstrument.
@@ -133,6 +135,9 @@ class CapsuleCompiler:
             assets: Optional asset references
             capsule_id: Optional explicit capsule_id (generated if None)
             control_program: Optional ControlProgram with system macro defaults
+            envelopes: Optional matrix envelope binding dicts (id/adsr/targets/
+                velocity_sens/key_scale_rate) carried into the capsule
+            amp_dynamics: Optional amp dynamics dict (velocity_sens/key_scale_rate)
 
         Returns:
             CompileResult with capsule in COMPILED state
@@ -200,6 +205,8 @@ class CapsuleCompiler:
                 derivation_rule_id=0,  # deterministic
             ),
             control=control_program,  # System macro defaults for cockpit
+            envelopes=envelopes,      # Matrix envelope bindings (packet E6)
+            amp_dynamics=amp_dynamics,
         )
 
         # Validate capsule structure
@@ -502,6 +509,13 @@ class CapsuleCompiler:
         if ir.control is not None:
             control_program = ir.control.to_control_program()
 
+        # Extract matrix envelope bindings (WSE-STD-ENVELOPE-MATRIX v0) so the
+        # compiled capsule retains mod envelopes (velocity -> FM index etc.)
+        envelopes = self._extract_envelopes_from_ir(ir)
+
+        # Extract amp dynamics (velocity_sens / key_scale_rate) from Amp node
+        amp_dynamics = self._extract_amp_dynamics_from_ir(ir)
+
         # Use standard compile_instrument with extracted values
         return self.compile_instrument(
             program_id=program_id,
@@ -517,6 +531,8 @@ class CapsuleCompiler:
             assets=assets,
             capsule_id=capsule_id,
             control_program=control_program,
+            envelopes=envelopes,
+            amp_dynamics=amp_dynamics,
         )
 
     def compile_from_macro(
@@ -679,6 +695,59 @@ class CapsuleCompiler:
                     defaults[VoiceParamID.FM6_TOPO_BLEND] = node.params.fm6_topo_blend_q15
 
         return defaults
+
+    def _extract_envelopes_from_ir(
+        self,
+        ir: 'InstrumentIR',
+    ) -> Optional[List[dict]]:
+        """
+        Extract matrix envelope bindings from IR as JSON-friendly dicts.
+
+        These are carried through capsule serialization so a compiled
+        capsule retains the preset's `envelopes:` section (mod envelopes
+        routed to FM operators, filter sweeps, etc.).
+        """
+        bindings = getattr(ir, 'envelopes', None) or []
+        if not bindings:
+            return None
+
+        result = []
+        for b in bindings:
+            adsr = b.adsr
+            result.append({
+                'id': b.id,
+                'adsr': {
+                    'a_ms': adsr.a_ms,
+                    'd_ms': adsr.d_ms,
+                    's': adsr.s,
+                    'r_ms': adsr.r_ms,
+                },
+                'targets': list(b.targets),
+                'velocity_sens': float(getattr(b, 'velocity_sens', 0.0)),
+                'key_scale_rate': float(getattr(b, 'key_scale_rate', 0.0)),
+            })
+        return result
+
+    def _extract_amp_dynamics_from_ir(
+        self,
+        ir: 'InstrumentIR',
+    ) -> Optional[dict]:
+        """
+        Extract amp dynamics (velocity_sens / key_scale_rate) from the Amp node.
+
+        Defaults (1.0 / 0.0) are omitted so legacy capsules stay byte-identical.
+        """
+        for node in ir.layers.L0_graph.nodes:
+            if node.type == "Amp" and node.params.adsr is not None:
+                velocity_sens = float(getattr(node.params, 'velocity_sens', 1.0))
+                key_scale_rate = float(getattr(node.params, 'key_scale_rate', 0.0))
+                if velocity_sens != 1.0 or key_scale_rate != 0.0:
+                    return {
+                        'velocity_sens': velocity_sens,
+                        'key_scale_rate': key_scale_rate,
+                    }
+                return None
+        return None
 
     def _extract_regime_graph_id(self, ir: 'InstrumentIR') -> Optional[int]:
         """

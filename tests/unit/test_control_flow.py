@@ -32,7 +32,9 @@ class TestPreset:
         return []
 
     def backbone_families(self):
-        return [0] * 8
+        # CompiledPreset contract: dict of op name -> strength (0.0-1.0).
+        # Empty backbone -> empty dict.
+        return {}
 
 
 # Create instances

@@ -2937,12 +2937,18 @@ class VoiceEngine:
                 release_ms=base_spec.release_ms * mult,
             )
 
+        def _apply_spec(scheduler, spec):
+            # EnvelopeScheduler caches block counts in __post_init__;
+            # re-run it after swapping the spec or key scaling is a no-op.
+            scheduler.spec = spec
+            scheduler.__post_init__()
+
         # Trigger main envelope
         if state.amp_envelope:
             ks_amp = getattr(state, 'amp_key_scale_rate', 0.0)
             base = getattr(state, 'amp_env_base_spec', None)
             if ks_amp and base is not None:
-                state.amp_envelope.spec = _key_scaled(base, ks_amp)
+                _apply_spec(state.amp_envelope, _key_scaled(base, ks_amp))
             state.amp_envelope.trigger_note()
 
         # Trigger all matrix envelopes (with per-binding key scaling)
@@ -2950,7 +2956,7 @@ class VoiceEngine:
             scheduler = entry[0]
             ks = entry[3] if len(entry) > 3 else 0.0
             if ks and len(entry) > 4:
-                scheduler.spec = _key_scaled(entry[4], ks)
+                _apply_spec(scheduler, _key_scaled(entry[4], ks))
             scheduler.trigger_note()
 
         # Handle LFO sync modes on note-on
@@ -3622,6 +3628,14 @@ class VoiceEngine:
             fm_op_ratios=list(fm6_config.op_ratios) if fm6_config else None,
             fm_op_levels=list(fm6_config.op_levels) if fm6_config else None,
             fm_feedback_depth=fm6_config.feedback_depth if fm6_config else None,
+            fm_post_filter_enabled=(
+                bool(getattr(fm6_config, 'post_filter_hz', None)) or None
+                if fm6_config else None
+            ),
+            fm_post_filter_cutoff_hz=(
+                getattr(fm6_config, 'post_filter_hz', None)
+                if fm6_config else None
+            ),
             env_targets_q15=env_targets_q15,
             cmmm_node_mask=cmmm.node_mask_u32 if cmmm else None,
             cmmm_mask_ramp_blocks=cmmm.mask_ramp_blocks if cmmm else 5,

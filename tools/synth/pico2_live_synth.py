@@ -199,18 +199,14 @@ class Pico2LiveSynth:
                     return []
 
                 def backbone_families(self):
-                    # Return default family weights (Q15) for basic sound
-                    # These will be scaled by control modifiers (TIMBRE, TEXTURE, CHAOS, etc.)
-                    return [
-                        32767,  # FamilyID.COLOR (TIMBRE)
-                        32767,  # FamilyID.LOCAL (TEXTURE)
-                        0,      # FamilyID.TRANSPORT
-                        0,      # FamilyID.GLUE
-                        0,      # FamilyID.TOPOLOGY
-                        0,      # FamilyID.CATASTROPHE (CHAOS)
-                        0,      # FamilyID.INJECT
-                        0,      # FamilyID.TAIL
-                    ]
+                    # CompiledPreset contract: dict of family/op name ->
+                    # strength (0.0-1.0). VoiceEngine.step_voice_simple()
+                    # calls .values() on this. Default family weights for a
+                    # basic sound (scaled by TIMBRE/TEXTURE/CHAOS modifiers).
+                    return {
+                        'color': 1.0,  # TIMBRE
+                        'local': 1.0,  # TEXTURE
+                    }
 
             preset = _MinimalPreset()
 
@@ -512,8 +508,8 @@ def main():
 
                 # Configure runner
                 runner_params = hello_imgui.RunnerParams()
-                runner_params.app_window_params.window_title = "Symcrash Controls (Live Synth)"
-                runner_params.app_window_params.window_geometry.size = (800, 500)
+                runner_params.app_window_params.window_title = "Symcrash Sound Design Workbench (Live)"
+                runner_params.app_window_params.window_geometry.size = (1050, 650)
                 runner_params.callbacks.show_gui = app.render
 
                 # Run
