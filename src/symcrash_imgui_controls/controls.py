@@ -180,11 +180,97 @@ def render_tree_combo(current: int) -> Tuple[bool, int]:
     Returns:
         (changed, new_index) tuple
     """
-    trees = ["Balanced", "Bass", "Treble", "Sparse", "Dense"]
+    trees = ["balanced", "harmonic", "texture", "impact", "drone"]
 
     imgui.set_next_item_width(100)
     changed, new_idx = imgui.combo("Tree", current, trees)
 
+    return changed, new_idx
+
+
+def render_character_knob(
+    label: str,
+    value: float,
+    size: float = 45.0,
+) -> Tuple[bool, float]:
+    """
+    Render a character control knob (0.0-1.0 range).
+
+    Args:
+        label: Knob label (e.g., "BRT")
+        value: Current value (0.0-1.0)
+        size: Knob diameter in pixels
+
+    Returns:
+        (changed, new_value) tuple with value in 0.0-1.0
+    """
+    value_pct = value * 100.0
+
+    changed, new_pct = imgui_knobs.knob(
+        label,
+        value_pct,
+        0.0,
+        100.0,
+        50.0,  # default_value at center
+        "%.0f%%",
+        imgui_knobs.ImGuiKnobVariant_.wiper_dot,
+        size,
+        imgui_knobs.ImGuiKnobFlags_.no_input,
+    )
+
+    return changed, new_pct / 100.0
+
+
+def render_character_knob_row(
+    labels: list,
+    values: list,
+    size: float = 45.0,
+) -> Tuple[bool, list, int]:
+    """
+    Render a row of character knobs (0.0-1.0 range).
+
+    Args:
+        labels: List of knob labels
+        values: List of float values (0.0-1.0)
+        size: Knob diameter
+
+    Returns:
+        (any_changed, new_values, changed_index) tuple
+        changed_index is -1 if nothing changed
+    """
+    any_changed = False
+    changed_idx = -1
+    new_values = list(values)
+
+    for i, (label, value) in enumerate(zip(labels, values)):
+        if i > 0:
+            imgui.same_line()
+
+        changed, new_val = render_character_knob(label, value, size)
+        if changed:
+            any_changed = True
+            changed_idx = i
+            new_values[i] = new_val
+
+    return any_changed, new_values, changed_idx
+
+
+def render_preset_file_combo(
+    preset_names: list,
+    current_idx: int,
+) -> Tuple[bool, int]:
+    """
+    Render preset file selector combo.
+
+    Args:
+        preset_names: List of preset display names
+        current_idx: Currently selected index
+
+    Returns:
+        (changed, new_index) tuple
+    """
+    imgui.set_next_item_width(220)
+    changed, new_idx = imgui.combo("##preset_file", current_idx, preset_names)
     return changed, new_idx
 
 

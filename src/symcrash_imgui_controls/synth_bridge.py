@@ -9,16 +9,16 @@ Pico2Receiver's callback chain - following the same control path as hardware.
 from typing import Optional, Callable
 from symcrash_python_ap.comm.pico2_synth_bridge import (
     Pico2SynthBridge,
-    MACRO_ATTACK,
-    MACRO_DECAY,
-    MACRO_SUSTAIN,
-    MACRO_RELEASE,
-    MACRO_CUTOFF,
-    MACRO_RESO,
-    MACRO_HARMONICS,
-    MACRO_ETA,
-    MACRO_DETUNE,
-    MACRO_GAIN,
+    POT_ATTACK as MACRO_ATTACK,
+    POT_DECAY as MACRO_DECAY,
+    POT_SUSTAIN as MACRO_SUSTAIN,
+    POT_RELEASE as MACRO_RELEASE,
+    POT_CUTOFF as MACRO_CUTOFF,
+    POT_RESO as MACRO_RESO,
+    POT_HARMONICS as MACRO_HARMONICS,
+    POT_ETA as MACRO_ETA,
+    POT_DETUNE as MACRO_DETUNE,
+    POT_GAIN as MACRO_GAIN,
 )
 
 

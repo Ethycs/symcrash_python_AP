@@ -3,7 +3,7 @@ authors = [{name = "Ethycs", email = "Ethycs@users.noreply.github.com"}]
 name = "symcrash_python_AP"
 requires-python = ">= 3.11"
 version = "0.1.0"
-dependencies = ["sounddevice>=0.5.3,<0.6", "imgui-bundle>=1.92.5,<2"]
+dependencies = ["sounddevice>=0.5.3,<0.6", "imgui-bundle>=1.92.5,<2", "python-osc>=1.9.3,<2", "ruamel.yaml>=0.18,<0.19"]
 
 [build-system]
 build-backend = "hatchling.build"
@@ -32,6 +32,13 @@ virtual-synth-mp = "python tools/virtual_synth_mp.py"
 # === Standalone Tools ===
 # ImGui control panel (standalone, sends UART to hardware)
 imgui-controls = "python -m symcrash_imgui_controls"
+# OSC tuning workbench (Open Stage Control front-end)
+workbench = "python -m symcrash_workbench"
+
+# === Development Tasks ===
+test = "python -m pytest tests/ -v"
+lint = "python tools/lint_presets.py presets/instruments/ -v"
+render-all = "python tools/render/render_all_presets.py"
 
 [tool.pixi.dependencies]
 python = ">=3.14.2,<3.15"

@@ -1,14 +1,18 @@
 """
-Symcrash ImGui Controls Application.
+Symcrash Sound Design Workbench.
 
-Main application window with knobs, buttons, and communication.
+ImGui application for preset browsing, character control tweaking,
+and render-and-play iteration.
 
-Supports two connection modes:
+Also supports hardware connection modes:
 1. UART mode: Connect to hardware via COM port (sends WSE-STD-100 messages)
 2. Bridge mode: Connect to pico2_live_synth instance (injects into receiver)
 """
 
+import threading
+from pathlib import Path
 from typing import Optional, Union
+
 from imgui_bundle import imgui, hello_imgui
 
 from .state import (
@@ -18,6 +22,9 @@ from .state import (
     MACRO_ATTACK,
     MACRO_CUTOFF,
     MACRO_HARMONICS,
+    CHARACTER_LABELS,
+    CHARACTER_FIELDS,
+    PLAYBACK_NOTES,
 )
 from .controls import (
     render_knob_row,
@@ -25,9 +32,15 @@ from .controls import (
     render_preset_combo,
     render_tree_combo,
     render_connection_status,
+    render_character_knob_row,
+    render_preset_file_combo,
 )
 from .uart_sender import UARTSender, find_available_ports
 from .synth_bridge import ImGuiSynthBridge
+
+# Default presets directory (relative to project root)
+_PROJECT_ROOT = Path(__file__).parent.parent.parent
+PRESETS_DIR = _PROJECT_ROOT / "presets" / "instruments"
 
 # Global app instance for external access
 _app_instance: Optional['SymcrashImGuiApp'] = None
@@ -40,16 +53,18 @@ def get_app() -> Optional['SymcrashImGuiApp']:
 
 class SymcrashImGuiApp:
     """
-    Main ImGui application for synth control.
+    Sound Design Workbench with ImGui controls.
 
     Provides:
-    - 10 knobs (ADSR, Filter, Oscillator)
+    - Preset file browser with Load button
+    - 6 character knobs (brightness, density, energy, risk, dream, slip)
+    - Render & Play button for offline rendering with character overrides
+    - 10 hardware knobs (ADSR, Filter, Oscillator) for live synth
     - 4 note buttons
-    - Preset/tree selection
-    - UART or bridge connection
+    - UART or bridge connection for live synth mode
 
     Connection modes:
-    - UART: Send WSE-STD-100 messages to hardware (like pico2_controls)
+    - UART: Send WSE-STD-100 messages to hardware
     - Bridge: Inject macros into pico2_live_synth via Pico2Receiver
     """
 
@@ -67,24 +82,109 @@ class SymcrashImGuiApp:
         self._port_list = []
         self._selected_port_idx = 0
 
+        # Playback note combo index
+        self._note_combo_idx = 2  # default C4
+
+        # Scan presets on creation
+        self._scan_presets()
+
     # =========================================================================
-    # UART MODE - Connect to hardware via serial port
+    # PRESET SCANNING
+    # =========================================================================
+
+    def _scan_presets(self) -> None:
+        """Scan presets/instruments/ for YAML files."""
+        self.state.available_presets = []
+        if PRESETS_DIR.exists():
+            yaml_files = sorted(PRESETS_DIR.glob("*.yaml"))
+            self.state.available_presets = [f.stem for f in yaml_files]
+        if not self.state.available_presets:
+            self.state.available_presets = ["(no presets found)"]
+
+    def _load_selected_preset(self) -> None:
+        """Load the currently selected preset and populate character knobs."""
+        idx = self.state.selected_preset_idx
+        if idx < 0 or idx >= len(self.state.available_presets):
+            return
+
+        name = self.state.available_presets[idx]
+        preset_path = PRESETS_DIR / f"{name}.yaml"
+        if not preset_path.exists():
+            self.state.render_status = f"File not found: {name}.yaml"
+            return
+
+        try:
+            from symcrash_python_ap.instrument_ir import load_instrument
+            ir = load_instrument(str(preset_path))
+
+            self.state.loaded_preset_path = str(preset_path)
+            self.state.loaded_preset_name = ir.meta.name or name
+
+            # Populate character knobs from preset's ControlConfig
+            if ir.control:
+                self.state.character_brightness = ir.control.brightness
+                self.state.character_density = ir.control.density
+                self.state.character_energy = ir.control.energy
+                self.state.character_risk = ir.control.risk
+                self.state.character_dream = ir.control.dream
+                self.state.character_slip = ir.control.slip
+
+            self.state.render_status = f"Loaded: {self.state.loaded_preset_name}"
+        except Exception as e:
+            self.state.render_status = f"Load error: {e}"
+
+    # =========================================================================
+    # RENDER & PLAY
+    # =========================================================================
+
+    def _on_render_and_play(self) -> None:
+        """Render preset with current character values and play audio."""
+        if self.state.is_rendering:
+            return
+        if not self.state.loaded_preset_path:
+            self.state.render_status = "No preset loaded"
+            return
+
+        def _do_render():
+            self.state.is_rendering = True
+            self.state.render_status = "Rendering..."
+            try:
+                import numpy as np
+                import sounddevice as sd
+                from .workbench_render import render_with_character, normalize_to_rms
+
+                note = PLAYBACK_NOTES[self._note_combo_idx][0]
+                samples, name = render_with_character(
+                    self.state.loaded_preset_path,
+                    note=note,
+                    duration_sec=self.state.playback_duration,
+                    brightness=self.state.character_brightness,
+                    density=self.state.character_density,
+                    energy=self.state.character_energy,
+                    risk=self.state.character_risk,
+                    dream=self.state.character_dream,
+                    slip=self.state.character_slip,
+                )
+                samples = normalize_to_rms(samples)
+
+                # Play via sounddevice
+                audio_f32 = samples.astype(np.float32) / 32767.0
+                sd.play(audio_f32, samplerate=48000)
+
+                self.state.render_status = f"Playing: {name} ({PLAYBACK_NOTES[self._note_combo_idx][1]})"
+            except Exception as e:
+                self.state.render_status = f"Render error: {e}"
+            finally:
+                self.state.is_rendering = False
+
+        threading.Thread(target=_do_render, daemon=True).start()
+
+    # =========================================================================
+    # UART MODE
     # =========================================================================
 
     def connect_uart(self, port: str) -> bool:
-        """
-        Connect to hardware via UART.
-
-        This sends WSE-STD-100 messages over serial, just like the
-        Pico2 hardware controller does.
-
-        Args:
-            port: Serial port (e.g., "COM3")
-
-        Returns:
-            True if connected successfully
-        """
-        # Disconnect any existing connection
+        """Connect to hardware via UART."""
         self.disconnect()
 
         self.sender = UARTSender(port)
@@ -99,31 +199,17 @@ class SymcrashImGuiApp:
             return False
 
     # =========================================================================
-    # BRIDGE MODE - Connect to pico2_live_synth instance
+    # BRIDGE MODE
     # =========================================================================
 
     def connect_bridge(self, pico2_bridge) -> bool:
-        """
-        Connect to a running pico2_live_synth via its Pico2SynthBridge.
-
-        This injects macros into the Pico2Receiver's callback chain,
-        following the same control path as hardware messages.
-
-        Args:
-            pico2_bridge: Pico2SynthBridge instance from pico2_live_synth
-
-        Returns:
-            True if connected successfully
-        """
-        # Disconnect any existing connection
+        """Connect to a running pico2_live_synth via its Pico2SynthBridge."""
         self.disconnect()
 
         self.bridge = ImGuiSynthBridge(pico2_bridge)
         if self.bridge.is_connected():
             self.state.connected = True
             self.state.port = "Bridge"
-
-            # Sync state from bridge
             self.state.macro_values = self.bridge.sync_state_from_bridge()
             print("[ImGuiApp] Connected to pico2_live_synth bridge")
             return True
@@ -177,47 +263,147 @@ class SymcrashImGuiApp:
         """Send tree target to current connection."""
         if self.sender:
             return self.sender.send_tree_target(tree_index)
-        # Bridge doesn't support tree target yet
         return False
 
     # =========================================================================
-    # RENDER
+    # RENDER (ImGui frame callback)
     # =========================================================================
 
     def render(self) -> None:
         """Main render callback - called each frame."""
-        imgui.begin("Symcrash Controls")
+        imgui.begin("Symcrash Sound Design Workbench")
 
-        self._render_connection_section()
+        # --- Workbench sections ---
+        self._render_preset_section()
         imgui.separator()
 
-        self._render_adsr_section()
+        self._render_character_section()
         imgui.separator()
 
-        self._render_filter_section()
+        self._render_playback_section()
         imgui.separator()
 
-        self._render_osc_section()
-        imgui.separator()
+        # --- Live synth sections ---
+        if imgui.collapsing_header("Live Synth Controls"):
+            self._render_connection_section()
+            imgui.separator()
 
-        self._render_notes_section()
-        imgui.separator()
+            self._render_adsr_section()
+            imgui.separator()
 
-        self._render_status_section()
+            self._render_filter_section()
+            imgui.separator()
+
+            self._render_osc_section()
+            imgui.separator()
+
+            self._render_notes_section()
+            imgui.separator()
+
+            self._render_status_section()
 
         imgui.end()
+
+    # =========================================================================
+    # WORKBENCH UI SECTIONS
+    # =========================================================================
+
+    def _render_preset_section(self) -> None:
+        """Render preset file browser."""
+        imgui.text("Preset")
+        imgui.same_line()
+
+        changed, new_idx = render_preset_file_combo(
+            self.state.available_presets,
+            self.state.selected_preset_idx,
+        )
+        if changed:
+            self.state.selected_preset_idx = new_idx
+
+        imgui.same_line()
+        if imgui.button("Load"):
+            self._load_selected_preset()
+
+        imgui.same_line()
+        if imgui.button("Refresh Presets"):
+            self._scan_presets()
+
+        # Show loaded preset name
+        if self.state.loaded_preset_name:
+            imgui.same_line()
+            imgui.text_colored(
+                imgui.ImVec4(0.4, 0.8, 0.4, 1.0),
+                self.state.loaded_preset_name,
+            )
+
+    def _render_character_section(self) -> None:
+        """Render character control knobs."""
+        imgui.text("Character")
+
+        # Get current values from state
+        values = [getattr(self.state, f) for f in CHARACTER_FIELDS]
+
+        changed, new_values, changed_idx = render_character_knob_row(
+            CHARACTER_LABELS, values
+        )
+
+        if changed:
+            for i, val in enumerate(new_values):
+                setattr(self.state, CHARACTER_FIELDS[i], val)
+
+    def _render_playback_section(self) -> None:
+        """Render playback controls (note, duration, render & play)."""
+        # Note selector
+        note_labels = [n[1] for n in PLAYBACK_NOTES]
+        imgui.text("Note")
+        imgui.same_line()
+        imgui.set_next_item_width(80)
+        changed, new_idx = imgui.combo("##play_note", self._note_combo_idx, note_labels)
+        if changed:
+            self._note_combo_idx = new_idx
+
+        # Duration slider
+        imgui.same_line()
+        imgui.text("Duration")
+        imgui.same_line()
+        imgui.set_next_item_width(120)
+        changed, new_dur = imgui.slider_float(
+            "##duration", self.state.playback_duration, 0.5, 4.0, "%.1fs"
+        )
+        if changed:
+            self.state.playback_duration = new_dur
+
+        # Render & Play button
+        imgui.same_line()
+        if self.state.is_rendering:
+            imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.5, 0.5, 0.2, 1.0))
+            imgui.button("Rendering...")
+            imgui.pop_style_color(1)
+        else:
+            imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.2, 0.5, 0.8, 1.0))
+            imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(0.3, 0.6, 0.9, 1.0))
+            imgui.push_style_color(imgui.Col_.button_active, imgui.ImVec4(0.1, 0.4, 0.7, 1.0))
+            if imgui.button("Render & Play"):
+                self._on_render_and_play()
+            imgui.pop_style_color(3)
+
+        # Status line
+        if self.state.render_status:
+            imgui.text_colored(imgui.ImVec4(0.7, 0.7, 0.7, 1.0), self.state.render_status)
+
+    # =========================================================================
+    # LIVE SYNTH UI SECTIONS
+    # =========================================================================
 
     def _render_connection_section(self) -> None:
         """Render connection controls."""
         imgui.text("Connection")
 
-        # Refresh ports button
         if imgui.button("Refresh"):
             self._port_list = find_available_ports()
 
         imgui.same_line()
 
-        # Port combo
         if not self._port_list:
             self._port_list = find_available_ports()
 
@@ -231,7 +417,6 @@ class SymcrashImGuiApp:
 
         imgui.same_line()
 
-        # Connect/Disconnect button
         if self.state.connected:
             if imgui.button("Disconnect"):
                 self.disconnect()
@@ -253,11 +438,9 @@ class SymcrashImGuiApp:
         changed, new_values, changed_idx = render_knob_row(labels, values)
 
         if changed:
-            # Update state
             for i, val in enumerate(new_values):
                 self.state.macro_values[MACRO_ATTACK + i] = val
 
-            # Send to connection
             if changed_idx >= 0:
                 macro_id = MACRO_ATTACK + changed_idx
                 self._send_macro(macro_id, new_values[changed_idx])
@@ -300,18 +483,15 @@ class SymcrashImGuiApp:
         """Render note buttons and preset/tree selectors."""
         imgui.text("Notes")
 
-        # Note buttons
         any_clicked, clicked_idx = render_note_row(
             NOTE_LABELS,
             self.state.note_states,
         )
 
         if any_clicked:
-            # Toggle note state
             new_state = self.state.toggle_note(clicked_idx)
             note = self.state.get_note_number(clicked_idx)
 
-            # Send to connection
             velocity = 100 if new_state else 0
             self._send_note(note, velocity, new_state)
 
@@ -319,14 +499,12 @@ class SymcrashImGuiApp:
         imgui.spacing()
         imgui.same_line()
 
-        # Preset selector
         changed, new_preset = render_preset_combo(self.state.current_preset)
         if changed:
             self.state.current_preset = new_preset
 
         imgui.same_line()
 
-        # Tree selector
         changed, new_tree = render_tree_combo(self.state.current_tree)
         if changed:
             self.state.current_tree = new_tree
@@ -345,16 +523,14 @@ class SymcrashImGuiApp:
 
 
 def main():
-    """Run the ImGui application standalone (UART mode)."""
+    """Run the Sound Design Workbench standalone."""
     app = SymcrashImGuiApp()
 
-    # Configure runner
     runner_params = hello_imgui.RunnerParams()
-    runner_params.app_window_params.window_title = "Symcrash Controls"
-    runner_params.app_window_params.window_geometry.size = (800, 500)
+    runner_params.app_window_params.window_title = "Symcrash Sound Design Workbench"
+    runner_params.app_window_params.window_geometry.size = (1050, 650)
     runner_params.callbacks.show_gui = app.render
 
-    # Run
     hello_imgui.run(runner_params)
 
 

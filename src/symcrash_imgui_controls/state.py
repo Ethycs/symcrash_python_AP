@@ -6,10 +6,15 @@ Mirrors the Pico2 hardware controller state:
 - 4 note states (buttons)
 - Preset selection
 - Connection status
+
+Sound Design Workbench additions:
+- Character controls (brightness, density, energy, risk, dream, slip)
+- Preset file browser state
+- Render & Play state
 """
 
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Optional, Any
 
 
 # Macro IDs (same as pico2_synth_bridge.py)
@@ -78,6 +83,28 @@ class ControlState:
     connected: bool = False
     port: str = ""
 
+    # --- Sound Design Workbench ---
+
+    # Character controls (0.0-1.0 normalized)
+    character_brightness: float = 0.5
+    character_density: float = 0.5
+    character_energy: float = 0.5
+    character_risk: float = 0.0
+    character_dream: float = 0.0
+    character_slip: float = 0.0
+
+    # Preset file browser
+    available_presets: List[str] = field(default_factory=list)
+    selected_preset_idx: int = 0
+    loaded_preset_path: Optional[str] = None
+    loaded_preset_name: str = ""
+
+    # Render & Play
+    playback_note: int = 60       # MIDI note (C4)
+    playback_duration: float = 1.5  # seconds
+    is_rendering: bool = False
+    render_status: str = ""
+
     def get_macro_float(self, macro_id: int) -> float:
         """Get macro value as 0.0-1.0 float."""
         if 0 <= macro_id < len(self.macro_values):
@@ -111,11 +138,27 @@ MACRO_LABELS = [
     "REL",    # Release
     "CUT",    # Cutoff
     "RES",    # Resonance
-    "HRM",    # Harmonics
-    "ETA",    # Eta (dry/wet)
+    "TONE",   # Tone color
+    "WET",    # Wet/dry blend
     "DET",    # Detune
     "GAIN",   # Gain
 ]
 
 # Note labels for display
 NOTE_LABELS = ["C4", "D4", "E4", "F4"]
+
+# Character control labels and field names
+CHARACTER_LABELS = ["BRT", "DEN", "ENR", "EDGE", "DRIFT", "BLEED"]
+CHARACTER_FIELDS = [
+    "character_brightness",
+    "character_density",
+    "character_energy",
+    "character_risk",
+    "character_dream",
+    "character_slip",
+]
+
+# Playback note options (MIDI note -> label)
+PLAYBACK_NOTES = [
+    (36, "C2"), (48, "C3"), (60, "C4"), (72, "C5"), (84, "C6"),
+]

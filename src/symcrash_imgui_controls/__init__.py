@@ -1,9 +1,9 @@
 """
-Symcrash ImGui Controls
-=======================
+Symcrash Sound Design Workbench
+================================
 
-Dear ImGui-based control interface for the Symcrash synthesizer.
-Mirrors the Pico2 hardware controller functionality.
+Dear ImGui-based sound design workbench for the Symcrash synthesizer.
+Provides preset browsing, character control knobs, and render-and-play.
 
 Usage:
     from symcrash_imgui_controls import main
@@ -29,6 +29,9 @@ from .state import (
     NOTE_LABELS,
     Q15_MAX,
     Q15_HALF,
+    CHARACTER_LABELS,
+    CHARACTER_FIELDS,
+    PLAYBACK_NOTES,
 )
 
 from .uart_sender import (
@@ -44,6 +47,9 @@ from .controls import (
     render_preset_combo,
     render_tree_combo,
     render_connection_status,
+    render_character_knob,
+    render_character_knob_row,
+    render_preset_file_combo,
 )
 
 from .app import (
@@ -69,6 +75,9 @@ __all__ = [
     'NOTE_LABELS',
     'Q15_MAX',
     'Q15_HALF',
+    'CHARACTER_LABELS',
+    'CHARACTER_FIELDS',
+    'PLAYBACK_NOTES',
     # UART
     'UARTSender',
     'find_available_ports',
@@ -80,6 +89,9 @@ __all__ = [
     'render_preset_combo',
     'render_tree_combo',
     'render_connection_status',
+    'render_character_knob',
+    'render_character_knob_row',
+    'render_preset_file_combo',
     # App
     'SymcrashImGuiApp',
     'main',

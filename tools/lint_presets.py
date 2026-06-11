@@ -17,6 +17,7 @@ Rules:
 
   INFO:
     has_conformance    - Header comment should include conformance profile
+    derived_processing - processing: derived from emphasis (no explicit list)
 
 Usage:
     pixi run python tools/lint_presets.py presets/instruments/
@@ -187,14 +188,20 @@ def _lint_sound_design_format(result, ir_data):
                 if key not in node_data:
                     result.warn("amp_adsr", f"Amp node '{node_id}' missing '{key}:'")
 
-    # Check behavior processing entries for CamelCase
+    # Check behavior processing entries for CamelCase, and note derived operators
     behavior = ir_data.get("behavior", {})
     reserved = {"states", "transitions"}
     for state_name, state_def in behavior.items():
         if state_name in reserved or not isinstance(state_def, dict):
             continue
-        ops = state_def.get("processing", [])
-        _check_operator_camelcase(result, ops, f"behavior.{state_name}")
+        has_processing = "processing" in state_def
+        has_emphasis = "emphasis" in state_def
+        if has_processing:
+            ops = state_def.get("processing", [])
+            _check_operator_camelcase(result, ops, f"behavior.{state_name}")
+        elif has_emphasis:
+            result.info("derived_processing",
+                f"behavior.{state_name}: processing derived from emphasis")
 
 
 def _lint_legacy_format(result, ir_data, text):
