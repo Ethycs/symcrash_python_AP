@@ -43,6 +43,7 @@ from typing import List, Dict, Optional, Tuple, Callable, TYPE_CHECKING
 from dataclasses import dataclass, field
 from enum import IntEnum
 import numpy as np
+from ..primitives import Q15_3_4
 
 if TYPE_CHECKING:
     from ..library.preset_compiler import CompiledPreset
@@ -2271,9 +2272,9 @@ class VoiceState:
     detune_cents: int = 0  # Additional detune from controller (-2400 to +2400)
 
     # Oscillator controls (from Pico2 controller)
-    eta_q15: int = 16384  # Dry/wet blend (0=dry, 32767=wet)
+    eta_q15: int = Q15_HALF  # Dry/wet blend (0=dry, 32767=wet)
     harmonics_q15: int = 0  # Harmonic mix (0=fundamental only)
-    master_gain_q15: int = 24576  # Master gain override (~0.75)
+    master_gain_q15: int = Q15_3_4  # Master gain override (~0.75)
 
     # Activity level (for voice stealing)
     activity_q15: int = 0
@@ -2305,7 +2306,7 @@ class VoiceState:
     # Beta ramping (from VoiceFrameEmitter, used in Simple mode)
     beta_current_q15: int = 0
     beta_start_q15: int = 0
-    beta_target_q15: int = 24576
+    beta_target_q15: int = Q15_3_4
     beta_ramp_blocks: int = 10
 
     # Pitch offset from control (in cents)
@@ -2837,7 +2838,7 @@ class VoiceEngine:
         state.amp_env_base_spec = state.amp_envelope.spec
         state.amp_key_scale_rate = float(getattr(preset, 'amp_key_scale_rate', 0.0))
         state.amp_velocity_sens_q15 = int(
-            getattr(preset, 'amp_velocity_sens', 1.0) * 32767)
+            getattr(preset, 'amp_velocity_sens', 1.0) * Q15_ONE)
 
         # Initialize LFOs from preset
         lfos = getattr(preset, 'lfos', None)
@@ -2868,7 +2869,7 @@ class VoiceEngine:
                     state.envelope_matrix[binding.id] = (
                         EnvelopeScheduler(spec=spec),
                         target_ids,
-                        int(getattr(binding, 'velocity_sens', 0.0) * 32767),
+                        int(getattr(binding, 'velocity_sens', 0.0) * Q15_ONE),
                         float(getattr(binding, 'key_scale_rate', 0.0)),
                         spec,  # base (unscaled) spec for key scaling
                     )
@@ -3088,10 +3089,17 @@ class VoiceEngine:
         """
         # Use RegimeGraph for intent-based transitions
         # Pass temperament from program if available
+        # check_transition returns (target, new_prng_state); the voice's
+        # rng_u32 is threaded through so stochastic transitions stay
+        # deterministic across snapshot/replay. (Before 2026-06-11 the
+        # tuple was used ununpacked: it was never None, the fallback was
+        # dead code, and _transition_regime rejected it - every voice
+        # was stuck in R1_ATTACK.)
         temperament = state.program.temperament
-        target = self.regime_graph.check_transition(
+        target, state.rng_u32 = self.regime_graph.check_transition(
             state.regime, state.intent, state.regime_blocks,
-            temperament=temperament
+            temperament=temperament,
+            prng_state=state.rng_u32,
         )
 
         if target is not None:
@@ -3518,8 +3526,8 @@ class VoiceEngine:
         # Apply velocity scaling
         # Velocity -> gain through the Amp velocity curve:
         # scale = (1 - sens) + sens * velocity (sens=1.0 -> legacy raw scaling)
-        amp_sens_q15 = getattr(state, 'amp_velocity_sens_q15', 32767)
-        vel_scale = 32767 - amp_sens_q15 + ((amp_sens_q15 * state.velocity_q15) >> 15)
+        amp_sens_q15 = getattr(state, 'amp_velocity_sens_q15', Q15_ONE)
+        vel_scale = Q15_ONE - amp_sens_q15 + ((amp_sens_q15 * state.velocity_q15) >> 15)
         gain_q15 = (gain_q15 * vel_scale) >> 15
 
         # Compute beta ramp
@@ -3536,7 +3544,7 @@ class VoiceEngine:
         f0_hz = 440.0 * (2.0 ** ((state.note_u8 - 69 + total_cents / 100.0) / 12.0))
 
         # Get preset PWM width default
-        pwm_width_q15 = getattr(preset, 'pwm_width_q15', 16384)
+        pwm_width_q15 = getattr(preset, 'pwm_width_q15', Q15_HALF)
 
         # Tick LFOs and apply modulation
         for lfo in state.lfos:
@@ -3573,7 +3581,7 @@ class VoiceEngine:
                 elif routing.target == LFOTarget.GAIN:
                     gain_q15 = mul_q15_sat(gain_q15, Q15_ONE + scaled)
                 elif routing.target == LFOTarget.PWM_WIDTH:
-                    pwm_width_q15 = max(0, min(32767, pwm_width_q15 + scaled))
+                    pwm_width_q15 = max(0, min(Q15_ONE, pwm_width_q15 + scaled))
                 elif routing.target == LFOTarget.FILTER_CUTOFF:
                     # Modulate filter cutoff (additive on log scale)
                     filter_cutoff_q15 = max(0, min(Q15_ONE, filter_cutoff_q15 + scaled))
@@ -3594,7 +3602,7 @@ class VoiceEngine:
                 value = scheduler.tick()
                 if sens_q15:
                     # velocity_sens: value *= (1 - sens + sens*velocity)
-                    scale = 32767 - sens_q15 + ((sens_q15 * state.velocity_q15) >> 15)
+                    scale = Q15_ONE - sens_q15 + ((sens_q15 * state.velocity_q15) >> 15)
                     value = (value * scale) >> 15
                 for target_id in target_ids:
                     env_targets_q15[target_id] = value
@@ -3640,7 +3648,7 @@ class VoiceEngine:
             cmmm_node_mask=cmmm.node_mask_u32 if cmmm else None,
             cmmm_mask_ramp_blocks=cmmm.mask_ramp_blocks if cmmm else 5,
             cmmm_tail_mode=cmmm.tail_mode if cmmm else None,
-            cmmm_traction_q15=cmmm.traction_q15 if cmmm else 32767,
+            cmmm_traction_q15=cmmm.traction_q15 if cmmm else Q15_ONE,
             # Filter parameters (modulated by LFO/macro)
             filter_cutoff_q15=filter_cutoff_q15,
             filter_reso_q15=filter_reso_q15,

@@ -6,11 +6,14 @@ Tail operators are the mandatory safety operators that must run
 to guarantee well-formed output. Different tail modes provide
 different quality/cost tradeoffs.
 
-Per CMMM-2 spec:
+Per WSE-STD-070 §10 (and InstrumentIR v0 tail table):
 - FULL: High quality [FineClamp, NormalizeScale, SheafProject]
 - MID:  Medium quality [FineClamp, NormalizeScale]
 - MIN:  Minimum safety [FineClamp]
-- EMERGENCY: Carrier-only [EmergencySimplify]
+- EMERGENCY: [FineClamp, EmergencySimplify] - clamping is the bedrock
+  guarantee and runs in every mode, including worst-case degradation.
+  (An older CMMM-2 draft had carrier-only EMERGENCY; the budget tables
+  and primitives.TAIL_MODE_TABLE always reserved for both ops.)
 """
 
 from typing import List, Dict
@@ -30,7 +33,7 @@ TAIL_OPS: Dict[TailMode, List[int]] = {
     TailMode.FULL: [OP_FINE_CLAMP, OP_NORMALIZE_SCALE, OP_SHEAF_PROJECT],
     TailMode.MID: [OP_FINE_CLAMP, OP_NORMALIZE_SCALE],
     TailMode.MIN: [OP_FINE_CLAMP],
-    TailMode.EMERGENCY: [OP_EMERGENCY_SIMPLIFY],
+    TailMode.EMERGENCY: [OP_FINE_CLAMP, OP_EMERGENCY_SIMPLIFY],
 }
 
 
@@ -76,5 +79,5 @@ TAIL_MODE_DESCRIPTIONS = {
     TailMode.FULL: "Full quality: FineClamp + NormalizeScale + SheafProject",
     TailMode.MID: "Medium quality: FineClamp + NormalizeScale",
     TailMode.MIN: "Minimum safety: FineClamp only",
-    TailMode.EMERGENCY: "Emergency fallback: EmergencySimplify (carrier-only)",
+    TailMode.EMERGENCY: "Emergency fallback: FineClamp + EmergencySimplify",
 }

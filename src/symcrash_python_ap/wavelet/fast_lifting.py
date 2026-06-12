@@ -21,6 +21,7 @@ For audio, the rounding difference is inaudible (max 1 LSB).
 
 from typing import List, Tuple, Optional
 import numpy as np
+from ..primitives import Q15_HALF, Q15_NEG_ONE, Q15_ONE
 
 try:
     from numba import njit
@@ -43,10 +44,10 @@ __all__ = [
 
 def _sat16(x: int) -> int:
     """Saturate to int16 range."""
-    if x > 32767:
-        return 32767
-    if x < -32768:
-        return -32768
+    if x > Q15_ONE:
+        return Q15_ONE
+    if x < Q15_NEG_ONE:
+        return Q15_NEG_ONE
     return x
 
 
@@ -326,9 +327,9 @@ class FusedWPT:
                 detail_start = approx_start + out_half
                 for i in range(half):
                     v = temp_s[i]
-                    dst[approx_start + i] = -32768 if v < -32768 else (32767 if v > 32767 else v)
+                    dst[approx_start + i] = Q15_NEG_ONE if v < Q15_NEG_ONE else (Q15_ONE if v > Q15_ONE else v)
                     v = temp_d[i]
-                    dst[detail_start + i] = -32768 if v < -32768 else (32767 if v > 32767 else v)
+                    dst[detail_start + i] = Q15_NEG_ONE if v < Q15_NEG_ONE else (Q15_ONE if v > Q15_ONE else v)
 
         # ===== APPLY MASK AT LEAVES =====
         leaves = fwd[depth]
@@ -338,7 +339,7 @@ class FusedWPT:
             for i in range(block_size):
                 mask_val = mask_q15[i] if i < len(mask_q15) else 0
                 v = (leaves[i] * mask_val) >> 15
-                inv_leaves[i] = -32768 if v < -32768 else (32767 if v > 32767 else v)
+                inv_leaves[i] = Q15_NEG_ONE if v < Q15_NEG_ONE else (Q15_ONE if v > Q15_ONE else v)
         else:
             for i in range(block_size):
                 inv_leaves[i] = leaves[i]
@@ -379,16 +380,16 @@ class FusedWPT:
                 # Interleave to output
                 for i in range(half):
                     v = temp_s[i]
-                    dst[out_start + 2 * i] = -32768 if v < -32768 else (32767 if v > 32767 else v)
+                    dst[out_start + 2 * i] = Q15_NEG_ONE if v < Q15_NEG_ONE else (Q15_ONE if v > Q15_ONE else v)
                     v = temp_d[i]
-                    dst[out_start + 2 * i + 1] = -32768 if v < -32768 else (32767 if v > 32767 else v)
+                    dst[out_start + 2 * i + 1] = Q15_NEG_ONE if v < Q15_NEG_ONE else (Q15_ONE if v > Q15_ONE else v)
 
         # ===== SCALE BACK UP =====
         result = inv[0]
         output = [0] * block_size
         for i in range(block_size):
             v = result[i] << headroom_bits
-            output[i] = -32768 if v < -32768 else (32767 if v > 32767 else v)
+            output[i] = Q15_NEG_ONE if v < Q15_NEG_ONE else (Q15_ONE if v > Q15_ONE else v)
 
         return output
 
@@ -425,10 +426,10 @@ def effect_mode_fused(
 @njit(cache=True, fastmath=True)
 def _sat16_jit(x: int) -> int:
     """Saturate to int16 range (JIT version)."""
-    if x > 32767:
-        return 32767
-    if x < -32768:
-        return -32768
+    if x > Q15_ONE:
+        return Q15_ONE
+    if x < Q15_NEG_ONE:
+        return Q15_NEG_ONE
     return x
 
 
@@ -496,16 +497,16 @@ def _effect_mode_jit_core(
             detail_start = approx_start + half
             for i in range(half):
                 v = temp_s[i]
-                if v < -32768:
+                if v < Q15_NEG_ONE:
                     v = -32768
-                elif v > 32767:
+                elif v > Q15_ONE:
                     v = 32767
                 fwd_levels[level + 1, approx_start + i] = v
 
                 v = temp_d[i]
-                if v < -32768:
+                if v < Q15_NEG_ONE:
                     v = -32768
-                elif v > 32767:
+                elif v > Q15_ONE:
                     v = 32767
                 fwd_levels[level + 1, detail_start + i] = v
 
@@ -513,10 +514,10 @@ def _effect_mode_jit_core(
     if use_mask:
         for i in range(block_size):
             # Add rounding (+16384) to avoid systematic negative bias from truncation
-            v = (fwd_levels[depth, i] * mask_q15[i] + 16384) >> 15
-            if v < -32768:
+            v = (fwd_levels[depth, i] * mask_q15[i] + Q15_HALF) >> 15
+            if v < Q15_NEG_ONE:
                 v = -32768
-            elif v > 32767:
+            elif v > Q15_ONE:
                 v = 32767
             inv_levels[depth, i] = v
     else:
@@ -566,25 +567,25 @@ def _effect_mode_jit_core(
             # Interleave to output with saturation
             for i in range(half):
                 v = temp_s[i]
-                if v < -32768:
+                if v < Q15_NEG_ONE:
                     v = -32768
-                elif v > 32767:
+                elif v > Q15_ONE:
                     v = 32767
                 inv_levels[level, out_start + 2 * i] = v
 
                 v = temp_d[i]
-                if v < -32768:
+                if v < Q15_NEG_ONE:
                     v = -32768
-                elif v > 32767:
+                elif v > Q15_ONE:
                     v = 32767
                 inv_levels[level, out_start + 2 * i + 1] = v
 
     # ===== SCALE BACK UP =====
     for i in range(block_size):
         v = inv_levels[0, i] << headroom_bits
-        if v < -32768:
+        if v < Q15_NEG_ONE:
             v = -32768
-        elif v > 32767:
+        elif v > Q15_ONE:
             v = 32767
         output[i] = v
 
@@ -659,7 +660,7 @@ def _get_jit_processor() -> JITWaveletProcessor:
 def effect_mode_jit(
     carrier: List[int],
     mask_q15: Optional[List[int]] = None,
-    headroom_bits: int = 1
+    headroom_bits: int = 3
 ) -> List[int]:
     """
     JIT-accelerated effect mode using Numba.
@@ -667,9 +668,16 @@ def effect_mode_jit(
     Drop-in replacement for effect_mode_fused with ~10-20x better performance.
     Falls back to pure Python if Numba is not available.
 
-    Note: headroom_bits=1 gives ~32 LSB error vs headroom_bits=3 giving ~94 LSB.
-    Since carrier is already scaled down by DC_HEADROOM (~0.9456), we can use
-    less headroom for better reconstruction accuracy.
+    headroom_bits=3 (default, matching every other effect_mode_* variant):
+    the lifting stages need ~3 bits of growth margin for full-scale
+    high-frequency content. Measured roundtrip max error by headroom on a
+    full-scale sine (2026-06-11): h=3 -> 7 LSB at ALL frequencies; h=2 ->
+    3 LSB but overflows at 8 kHz (16533); h=1 -> 1 LSB at low freq but
+    catastrophic internal saturation >= 2 kHz (19473 @ 4 kHz, 33321 @
+    8 kHz). DC_HEADROOM (~0.9456, ~0.5 dB) is nowhere near the ~1 bit of
+    margin the old h=1 rationale assumed, and lanes clips the carrier to
+    full scale before this call. Precision cost is 2^h - 1 LSB (~-73 dBFS
+    at h=3).
     """
     if NUMBA_AVAILABLE:
         return _get_jit_processor().effect_mode(carrier, mask_q15, headroom_bits)
@@ -750,16 +758,16 @@ def _fwpt_jit_core(
             detail_start = approx_start + half
             for i in range(half):
                 v = temp_s[i]
-                if v < -32768:
+                if v < Q15_NEG_ONE:
                     v = -32768
-                elif v > 32767:
+                elif v > Q15_ONE:
                     v = 32767
                 fwd_levels[level + 1, approx_start + i] = v
 
                 v = temp_d[i]
-                if v < -32768:
+                if v < Q15_NEG_ONE:
                     v = -32768
-                elif v > 32767:
+                elif v > Q15_ONE:
                     v = 32767
                 fwd_levels[level + 1, detail_start + i] = v
 
@@ -834,25 +842,25 @@ def _idwpt_jit_core(
             # Interleave to output with saturation
             for i in range(half):
                 v = temp_s[i]
-                if v < -32768:
+                if v < Q15_NEG_ONE:
                     v = -32768
-                elif v > 32767:
+                elif v > Q15_ONE:
                     v = 32767
                 inv_levels[level, out_start + 2 * i] = v
 
                 v = temp_d[i]
-                if v < -32768:
+                if v < Q15_NEG_ONE:
                     v = -32768
-                elif v > 32767:
+                elif v > Q15_ONE:
                     v = 32767
                 inv_levels[level, out_start + 2 * i + 1] = v
 
     # Scale back up
     for i in range(block_size):
         v = inv_levels[0, i] << headroom_bits
-        if v < -32768:
+        if v < Q15_NEG_ONE:
             v = -32768
-        elif v > 32767:
+        elif v > Q15_ONE:
             v = 32767
         output_buf[i] = v
 
