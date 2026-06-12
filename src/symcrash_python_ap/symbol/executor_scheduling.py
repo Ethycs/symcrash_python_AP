@@ -41,6 +41,7 @@ from ..comm.uart_protocol import (
     VoiceFrameV0, BackboneEntry, Payload64, PayloadMode,
     EventLane, NUM_EVENT_LANES, resolve_pattern
 )
+from ..primitives import Q15_NEG_ONE
 
 
 # =============================================================================
@@ -267,7 +268,7 @@ def check_tail_safe(c: List[int], traction_q15: int = Q15_ONE,
     result.bounded_energy = energy <= scaled_e_max
 
     # 3. No NaN/undefined - Python ints don't have NaN, check for overflow
-    result.no_nan_undefined = all(-32768 <= x <= 32767 for x in c)
+    result.no_nan_undefined = all(Q15_NEG_ONE <= x <= Q15_ONE for x in c)
 
     # 4. Deterministic coercion - assume OK if we reach this point
     result.deterministic_coercion = True

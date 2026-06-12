@@ -16,6 +16,7 @@ from .tables import VM_K
 
 # Import canonical constants from primitives (single source of truth)
 from ..primitives import Q15_ONE, Q16_ONE
+from ..primitives import Q15_3_4, Q15_NEG_ONE
 
 # Constants
 # VM_K imported from tables.py for consistency
@@ -113,7 +114,7 @@ class FM6State:
     # Post-filter (optional one-pole lowpass)
     # When enabled, softens harsh FM harmonics (like vintage DX7 DAC filter)
     post_filter_enabled: bool = False
-    post_filter_cutoff_q15: int = 24576  # ~0.75 coefficient (gentle rolloff)
+    post_filter_cutoff_q15: int = Q15_3_4  # ~0.75 coefficient (gentle rolloff)
     _post_filter_state: int = 0          # Filter state (z⁻¹)
 
     def reset(self):
@@ -244,7 +245,7 @@ class FM6State:
             diff = int(audio[i]) - state
             state = state + ((diff * coeff) >> 15)
             # Saturate
-            state = max(-32768, min(32767, state))
+            state = max(Q15_NEG_ONE, min(Q15_ONE, state))
             output[i] = state
 
         self._post_filter_state = state
@@ -302,7 +303,7 @@ DX7_FEEDBACK_TABLE = [
     18724,  # Level 4: ~0.571
     23405,  # Level 5: ~0.714
     28086,  # Level 6: ~0.857
-    32767,  # Level 7: ~1.0
+    Q15_ONE,  # Level 7: ~1.0
 ]
 
 

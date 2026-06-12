@@ -36,6 +36,7 @@ import os
 import math
 
 import numpy as np
+from ..primitives import Q15_HALF, Q15_NEG_ONE, Q15_ONE, Q15_SCALE
 
 try:
     from numba import njit
@@ -130,17 +131,17 @@ def _rshift_rne(x, k):
 @njit(cache=True)
 def _clamp16(x):
     """clamp_q15 / np.clip(x, -32768, 32767)."""
-    if x > 32767:
-        return 32767
-    if x < -32768:
-        return -32768
+    if x > Q15_ONE:
+        return Q15_ONE
+    if x < Q15_NEG_ONE:
+        return Q15_NEG_ONE
     return x
 
 
 @njit(cache=True)
 def _wrap16(x):
     """Emulate numpy int16 wraparound for a value already in int64."""
-    return ((x + 32768) & 0xFFFF) - 32768
+    return ((x + Q15_SCALE) & 0xFFFF) - Q15_SCALE
 
 
 # =============================================================================
@@ -607,24 +608,24 @@ def _idwpt_core_k(coeffs, headroom_bits, output_buf, inv_levels, temp_s, temp_d)
 
             for i in range(half):
                 v = temp_s[i]
-                if v < -32768:
+                if v < Q15_NEG_ONE:
                     v = -32768
-                elif v > 32767:
+                elif v > Q15_ONE:
                     v = 32767
                 inv_levels[level, out_start + 2 * i] = v
 
                 v = temp_d[i]
-                if v < -32768:
+                if v < Q15_NEG_ONE:
                     v = -32768
-                elif v > 32767:
+                elif v > Q15_ONE:
                     v = 32767
                 inv_levels[level, out_start + 2 * i + 1] = v
 
     for i in range(block_size):
         v = inv_levels[0, i] << headroom_bits
-        if v < -32768:
+        if v < Q15_NEG_ONE:
             v = -32768
-        elif v > 32767:
+        elif v > Q15_ONE:
             v = 32767
         output_buf[i] = v
 
@@ -790,16 +791,16 @@ def fwpt_64(input_buf, headroom_bits, output_coeffs):
             detail_start = approx_start + half
             for i in range(half):
                 v = temp_s[i]
-                if v < -32768:
+                if v < Q15_NEG_ONE:
                     v = -32768
-                elif v > 32767:
+                elif v > Q15_ONE:
                     v = 32767
                 fwd_levels[level + 1, approx_start + i] = v
 
                 v = temp_d[i]
-                if v < -32768:
+                if v < Q15_NEG_ONE:
                     v = -32768
-                elif v > 32767:
+                elif v > Q15_ONE:
                     v = 32767
                 fwd_levels[level + 1, detail_start + i] = v
 
@@ -899,9 +900,9 @@ def fm6_block_full(
 
             output = _fm6_rshift_rne(sin_val * level, 15)
             output = _fm6_rshift_rne(output * env, 15)
-            if output > 32767:
+            if output > Q15_ONE:
                 output = 32767
-            elif output < -32768:
+            elif output < Q15_NEG_ONE:
                 output = -32768
 
             op_out[op_idx, s] = output
@@ -920,13 +921,13 @@ def fm6_block_full(
         # Reference computes (sum * master) in an int32 numpy array, which
         # can wrap; emulate the wraparound at each int32-array step.
         prod = _wrap32(acc * master_level)
-        val = _wrap32(prod + 16384) >> 15
+        val = _wrap32(prod + Q15_HALF) >> 15
         if num_carriers > 1:
             # numpy int32 floor division (matches Python floor semantics)
             val = val // num_carriers
-        if val > 32767:
+        if val > Q15_ONE:
             val = 32767
-        elif val < -32768:
+        elif val < Q15_NEG_ONE:
             val = -32768
         out_audio[s] = val
 

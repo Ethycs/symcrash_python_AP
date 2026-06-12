@@ -24,6 +24,7 @@ from enum import IntEnum
 from ..primitives import (
     Q15_ONE, Q15_HALF, Q15_SCALE, BLOCK_SIZE, SAMPLE_RATE_HZ, BLOCK_RATE_HZ, NUM_LEAVES
 )
+from ..primitives import Q15_3_4
 
 
 # =============================================================================
@@ -73,7 +74,7 @@ class EnvelopeState:
     # ADSR times in samples
     attack_samples: int = 480       # 10ms @ 48kHz
     decay_samples: int = 2400       # 50ms @ 48kHz
-    sustain_q15: int = 24576        # 0.75 sustain level
+    sustain_q15: int = Q15_3_4        # 0.75 sustain level
     release_samples: int = 4800     # 100ms @ 48kHz
 
     # Internal counters

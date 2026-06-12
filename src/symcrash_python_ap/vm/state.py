@@ -15,6 +15,7 @@ from .tables import COEFF_LEN, BLOCK_SAMPLES
 from ..fixed import midi_to_phase_inc_fixed
 from .coeff_lut_streaming import CCSState, midi_to_hz, SAMPLE_RATE
 from ..primitives import Q15_ONE, Q15_HALF, SymbolMode, TimbralMode
+from ..primitives import Q15_3_4
 
 # Defer import to avoid circular dependency - ModeBState imported when needed
 # from .harmonic_bank import ModeBState, OSC_MODE_A, OSC_MODE_B
@@ -277,7 +278,7 @@ class EnvelopeState:
     # Envelope parameters (set at note-on)
     attack_samples: int = 0
     decay_samples: int = 0
-    sustain_level_q15: int = 24576  # ~0.75
+    sustain_level_q15: int = Q15_3_4  # ~0.75
     release_samples: int = 0
 
 
@@ -560,7 +561,7 @@ class VMState:
         cents: int = 0,
         attack_samples: int = 480,
         decay_samples: int = 960,
-        sustain_level_q15: int = 24576,
+        sustain_level_q15: int = Q15_3_4,
         release_samples: int = 4800,
         *,
         f0_hz: Optional[float] = None,

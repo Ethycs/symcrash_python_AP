@@ -18,6 +18,7 @@ from imgui_bundle import imgui, imgui_node_editor as ed
 
 from symcrash_python_ap.editor import EditorSession, SetParam
 from symcrash_python_ap.instrument_ir import L0Node, L0Edge, NodeType
+from symcrash_python_ap.primitives import Q15_ONE, Q16_ONE
 
 
 # Node colors by type
@@ -551,7 +552,7 @@ class L0GraphView:
             pw_pct = params.pwm_width_q15 / 32767.0 * 100.0
             changed, new_pct = imgui.slider_float("Pulse Width", pw_pct, 10.0, 90.0, "%.1f%%")
             if changed:
-                new_q15 = int(new_pct / 100.0 * 32767)
+                new_q15 = int(new_pct / 100.0 * Q15_ONE)
                 path = f"layers.L0_graph.nodes[{self._get_node_index()}].params.pwm_width_q15"
                 self.session.execute(SetParam(path, new_q15))
 
@@ -569,7 +570,7 @@ class L0GraphView:
             ratio_float = params.sync_ratio_q16 / 65536.0
             changed, new_ratio = imgui.slider_float("Sync Ratio", ratio_float, 0.5, 4.0, "%.2fx")
             if changed:
-                new_q16 = int(new_ratio * 65536)
+                new_q16 = int(new_ratio * Q16_ONE)
                 path = f"layers.L0_graph.nodes[{self._get_node_index()}].params.sync_ratio_q16"
                 self.session.execute(SetParam(path, new_q16))
 
@@ -638,7 +639,7 @@ class L0GraphView:
         cutoff_pct = params.filter_cutoff_q15 / 32767.0 * 100.0
         changed, new_pct = imgui.slider_float("Cutoff", cutoff_pct, 0.0, 100.0, "%.1f%%")
         if changed:
-            new_q15 = int(new_pct / 100.0 * 32767)
+            new_q15 = int(new_pct / 100.0 * Q15_ONE)
             path = f"layers.L0_graph.nodes[{self._get_node_index()}].params.filter_cutoff_q15"
             self.session.execute(SetParam(path, new_q15))
 
@@ -646,7 +647,7 @@ class L0GraphView:
         reso_pct = params.filter_resonance_q15 / 32767.0 * 100.0
         changed, new_pct = imgui.slider_float("Resonance", reso_pct, 0.0, 100.0, "%.1f%%")
         if changed:
-            new_q15 = int(new_pct / 100.0 * 32767)
+            new_q15 = int(new_pct / 100.0 * Q15_ONE)
             path = f"layers.L0_graph.nodes[{self._get_node_index()}].params.filter_resonance_q15"
             self.session.execute(SetParam(path, new_q15))
 
@@ -657,7 +658,7 @@ class L0GraphView:
         env_depth_pct = params.filter_env_depth_q15 / 32767.0 * 100.0
         changed, new_pct = imgui.slider_float("Env Depth", env_depth_pct, -100.0, 100.0, "%.1f%%")
         if changed:
-            new_q15 = int(new_pct / 100.0 * 32767)
+            new_q15 = int(new_pct / 100.0 * Q15_ONE)
             path = f"layers.L0_graph.nodes[{self._get_node_index()}].params.filter_env_depth_q15"
             self.session.execute(SetParam(path, new_q15))
 
@@ -665,7 +666,7 @@ class L0GraphView:
         key_track_pct = params.filter_key_track_q15 / 32767.0 * 100.0
         changed, new_pct = imgui.slider_float("Key Track", key_track_pct, 0.0, 100.0, "%.1f%%")
         if changed:
-            new_q15 = int(new_pct / 100.0 * 32767)
+            new_q15 = int(new_pct / 100.0 * Q15_ONE)
             path = f"layers.L0_graph.nodes[{self._get_node_index()}].params.filter_key_track_q15"
             self.session.execute(SetParam(path, new_q15))
 
@@ -675,7 +676,7 @@ class L0GraphView:
         drive_pct = params.filter_drive_q15 / 32767.0 * 100.0
         changed, new_pct = imgui.slider_float("Drive", drive_pct, 0.0, 100.0, "%.1f%%")
         if changed:
-            new_q15 = int(new_pct / 100.0 * 32767)
+            new_q15 = int(new_pct / 100.0 * Q15_ONE)
             path = f"layers.L0_graph.nodes[{self._get_node_index()}].params.filter_drive_q15"
             self.session.execute(SetParam(path, new_q15))
 
@@ -741,13 +742,13 @@ class L0GraphView:
         imgui.text("Operator Levels")
 
         # Operator levels (6 operators)
-        op_levels = params.op_levels or [32767] * 6
+        op_levels = params.op_levels or [Q15_ONE] * 6
         for i in range(6):
             level_pct = op_levels[i] / 32767.0 * 100.0
             changed, new_pct = imgui.slider_float(f"Op {i+1} Level", level_pct, 0.0, 100.0, "%.1f%%")
             if changed:
                 new_levels = list(op_levels)
-                new_levels[i] = int(new_pct / 100.0 * 32767)
+                new_levels[i] = int(new_pct / 100.0 * Q15_ONE)
                 path = f"layers.L0_graph.nodes[{self._get_node_index()}].params.op_levels"
                 self.session.execute(SetParam(path, new_levels))
 
@@ -755,14 +756,14 @@ class L0GraphView:
         imgui.text("Operator Ratios")
 
         # Operator ratios (Q16.16 format, 65536 = 1.0x)
-        op_ratios = params.op_ratios or [65536] * 6
+        op_ratios = params.op_ratios or [Q16_ONE] * 6
         ratio_presets = [0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]
         for i in range(6):
             ratio_float = op_ratios[i] / 65536.0
             changed, new_ratio = imgui.slider_float(f"Op {i+1} Ratio", ratio_float, 0.5, 16.0, "%.2fx")
             if changed:
                 new_ratios = list(op_ratios)
-                new_ratios[i] = int(new_ratio * 65536)
+                new_ratios[i] = int(new_ratio * Q16_ONE)
                 path = f"layers.L0_graph.nodes[{self._get_node_index()}].params.op_ratios"
                 self.session.execute(SetParam(path, new_ratios))
 

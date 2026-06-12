@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 import json
+from ..primitives import Q15_3_4
 
 try:
     import yaml
@@ -311,7 +312,7 @@ class CompiledPreset:
     backbone: List[BackboneOp]
 
     # Harmonic amplitudes for saw/partial carriers
-    harmonic_amps_q15: List[int] = field(default_factory=lambda: [32767, 16383, 10922, 8191, 6553, 5461, 4681, 4096])
+    harmonic_amps_q15: List[int] = field(default_factory=lambda: [Q15_ONE, 16383, 10922, 8191, 6553, 5461, 4681, 4096])
 
     # FM6 configuration (optional - if present, enables FM6 mode)
     fm6: Optional[FM6Config] = None
@@ -557,7 +558,7 @@ def compiled_preset_from_capsule(capsule) -> CompiledPreset:
         amp_env = ADSRSpec(
             attack_ms=cd.get(int(ControlID.ATK_BLOCKS), 8) * _MS_PER_BLOCK,
             decay_ms=cd.get(int(ControlID.DCY_BLOCKS), 32) * _MS_PER_BLOCK,
-            sustain=cd.get(int(ControlID.SUS_Q15), 24576) / Q15_ONE,
+            sustain=cd.get(int(ControlID.SUS_Q15), Q15_3_4) / Q15_ONE,
             release_ms=cd.get(int(ControlID.REL_BLOCKS), 64) * _MS_PER_BLOCK,
         )
 

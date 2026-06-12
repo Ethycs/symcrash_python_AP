@@ -23,6 +23,7 @@ from .tables import VM_K, COEFF_LEN
 
 # Import canonical constants from primitives (single source of truth)
 from ..primitives import NUM_LEAVES, BLOCK_SIZE
+from ..primitives import Q15_NEG_ONE, Q15_ONE, Q16_ONE
 
 
 @dataclass
@@ -57,7 +58,7 @@ class SampleOscState:
 
     # Playback rate (Q16: 65536 = 1.0x, 131072 = 2.0x, etc.)
     # Works in both coeff mode (block interpolation) and audio mode
-    rate_q16: int = 65536
+    rate_q16: int = Q16_ONE
 
     # Loop parameters (in block indices when use_coeff_buffer=True)
     loop_start: int = 0      # Loop start block index
@@ -134,7 +135,7 @@ class SampleOscState:
             start = b * BLOCK_SIZE
             audio_block = self.buffer[start:start + BLOCK_SIZE]
             coeffs = fwpt_jit(audio_block.tolist(), headroom_bits=1)
-            self.coeff_buffer[b, :] = np.clip(coeffs, -32768, 32767)
+            self.coeff_buffer[b, :] = np.clip(coeffs, Q15_NEG_ONE, Q15_ONE)
 
         self.use_coeff_buffer = True
         # Convert loop points to block indices
@@ -148,7 +149,7 @@ class SampleOscState:
         Pitch shifting works in coefficient mode via block interpolation.
         No fallback to audio mode needed.
         """
-        self.rate_q16 = int(ratio * 65536)
+        self.rate_q16 = int(ratio * Q16_ONE)
 
     def set_pitch_semitones(self, semitones: float) -> None:
         """Set playback pitch shift in semitones."""
@@ -218,7 +219,7 @@ def read_coeff_block(state: SampleOscState, output_512: np.ndarray) -> None:
         c0 = int(coeffs_0[leaf])
         c1 = int(coeffs_1[leaf])
         interp = c0 + (((c1 - c0) * block_frac) >> 16)
-        interp = max(-32768, min(32767, interp))  # Saturate
+        interp = max(Q15_NEG_ONE, min(Q15_ONE, interp))  # Saturate
         for k in range(VM_K):
             output_512[leaf * VM_K + k] = interp
 
@@ -276,14 +277,14 @@ def read_sample_block(state: SampleOscState, num_samples: int = BLOCK_SIZE) -> n
                 # Interpolate last sample toward zero
                 s0 = int(state.buffer[buf_len - 1])
                 interp = s0 - ((s0 * pos_frac) >> 16)
-                output[i] = np.clip(interp, -32768, 32767)
+                output[i] = np.clip(interp, Q15_NEG_ONE, Q15_ONE)
         else:
             # Linear interpolation between samples
             s0 = int(state.buffer[pos_int])
             s1 = int(state.buffer[pos_int + 1])
             # Interpolate: out = s0 + (s1 - s0) * frac / 65536
             interp = s0 + (((s1 - s0) * pos_frac) >> 16)
-            output[i] = np.clip(interp, -32768, 32767)
+            output[i] = np.clip(interp, Q15_NEG_ONE, Q15_ONE)
 
         # Advance position
         state.position_q16 += state.rate_q16
@@ -323,7 +324,7 @@ def sample_generate_coeffs(state: SampleOscState, output_512: np.ndarray) -> Non
     # Replicate across K time slots
     for k in range(VM_K):
         for leaf in range(NUM_LEAVES):
-            output_512[leaf * VM_K + k] = np.clip(coeffs_64[leaf], -32768, 32767)
+            output_512[leaf * VM_K + k] = np.clip(coeffs_64[leaf], Q15_NEG_ONE, Q15_ONE)
 
 
 def sample_generate_coeffs_windowed(
@@ -345,7 +346,7 @@ def sample_generate_coeffs_windowed(
     # Apply window if provided
     if window is not None:
         audio_block = (audio_block.astype(np.int32) * window.astype(np.int32)) >> 15
-        audio_block = np.clip(audio_block, -32768, 32767).astype(np.int16)
+        audio_block = np.clip(audio_block, Q15_NEG_ONE, Q15_ONE).astype(np.int16)
 
     # Transform via FWPT
     coeffs_64 = fwpt_jit(audio_block.tolist(), headroom_bits=1)
@@ -353,7 +354,7 @@ def sample_generate_coeffs_windowed(
     # Replicate across K time slots
     for k in range(VM_K):
         for leaf in range(NUM_LEAVES):
-            output_512[leaf * VM_K + k] = np.clip(coeffs_64[leaf], -32768, 32767)
+            output_512[leaf * VM_K + k] = np.clip(coeffs_64[leaf], Q15_NEG_ONE, Q15_ONE)
 
 
 # =============================================================================
@@ -375,7 +376,7 @@ def create_hann_window(size: int = BLOCK_SIZE) -> np.ndarray:
     """
     n = np.arange(size)
     window = 0.5 * (1 - np.cos(2 * np.pi * n / (size - 1)))
-    return (window * 32767).astype(np.int16)
+    return (window * Q15_ONE).astype(np.int16)
 
 
 def create_hamming_window(size: int = BLOCK_SIZE) -> np.ndarray:
@@ -393,7 +394,7 @@ def create_hamming_window(size: int = BLOCK_SIZE) -> np.ndarray:
     """
     n = np.arange(size)
     window = 0.54 - 0.46 * np.cos(2 * np.pi * n / (size - 1))
-    return (window * 32767).astype(np.int16)
+    return (window * Q15_ONE).astype(np.int16)
 
 
 def create_blackman_window(size: int = BLOCK_SIZE) -> np.ndarray:
@@ -412,7 +413,7 @@ def create_blackman_window(size: int = BLOCK_SIZE) -> np.ndarray:
     n = np.arange(size)
     a0, a1, a2 = 0.42, 0.5, 0.08
     window = a0 - a1 * np.cos(2 * np.pi * n / (size - 1)) + a2 * np.cos(4 * np.pi * n / (size - 1))
-    return (window * 32767).astype(np.int16)
+    return (window * Q15_ONE).astype(np.int16)
 
 
 def create_kaiser_window(size: int = BLOCK_SIZE, beta: float = 5.0) -> np.ndarray:
@@ -436,7 +437,7 @@ def create_kaiser_window(size: int = BLOCK_SIZE, beta: float = 5.0) -> np.ndarra
     window = np.kaiser(size, beta)
     # Normalize to peak of 1.0, then scale to Q15
     window = window / np.max(window)
-    return (window * 32767).astype(np.int16)
+    return (window * Q15_ONE).astype(np.int16)
 
 
 def create_triangular_window(size: int = BLOCK_SIZE) -> np.ndarray:
@@ -455,7 +456,7 @@ def create_triangular_window(size: int = BLOCK_SIZE) -> np.ndarray:
     n = np.arange(size)
     half = (size - 1) / 2
     window = 1.0 - np.abs((n - half) / half)
-    return (window * 32767).astype(np.int16)
+    return (window * Q15_ONE).astype(np.int16)
 
 
 def compute_playback_rate(original_note: int, target_note: int) -> int:
@@ -471,7 +472,7 @@ def compute_playback_rate(original_note: int, target_note: int) -> int:
     """
     semitones = target_note - original_note
     ratio = 2.0 ** (semitones / 12.0)
-    return int(ratio * 65536)
+    return int(ratio * Q16_ONE)
 
 
 # =============================================================================

@@ -33,6 +33,7 @@ from ..wavelet.fast_lifting import fwpt_jit
 
 # Import canonical constants from primitives (single source of truth)
 from ..primitives import NUM_LEAVES, BLOCK_SIZE, Q15_ONE, Q16_ONE
+from ..primitives import Q15_NEG_ONE
 
 
 # =============================================================================
@@ -184,7 +185,7 @@ class WavetableAtlas:
         s1 = lerp_q16(s10, s11, frame_frac)  # Interpolate along frame at pos_next
         result = lerp_q16(s0, s1, pos_frac)  # Interpolate along position
 
-        return max(-32768, min(32767, result))
+        return max(Q15_NEG_ONE, min(Q15_ONE, result))
 
 
 def create_basic_waves() -> WavetableAtlas:
@@ -202,19 +203,19 @@ def create_basic_waves() -> WavetableAtlas:
     phase = np.linspace(0, 2 * np.pi, frame_size, endpoint=False)
 
     # Frame 0: Sine
-    frames[0] = (np.sin(phase) * 32767).astype(np.int16)
+    frames[0] = (np.sin(phase) * Q15_ONE).astype(np.int16)
 
     # Frame 1: Triangle
     tri = 2 * np.abs(2 * (np.linspace(0, 1, frame_size, endpoint=False) - 0.5)) - 1
-    frames[1] = (tri * 32767).astype(np.int16)
+    frames[1] = (tri * Q15_ONE).astype(np.int16)
 
     # Frame 2: Saw (ramp down)
     saw = 1 - 2 * np.linspace(0, 1, frame_size, endpoint=False)
-    frames[2] = (saw * 32767).astype(np.int16)
+    frames[2] = (saw * Q15_ONE).astype(np.int16)
 
     # Frame 3: Square
     sq = np.where(phase < np.pi, 1.0, -1.0)
-    frames[3] = (sq * 32767).astype(np.int16)
+    frames[3] = (sq * Q15_ONE).astype(np.int16)
 
     return WavetableAtlas.from_2d_array(frames, name="BasicWaves")
 
@@ -249,7 +250,7 @@ def create_harmonic_series(num_frames: int = 32, max_harmonics: int = 32) -> Wav
         frames[f] = waveform
 
     return WavetableAtlas.from_2d_array(
-        (frames * 32767).astype(np.int16),
+        (frames * Q15_ONE).astype(np.int16),
         name="HarmonicSeries"
     )
 
@@ -478,7 +479,7 @@ def wavetable_generate_coeffs(state: WavetableState, output_512: np.ndarray) -> 
     # Replicate across K time slots
     for k in range(VM_K):
         for leaf in range(NUM_LEAVES):
-            output_512[leaf * VM_K + k] = np.clip(coeffs_64[leaf], -32768, 32767)
+            output_512[leaf * VM_K + k] = np.clip(coeffs_64[leaf], Q15_NEG_ONE, Q15_ONE)
 
 
 def wavetable_generate_coeffs_fast(state: WavetableState, output_512: np.ndarray) -> None:

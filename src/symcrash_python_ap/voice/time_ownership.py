@@ -22,6 +22,8 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Set, Dict, Any, Callable
 from enum import Enum, IntEnum
 import re
+from ..primitives import Q15_ONE
+from ..primitives import Q15_QUARTER
 
 
 # =============================================================================
@@ -449,7 +451,7 @@ class VoiceFrame:
     note_u8: int = 60
     cents_i16: int = 0
     velocity_q15: int = 0
-    gain_q15: int = 32767
+    gain_q15: int = Q15_ONE
     activity_q15: int = 0
     pan_q15: int = 0
 
@@ -498,22 +500,22 @@ def convert_intent_to_voice(
     - event_mask/event_strengths (scheduled events)
     """
     # Convert velocity to Q15
-    velocity_q15 = int(intent.velocity * 32767)
+    velocity_q15 = int(intent.velocity * Q15_ONE)
 
     # Convert family weights to Q15 array
     w_family_q15 = [0] * 8
     family_names = ['CALM', 'TENSE', 'FOLD', 'CUSP', 'SWALLOW', 'PULSE', 'SPARSE', 'DENSE']
     for i, name in enumerate(family_names):
         if name in intent.family_weights:
-            w_family_q15[i] = int(intent.family_weights[name] * 32767)
+            w_family_q15[i] = int(intent.family_weights[name] * Q15_ONE)
 
     return VoiceFrame(
         voice_id=voice_id,
         block_index=block_index,
         note_u8=intent.note,
-        cents_i16=int(intent.pitch_bend * 8192),  # Pitch bend to cents
+        cents_i16=int(intent.pitch_bend * Q15_QUARTER),  # q15-literal-ok (cents scale, not Q15)
         velocity_q15=velocity_q15,
-        gain_q15=int(intent.expression * 32767),
+        gain_q15=int(intent.expression * Q15_ONE),
         gate=intent.gate,
         gate_rise=gate_rise,
         gate_fall=gate_fall,

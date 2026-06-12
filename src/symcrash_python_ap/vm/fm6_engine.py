@@ -17,6 +17,7 @@ from typing import Tuple
 from .fm_algorithms import get_algorithm, FMAlgorithm
 from .fm6_state import FM6State, Q15_ONE, Q16_ONE, Q32_MASK
 from .tables import VM_K, COEFF_LEN
+from ..primitives import Q15_NEG_ONE, Q15_ONE
 
 # Import sine table from SineCore
 try:
@@ -28,9 +29,9 @@ except ImportError:
     def sin_cos_q15(phase_q32: int) -> Tuple[int, int]:
         """Compute sin/cos from Q32 phase."""
         phase_rad = (phase_q32 / (1 << 32)) * 2 * math.pi
-        sin_val = int(math.sin(phase_rad) * 32767)
-        cos_val = int(math.cos(phase_rad) * 32767)
-        return max(-32768, min(32767, sin_val)), max(-32768, min(32767, cos_val))
+        sin_val = int(math.sin(phase_rad) * Q15_ONE)
+        cos_val = int(math.cos(phase_rad) * Q15_ONE)
+        return max(Q15_NEG_ONE, min(Q15_ONE, sin_val)), max(Q15_NEG_ONE, min(Q15_ONE, cos_val))
 
 
 # Constants - import from primitives (single source of truth)
@@ -88,10 +89,10 @@ def fm6_gateway_level_overrides(state: 'FM6State', alg: 'FMAlgorithm' = None):
 
 def _sat16(x: int) -> int:
     """Saturate to int16 range."""
-    if x > 32767:
-        return 32767
-    elif x < -32768:
-        return -32768
+    if x > Q15_ONE:
+        return Q15_ONE
+    elif x < Q15_NEG_ONE:
+        return Q15_NEG_ONE
     return x
 
 
@@ -193,7 +194,7 @@ def fm6_generate_block(state: FM6State, base_phase_inc: int) -> np.ndarray:
         # Scale down to prevent clipping when summing carriers
         output_k = output_k // num_carriers
 
-    return np.clip(output_k, -32768, 32767).astype(np.int16)
+    return np.clip(output_k, Q15_NEG_ONE, Q15_ONE).astype(np.int16)
 
 
 def fm6_generate_block_full(state: FM6State, base_phase_inc: int,
@@ -290,7 +291,7 @@ def fm6_generate_block_full(state: FM6State, base_phase_inc: int,
         output = output // len(carriers)
 
     # Saturate to int16
-    output = np.clip(output, -32768, 32767).astype(np.int16)
+    output = np.clip(output, Q15_NEG_ONE, Q15_ONE).astype(np.int16)
 
     # Apply post-filter if enabled (softens harsh FM harmonics)
     if state.post_filter_enabled:
@@ -439,7 +440,7 @@ def fm6_generate_coeffs(state: FM6State, output: np.ndarray, base_phase_inc: int
     # All k-slots get same coefficient (FWPT captures full block spectrum)
     for k in range(VM_K):
         for leaf in range(NUM_LEAVES):
-            output[leaf * VM_K + k] = int(np.clip(coeffs_64[leaf], -32768, 32767))
+            output[leaf * VM_K + k] = int(np.clip(coeffs_64[leaf], Q15_NEG_ONE, Q15_ONE))
 
 
 def fm6_generate_audio(state: FM6State, base_phase_inc: int, num_blocks: int = 1) -> np.ndarray:

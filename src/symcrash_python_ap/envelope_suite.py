@@ -49,6 +49,7 @@ from typing import Optional, List, Tuple
 import math
 
 from .primitives import Q15_ONE, BLOCK_RATE_HZ
+from .primitives import Q15_NEG_ONE, Q15_SCALE, Q16_HALF, Q16_ONE
 
 
 # =============================================================================
@@ -73,15 +74,15 @@ def hz_to_phase_inc(hz: float) -> int:
     if hz <= 0:
         return 0
     # phase_inc = (hz / BLOCKS_PER_SECOND) * 65536
-    return int((hz * 65536) / BLOCKS_PER_SECOND)
+    return int((hz * Q16_ONE) / BLOCKS_PER_SECOND)
 
 
 def _sat16(x: int) -> int:
     """Saturate to Q15 range."""
-    if x > 32767:
-        return 32767
-    if x < -32768:
-        return -32768
+    if x > Q15_ONE:
+        return Q15_ONE
+    if x < Q15_NEG_ONE:
+        return Q15_NEG_ONE
     return x
 
 
@@ -468,7 +469,7 @@ class EnvelopeFollower:
         """
         # Rectify input (take absolute value)
         mag = abs(input_q15)
-        if mag > 32767:
+        if mag > Q15_ONE:
             mag = 32767
 
         if self.mode == "RMS":
@@ -611,7 +612,7 @@ class Slew:
         Returns:
             Slewed value (Q15)
         """
-        target_q15 = max(-32768, min(32767, target_q15))
+        target_q15 = max(Q15_NEG_ONE, min(Q15_ONE, target_q15))
         delta = target_q15 - self._current_q15
 
         if self.mode == "EXP":
@@ -635,7 +636,7 @@ class Slew:
 
     def set_immediate(self, value_q15: int) -> None:
         """Set value immediately (no slew)."""
-        self._current_q15 = max(-32768, min(32767, value_q15))
+        self._current_q15 = max(Q15_NEG_ONE, min(Q15_ONE, value_q15))
 
     @property
     def value(self) -> int:
@@ -703,7 +704,7 @@ class LFO:
     def __post_init__(self):
         self._update_cache()
         # Apply phase offset
-        self._phase_q16 = int(self.phase_offset * 65536) & 0xFFFF
+        self._phase_q16 = int(self.phase_offset * Q16_ONE) & 0xFFFF
 
     def _update_cache(self):
         """Compute phase increment from rate."""
@@ -734,33 +735,33 @@ class LFO:
 
         elif self.shape == LFOShape.TRIANGLE:
             # Triangle: -1 at 0, +1 at 0.5, -1 at 1.0
-            if phase < 32768:
+            if phase < Q16_HALF:
                 output = (phase * 2) - Q15_ONE
             else:
-                output = Q15_ONE - ((phase - 32768) * 2)
+                output = Q15_ONE - ((phase - Q16_HALF) * 2)
             output = _sat16(output)
 
         elif self.shape == LFOShape.SAW_UP:
             # Sawtooth up: -1 to +1 over full cycle
-            output = phase - 32768
+            output = phase - Q16_HALF
 
         elif self.shape == LFOShape.SAW_DOWN:
             # Sawtooth down: +1 to -1 over full cycle
-            output = 32767 - phase
+            output = Q15_ONE - phase
 
         elif self.shape == LFOShape.SQUARE:
             # Square wave
-            output = Q15_ONE if phase < 32768 else -Q15_ONE
+            output = Q15_ONE if phase < Q16_HALF else -Q15_ONE
 
         elif self.shape == LFOShape.SAMPLE_HOLD:
             # Sample & hold: new random value at each cycle start
             old_phase = self._phase_q16
             new_phase = (old_phase + self._phase_inc) & 0xFFFF
             # Check for wrap (cycle completion) or first time (sh_value is 0 and we haven't started)
-            if new_phase < old_phase or (self._sh_value == 0 and old_phase == int(self.phase_offset * 65536) & 0xFFFF):
+            if new_phase < old_phase or (self._sh_value == 0 and old_phase == int(self.phase_offset * Q16_ONE) & 0xFFFF):
                 # Crossed zero or first tick, generate new value
                 self._sh_seed = (self._sh_seed * 1103515245 + 12345) & 0x7FFFFFFF
-                self._sh_value = ((self._sh_seed >> 15) & 0xFFFF) - 32768
+                self._sh_value = ((self._sh_seed >> 15) & 0xFFFF) - Q15_SCALE
                 self._sh_value = max(-Q15_ONE, min(Q15_ONE, self._sh_value))
             output = self._sh_value
 
@@ -778,7 +779,7 @@ class LFO:
 
     def sync(self, phase: float = 0.0) -> None:
         """Reset phase to specified position (0.0 to 1.0)."""
-        self._phase_q16 = int(phase * 65536) & 0xFFFF
+        self._phase_q16 = int(phase * Q16_ONE) & 0xFFFF
 
     @property
     def phase(self) -> float:
@@ -787,7 +788,7 @@ class LFO:
 
     def reset(self) -> None:
         """Reset LFO to initial state."""
-        self._phase_q16 = int(self.phase_offset * 65536) & 0xFFFF
+        self._phase_q16 = int(self.phase_offset * Q16_ONE) & 0xFFFF
         self._sh_value = 0
 
 

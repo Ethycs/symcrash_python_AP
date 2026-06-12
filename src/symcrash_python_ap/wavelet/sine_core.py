@@ -99,8 +99,8 @@ def _generate_lut_64k():
     """Generate full 64K sine LUT on first use."""
     import math
     table = []
-    for i in range(65536):
-        theta = 2 * math.pi * i / 65536
+    for i in range(65536):  # q15-literal-ok (LUT size, 2^16 phase steps)
+        theta = 2 * math.pi * i / 65536  # q15-literal-ok (LUT size)
         value = int(round(Q_SCALE * math.sin(theta)))
         value = max(-Q_SCALE, min(Q_SCALE, value))
         table.append(value)
@@ -120,8 +120,8 @@ def _get_lut_64k_np():
     global _SINE_LUT_64K_NP
     if _SINE_LUT_64K_NP is None:
         import numpy as np
-        phases = np.arange(65536)
-        _SINE_LUT_64K_NP = (np.sin(phases * 2 * np.pi / 65536) * Q_SCALE).astype(np.int16)
+        phases = np.arange(65536)  # q15-literal-ok (LUT size)
+        _SINE_LUT_64K_NP = (np.sin(phases * 2 * np.pi / 65536) * Q_SCALE).astype(np.int16)  # q15-literal-ok (LUT size)
     return _SINE_LUT_64K_NP
 
 
@@ -158,14 +158,14 @@ def cosine_q15_fast(phase_16bit: int) -> int:
     """Fast cosine lookup using 64K LUT."""
     lut = _get_lut_64k()
     # cos(x) = sin(x + 90°) = sin(x + 16384)
-    return lut[(phase_16bit + 16384) & 0xFFFF]
+    return lut[(phase_16bit + 16384) & 0xFFFF]  # q15-literal-ok (quarter cycle, 90 deg)
 
 
 def cosine_q15_vectorized(phases_16bit):
     """Vectorized cosine lookup for NumPy arrays."""
     import numpy as np
     lut = _get_lut_64k_np()
-    return lut[(phases_16bit + 16384) & 0xFFFF].astype(np.int32)
+    return lut[(phases_16bit + 16384) & 0xFFFF].astype(np.int32)  # q15-literal-ok (quarter cycle)
 
 
 # =============================================================================
@@ -334,7 +334,7 @@ def sin_cos_q15_vectorized(phases_32):
     phases_16 = ((phases_32 >> 16) & 0xFFFF).astype(np.uint16)
     lut = _get_lut_64k_np()
     sin_vals = lut[phases_16].astype(np.int32)
-    cos_vals = lut[(phases_16 + 16384) & 0xFFFF].astype(np.int32)
+    cos_vals = lut[(phases_16 + 16384) & 0xFFFF].astype(np.int32)  # q15-literal-ok (quarter cycle)
     return sin_vals, cos_vals
 
 

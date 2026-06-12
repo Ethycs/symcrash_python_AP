@@ -43,6 +43,7 @@ from .control_frame import (
     VoiceControlPatch,
     GlobalControls,
 )
+from .primitives import Q15_HALF, Q15_ONE
 
 if TYPE_CHECKING:
     from .symbol.executor_scheduling import HealthTelemetry
@@ -102,7 +103,7 @@ class CockpitEngine:
         self._event_queue: List = []
 
         # Global state
-        self._master_gain_q15 = 32767
+        self._master_gain_q15 = Q15_ONE
 
         # Health telemetry from scheduler (for display/logging)
         self._health_telemetry: Optional['HealthTelemetry'] = None
@@ -164,22 +165,22 @@ class CockpitEngine:
             value_q15: Q15 value (0-32767)
         """
         # Clamp pot value
-        value_q15 = max(0, min(32767, value_q15))
+        value_q15 = max(0, min(Q15_ONE, value_q15))
 
         if pot_id == 0:
             # Attack: map 0-32767 to 1..500 blocks
-            blocks = max(1, (value_q15 * 500) // 32767)
+            blocks = max(1, (value_q15 * 500) // Q15_ONE)
             self.set_control(ControlID.ATK_BLOCKS, blocks)
         elif pot_id == 1:
             # Decay: map 0-32767 to 1..1000 blocks
-            blocks = max(1, (value_q15 * 1000) // 32767)
+            blocks = max(1, (value_q15 * 1000) // Q15_ONE)
             self.set_control(ControlID.DCY_BLOCKS, blocks)
         elif pot_id == 2:
             # Sustain: direct Q15
             self.set_control(ControlID.SUS_Q15, value_q15)
         elif pot_id == 3:
             # Release: map 0-32767 to 1..1500 blocks
-            blocks = max(1, (value_q15 * 1500) // 32767)
+            blocks = max(1, (value_q15 * 1500) // Q15_ONE)
             self.set_control(ControlID.REL_BLOCKS, blocks)
         elif pot_id == 4:
             # Cutoff -> CHAOS
@@ -195,7 +196,7 @@ class CockpitEngine:
             self.set_control(ControlID.MORPH, value_q15)
         elif pot_id == 8:
             # Detune: map 0-32767 to -2400..+2400 cents
-            cents = ((value_q15 - 16384) * 2400) // 16384
+            cents = ((value_q15 - Q15_HALF) * 2400) // Q15_HALF
             self.set_control(ControlID.DETUNE, cents)
         elif pot_id == 9:
             # Master gain
@@ -211,7 +212,7 @@ class CockpitEngine:
             channel: MIDI channel (0-15)
         """
         # Convert MIDI velocity (0-127) to Q15 (0-32767)
-        velocity_q15 = (velocity * 32767) // 127
+        velocity_q15 = (velocity * Q15_ONE) // 127
 
         self._event_queue.append(('note_on', note, velocity_q15, channel))
 
@@ -234,7 +235,7 @@ class CockpitEngine:
             channel: MIDI channel (0-15)
         """
         # Map 0-16383 to -200..+200 cents
-        cents = ((value - 8192) * 200) // 8192
+        cents = ((value - 8192) * 200) // 8192  # q15-literal-ok (MIDI pitch-bend center, 2^13)
         self.set_control(ControlID.PITCH_BEND, cents)
 
     # =========================================================================
@@ -370,7 +371,7 @@ class CockpitEngine:
         elif family_id == FamilyID.CATASTROPHE:
             return self.get_control_current(ControlID.CHAOS)
         else:
-            return 32767  # Default to full scale
+            return Q15_ONE  # Default to full scale
 
     def get_pitch_offset_cents(self) -> int:
         """
@@ -435,7 +436,7 @@ class CockpitEngine:
             return {
                 'cpu_bar': 0,
                 'mem_bar': 0,
-                'stab_bar': 32767,  # Full stability as default
+                'stab_bar': Q15_ONE,  # Full stability as default
                 'gear': 0,
             }
         return {

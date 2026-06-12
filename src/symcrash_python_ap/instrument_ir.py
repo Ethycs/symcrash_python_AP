@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any, Union, Tuple
 from enum import Enum, IntEnum
 import json
+from .primitives import Q15_3_4, Q15_HALF, Q15_QUARTER, Q16_ONE
 
 try:
     import yaml
@@ -138,7 +139,7 @@ def _auto_detect_ratios(raw: list) -> list:
     if not raw:
         return raw
     if any(isinstance(v, float) for v in raw) or all(v < 100 for v in raw):
-        return [round(r * 65536) for r in raw]
+        return [round(r * Q16_ONE) for r in raw]
     return raw
 
 
@@ -158,7 +159,7 @@ def _auto_detect_levels(raw: list) -> list:
     if not raw:
         return raw
     if any(isinstance(v, float) for v in raw):
-        return [round(l * 32767) for l in raw]
+        return [round(l * Q15_ONE) for l in raw]
     return raw
 
 
@@ -312,12 +313,12 @@ class TemperamentVector:
             reactivity_q15: 22937
     """
     # All values Q15 (0-32767), default Q15_HALF (16384) for neutral behavior
-    hysteresis_q15: int = 16384       # Scales EdgeSpec enter/exit margins
-    stickiness_q15: int = 16384       # Resistance to leaving current regime
-    reactivity_q15: int = 16384       # Response speed (inverse debounce scaling)
-    escalation_bias_q15: int = 16384  # Tendency toward higher regimes
-    fatigue_sensitivity_q15: int = 16384  # How much fatigue affects behavior
-    tension_influence_q15: int = 16384    # How much tension affects transitions
+    hysteresis_q15: int = Q15_HALF       # Scales EdgeSpec enter/exit margins
+    stickiness_q15: int = Q15_HALF       # Resistance to leaving current regime
+    reactivity_q15: int = Q15_HALF       # Response speed (inverse debounce scaling)
+    escalation_bias_q15: int = Q15_HALF  # Tendency toward higher regimes
+    fatigue_sensitivity_q15: int = Q15_HALF  # How much fatigue affects behavior
+    tension_influence_q15: int = Q15_HALF    # How much tension affects transitions
     chaos_amount_q15: int = 0         # 0 = deterministic (default)
 
     def to_dict(self) -> dict:
@@ -338,12 +339,12 @@ class TemperamentVector:
         if data is None:
             return cls()
         return cls(
-            hysteresis_q15=data.get('hysteresis_q15', 16384),
-            stickiness_q15=data.get('stickiness_q15', 16384),
-            reactivity_q15=data.get('reactivity_q15', 16384),
-            escalation_bias_q15=data.get('escalation_bias_q15', 16384),
-            fatigue_sensitivity_q15=data.get('fatigue_sensitivity_q15', 16384),
-            tension_influence_q15=data.get('tension_influence_q15', 16384),
+            hysteresis_q15=data.get('hysteresis_q15', Q15_HALF),
+            stickiness_q15=data.get('stickiness_q15', Q15_HALF),
+            reactivity_q15=data.get('reactivity_q15', Q15_HALF),
+            escalation_bias_q15=data.get('escalation_bias_q15', Q15_HALF),
+            fatigue_sensitivity_q15=data.get('fatigue_sensitivity_q15', Q15_HALF),
+            tension_influence_q15=data.get('tension_influence_q15', Q15_HALF),
             chaos_amount_q15=data.get('chaos_amount_q15', 0),
         )
 
@@ -359,13 +360,13 @@ class TemperamentVector:
             )
         """
         return cls(
-            hysteresis_q15=int(kwargs.get('hysteresis', 0.5) * 32767),
-            stickiness_q15=int(kwargs.get('stickiness', 0.5) * 32767),
-            reactivity_q15=int(kwargs.get('reactivity', 0.5) * 32767),
-            escalation_bias_q15=int(kwargs.get('escalation_bias', 0.5) * 32767),
-            fatigue_sensitivity_q15=int(kwargs.get('fatigue_sensitivity', 0.5) * 32767),
-            tension_influence_q15=int(kwargs.get('tension_influence', 0.5) * 32767),
-            chaos_amount_q15=int(kwargs.get('chaos_amount', 0.0) * 32767),
+            hysteresis_q15=int(kwargs.get('hysteresis', 0.5) * Q15_ONE),
+            stickiness_q15=int(kwargs.get('stickiness', 0.5) * Q15_ONE),
+            reactivity_q15=int(kwargs.get('reactivity', 0.5) * Q15_ONE),
+            escalation_bias_q15=int(kwargs.get('escalation_bias', 0.5) * Q15_ONE),
+            fatigue_sensitivity_q15=int(kwargs.get('fatigue_sensitivity', 0.5) * Q15_ONE),
+            tension_influence_q15=int(kwargs.get('tension_influence', 0.5) * Q15_ONE),
+            chaos_amount_q15=int(kwargs.get('chaos_amount', 0.0) * Q15_ONE),
         )
 
 
@@ -426,17 +427,17 @@ class ControlConfig:
         from .library.capsule import ControlProgram
 
         return ControlProgram(
-            energy_q15=int(self.energy * 32767),
-            motion_q15=int(self.motion * 32767),
-            focus_q15=int(self.focus * 32767),
-            brightness_q15=int(self.brightness * 32767),
-            density_q15=int(self.density * 32767),
-            risk_q15=int(self.risk * 32767),
-            space_q15=int(self.space * 32767),
-            material_q15=int(self.material * 32767),
-            unity_q15=int(self.unity * 32767),
-            dream_q15=int(self.dream * 32767),
-            slip_q15=int(self.slip * 32767),
+            energy_q15=int(self.energy * Q15_ONE),
+            motion_q15=int(self.motion * Q15_ONE),
+            focus_q15=int(self.focus * Q15_ONE),
+            brightness_q15=int(self.brightness * Q15_ONE),
+            density_q15=int(self.density * Q15_ONE),
+            risk_q15=int(self.risk * Q15_ONE),
+            space_q15=int(self.space * Q15_ONE),
+            material_q15=int(self.material * Q15_ONE),
+            unity_q15=int(self.unity * Q15_ONE),
+            dream_q15=int(self.dream * Q15_ONE),
+            slip_q15=int(self.slip * Q15_ONE),
         )
 
 
@@ -538,11 +539,11 @@ class NodeParams:
 
     # PWM parameters (Q0.15 per WSE-STD-001)
     pwm_enable: bool = False
-    pwm_width_q15: int = 16384        # Duty cycle Q0.15 (16384=50%)
+    pwm_width_q15: int = Q15_HALF        # Duty cycle Q0.15 (16384=50%)
 
     # Hard sync parameters
     sync_enable: bool = False
-    sync_ratio_q16: int = 65536       # Master/slave ratio Q16.16 (65536=1.0)
+    sync_ratio_q16: int = Q16_ONE       # Master/slave ratio Q16.16 (65536=1.0)
 
     # Mode B FM parameters
     fm_enable: bool = False
@@ -559,7 +560,7 @@ class NodeParams:
     legato_mode: bool = False         # Smooth pitch transitions
 
     # Sample playback parameters
-    sample_rate_q16: int = 65536      # Playback rate Q16.16 (65536=1.0x)
+    sample_rate_q16: int = Q16_ONE      # Playback rate Q16.16 (65536=1.0x)
 
     # Noise
     color: Optional[str] = None
@@ -578,7 +579,7 @@ class NodeParams:
     # Filter parameters (subtractive synthesis, Q0.15 per WSE-STD-001)
     filter_enable: bool = False
     filter_type: int = 0              # 0=LP, 1=HP, 2=BP, 3=Notch
-    filter_cutoff_q15: int = 32767    # Cutoff Q0.15 (log scale 20Hz-20kHz)
+    filter_cutoff_q15: int = Q15_ONE    # Cutoff Q0.15 (log scale 20Hz-20kHz)
     filter_resonance_q15: int = 0     # Resonance Q0.15 (0=flat, 32767=self-osc)
     filter_env_depth_q15: int = 0     # Envelope mod Q1.15 (signed)
     filter_key_track_q15: int = 0     # Key tracking Q0.15 (16384=50%)
@@ -1133,7 +1134,7 @@ class RegimeEnvelopeOverride:
     """
     envelope_id: str                  # Reference to EnvelopeBinding.id
     adsr_override: Optional[ADSR] = None  # Override ADSR for this regime
-    scale_q15: int = 32767            # Output scaling Q0.15 (32767 = 1.0)
+    scale_q15: int = Q15_ONE            # Output scaling Q0.15 (32767 = 1.0)
 
 
 @dataclass
@@ -1251,7 +1252,7 @@ class CmmmControl:
     node_mask: Union[int, str] = 0xFFFFFFFF  # Can be int or "pattern:N"
     mask_ramp_blocks: int = 5
     tail_mode: Union[int, str] = 0  # Can be int or name (FULL, MID, MIN, EMERGENCY)
-    traction_q15: int = 32767
+    traction_q15: int = Q15_ONE
 
     # Pattern table for K ladder - use primitives.K_LADDER_MASKS (single source of truth)
     # Kept as class attr for backwards compatibility
@@ -1443,14 +1444,14 @@ class MaterialConfig:
 
     # Dry/wet blend
     beta_start_q15: int = 0          # Starting blend (0 = fully dry)
-    beta_target_q15: int = 16384     # Target blend (0.5 default)
+    beta_target_q15: int = Q15_HALF     # Target blend (0.5 default)
     beta_ramp_blocks: int = 8        # Blocks to ramp from start to target
 
     # Per-program parameters (Q15)
-    tape_saturation_q15: int = 8192      # Tape hysteresis amount
-    catastrophe_threshold_q15: int = 24576  # Bifurcation trigger point
+    tape_saturation_q15: int = Q15_QUARTER      # Tape hysteresis amount
+    catastrophe_threshold_q15: int = Q15_3_4  # Bifurcation trigger point
     rank_filter_order: int = 3           # Nonlinear filter order (1-8)
-    tropical_blend_q15: int = 16384      # Max operation blend
+    tropical_blend_q15: int = Q15_HALF      # Max operation blend
 
 
 @dataclass
@@ -2152,10 +2153,10 @@ def _parse_node_params(data: dict) -> NodeParams:
         for op in operators:
             # Convert float ratio to Q16 (65536 = 1.0)
             ratio = op.get('ratio', 1.0)
-            ratios.append(round(ratio * 65536))
+            ratios.append(round(ratio * Q16_ONE))
             # Convert float level to Q15 (32767 = 1.0)
             level = op.get('level', 1.0)
-            levels.append(round(level * 32767))
+            levels.append(round(level * Q15_ONE))
         params.op_ratios = ratios
         params.op_levels = levels
     else:
@@ -2401,7 +2402,7 @@ def _parse_regime_envelope_override(data: dict) -> RegimeEnvelopeOverride:
     return RegimeEnvelopeOverride(
         envelope_id=data.get('envelope_id', ''),
         adsr_override=adsr_override,
-        scale_q15=data.get('scale_q15', 32767),
+        scale_q15=data.get('scale_q15', Q15_ONE),
     )
 
 
@@ -2489,7 +2490,7 @@ def _parse_cmmm_control(data: dict) -> CmmmControl:
         node_mask=data.get('node_mask', 0xFFFFFFFF),
         mask_ramp_blocks=data.get('mask_ramp_blocks', 5),
         tail_mode=data.get('tail_mode', 0),
-        traction_q15=float_or_q15(data, 'traction', 'traction_q15', 32767),
+        traction_q15=float_or_q15(data, 'traction', 'traction_q15', Q15_ONE),
     )
 
 
@@ -2676,12 +2677,12 @@ def _parse_material_config(data: dict) -> MaterialConfig:
     """
     return MaterialConfig(
         beta_start_q15=float_or_q15(data, 'beta_start', 'beta_start_q15', 0),
-        beta_target_q15=float_or_q15(data, 'beta_target', 'beta_target_q15', 16384),
+        beta_target_q15=float_or_q15(data, 'beta_target', 'beta_target_q15', Q15_HALF),
         beta_ramp_blocks=data.get('beta_ramp_blocks', 8),
-        tape_saturation_q15=float_or_q15(data, 'tape_saturation', 'tape_saturation_q15', 8192),
-        catastrophe_threshold_q15=float_or_q15(data, 'catastrophe_threshold', 'catastrophe_threshold_q15', 24576),
+        tape_saturation_q15=float_or_q15(data, 'tape_saturation', 'tape_saturation_q15', Q15_QUARTER),
+        catastrophe_threshold_q15=float_or_q15(data, 'catastrophe_threshold', 'catastrophe_threshold_q15', Q15_3_4),
         rank_filter_order=data.get('rank_filter_order', 3),
-        tropical_blend_q15=float_or_q15(data, 'tropical_blend', 'tropical_blend_q15', 16384),
+        tropical_blend_q15=float_or_q15(data, 'tropical_blend', 'tropical_blend_q15', Q15_HALF),
     )
 
 
@@ -2958,7 +2959,7 @@ AXIS_OPERATORS = {
 SAFETY_OPERATORS = ['NormalizeScale', 'FineClamp']
 
 
-def emphasis_to_family_base(emphasis: Dict[str, float], q15_one: int = 32767) -> List[int]:
+def emphasis_to_family_base(emphasis: Dict[str, float], q15_one: int = Q15_ONE) -> List[int]:
     """
     Convert control-axis weights (0.0-1.0) to an 8-slot Q15 family_base array.
 
@@ -3099,7 +3100,7 @@ def _translate_sound_design_format(data: dict) -> dict:
             if 'partials' in params and params['partials']:
                 vals = params['partials']
                 if vals and isinstance(vals[0], float) and all(v <= 1.0 for v in vals):
-                    params['partials'] = [round(v * 32767) for v in vals]
+                    params['partials'] = [round(v * Q15_ONE) for v in vals]
 
         nodes.append({
             'id': node_id,
@@ -3450,7 +3451,7 @@ def extract_partials_q15(ir: InstrumentIR) -> Optional[List[int]]:
         if node.type == "Osc" and node.params.harmonics:
             amps = node.params.harmonics.amplitudes
             if amps:
-                return [max(0, min(32767, round(a * 32767))) for a in amps]
+                return [max(0, min(Q15_ONE, round(a * Q15_ONE))) for a in amps]
     return None
 
 
@@ -3462,7 +3463,7 @@ def extract_phase_spread_q15(ir: InstrumentIR) -> int:
     """
     for node in ir.layers.L0_graph.nodes:
         if node.type == "Osc" and getattr(node.params, 'phase_spread', 0.0):
-            return max(0, min(32767, round(node.params.phase_spread * 32767)))
+            return max(0, min(Q15_ONE, round(node.params.phase_spread * Q15_ONE)))
     return 0
 
 
@@ -3511,7 +3512,7 @@ def extract_noise_params(ir: InstrumentIR) -> Optional[dict]:
             'color': _NOISE_COLOR_IDS.get(color_name, 0),
             'attack_ms': float(getattr(params, 'noise_attack_ms', 1.0)),
             'decay_ms': float(getattr(params, 'noise_decay_ms', 60.0)),
-            'level_q15': max(0, min(32767, round(float(level) * 32767))),
+            'level_q15': max(0, min(Q15_ONE, round(float(level) * Q15_ONE))),
             'seed_u32': int(getattr(ir.meta, 'seed_u32', 0) or 0) & 0xFFFFFFFF,
         }
     return None

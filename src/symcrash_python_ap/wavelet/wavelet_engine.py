@@ -22,6 +22,7 @@ from ..fixed import (
     sat16, mul_q15_sat, shift_round, slew_q15,
     Q15_ONE, Q15_SHIFT, Q15_HALF
 )
+from ..primitives import Q15_SCALE
 from ..frames import VoiceFrame
 from .wavelet_packet_trees import PacketTreeSet, BLOCK_SIZE, LEAF_COUNT, NODE_SIZE
 
@@ -738,10 +739,10 @@ class WaveletEngine:
         # At center (pan=0): both channels get full signal
         # At extremes: one channel gets full, other gets zero
         
-        if pan <= -16384:
+        if pan <= -Q15_HALF:
             # Hard left
             return list(x), [0] * len(x)
-        elif pan >= 16384:
+        elif pan >= Q15_HALF:
             # Hard right
             return [0] * len(x), list(x)
         else:
@@ -751,7 +752,7 @@ class WaveletEngine:
             # pan=+16384: L=0, R=1
             
             # Scale pan to 0-1 range for right channel
-            right_frac = (pan + 16384) / 32768  # 0 to 1
+            right_frac = (pan + Q15_HALF) / Q15_SCALE  # 0 to 1
             left_frac = 1.0 - right_frac * 0.5   # 1 to 0.5 to 1
             right_frac = 0.5 + right_frac * 0.5  # 0.5 to 1
             
@@ -760,8 +761,8 @@ class WaveletEngine:
             if abs(pan) < 1000:
                 return list(x), list(x)
             
-            left_gain = int(Q15_ONE * (1.0 - max(0, pan) / 32768))
-            right_gain = int(Q15_ONE * (1.0 + min(0, pan) / 32768))
+            left_gain = int(Q15_ONE * (1.0 - max(0, pan) / Q15_SCALE))
+            right_gain = int(Q15_ONE * (1.0 + min(0, pan) / Q15_SCALE))
 
             L = [mul_q15_sat(s, left_gain) for s in x]
             R = [mul_q15_sat(s, right_gain) for s in x]

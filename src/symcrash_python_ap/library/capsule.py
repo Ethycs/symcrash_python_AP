@@ -23,6 +23,7 @@ from typing import Dict, List, Optional
 
 # Import canonical primitives (single source of truth)
 from ..primitives import SystemMacro as _SystemMacro, SAMPLE_RATE_HZ, BLOCK_SIZE
+from ..primitives import Q15_HALF, Q15_QUARTER
 
 
 # =============================================================================
@@ -189,15 +190,15 @@ class ControlProgram:
     - slip: Cross-scale transport / diffusion amount
     """
     # Controller → CMMM axes (Q15 unsigned, 0=minimum, 32767=maximum)
-    energy_q15: int = 16384           # 0.5 = neutral intensity
+    energy_q15: int = Q15_HALF           # 0.5 = neutral intensity
     motion_q15: int = 0               # 0.0 = no modulation
-    focus_q15: int = 16384            # 0.5 = balanced emphasis
-    brightness_q15: int = 16384       # 0.5 = neutral brightness
-    density_q15: int = 16384          # 0.5 = neutral body
+    focus_q15: int = Q15_HALF            # 0.5 = balanced emphasis
+    brightness_q15: int = Q15_HALF       # 0.5 = neutral brightness
+    density_q15: int = Q15_HALF          # 0.5 = neutral body
     risk_q15: int = 0                 # 0.0 = stable, no chaos
-    space_q15: int = 8192             # 0.25 = subtle spatial
-    material_q15: int = 16384         # 0.5 = neutral (neither wood nor glass)
-    unity_q15: int = 16384            # 0.5 = balanced blend
+    space_q15: int = Q15_QUARTER             # 0.25 = subtle spatial
+    material_q15: int = Q15_HALF         # 0.5 = neutral (neither wood nor glass)
+    unity_q15: int = Q15_HALF            # 0.5 = balanced blend
     dream_q15: int = 0                # 0.0 = precise, no entropy
     slip_q15: int = 0                 # 0.0 = no cross-scale diffusion
 

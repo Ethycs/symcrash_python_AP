@@ -14,6 +14,7 @@ from .tables import (
     get_tail_ops, get_pattern_for_k, popcount32,
     BLOCK_SAMPLES,
 )
+from ..primitives import Q15_HALF, Q15_ONE
 
 if TYPE_CHECKING:
     from ..frames import VoiceFrame
@@ -38,7 +39,7 @@ class CarrierRole(IntEnum):
 class BackboneEntry:
     """A single backbone operator instruction."""
     op_id: int
-    strength_q15: int = 32767  # Full strength by default
+    strength_q15: int = Q15_ONE  # Full strength by default
     param0_q15: int = 0
     param1_q15: int = 0
 
@@ -52,7 +53,7 @@ class EventEntry:
     """A single event lane instruction."""
     lane: int               # Event lane (0-7)
     op_id: int              # Which inject op to use
-    strength_q15: int = 32767
+    strength_q15: int = Q15_ONE
     payload_mode: int = 0   # Payload interpretation mode
     payload64: int = 0      # 64-bit payload
 
@@ -68,7 +69,7 @@ class CarrierParams:
     phase_inc: int = 0       # Computed from note/cents via LUT
     note: int = 60           # MIDI note number
     cents: int = 0           # Fine tuning in cents
-    harmonic_amps_q15: List[int] = field(default_factory=lambda: [32767] + [0] * 15)
+    harmonic_amps_q15: List[int] = field(default_factory=lambda: [Q15_ONE] + [0] * 15)
     model_id: int = 0        # Oscillator model (0 = additive sine)
 
 
@@ -83,7 +84,7 @@ class CoeffOscParams:
     Extended for WSE-STD-210 Mode B support.
     """
     table_id: int = 0         # Which coefficient table (0=sine, 1=saw, etc.)
-    base_mix_q15: int = 32767  # Blend factor: 0=pure CMMM state, 32767=pure osc
+    base_mix_q15: int = Q15_ONE  # Blend factor: 0=pure CMMM state, 32767=pure osc
     phase_inc: int = 0        # Base phase increment (from MIDI note)
     note: int = 60            # MIDI note number
     cents: int = 0            # Fine tuning in cents
@@ -92,7 +93,7 @@ class CoeffOscParams:
     osc_mode: int = 0             # 0=Mode A (LUT), 1=Mode B (Rotator)
     H_request: int = 16           # Requested harmonic count (bandlimited at runtime)
     waveform_type: int = 0        # 0=sine, 1=square, 2=pulse, 3=saw, 4=saw_down, 5=triangle
-    pwm_width_q15: int = 16384    # PWM duty cycle (Q15: 0=0%, 32767≈100%)
+    pwm_width_q15: int = Q15_HALF    # PWM duty cycle (Q15: 0=0%, 32767≈100%)
     pwm_enabled: bool = False     # Enable PWM modulation
     sync_enabled: bool = False    # Enable hard sync
     fm_depth_q15: int = 0         # FM modulation depth (Q15)
@@ -150,8 +151,8 @@ class DecodedPlan:
     eta_curr_q15: int = 0
 
     # Gain - for intra-block ramping
-    gain_prev_q15: int = 32767
-    gain_curr_q15: int = 32767
+    gain_prev_q15: int = Q15_ONE
+    gain_curr_q15: int = Q15_ONE
 
     # Backbone instructions (in execution order)
     backbone_instrs: List[BackboneEntry] = field(default_factory=list)
@@ -199,7 +200,7 @@ def decode_frame(
     frame: 'VoiceFrame',
     tables: Tables = DEFAULT_TABLES,
     prev_eta_q15: int = 0,
-    prev_gain_q15: int = 32767,
+    prev_gain_q15: int = Q15_ONE,
     prev_partial_amps: Optional[List[int]] = None,
 ) -> DecodedPlan:
     """
@@ -265,7 +266,7 @@ def decode_frame(
     # Harmonic amplitudes: use frame value, latch from previous, or default
     if hasattr(frame, 'partial_amps_q15') and frame.partial_amps_q15:
         # Frame provides explicit values
-        harmonic_amps = [32767] + [0] * 15
+        harmonic_amps = [Q15_ONE] + [0] * 15
         for i, amp in enumerate(frame.partial_amps_q15[:16]):
             harmonic_amps[i] = amp
     elif prev_partial_amps:
@@ -276,7 +277,7 @@ def decode_frame(
             harmonic_amps.append(0)
     else:
         # Default: fundamental only
-        harmonic_amps = [32767] + [0] * 15
+        harmonic_amps = [Q15_ONE] + [0] * 15
 
     plan.carrier_params = CarrierParams(
         f0_hz=f0_hz,
@@ -304,7 +305,7 @@ def decode_frame(
     osc_mode = getattr(frame, 'coeff_osc_mode', 0) or 0
     H_request = getattr(frame, 'H_request', 16) or 16
     waveform_type = getattr(frame, 'waveform_type', 0) or 0
-    pwm_width_q15 = getattr(frame, 'pwm_width_q15', 16384) or 16384
+    pwm_width_q15 = getattr(frame, 'pwm_width_q15', Q15_HALF) or Q15_HALF
     pwm_enabled = getattr(frame, 'pwm_enabled', False)
     sync_enabled = getattr(frame, 'sync_enabled', False)
     fm_depth_q15 = getattr(frame, 'fm_depth_q15', 0) or 0
@@ -378,7 +379,7 @@ def decode_frame(
     plan.gain_prev_q15 = prev_gain_q15
     # NOTE: Don't use `or 32767` here - 0 is a valid gain value (silence)
     gain = getattr(frame, 'gain_q15', None)
-    plan.gain_curr_q15 = 32767 if gain is None else gain
+    plan.gain_curr_q15 = Q15_ONE if gain is None else gain
 
     # -------------------------------------------------------------------------
     # Backbone instructions
@@ -389,7 +390,7 @@ def decode_frame(
             # Get operator ID from name
             op_id = _op_name_to_id(op_name)
             if op_id is not None:
-                strength = int(max(0.0, min(1.0, _op_strength(op_name, families))) * 32767)
+                strength = int(max(0.0, min(1.0, _op_strength(op_name, families))) * Q15_ONE)
                 plan.backbone_instrs.append(BackboneEntry(
                     op_id=op_id,
                     strength_q15=strength,
@@ -405,12 +406,12 @@ def decode_frame(
     # -------------------------------------------------------------------------
     if hasattr(frame, 'event_mask') and frame.event_mask:
         event_mask = frame.event_mask
-        event_strengths = getattr(frame, 'event_strength_q15', [32767] * 8) or [32767] * 8
+        event_strengths = getattr(frame, 'event_strength_q15', [Q15_ONE] * 8) or [Q15_ONE] * 8
 
         for lane in range(8):
             if event_mask & (1 << lane):
                 op_id = EVENT_LANE_TO_OP.get(lane, 13)
-                strength = event_strengths[lane] if lane < len(event_strengths) else 32767
+                strength = event_strengths[lane] if lane < len(event_strengths) else Q15_ONE
                 plan.event_instrs.append(EventEntry(
                     lane=lane,
                     op_id=op_id,

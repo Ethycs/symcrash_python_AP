@@ -20,6 +20,7 @@ from ..fixed import (
     sat16, mul_q15_sat, shift_round, shift_round_sat16,
     Q15_ONE, Q15_SHIFT, Q15_HALF
 )
+from ..primitives import Q15_NEG_ONE
 
 # Import tree definitions and shared types from wavelet_trees package
 from ..wavelet_trees import (
@@ -710,9 +711,9 @@ class PacketTreeSet:
         for s in result:
             scaled_up = s << HEADROOM_BITS
             # Saturate to Q15 range
-            if scaled_up > 32767:
+            if scaled_up > Q15_ONE:
                 scaled_up = 32767
-            elif scaled_up < -32768:
+            elif scaled_up < Q15_NEG_ONE:
                 scaled_up = -32768
             output.append(scaled_up)
 

@@ -27,6 +27,7 @@ import math
 
 from ..prng import PCG32, VoicePRNG
 from ..primitives import Q15_ONE, Q15_HALF, Q15_SCALE, BLOCK_SIZE, SAMPLE_RATE_HZ
+from ..primitives import Q15_3_4, Q15_QUARTER
 
 
 # =============================================================================
@@ -125,7 +126,7 @@ TREE_ARCHETYPES: Dict[TreeArchetype, TreeArchetypeConfig] = {
     ),
     TreeArchetype.BRIGHT: TreeArchetypeConfig(
         name="Bright",
-        tilt_q15=16384,  # +0.5 tilt
+        tilt_q15=Q15_HALF,  # +0.5 tilt
         odd_emphasis_q15=0,
         noise_inject_q15=0,
         transient_q15=0,
@@ -134,16 +135,16 @@ TREE_ARCHETYPES: Dict[TreeArchetype, TreeArchetypeConfig] = {
     TreeArchetype.HOLLOW: TreeArchetypeConfig(
         name="Hollow",
         tilt_q15=0,
-        odd_emphasis_q15=24576,  # Strong odd emphasis
+        odd_emphasis_q15=Q15_3_4,  # Strong odd emphasis
         noise_inject_q15=0,
         transient_q15=0,
         harmonic_lock=True,
     ),
     TreeArchetype.NOISY: TreeArchetypeConfig(
         name="Noisy",
-        tilt_q15=8192,
+        tilt_q15=Q15_QUARTER,
         odd_emphasis_q15=0,
-        noise_inject_q15=8192,  # Moderate noise
+        noise_inject_q15=Q15_QUARTER,  # Moderate noise
         transient_q15=0,
         harmonic_lock=False,
     ),
@@ -152,7 +153,7 @@ TREE_ARCHETYPES: Dict[TreeArchetype, TreeArchetypeConfig] = {
         tilt_q15=0,
         odd_emphasis_q15=0,
         noise_inject_q15=4096,
-        transient_q15=24576,  # Sharp transients
+        transient_q15=Q15_3_4,  # Sharp transients
         harmonic_lock=False,
     ),
 }
@@ -1485,7 +1486,7 @@ class WPOState:
             else:
                 # Deterministic noise from phase for reproducibility
                 noise = ((phase * 1103515245 + 12345) >> 16) & 0x7FFF
-                noise = noise - 16384  # Center around 0
+                noise = noise - Q15_HALF  # Center around 0
             noise_scaled = (noise * config.noise_inject_q15) >> 15
             base = ((base * (Q15_ONE - config.noise_inject_q15)) >> 15) + noise_scaled
 

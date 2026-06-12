@@ -24,6 +24,7 @@ import time
 
 # Import canonical constants from primitives (single source of truth)
 from ..primitives import BLOCK_SIZE, SAMPLE_RATE_HZ, Q15_ONE
+from ..primitives import Q15_3_4, Q15_HALF, Q15_QUARTER
 
 # Constants
 SAMPLE_RATE = SAMPLE_RATE_HZ  # Alias for backward compatibility
@@ -173,7 +174,7 @@ def render_process_main(
                     current_note = note
                     current_voice_id = engine.allocate_voice(program_id=1001)
                     if current_voice_id is not None:
-                        gesture = GestureBasis(gate=True, pressure_q15=24576)
+                        gesture = GestureBasis(gate=True, pressure_q15=Q15_3_4)
                         engine.note_on(current_voice_id, gesture=gesture)
                 elif msg_type == MSG_NOTE_OFF:
                     if current_voice_id is not None:
@@ -201,17 +202,17 @@ def render_process_main(
 
                 detune_cents = voice_state.detune_cents if voice_state else 0
                 f0_hz = 440.0 * (2.0 ** ((current_note - 69 + detune_cents / 100.0) / 12.0))
-                eta_q15 = voice_state.eta_q15 if voice_state else 32767
-                master_gain = voice_state.master_gain_q15 if voice_state else 32767
+                eta_q15 = voice_state.eta_q15 if voice_state else Q15_ONE
+                master_gain = voice_state.master_gain_q15 if voice_state else Q15_ONE
                 # Q15 multiply with rounding: (a * b + 16384) >> 15
-                scaled_gain = (active_frame.gain_q15 * master_gain + 16384) >> 15
+                scaled_gain = (active_frame.gain_q15 * master_gain + Q15_HALF) >> 15
 
                 harmonics_q15 = voice_state.harmonics_q15 if voice_state else 0  # 0 = pure sine
-                base_amps = [32767, 16384, 10923, 8192, 6554, 5461, 4681, 4096]
+                base_amps = [Q15_ONE, Q15_HALF, 10923, Q15_QUARTER, 6554, 5461, 4681, 4096]
                 partial_amps = [base_amps[0]]
                 for amp in base_amps[1:]:
                     # Q15 multiply with rounding
-                    partial_amps.append((amp * harmonics_q15 + 16384) >> 15)
+                    partial_amps.append((amp * harmonics_q15 + Q15_HALF) >> 15)
 
                 frame = VoiceFrame(
                     voice_id=active_frame.voice_id,
@@ -242,15 +243,15 @@ def _apply_macro(engine, macro_id: int, value_q15: int):
     """Apply macro value to engine (mirrors Pico2SynthBridge)."""
     # ADSR macros
     if macro_id == 0:  # Attack
-        blocks = max(1, (value_q15 * 250) // 32767)
+        blocks = max(1, (value_q15 * 250) // Q15_ONE)
         engine.default_program.attack_blocks = blocks
     elif macro_id == 1:  # Decay
-        blocks = max(1, (value_q15 * 500) // 32767)
+        blocks = max(1, (value_q15 * 500) // Q15_ONE)
         engine.default_program.decay_blocks = blocks
     elif macro_id == 2:  # Sustain
         engine.default_program.sustain_level_q15 = value_q15
     elif macro_id == 3:  # Release
-        blocks = max(1, (value_q15 * 750) // 32767)
+        blocks = max(1, (value_q15 * 750) // Q15_ONE)
         engine.default_program.release_blocks = blocks
 
     # Apply to active voices
@@ -270,8 +271,8 @@ def _apply_macro(engine, macro_id: int, value_q15: int):
             elif macro_id == 7:  # Eta
                 vs.eta_q15 = value_q15
             elif macro_id == 8:  # Detune
-                centered = value_q15 - 16384
-                vs.detune_cents = (centered * 2400) // 16384
+                centered = value_q15 - Q15_HALF
+                vs.detune_cents = (centered * 2400) // Q15_HALF
             elif macro_id == 9:  # Gain
                 vs.master_gain_q15 = value_q15
 

@@ -28,6 +28,7 @@ from .capsule import (
 # Import registry for value type lookup
 from .central_registry import get_central_registry
 from ..voice.voice_engine_registry import ValueType
+from ..primitives import Q15_NEG_ONE, Q15_ONE
 
 
 # =============================================================================
@@ -181,12 +182,12 @@ def pack_voice_params(defaults: Dict[int, int]) -> bytes:
                 0,  # persistence (default PER_VOICE)
                 int(entry.value_type),
                 param_id,
-                max(-32768, min(32767, value)),  # Clamp to i16 range
+                max(Q15_NEG_ONE, min(Q15_ONE, value)),  # Clamp to i16 range
             ))
         else:
             # Fallback: determine size from value magnitude
             # For unknown params, use 32-bit if value exceeds 16-bit range
-            if value > 32767 or value < -32768:
+            if value > Q15_ONE or value < Q15_NEG_ONE:
                 # Value requires 32-bit storage
                 parts.append(struct.pack(
                     '<BBHI',

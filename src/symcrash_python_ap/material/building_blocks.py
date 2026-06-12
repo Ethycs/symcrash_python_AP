@@ -25,6 +25,7 @@ from ..fixed import (
     tanh_q15, soft_clip_q15,
     Q15_ONE, Q15_SHIFT, Q15_HALF, RSHIFT_RNE
 )
+from ..primitives import Q15_3_4, Q15_NEG_ONE
 
 
 # =============================================================================
@@ -126,7 +127,7 @@ def saturator_sample(x: int, params: SaturatorParams) -> int:
 
     elif params.curve == 1:
         # Soft clip: linear below threshold, compressed above
-        return soft_clip_q15(driven, threshold=24576)
+        return soft_clip_q15(driven, threshold=Q15_3_4)
 
     elif params.curve == 2:
         # Hard clip: abrupt limiting
@@ -382,7 +383,7 @@ def tropical_gate_sample(x: int, threshold_q15: int, mode: int = 0) -> int:
     Returns:
         Gated output (Q15)
     """
-    abs_x = abs(x) if x != -32768 else 32767
+    abs_x = abs(x) if x != Q15_NEG_ONE else Q15_ONE
 
     if mode == 0:
         # Hard gate: zero below threshold

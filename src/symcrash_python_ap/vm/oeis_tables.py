@@ -22,6 +22,7 @@ Usage:
 from enum import IntEnum
 from typing import List
 import numpy as np
+from ..primitives import Q15_ONE
 
 # =============================================================================
 # SEQUENCE DEFINITIONS
@@ -165,7 +166,7 @@ def get_partial_amplitudes(
     seq_id: OEISSequenceID,
     H_max: int = 32,
     rolloff_db_per_octave: float = -3.0,
-    base_amplitude_q15: int = 32767,
+    base_amplitude_q15: int = Q15_ONE,
 ) -> np.ndarray:
     """
     Get Q15 amplitudes for harmonics in the sequence.

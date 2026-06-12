@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 import numpy as np
+from symcrash_python_ap.primitives import Q15_ONE
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 for p in (str(REPO_ROOT / "src"), str(REPO_ROOT / "tools" / "render")):
@@ -148,7 +149,7 @@ class WorkbenchSession:
             t0 = time.monotonic()
             samples = render_preset_note(
                 self.ir, note=self.note, duration_sec=self.duration,
-                velocity_q15=int(self.velocity * 32767))
+                velocity_q15=int(self.velocity * Q15_ONE))
             dt = time.monotonic() - t0
         samples = np.asarray(samples, dtype=np.int16)
         self._log("render", note=self.note, velocity=self.velocity,

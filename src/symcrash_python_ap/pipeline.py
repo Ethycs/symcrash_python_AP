@@ -182,7 +182,7 @@ class Pipeline:
                 # Add to existing (allows multiple harmonics in same band)
                 # Clamp to Q15 range (±32767) not sat16 (±32768)
                 new_val = coeffs[node_start + i] + coeff_val
-                coeffs[node_start + i] = max(-32767, min(32767, new_val))
+                coeffs[node_start + i] = max(-Q15_ONE, min(Q15_ONE, new_val))
 
         self.symbol.inject_note(voice_id, coeffs)
     

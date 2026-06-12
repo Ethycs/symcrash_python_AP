@@ -45,6 +45,7 @@ from .lifecycle import LifecycleState, CapsuleRecord, create_compiled_record
 from .central_registry import get_central_registry
 from ..control_registry import ControlID
 from ..voice.voice_engine_registry import VoiceParamID
+from ..primitives import Q15_ONE
 
 if TYPE_CHECKING:
     from ..instrument_ir import InstrumentIR
@@ -602,7 +603,7 @@ class CapsuleCompiler:
             if macro_id in macro_to_control:
                 control_id = macro_to_control[macro_id]
                 # Convert macro default (0.0-1.0) to Q15 (0-32767)
-                default_q15 = int(macro.default * 32767)
+                default_q15 = int(macro.default * Q15_ONE)
                 defaults[control_id] = default_q15
             else:
                 warnings.append(f"Unknown macro {macro.id} - no control mapping")
@@ -615,7 +616,7 @@ class CapsuleCompiler:
                 ms_per_block = 64 / 48.0  # ~1.33ms
                 defaults[ControlID.ATK_BLOCKS] = max(1, int(adsr.a_ms / ms_per_block))
                 defaults[ControlID.DCY_BLOCKS] = max(1, int(adsr.d_ms / ms_per_block))
-                defaults[ControlID.SUS_Q15] = int(adsr.s * 32767)
+                defaults[ControlID.SUS_Q15] = int(adsr.s * Q15_ONE)
                 defaults[ControlID.REL_BLOCKS] = max(1, int(adsr.r_ms / ms_per_block))
 
         defaults['_warnings'] = warnings

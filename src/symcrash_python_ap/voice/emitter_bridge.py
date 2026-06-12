@@ -41,6 +41,7 @@ Mode 3 Example (Full CMMM):
 
 from typing import TYPE_CHECKING, Optional, List
 from dataclasses import dataclass, field
+from ..primitives import Q15_HALF, Q15_ONE
 
 if TYPE_CHECKING:
     from ..library.preset_compiler import CompiledPreset
@@ -148,7 +149,7 @@ class VoiceEngineAdapter:
     # Note state (mirrors VoiceFrameEmitter interface)
     note: int = 60
     cents: int = 0
-    velocity_q15: int = 32767
+    velocity_q15: int = Q15_ONE
 
     # Block counter
     block_index: int = 0
@@ -167,7 +168,7 @@ class VoiceEngineAdapter:
                 if lfos:
                     state.lfos = lfos
 
-    def note_on(self, note: int, velocity_q15: int = 32767, cents: int = 0) -> None:
+    def note_on(self, note: int, velocity_q15: int = Q15_ONE, cents: int = 0) -> None:
         """
         Trigger note-on through VoiceEngine.
 
@@ -247,7 +248,7 @@ class VoiceEngineAdapter:
         # Get preset fields
         osc_mode = getattr(self.preset, 'osc_mode', 0)
         fm6_config = getattr(self.preset, 'fm6', None)
-        pwm_width_q15 = getattr(self.preset, 'pwm_width_q15', 16384)
+        pwm_width_q15 = getattr(self.preset, 'pwm_width_q15', Q15_HALF)
         cmmm = getattr(self.preset, 'cmmm', None)
 
         # Build VoiceFrame from ABI + preset
@@ -288,7 +289,7 @@ class VoiceEngineAdapter:
             cmmm_node_mask=cmmm.node_mask_u32 if cmmm else None,
             cmmm_mask_ramp_blocks=cmmm.mask_ramp_blocks if cmmm else 5,
             cmmm_tail_mode=cmmm.tail_mode if cmmm else None,
-            cmmm_traction_q15=cmmm.traction_q15 if cmmm else 32767,
+            cmmm_traction_q15=cmmm.traction_q15 if cmmm else Q15_ONE,
         )
 
         return frame

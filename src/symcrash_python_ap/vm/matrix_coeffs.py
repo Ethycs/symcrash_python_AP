@@ -27,6 +27,7 @@ from .waveform_matrix import (
     WaveformType, waveform_sample_q15,
     WAVEFORM_PERIOD, PHASE_TO_WAVE_SHIFT
 )
+from ..primitives import Q15_NEG_ONE
 from .tables import VM_K
 from ..primitives import BLOCK_SIZE, NUM_LEAVES
 
@@ -121,7 +122,7 @@ class WaveformCoeffBank:
 
         result = c0 + (((c1 - c0) * frac + (1 << 14)) >> 15)
 
-        return np.clip(result, -32768, 32767).astype(np.int16)
+        return np.clip(result, Q15_NEG_ONE, Q15_ONE).astype(np.int16)
 
     @staticmethod
     def generate(
@@ -252,7 +253,7 @@ class HarmonicCoeffMatrix:
             weight = int(a_h[h-1])
             result += (basis_interp * weight) >> 15
 
-        return np.clip(result, -32768, 32767).astype(np.int16)
+        return np.clip(result, Q15_NEG_ONE, Q15_ONE).astype(np.int16)
 
     @staticmethod
     def generate(phase_inc: int, H_max: int = 32, num_phase_bins: int = 64) -> 'HarmonicCoeffMatrix':

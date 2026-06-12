@@ -19,6 +19,7 @@ import struct
 
 # Import Q15_ONE from primitives (single source of truth)
 from .primitives import Q15_ONE
+from .primitives import Q15_3_4, Q15_HALF, Q16_ONE
 
 
 @dataclass
@@ -94,7 +95,7 @@ class VoiceFrame:
     # Carrier/Lift blend target (beta)
     # 0 = pure carrier (dry), 32767 = pure wavelet (wet)
     # Default ~75% wet for rich wavelet texture with carrier stability
-    beta_target_q15: int = 24576
+    beta_target_q15: int = Q15_3_4
 
     # Harmonic amplitudes for leaf generation (Q15)
     # Index 0 = fundamental, index 1 = 2nd harmonic, etc.
@@ -164,7 +165,7 @@ class VoiceFrame:
     noise_seed_u32: int = 0         # Preset meta.seed_u32 (replay determinism)
 
     # PWM parameters
-    pwm_width_q15: int = 16384      # Duty cycle (Q15: 0=0%, 32767≈100%, 16384=50%)
+    pwm_width_q15: int = Q15_HALF      # Duty cycle (Q15: 0=0%, 32767≈100%, 16384=50%)
     pwm_enabled: bool = False       # Enable PWM modulation
 
     # Hard sync parameters
@@ -187,7 +188,7 @@ class VoiceFrame:
 
     # Sample playback parameters (Phase 3 - coeff_osc_mode=2)
     # Note: Sample buffer is loaded via Voice Engine, not VoiceFrame
-    sample_rate_q16: int = 65536    # Playback rate (Q16: 65536=1.0x)
+    sample_rate_q16: int = Q16_ONE    # Playback rate (Q16: 65536=1.0x)
 
     # =========================================================================
     # FM6 Parameters (WSE-STD-FM-TOPOLOGY-v0 - coeff_osc_mode=3)
@@ -844,8 +845,8 @@ class VoiceFramePacketV1:
     carrier_archetype_u8: int = 0   # TreeArchetype (HARMONIC=0)
     transition_kind_u8: int = 0     # TransitionKind (RETRIGGER=0)
     detune_cents_i16: int = 0       # Carrier detune in cents
-    pw_q15: int = 16384             # Pulse width (0.5 default)
-    eta_target_q15: int = 16384     # Scaffold/texture blend (0.5 default)
+    pw_q15: int = Q15_HALF             # Pulse width (0.5 default)
+    eta_target_q15: int = Q15_HALF     # Scaffold/texture blend (0.5 default)
     pitchbend_cents_i16: int = 0    # Real-time pitchbend
 
     # Events (82 bytes)

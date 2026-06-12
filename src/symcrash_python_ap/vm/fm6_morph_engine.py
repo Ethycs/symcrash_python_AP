@@ -19,6 +19,7 @@ from .fm_archetypes import (
     compute_blended_matrix, compute_blended_carriers, blend_feedback_op,
     ARCH_CHAIN, Q15_ONE
 )
+from ..primitives import Q15_NEG_ONE, Q15_ONE
 from .fm6_state import FM6State, FMOperator, Q32_MASK
 from .tables import VM_K, COEFF_LEN
 
@@ -31,9 +32,9 @@ except ImportError:
     def sin_cos_q15(phase_q32: int) -> Tuple[int, int]:
         """Compute sin/cos from Q32 phase."""
         phase_rad = (phase_q32 / (1 << 32)) * 2 * math.pi
-        sin_val = int(math.sin(phase_rad) * 32767)
-        cos_val = int(math.cos(phase_rad) * 32767)
-        return max(-32768, min(32767, sin_val)), max(-32768, min(32767, cos_val))
+        sin_val = int(math.sin(phase_rad) * Q15_ONE)
+        cos_val = int(math.cos(phase_rad) * Q15_ONE)
+        return max(Q15_NEG_ONE, min(Q15_ONE, sin_val)), max(Q15_NEG_ONE, min(Q15_ONE, cos_val))
 
 
 # Import from primitives (single source of truth)
@@ -42,10 +43,10 @@ from ..primitives import NUM_LEAVES
 
 def _sat16(x: int) -> int:
     """Saturate to int16 range."""
-    if x > 32767:
-        return 32767
-    elif x < -32768:
-        return -32768
+    if x > Q15_ONE:
+        return Q15_ONE
+    elif x < Q15_NEG_ONE:
+        return Q15_NEG_ONE
     return x
 
 
@@ -252,7 +253,7 @@ def fm6_generate_block_morphed(state: FM6MorphState, base_phase_inc: int) -> np.
     if num_active_carriers > 1:
         output_k = output_k // num_active_carriers
 
-    return np.clip(output_k, -32768, 32767).astype(np.int16)
+    return np.clip(output_k, Q15_NEG_ONE, Q15_ONE).astype(np.int16)
 
 
 def fm6_morph_to_coefficients(output_k: np.ndarray) -> np.ndarray:

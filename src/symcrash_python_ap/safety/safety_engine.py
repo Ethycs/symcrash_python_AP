@@ -137,7 +137,7 @@ from ..fixed import (
 from ..frames import ParamFrame, Metrics
 
 # Import from primitives (single source of truth)
-from ..primitives import NUM_LEAVES
+from ..primitives import NUM_LEAVES, Q15_NEG_ONE
 
 
 # =============================================================================
@@ -1164,7 +1164,7 @@ class SymbolTail:
 
         # S1: Finite coefficients (all representable as int16)
         for c in coeffs:
-            if c > 32767 or c < -32768:
+            if c > Q15_ONE or c < Q15_NEG_ONE:
                 result.s1_finite = False
                 break
 

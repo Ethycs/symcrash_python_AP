@@ -19,6 +19,7 @@ Usage:
 from dataclasses import dataclass
 from enum import IntEnum
 from typing import Dict, List
+from .primitives import Q15_3_4, Q15_ONE
 
 
 # =============================================================================
@@ -94,27 +95,27 @@ class ControlEntry:
 # =============================================================================
 
 CONTROL_REGISTRY_V0: List[ControlEntry] = [
-    ControlEntry(0, "TIMBRE", ValueType.Q15U, 0, 32767, 32767,
+    ControlEntry(0, "TIMBRE", ValueType.Q15U, 0, Q15_ONE, Q15_ONE,
                  SlewPolicy.ONE_POLE, 2048, "family_scale[COLOR]"),
-    ControlEntry(1, "TEXTURE", ValueType.Q15U, 0, 32767, 32767,
+    ControlEntry(1, "TEXTURE", ValueType.Q15U, 0, Q15_ONE, Q15_ONE,
                  SlewPolicy.ONE_POLE, 2048, "family_scale[LOCAL]"),
-    ControlEntry(2, "DYNAMICS", ValueType.Q15U, 0, 32767, 32767,
+    ControlEntry(2, "DYNAMICS", ValueType.Q15U, 0, Q15_ONE, Q15_ONE,
                  SlewPolicy.ONE_POLE, 2048, "gain_scale_q15"),
-    ControlEntry(3, "MORPH", ValueType.Q15U, 0, 32767, 0,
+    ControlEntry(3, "MORPH", ValueType.Q15U, 0, Q15_ONE, 0,
                  SlewPolicy.NBLOCK, 16, "tree_blend_q15"),
-    ControlEntry(4, "CHAOS", ValueType.Q15U, 0, 32767, 0,
+    ControlEntry(4, "CHAOS", ValueType.Q15U, 0, Q15_ONE, 0,
                  SlewPolicy.NBLOCK, 32, "family_scale[CATASTROPHE]"),
     ControlEntry(5, "DETUNE", ValueType.I16, -2400, 2400, 0,
                  SlewPolicy.INSTANT, 0, "pitch_offset_cents"),
     ControlEntry(6, "PITCH_BEND", ValueType.I16, -200, 200, 0,
                  SlewPolicy.INSTANT, 0, "pitch_offset_cents"),
-    ControlEntry(9, "MASTER_GAIN", ValueType.Q15U, 0, 32767, 32767,
+    ControlEntry(9, "MASTER_GAIN", ValueType.Q15U, 0, Q15_ONE, Q15_ONE,
                  SlewPolicy.ONE_POLE, 4096, "global.master_gain_q15"),
     ControlEntry(16, "ATK_BLOCKS", ValueType.U16, 1, 500, 8,
                  SlewPolicy.NBLOCK, 4, "attack_blocks"),
     ControlEntry(17, "DCY_BLOCKS", ValueType.U16, 1, 1000, 32,
                  SlewPolicy.NBLOCK, 4, "decay_blocks"),
-    ControlEntry(18, "SUS_Q15", ValueType.Q15U, 0, 32767, 24576,
+    ControlEntry(18, "SUS_Q15", ValueType.Q15U, 0, Q15_ONE, Q15_3_4,
                  SlewPolicy.NBLOCK, 4, "sustain_level_q15"),
     ControlEntry(19, "REL_BLOCKS", ValueType.U16, 1, 1500, 64,
                  SlewPolicy.NBLOCK, 4, "release_blocks"),

@@ -336,7 +336,7 @@ def composite_generate_coeffs(
     for i in range(COEFF_LEN_POLYPHASE):
         a_val = int(state._coeff_a[i])
         b_val = int(state._coeff_b[i])
-        blended = (inv_blend * a_val + blend * b_val + 16384) >> 15
+        blended = (inv_blend * a_val + blend * b_val + Q15_HALF) >> 15
         output_coeffs[i] = SAT16(blended)
 
 

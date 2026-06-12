@@ -49,6 +49,7 @@ from .frames import ParamFrame, VoiceFrame
 from .vm.state import VMState, OSC_MODE_A, OSC_MODE_B, OSC_MODE_FM6
 from .vm.executor import vm_step_block
 from .primitives import Q15_ONE, Q15_HALF, Q15_NEG_ONE, SAMPLE_RATE_HZ
+from .primitives import Q16_ONE
 
 
 # =============================================================================
@@ -276,8 +277,8 @@ class SynthMaster:
                 self._fm6_params = {
                     'algorithm': getattr(node.params, 'algorithm', 1),
                     'feedback': getattr(node.params, 'feedback', 0),
-                    'op_ratios': getattr(node.params, 'op_ratios', [65536] * 6),
-                    'op_levels': getattr(node.params, 'op_levels', [32767, 0, 0, 0, 0, 0]),
+                    'op_ratios': getattr(node.params, 'op_ratios', [Q16_ONE] * 6),
+                    'op_levels': getattr(node.params, 'op_levels', [Q15_ONE, 0, 0, 0, 0, 0]),
                 }
 
         # Custom partials (waveform: partials) take priority over the

@@ -21,6 +21,7 @@ from symcrash_python_ap.instrument_ir import (
     EmitTemplate,
     derive_operators_from_emphasis,
 )
+from symcrash_python_ap.primitives import Q16_ONE
 
 AXES = list(AXIS_OPERATORS.keys())  # color, body, spread, snap, glue, warp, chaos
 
@@ -141,10 +142,10 @@ def _fm6_op_param(i, kind):
             return False
         vals = getattr(node.params, attr)
         if vals is None:
-            vals = [65536] * 6 if kind == "ratio" else [0] * 6
+            vals = [Q16_ONE] * 6 if kind == "ratio" else [0] * 6
             setattr(node.params, attr, vals)
         while len(vals) < 6:
-            vals.append(65536 if kind == "ratio" else 0)
+            vals.append(Q16_ONE if kind == "ratio" else 0)
         vals[i] = int(round(float(v) * scale))
         return True
 

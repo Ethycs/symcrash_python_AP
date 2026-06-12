@@ -45,6 +45,7 @@ from ..wavelet.sine_core import (
     sine_q15, cosine_q15, sin_cos_q15,
     PHASE_BITS, PHASE_MASK
 )
+from ..primitives import Q15_HALF, Q15_QUARTER
 
 # =============================================================================
 # CONSTANTS
@@ -152,7 +153,7 @@ def apply_blep(c: np.ndarray, transition_idx: int, step_direction: int = 1) -> N
 
 def generate_square_vector(
     period: int = WAVEFORM_PERIOD,
-    duty_q15: int = 16384,
+    duty_q15: int = Q15_HALF,
     bandlimited: bool = False
 ) -> np.ndarray:
     """
@@ -183,7 +184,7 @@ def generate_square_vector(
 
 def generate_pulse_vector(
     period: int = WAVEFORM_PERIOD,
-    duty_q15: int = 8192,
+    duty_q15: int = Q15_QUARTER,
     bandlimited: bool = False
 ) -> np.ndarray:
     """
@@ -345,7 +346,7 @@ class WaveformCache:
     def get_vector(
         self,
         wave_type: int,
-        duty_q15: int = 16384,
+        duty_q15: int = Q15_HALF,
         bandlimited: Optional[bool] = None
     ) -> np.ndarray:
         """
@@ -375,7 +376,7 @@ class WaveformCache:
     def _generate(self, wave_type: int, duty_q15: int, bandlimited: bool) -> np.ndarray:
         """Generate waveform vector."""
         if wave_type == WaveformType.SQUARE:
-            return generate_square_vector(self.period, 16384, bandlimited)
+            return generate_square_vector(self.period, Q15_HALF, bandlimited)
         elif wave_type == WaveformType.PULSE:
             return generate_pulse_vector(self.period, duty_q15, bandlimited)
         elif wave_type == WaveformType.SAW:
@@ -413,7 +414,7 @@ def get_waveform_cache() -> WaveformCache:
 def waveform_sample_q15(
     phase_32: int,
     wave_type: int,
-    duty_q15: int = 16384,
+    duty_q15: int = Q15_HALF,
 ) -> int:
     """
     Get waveform sample at given phase.
@@ -445,7 +446,7 @@ def waveform_sample_q15(
 def waveform_sample_vectorized(
     phases_32: np.ndarray,
     wave_type: int,
-    duty_q15: int = 16384,
+    duty_q15: int = Q15_HALF,
 ) -> np.ndarray:
     """
     Vectorized waveform sampling.
@@ -481,7 +482,7 @@ def waveform_sample_vectorized(
 def compute_harmonic_coefficients(
     wave_type: int,
     H_max: int = 32,
-    duty_q15: int = 16384,
+    duty_q15: int = Q15_HALF,
 ) -> Tuple[int, np.ndarray, np.ndarray]:
     """
     Compute Fourier series coefficients for waveform.
@@ -540,7 +541,7 @@ def compute_harmonic_coefficients(
 def get_theoretical_harmonics(
     wave_type: int,
     H_max: int = 32,
-    duty_q15: int = 16384,
+    duty_q15: int = Q15_HALF,
 ) -> Tuple[int, np.ndarray, np.ndarray]:
     """
     Get theoretical harmonic coefficients for standard waveforms.

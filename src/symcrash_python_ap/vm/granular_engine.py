@@ -26,6 +26,7 @@ from .sample_source import SampleOscState, VM_K, NUM_LEAVES, COEFF_LEN
 
 # Import canonical constants from primitives (single source of truth)
 from ..primitives import Q15_ONE, Q15_HALF, BLOCK_SIZE
+from ..primitives import Q15_NEG_ONE, Q15_SCALE, Q16_ONE
 
 
 # =============================================================================
@@ -56,7 +57,7 @@ class GrainState:
 
     # Grain parameters
     length_blocks: int = 16      # Duration in blocks
-    rate_q16: int = 65536        # Playback rate (65536 = 1.0x)
+    rate_q16: int = Q16_ONE        # Playback rate (65536 = 1.0x)
     pan_q15: int = Q15_HALF      # Stereo pan (0 = left, 32767 = right)
 
     # Amplitude envelope (attack/release ramps)
@@ -72,7 +73,7 @@ class GrainState:
         self,
         start_block: int,
         length_blocks: int,
-        rate_q16: int = 65536,
+        rate_q16: int = Q16_ONE,
         amplitude_q15: int = Q15_ONE,
     ) -> None:
         """Trigger a new grain."""
@@ -148,12 +149,12 @@ class GranularState:
     # Scan position (where to spawn new grains)
     scan_position: int = 0          # In blocks (integer part)
     scan_position_q16: int = 0      # Q16 accumulator for fractional advancement
-    scan_rate_q16: int = 65536      # Rate of scan movement (65536 = 1 block/block)
+    scan_rate_q16: int = Q16_ONE      # Rate of scan movement (65536 = 1 block/block)
 
     # Grain scheduling parameters
     density_q15: int = Q15_HALF     # Probability of spawning grain per block
     grain_length: int = 16          # Default grain length in blocks
-    grain_rate_q16: int = 65536     # Playback rate for new grains
+    grain_rate_q16: int = Q16_ONE     # Playback rate for new grains
     spray_q15: int = 0              # Random scatter around scan position
 
     # Output mixing
@@ -196,7 +197,7 @@ class GranularState:
             start = b * BLOCK_SIZE
             audio_block = audio_buffer[start:start + BLOCK_SIZE]
             coeffs = fwpt_jit(audio_block.tolist(), headroom_bits=1)
-            self.coeff_buffer[b, :] = np.clip(coeffs, -32768, 32767)
+            self.coeff_buffer[b, :] = np.clip(coeffs, Q15_NEG_ONE, Q15_ONE)
 
         self.num_source_blocks = num_blocks
 
@@ -248,7 +249,7 @@ def _compute_spawn_position(state: GranularState) -> int:
         # Add random scatter
         state.prng_state, rand = _prng_step(state.prng_state)
         spray_range = (state.spray_q15 * state.num_source_blocks) >> 15
-        offset = ((rand - 32768) * spray_range) >> 15
+        offset = ((rand - Q15_SCALE) * spray_range) >> 15
         base_pos += offset
 
     # Clamp to valid range
@@ -368,7 +369,7 @@ def granular_generate_coeffs(state: GranularState, output_512: np.ndarray) -> No
         mix_acc = mix_acc // max(1, active_count)
 
     # Saturate and replicate to 512 coefficients
-    mix_sat = np.clip(mix_acc, -32768, 32767).astype(np.int16)
+    mix_sat = np.clip(mix_acc, Q15_NEG_ONE, Q15_ONE).astype(np.int16)
 
     for leaf in range(NUM_LEAVES):
         val = int(mix_sat[leaf])
@@ -401,8 +402,8 @@ def granular_set_parameters(
     state.density_q15 = int(min(1.0, max(0.0, density)) * Q15_ONE)
     state.grain_length = max(MIN_GRAIN_BLOCKS, int(grain_size_ms / block_time_ms))
     state.spray_q15 = int(min(1.0, max(0.0, spray)) * Q15_ONE)
-    state.grain_rate_q16 = int(pitch_ratio * 65536)
-    state.scan_rate_q16 = int(scan_rate * 65536)
+    state.grain_rate_q16 = int(pitch_ratio * Q16_ONE)
+    state.scan_rate_q16 = int(scan_rate * Q16_ONE)
 
 
 # =============================================================================

@@ -23,6 +23,7 @@ from typing import List, Optional, Set, Tuple, Dict
 from enum import Enum, IntEnum
 
 from ..frames import VoiceFramePacketV0b, VoiceFlags
+from ..primitives import Q15_SCALE
 
 
 # =============================================================================
@@ -34,7 +35,7 @@ from ..frames import VoiceFramePacketV0b, VoiceFlags
 ENERGY_EPS_Q15 = 33
 
 # Cloud decay factor per block (0.98 = ~3dB per 50 blocks at 48kHz/64)
-CLOUD_DECAY_Q15 = int(0.98 * 32768)  # 32112
+CLOUD_DECAY_Q15 = int(0.98 * Q15_SCALE)  # 32112
 
 # Retirement threshold (below this, voice can be retired)
 RETIRE_EPS_Q15 = 3  # Very close to silence

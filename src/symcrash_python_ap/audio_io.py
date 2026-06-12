@@ -19,6 +19,7 @@ import numpy as np
 from datetime import datetime
 from typing import List, Tuple, Union, Optional
 from dataclasses import dataclass
+from .primitives import Q15_NEG_ONE, Q15_ONE, Q15_SCALE
 
 
 # =============================================================================
@@ -148,8 +149,8 @@ class AudioWriter:
             n_channels = 2
 
         # Clip to int16 range
-        L_arr = np.clip(L_arr, -32768, 32767).astype(np.int16)
-        R_arr = np.clip(R_arr, -32768, 32767).astype(np.int16)
+        L_arr = np.clip(L_arr, Q15_NEG_ONE, Q15_ONE).astype(np.int16)
+        R_arr = np.clip(R_arr, Q15_NEG_ONE, Q15_ONE).astype(np.int16)
 
         return L_arr, R_arr, n_channels
 
@@ -256,7 +257,7 @@ class AudioWriter:
 
     def _print_info(self, meta: AudioMetadata) -> None:
         """Print info about written file."""
-        peak_pct = 100 * meta.peak_amplitude / 32768
+        peak_pct = 100 * meta.peak_amplitude / Q15_SCALE
         print(f"Wrote {meta.filepath}")
         print(f"  Duration: {meta.duration_sec:.2f}s | Channels: {meta.channels} | Rate: {meta.sample_rate}Hz")
         print(f"  Peak: {meta.peak_amplitude:.0f} ({peak_pct:.1f}%) | RMS: {meta.rms_amplitude:.0f}")

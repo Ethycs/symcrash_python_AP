@@ -34,6 +34,7 @@ from ..primitives import BLOCK_SIZE, NUM_LEAVES, SAMPLE_RATE_HZ
 
 # JIT hot-path kernels (bit-exact, switchable; see vm/hotpath_jit.py)
 from . import hotpath_jit as _hot
+from ..primitives import Q15_HALF, Q15_NEG_ONE
 
 # =============================================================================
 # CONSTANTS (WSE-STD-210 Section 1)
@@ -167,7 +168,7 @@ class HarmonicWeights:
                 self.a_h_q15[h - 1] = SAT16(int(sign * amplitude * Q15_ONE))
         self.H_active = min(H, len(self.a_h_q15))
 
-    def set_pwm(self, duty_q15: int = 16384, H: int = 32) -> None:
+    def set_pwm(self, duty_q15: int = Q15_HALF, H: int = 32) -> None:
         """
         Configure for PWM/pulse wave with given duty cycle.
 
@@ -230,7 +231,7 @@ class HarmonicWeights:
 
         self.H_active = min(len(harmonic_amps_q15), len(self.a_h_q15))
 
-    def set_from_waveform_type(self, wave_type: int, H: int = 32, duty_q15: int = 16384) -> None:
+    def set_from_waveform_type(self, wave_type: int, H: int = 32, duty_q15: int = Q15_HALF) -> None:
         """
         Configure from WaveformType constant.
 
@@ -271,7 +272,7 @@ class HarmonicWeights:
         sequence_id: int,
         H: int = 32,
         rolloff_db_per_octave: float = -3.0,
-        base_amplitude_q15: int = 32767,
+        base_amplitude_q15: int = Q15_ONE,
     ) -> None:
         """
         Configure harmonics based on OEIS integer sequence.
@@ -379,7 +380,7 @@ class LFORouting:
     amount_q15: Scaling factor (32767 = 100%)
     """
     target: LFOTarget = LFOTarget.PITCH
-    amount_q15: int = 32767
+    amount_q15: int = Q15_ONE
 
 
 # =============================================================================
@@ -611,7 +612,7 @@ class LFOState(VibratoState):
     routings: List[LFORouting] = field(default_factory=list)
 
     # Depth in Q15 (unified for all targets)
-    depth_q15: int = 16384  # 50% default
+    depth_q15: int = Q15_HALF  # 50% default
 
     # Arc slot index - which arc_phase_q16 slot stores this LFO's phase
     # Phase is stored externally in VoiceState.arc_phase_q16[arc_slot]
@@ -763,7 +764,7 @@ class LFOState(VibratoState):
     def configure_lfo(
         self,
         rate_hz: float = 5.0,
-        depth_q15: int = 16384,
+        depth_q15: int = Q15_HALF,
         waveform: LFOWaveform = LFOWaveform.SINE,
         sync_mode: LFOSyncMode = LFOSyncMode.FREE,
         delay_ms: float = 0.0,
@@ -834,7 +835,7 @@ class ModeBState:
     weights: HarmonicWeights = field(default_factory=HarmonicWeights)
 
     # PWM state
-    pwm_width_q15: int = 16384  # 50% duty cycle
+    pwm_width_q15: int = Q15_HALF  # 50% duty cycle
     pwm_enabled: bool = False
 
     # FM/PM state
@@ -1260,9 +1261,9 @@ def mode_b_generate_coeffs(
 
     # Scale factor to prevent overflow (sum of harmonics shouldn't exceed ~32767)
     # Use headroom of 2x to be safe
-    if total_weight > 32767:
+    if total_weight > Q15_ONE:
         scale_shift = 0
-        while (total_weight >> scale_shift) > 32767:
+        while (total_weight >> scale_shift) > Q15_ONE:
             scale_shift += 1
     else:
         scale_shift = 0
@@ -1421,7 +1422,7 @@ class WaveformCoeffLUT:
         diff = v1 - v0
         result = v0 + ((diff * frac + (1 << 14)) >> 15)
 
-        return np.clip(result, -32768, 32767).astype(np.int16)
+        return np.clip(result, Q15_NEG_ONE, Q15_ONE).astype(np.int16)
 
     @staticmethod
     def generate(waveform_type: int, phase_inc: int, P: int = 256) -> 'WaveformCoeffLUT':
@@ -1642,7 +1643,7 @@ def extract_modulator_signal(
                 val = int(coeff_state[leaf * VM_K + k])
                 energy += (val * val) >> 15
             # Clamp to Q15 range
-            fm_mod[k] = SAT16(min(32767, energy >> 6))
+            fm_mod[k] = SAT16(min(Q15_ONE, energy >> 6))
 
     return fm_mod
 
@@ -1793,7 +1794,7 @@ def mode_b_generate_coeffs_vectorized(
     # Compute scale shift for normalization
     total_weight = np.maximum(np.abs(a_h), np.abs(b_h)).sum()
     scale_shift = 0
-    while total_weight > 32767 and scale_shift < 15:
+    while total_weight > Q15_ONE and scale_shift < 15:
         total_weight >>= 1
         scale_shift += 1
 
@@ -1859,7 +1860,7 @@ def mode_b_generate_coeffs_vectorized(
     result += sin_contrib.sum(axis=0) + cos_contrib.sum(axis=0)
 
     # Saturate and interleave into output
-    result = np.clip(result, -32768, 32767).astype(np.int16)
+    result = np.clip(result, Q15_NEG_ONE, Q15_ONE).astype(np.int16)
 
     # Interleave: output[l*K + k] = result[l, k]
     # result is [L, K] row-major, so this is exactly a C-order ravel

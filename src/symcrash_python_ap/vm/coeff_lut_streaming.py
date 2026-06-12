@@ -43,6 +43,7 @@ from ..wavelet.fast_lifting import fwpt_jit, idwpt_jit
 from ..wavelet.sine_core import sine_q15
 from .tables import VM_K as TABLES_VM_K
 from ..primitives import BLOCK_SIZE, NUM_LEAVES, Q15_ONE, Q15_HALF, SAMPLE_RATE_HZ
+from ..primitives import Q15_NEG_ONE
 
 logger = logging.getLogger(__name__)
 
@@ -215,7 +216,7 @@ class StreamingCoeffLUT:
             diff = v1 - v0
             val = v0 + ((diff * frac_64 + half) >> frac_bits)
 
-        np.clip(val, -32768, 32767, out=val)
+        np.clip(val, Q15_NEG_ONE, Q15_ONE, out=val)
         output[:, :] = val.astype(np.int16)
 
     @staticmethod
@@ -286,7 +287,7 @@ class StreamingCoeffLUT:
                     sample = generate_sample_fn(phase)
                     if normalize:
                         sample = (sample * TARGET_RMS_Q15) // Q15_ONE
-                    block[n] = np.clip(sample, -32768, 32767)
+                    block[n] = np.clip(sample, Q15_NEG_ONE, Q15_ONE)
                     phase = (phase + phase_inc) & 0xFFFFFFFF
 
                 # Run FWPT to get coefficients
@@ -342,7 +343,7 @@ class StreamingCoeffLUT:
             for h in range(1, 17):
                 h_phase = (phase * h) & 0xFFFFFFFF
                 val += sine_q15(h_phase) // h
-            return int(np.clip(val // 2, -32768, 32767))
+            return int(np.clip(val // 2, Q15_NEG_ONE, Q15_ONE))
 
         return StreamingCoeffLUT.generate_from_waveform(
             wave_id=1,
@@ -360,7 +361,7 @@ class StreamingCoeffLUT:
             for h in [1, 3, 5, 7, 9, 11, 13, 15]:
                 h_phase = (phase * h) & 0xFFFFFFFF
                 val += sine_q15(h_phase) // h
-            return int(np.clip(val, -32768, 32767))
+            return int(np.clip(val, Q15_NEG_ONE, Q15_ONE))
 
         return StreamingCoeffLUT.generate_from_waveform(
             wave_id=2,
@@ -434,7 +435,7 @@ class SubbandState:
                     # c_out = c_state + (c_base - c_state) * mix >> 15
                     diff = c_b - c_s
                     blended = c_s + RSHIFT_RNE(diff * base_mix_q15, 15)
-                    self.state[l, k] = int(np.clip(blended, -32768, 32767))
+                    self.state[l, k] = int(np.clip(blended, Q15_NEG_ONE, Q15_ONE))
 
     def advance_phase(self, samples: int = BLOCK_SIZE) -> None:
         """Advance phase accumulator by given number of samples."""
@@ -550,7 +551,7 @@ def _saw_q15(phase: int, max_harmonics: int = MAX_HARMONICS) -> int:
         sign = 1 if (h % 2 == 1) else -1  # Alternating sign for proper saw shape
         val += sign * sine_q15(h_phase) // h
     # Normalize: theoretical peak is ~1.28 of sine, scale to ~0.8 for headroom
-    return int(np.clip(val * 2 // 3, -32768, 32767))
+    return int(np.clip(val * 2 // 3, Q15_NEG_ONE, Q15_ONE))
 
 
 def _square_q15(phase: int, max_harmonics: int = MAX_HARMONICS) -> int:
@@ -566,7 +567,7 @@ def _square_q15(phase: int, max_harmonics: int = MAX_HARMONICS) -> int:
         h_phase = (phase * h) & 0xFFFFFFFF
         val += sine_q15(h_phase) // h
     # Normalize: theoretical peak is ~1.27 of sine, scale appropriately
-    return int(np.clip(val * 3 // 4, -32768, 32767))
+    return int(np.clip(val * 3 // 4, Q15_NEG_ONE, Q15_ONE))
 
 
 def _triangle_q15(phase: int, max_harmonics: int = MAX_HARMONICS) -> int:
@@ -589,7 +590,7 @@ def _triangle_q15(phase: int, max_harmonics: int = MAX_HARMONICS) -> int:
 
     # Raw peak is ~39918 (all odd harmonics add at 90 degrees)
     # Scale down by 32767/39918 ≈ 0.821 ≈ 13/16 = 0.8125
-    return int(np.clip(val * 13 // 16, -32767, 32767))
+    return int(np.clip(val * 13 // 16, -Q15_ONE, Q15_ONE))
 
 
 def _pulse_q15(phase: int, max_harmonics: int = MAX_HARMONICS, duty: float = 0.25) -> int:
@@ -613,7 +614,7 @@ def _pulse_q15(phase: int, max_harmonics: int = MAX_HARMONICS, duty: float = 0.2
             h_phase = (phase * h) & 0xFFFFFFFF
             val += int(amp_mod * sine_q15(h_phase) / h)
     # Normalize similar to saw
-    return int(np.clip(val * 2 // 3, -32768, 32767))
+    return int(np.clip(val * 2 // 3, Q15_NEG_ONE, Q15_ONE))
 
 
 def get_waveform_generator(wave_id: int):

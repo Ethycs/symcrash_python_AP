@@ -45,6 +45,7 @@ from ..wavelet.backends import (
     HarmonicScaffoldBackend,
     WaveletBackend,
 )
+from ..primitives import Q15_3_4
 
 # Use sine_core for bit-exact trig (no math.sin/cos in hot paths)
 from ..wavelet.sine_core import sine_q15, cosine_q15, PHASE_MASK
@@ -301,7 +302,7 @@ class UnifiedOutputStage:
         # All integer math to avoid floating-point jitter
         pan_q15 = frame.pan_q15
         # Map pan_q15 from [-32768, 32767] to [0, 65535] (Q16 unsigned)
-        pan_u16 = pan_q15 + 32768
+        pan_u16 = pan_q15 + Q15_SCALE
         # Scale to phase [0, 0x40000000]: phase = pan_u16 * 0x40000000 / 65536
         # = (pan_u16 << 14) since 0x40000000 / 65536 = 0x4000 = 16384 = 2^14
         pan_phase = (pan_u16 << 14) & PHASE_MASK
@@ -335,7 +336,7 @@ class UnifiedOutputStage:
         voice_id: int,
         note: int,
         gain_q15: int = Q15_HALF,
-        beta_target_q15: int = 24576,
+        beta_target_q15: int = Q15_3_4,
     ) -> Tuple[List[int], List[int]]:
         """
         Simplified render for common use case.

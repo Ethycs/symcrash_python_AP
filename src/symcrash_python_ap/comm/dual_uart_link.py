@@ -1848,17 +1848,17 @@ def run_conformance_test():
     # Test 10: Voice state hold/decay
     print("\n10. Voice State Hold/Decay (Section 8)")
     voice = VoiceState(voice_id=0, active=True)
-    voice.leaf_gains[0] = 32767
+    voice.leaf_gains[0] = Q15_ONE
     voice.last_block_id = 100
 
     # Within hold period
     voice.tick_block(104, hold_blocks=4, decay_blocks=32)
-    assert voice.leaf_gains[0] == 32767
+    assert voice.leaf_gains[0] == Q15_ONE
     print(f"   Block 104 (within hold): gain = {voice.leaf_gains[0]}")
 
     # Start decay
     voice.tick_block(106, hold_blocks=4, decay_blocks=32)
-    assert voice.leaf_gains[0] < 32767
+    assert voice.leaf_gains[0] < Q15_ONE
     print(f"   Block 106 (decay started): gain = {voice.leaf_gains[0]}")
     print("   PASS")
 

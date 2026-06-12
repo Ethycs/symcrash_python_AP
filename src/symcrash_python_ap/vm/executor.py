@@ -13,6 +13,7 @@ from .state import (
     VMState, OSC_MODE_A, OSC_MODE_B, OSC_MODE_SAMPLE, OSC_MODE_FM6, OSC_MODE_WAVETABLE,
     OSC_MODE_GRANULAR, PAYLOAD_TYPE_NODEMASK_SET, PAYLOAD_TYPE_TAILMODE_SET,
 )
+from ..primitives import Q16_ONE
 from .decode import DecodedPlan, decode_frame, FM_SOURCE_FEEDBACK
 from .tables import Tables, DEFAULT_TABLES, BLOCK_SAMPLES, VM_K
 from .lanes import (
@@ -89,7 +90,7 @@ def _process_cmmm_events(state: VMState, frame: 'VoiceFrame') -> None:
     # Step 3: Process tail mode event (payload_type 0x31)
     tail_mode = getattr(frame, 'cmmm_tail_mode', None)
     if tail_mode is not None:
-        traction = getattr(frame, 'cmmm_traction_q15', 32767)
+        traction = getattr(frame, 'cmmm_traction_q15', Q15_ONE)
         latch.apply_tailmode_event(tail_mode, traction)
 
     # -------------------------------------------------------------------------
@@ -286,7 +287,7 @@ def _get_dynamic_backbone(state: VMState, frame: 'VoiceFrame', cfg) -> list:
             # Get strength from families dict (keyed by op_id or op_name)
             strength = families.get(op_id, Q15_HALF)  # Default 50% strength
             if isinstance(strength, float):
-                strength = int(strength * 32767)
+                strength = int(strength * Q15_ONE)
             backbone.append(BackboneEntry(op_id=op_id, strength_q15=strength))
 
         return backbone
@@ -499,7 +500,7 @@ def vm_step_block(
         sample_state = state.sample_state
         if sample_state.buffer is not None:
             # Get sample rate from frame (default 1.0x)
-            sample_rate = getattr(frame, 'sample_rate_q16', 65536) or 65536
+            sample_rate = getattr(frame, 'sample_rate_q16', Q16_ONE) or Q16_ONE
 
             # If sample has root note metadata, compute pitch shift
             root_note = getattr(sample_state, 'root_note', None)

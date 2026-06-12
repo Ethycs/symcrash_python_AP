@@ -20,6 +20,7 @@ import numpy as np
 
 from .state import VMState, EnvelopePhase
 from ..primitives import BLOCK_SIZE
+from ..primitives import Q15_NEG_ONE, Q15_ONE
 
 
 # =============================================================================
@@ -215,7 +216,7 @@ class VoicePool:
             self._mix_buffer += audio.astype(np.int32)
 
         # Soft clip to prevent harsh clipping
-        clipped = np.clip(self._mix_buffer, -32768, 32767)
+        clipped = np.clip(self._mix_buffer, Q15_NEG_ONE, Q15_ONE)
         return clipped.astype(np.int16)
 
     def find_voice_for_note(self, note: int, channel: int = 0) -> Optional[VoiceSlot]:

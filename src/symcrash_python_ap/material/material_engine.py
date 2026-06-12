@@ -707,7 +707,7 @@ class MaterialEngine:
         # drive: LFO rate (0.1 Hz to 5 Hz)
         # LFO freq = 0.1 + (drive/32767) * 4.9 Hz
         # phase_inc per sample = freq / sample_rate * 2^32
-        rate_hz = 0.1 + (self.params.drive_q15 / 32767) * 4.9
+        rate_hz = 0.1 + (self.params.drive_q15 / Q15_ONE) * 4.9
         lfo_inc = int(rate_hz / 48000 * (1 << 32))
 
         # tone: modulation depth (0-480 samples = 0-10ms)
@@ -719,7 +719,7 @@ class MaterialEngine:
         # Stereo offset: fixed phase difference between L and R
         # bias_q15 = 16384 (0.5) gives 90 degree offset = pi/2
         # Map to radians: stereo_phase_offset = bias_q15 / 32767 * pi
-        stereo_phase_offset = (self.params.bias_q15 / 32767) * math.pi
+        stereo_phase_offset = (self.params.bias_q15 / Q15_ONE) * math.pi
 
         for i in range(self.B):
             # Process L channel
@@ -934,7 +934,7 @@ class MaterialEngine:
         # Range: ~10 octaves
         log_min = math.log2(20)
         log_max = math.log2(20000)
-        log_freq = log_min + (cutoff_q15 / 32767) * (log_max - log_min)
+        log_freq = log_min + (cutoff_q15 / Q15_ONE) * (log_max - log_min)
         fc = 2 ** log_freq
 
         # Clamp to valid range
@@ -948,7 +948,7 @@ class MaterialEngine:
         # reso_q15 = 32767 -> Q = 25 (near self-oscillation)
         # k = 2 - 2*Q = 2 - 1/Q (damping)
         # Q = 0.5 + (reso/32767) * 24.5
-        Q = 0.5 + (reso_q15 / 32767) * 24.5
+        Q = 0.5 + (reso_q15 / Q15_ONE) * 24.5
         k = 2.0 - 1.0 / Q
 
         # Clamp k to prevent instability (k must be > 0 for stability)
@@ -1002,12 +1002,12 @@ class MaterialEngine:
         notch = lp + hp  # Notch = LP + HP
 
         # Update state
-        state.ic1eq = int((2.0 * v1 - ic1eq) * 32767)
-        state.ic2eq = int((2.0 * v2 - ic2eq) * 32767)
+        state.ic1eq = int((2.0 * v1 - ic1eq) * Q15_ONE)
+        state.ic2eq = int((2.0 * v2 - ic2eq) * Q15_ONE)
 
         # Clamp state to prevent runaway
-        state.ic1eq = max(-32767, min(32767, state.ic1eq))
-        state.ic2eq = max(-32767, min(32767, state.ic2eq))
+        state.ic1eq = max(-Q15_ONE, min(Q15_ONE, state.ic1eq))
+        state.ic2eq = max(-Q15_ONE, min(Q15_ONE, state.ic2eq))
 
         # Select output based on mode
         if mode == 0:
@@ -1020,7 +1020,7 @@ class MaterialEngine:
             out = notch
 
         # Convert back to Q15
-        return sat16(int(out * 32767))
+        return sat16(int(out * Q15_ONE))
 
     def _svf_filter(self, L: List[int], R: List[int],
                     cutoff_q15: int, reso_q15: int, mode: int) -> Tuple[List[int], List[int]]:
@@ -1174,7 +1174,7 @@ class MaterialEngine:
         self.ks_L.delay_samples = delay_samples
         self.ks_R.delay_samples = delay_samples
 
-    def excite_karplus(self, noise_level_q15: int = 32767):
+    def excite_karplus(self, noise_level_q15: int = Q15_ONE):
         """
         Excite the Karplus-Strong string with a noise burst.
 

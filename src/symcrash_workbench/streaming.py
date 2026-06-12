@@ -51,6 +51,7 @@ from pathlib import Path
 from typing import List, Optional
 
 import numpy as np
+from symcrash_python_ap.primitives import Q15_HALF, Q15_ONE, Q16_ONE
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 for _p in (str(REPO_ROOT / "src"), str(REPO_ROOT / "tools" / "render")):
@@ -335,7 +336,7 @@ class StreamingVoice:
         ir = self.session.ir
         note = self.note
         b = self.block_index
-        velocity_q15 = int(self.session.velocity * 32767)
+        velocity_q15 = int(self.session.velocity * Q15_ONE)
 
         # --- Amp ADSR, gate-driven (sustain holds until note_off) ---
         a_blocks, d_blocks, r_blocks = 1, 1, 1
@@ -349,21 +350,21 @@ class StreamingVoice:
                 a_blocks = ms_to_blocks(adsr.a_ms * mult)
                 d_blocks = ms_to_blocks(adsr.d_ms * mult)
                 r_blocks = ms_to_blocks(adsr.r_ms * mult)
-                s_q15 = int(adsr.s * 32767)
+                s_q15 = int(adsr.s * Q15_ONE)
                 vel_sens_q15 = int(
-                    getattr(node.params, "velocity_sens", 1.0) * 32767)
+                    getattr(node.params, "velocity_sens", 1.0) * Q15_ONE)
                 break
         self._release_blocks = r_blocks
-        vel_scale_q15 = (32767 - vel_sens_q15
+        vel_scale_q15 = (Q15_ONE - vel_sens_q15
                          + ((vel_sens_q15 * velocity_q15) >> 15))
 
         if self.gate:
             if b < a_blocks:
-                gain_q15 = int(32767 * b / a_blocks)
+                gain_q15 = int(Q15_ONE * b / a_blocks)
                 phase = "ATTACK"
             elif b < a_blocks + d_blocks:
                 t = (b - a_blocks) / d_blocks
-                gain_q15 = int(32767 - (32767 - s_q15) * t)
+                gain_q15 = int(Q15_ONE - (Q15_ONE - s_q15) * t)
                 phase = "DECAY"
             else:
                 gain_q15 = s_q15
@@ -374,7 +375,7 @@ class StreamingVoice:
             gain_q15 = int(self._release_from_q15 * max(0.0, 1.0 - t))
             phase = "RELEASE"
             env_sustain_blocks = self._note_off_block
-        gain_q15 = max(0, min(32767, gain_q15))
+        gain_q15 = max(0, min(Q15_ONE, gain_q15))
         self._last_gain_q15 = gain_q15
 
         # --- Emphasis operators by envelope phase (simple-form mapping,
@@ -401,7 +402,7 @@ class StreamingVoice:
             for es in env_states:
                 value = es.value_q15(b, env_sustain_blocks)
                 if es.velocity_sens_q15:
-                    scale = (32767 - es.velocity_sens_q15
+                    scale = (Q15_ONE - es.velocity_sens_q15
                              + ((es.velocity_sens_q15 * velocity_q15) >> 15))
                     value = (value * scale) >> 15
                 for target_id in es.target_ids:
@@ -414,10 +415,10 @@ class StreamingVoice:
         pwm_enabled = False
         for node in ir.layers.L0_graph.nodes:
             if node.type == "Osc":
-                if getattr(node.params, "pwm_width_q15", None) not in (None, 16384):
+                if getattr(node.params, "pwm_width_q15", None) not in (None, Q15_HALF):
                     pwm_width = node.params.pwm_width_q15
                 if getattr(node.params, "pw", 0.5) != 0.5:
-                    pwm_width = int(node.params.pw * 32767)
+                    pwm_width = int(node.params.pw * Q15_ONE)
                 pwm_enabled = bool(getattr(node.params, "pwm_enable", False))
                 break
         lfos = list(getattr(ir, "modulators", None) or [])
@@ -425,11 +426,11 @@ class StreamingVoice:
             lfo.advance_block()
             lfo_val = lfo.get_lfo_value()
             for routing in lfo.routings:
-                scaled = (lfo_val * routing.amount_q15 + 16384) >> 15
+                scaled = (lfo_val * routing.amount_q15 + Q15_HALF) >> 15
                 if routing.target == LFOTarget.PITCH:
                     total_cents += scaled
                 elif routing.target == LFOTarget.GAIN:
-                    gain_scale_q15 = max(0, min(32767, 32767 + scaled))
+                    gain_scale_q15 = max(0, min(Q15_ONE, Q15_ONE + scaled))
                 elif routing.target == LFOTarget.PWM_WIDTH:
                     pwm_width = max(1638, min(31130, pwm_width + scaled))
 
@@ -458,8 +459,8 @@ class StreamingVoice:
             block_amps = _filtered_partials(
                 harmonic_amps, f0, eff_cutoff, filter_params["resonance"])
 
-        final_gain = ((((gain_q15 * gain_scale_q15 + 16384) >> 15)
-                       * vel_scale_q15 + 16384) >> 15)
+        final_gain = ((((gain_q15 * gain_scale_q15 + Q15_HALF) >> 15)
+                       * vel_scale_q15 + Q15_HALF) >> 15)
 
         # --- FM6 path ---
         for node in ir.layers.L0_graph.nodes:
@@ -473,9 +474,9 @@ class StreamingVoice:
                     beta_target_q15=0,
                     fm_algorithm_id=getattr(node.params, "algorithm", 1),
                     fm_op_ratios=getattr(node.params, "op_ratios",
-                                         [65536] * 6),
+                                         [Q16_ONE] * 6),
                     fm_op_levels=getattr(node.params, "op_levels",
-                                         [32767, 0, 0, 0, 0, 0]),
+                                         [Q15_ONE, 0, 0, 0, 0, 0]),
                     fm_feedback_depth=getattr(node.params, "feedback", 0),
                     fm_post_filter_enabled=bool(post_hz) or None,
                     fm_post_filter_cutoff_hz=post_hz,

@@ -20,6 +20,7 @@ from ..wavelet.sine_core import (
     cosine_q15 as _cosine_q15,
     sine_q15_vectorized as _sine_vectorized,
 )
+from ..primitives import Q15_NEG_ONE, Q15_SCALE
 
 # Import canonical Q15 constants and utilities from primitives (single source of truth)
 from ..primitives import Q15_ONE, Q15_HALF, clamp_q15, iter_active_nodes
@@ -204,12 +205,12 @@ WET_OLA_SIZE = 8  # Overlap samples (must match state.py)
 
 # Precomputed Hann window for OLA (fade-out and fade-in)
 _WET_OLA_FADE_OUT = np.array([
-    (np.cos(np.pi * i / WET_OLA_SIZE) + 1) * 16384  # Q15 Hann fade-out
+    (np.cos(np.pi * i / WET_OLA_SIZE) + 1) * Q15_HALF  # Q15 Hann fade-out
     for i in range(WET_OLA_SIZE)
 ], dtype=np.int32)
 
 _WET_OLA_FADE_IN = np.array([
-    (1 - np.cos(np.pi * i / WET_OLA_SIZE)) * 16384  # Q15 Hann fade-in
+    (1 - np.cos(np.pi * i / WET_OLA_SIZE)) * Q15_HALF  # Q15 Hann fade-in
     for i in range(WET_OLA_SIZE)
 ], dtype=np.int32)
 
@@ -364,7 +365,7 @@ def lane_carrier_render(state: VMState, cfg: DecodedPlan) -> np.ndarray:
     # - Headroom scaling preserves symmetry
 
     # Clamp to int16 range (should rarely trigger with headroom applied)
-    np.clip(_CARRIER_SAMPLES, -32768, 32767, out=_CARRIER_SAMPLES)
+    np.clip(_CARRIER_SAMPLES, Q15_NEG_ONE, Q15_ONE, out=_CARRIER_SAMPLES)
     _CARRIER_OUTPUT[:] = _CARRIER_SAMPLES.astype(np.int16)
 
     return _CARRIER_OUTPUT
@@ -433,7 +434,7 @@ def _inject_noise(state: VMState, mask: int, strength: int, lane: int) -> None:
         rand_val = prng_step(state)
 
         # Scale to Q15 range and apply strength
-        noise = ((rand_val & 0xFFFF) - 32768)
+        noise = ((rand_val & 0xFFFF) - Q15_SCALE)
         noise = (noise * strength) >> 15
 
         state.coeff_state[i] = clamp_q15(state.coeff_state[i] + noise)
@@ -858,7 +859,7 @@ def _tail_ccs_soft_limit(state: VMState) -> None:
 
     # Vectorized scaling
     scaled = (coeffs * gain_num + gain_den // 2) // gain_den
-    state.coeff_state[:COEFF_LEN] = np.clip(scaled, -32768, 32767).astype(np.int16)
+    state.coeff_state[:COEFF_LEN] = np.clip(scaled, Q15_NEG_ONE, Q15_ONE).astype(np.int16)
 
 
 def _tail_fine_clamp(state: VMState, mask: int) -> None:
@@ -1087,7 +1088,7 @@ def lane_idwpt_render(
         state.wet_seam_initialized = True
 
     # Clamp and copy to output buffer
-    _IDWPT_OUTPUT[:] = np.clip(wet_arr, -32768, 32767).astype(np.int16)
+    _IDWPT_OUTPUT[:] = np.clip(wet_arr, Q15_NEG_ONE, Q15_ONE).astype(np.int16)
 
     return _IDWPT_OUTPUT
 
@@ -1265,7 +1266,7 @@ def lane_mix_gain(
     samples = (mixed * gain_vals) >> 15
 
     # Clamp and return
-    return np.clip(samples, -32768, 32767).astype(np.int16)
+    return np.clip(samples, Q15_NEG_ONE, Q15_ONE).astype(np.int16)
 
 
 __all__ = [
