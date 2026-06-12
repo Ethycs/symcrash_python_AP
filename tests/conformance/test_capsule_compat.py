@@ -382,7 +382,8 @@ class TestCapsuleBinaryCodec:
     def test_magic_and_version(self):
         """Capsule has correct magic and version."""
         assert CAPSULE_MAGIC == b'WSEC'
-        assert CAPSULE_VERSION == 0
+        # Version 1: bumped for CMMM enrichment support (Phase P5)
+        assert CAPSULE_VERSION == 1
 
     def test_roundtrip_instrument_capsule(self):
         """Instrument capsule round-trips through binary."""

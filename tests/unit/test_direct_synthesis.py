@@ -211,89 +211,14 @@ def test_coefficient_evolution():
         pass
 
 
-def test_correct_oscillator():
-    """
-    The CORRECT approach:
-
-    For each output block, we need to know the EXACT starting phase.
-    Generate the reference audio for that phase, FWPT it, and IDWPT.
-
-    Since FWPT/IDWPT are inverses, this gives perfect reconstruction.
-    The "oscillator" is just phase tracking + table lookup.
-    """
-    print("\n\nTest: Correct Phase-Tracked Oscillator")
-    print("=" * 60)
-
-    from symcrash_python_ap.vm.coeff_tables_fast import FastCoeffTable2D
-
-    table = FastCoeffTable2D()
-    phase_inc = midi_to_phase_inc(60)
-    phase = 0
-
-    all_audio = []
-
-    for block in range(20):
-        # Get the sin/cos coefficients for this phase
-        phase_idx = (phase >> 26) & 0x3F
-        c_sin, c_cos = table.get_coeffs(60, phase_idx)
-
-        # Phase rotation for smooth interpolation
-        phase_frac = (phase & 0x3FFFFFF) / (1 << 26)  # Fractional part within phase step
-        # Actually, use the FULL phase for rotation
-        phase_rad = 2 * np.pi * (phase / (1 << 32))
-        cos_phi = np.cos(phase_rad)
-        sin_phi = np.sin(phase_rad)
-
-        # Interpolate: c = cos(phi)*c_sin + sin(phi)*c_cos
-        coeffs = (cos_phi * c_sin.astype(np.float32) + sin_phi * c_cos.astype(np.float32))
-        coeffs_int = np.clip(coeffs, -32768, 32767).astype(np.int16)
-
-        # IDWPT
-        audio = idwpt_jit(coeffs_int.tolist(), headroom_bits=1)
-        audio_arr = np.array(audio, dtype=np.int16)
-        all_audio.append(audio_arr)
-
-        if block < 5:
-            print(f"  Block {block}: phase_idx={phase_idx:2d}, phase_rad={phase_rad:.2f}, range=[{audio_arr.min():6d},{audio_arr.max():6d}]")
-
-        # Advance phase for ENTIRE block (64 samples)
-        phase = (phase + phase_inc * 64) & 0xFFFFFFFF
-
-    full_audio = np.concatenate(all_audio)
-
-    # Check boundaries
-    max_jump = 0
-    worst_block = -1
-    for i in range(len(all_audio) - 1):
-        jump = abs(int(all_audio[i][-1]) - int(all_audio[i+1][0]))
-        if jump > max_jump:
-            max_jump = jump
-            worst_block = i
-
-    print(f"\n  Max boundary jump: {max_jump} (at block {worst_block})")
-
-    # FFT
-    try:
-        from scipy.fft import fft
-        N = len(full_audio)
-        fft_result = np.abs(fft(full_audio.astype(np.float32)))[:N//2]
-        freqs = np.fft.fftfreq(N, 1/48000)[:N//2]
-        peak_idx = np.argmax(fft_result)
-        peak_freq = freqs[peak_idx]
-        print(f"  FFT peak: {peak_freq:.2f} Hz (expected 261.63 Hz)")
-        print(f"  Error: {abs(peak_freq - 261.63):.2f} Hz")
-
-        if abs(peak_freq - 261.63) < 10:
-            print("  [OK] Correct frequency!")
-        else:
-            print("  [WARNING] Frequency incorrect")
-
-    except ImportError:
-        pass
+# test_correct_oscillator was deleted: it exercised FastCoeffTable2D from
+# vm/coeff_tables_fast.py, which was removed when the quadrature coefficient
+# table oscillator was replaced by StreamingCoeffLUT (commit d9332ee,
+# "StreamingCoeffLUT into VM CCS Path"); the streaming path is covered by
+# tests/conformance/test_ccs_conformance.py.
 
 
 if __name__ == '__main__':
     test_continuous_synthesis()
     test_coefficient_persistence()
     test_coefficient_evolution()
-    test_correct_oscillator()

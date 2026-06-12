@@ -6,15 +6,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from symcrash_python_ap.vm.harmonic_bank import (
-    ModeBState, mode_b_generate_coeffs, get_basis_for_note
+    ModeBState, mode_b_generate_coeffs, get_basis_for_note, VM_K, COEFF_LEN
 )
 from symcrash_python_ap.wavelet.fast_lifting import idwpt_jit
 from symcrash_python_ap.wavelet.sine_core import freq_to_phase_inc
-from symcrash_python_ap.fixed import Q15_ONE, SAT16
 
 freq_hz = 261.63
 phase_inc = freq_to_phase_inc(freq_hz, 48000)
-basis = get_basis_for_note(60)
 
 def window_none(h, H):
     return 1.0
@@ -41,9 +39,13 @@ def window_gaussian(h, H, alpha=2.5):
     """Gaussian: exp(-0.5 * (alpha*h/H)^2)"""
     return math.exp(-0.5 * (alpha * h / H) ** 2)
 
-def test_window(window_fn, name, num_blocks=100):
+def _eval_window(window_fn, name, num_blocks=100):
+    """Render a square wave with the given mollifier window; return ringing metrics."""
+    from symcrash_python_ap.fixed import Q15_ONE, SAT16
+
     mb_state = ModeBState()
     mb_state.reset(note=60, phase_inc=phase_inc)
+    basis = get_basis_for_note(60)
 
     # Manually set weights with window
     H = 32
@@ -59,9 +61,9 @@ def test_window(window_fn, name, num_blocks=100):
 
     all_samples = []
     for _ in range(num_blocks):
-        coeffs = np.zeros(512, dtype=np.int16)
+        coeffs = np.zeros(COEFF_LEN, dtype=np.int16)
         mode_b_generate_coeffs(mb_state, basis, coeffs)
-        audio = idwpt_jit(coeffs.reshape(64, 8)[:, 0].tolist(), headroom_bits=1)
+        audio = idwpt_jit(coeffs.reshape(64, VM_K)[:, 0].tolist(), headroom_bits=1)
         all_samples.extend(audio)
         mb_state.advance_block()
 
@@ -71,54 +73,70 @@ def test_window(window_fn, name, num_blocks=100):
     flat_std = np.std(samples[high_mask]) if np.sum(high_mask) > 0 else 0
     return flat_std, np.max(samples)
 
-print("MOLLIFIER WINDOW COMPARISON")
-print("=" * 50)
-print(f"{'Window':<20} {'Flat Std':>10} {'Peak':>10}")
-print("-" * 50)
 
-windows = [
-    (window_none, "None (raw)"),
-    (window_sigma, "Sigma (sinc)"),
-    (window_sigma2, "Sigma^2 (Fejer)"),
-    (window_raised_cos, "Raised Cosine"),
-    (window_gaussian, "Gaussian"),
-]
+def test_sigma_window_reduces_ringing():
+    """Lanczos sigma mollifier should reduce Gibbs ringing vs raw truncation."""
+    raw_std, _ = _eval_window(window_none, "None (raw)", num_blocks=40)
+    sigma_std, _ = _eval_window(window_sigma, "Sigma (sinc)", num_blocks=40)
 
-baseline_std = None
-for fn, name in windows:
-    std, peak = test_window(fn, name)
-    if baseline_std is None:
-        baseline_std = std
-    ratio = baseline_std / std if std > 0 else 0
-    print(f"{name:<20} {std:>10.1f} {peak:>10}  ({ratio:.1f}x)")
+    assert raw_std > 0, "Raw square wave should exhibit Gibbs ringing"
+    assert sigma_std < raw_std, (
+        f"Sigma window should reduce ringing: raw={raw_std:.1f}, sigma={sigma_std:.1f}"
+    )
 
-# Compare to direct synthesis (no wavelet)
-print("\n" + "=" * 50)
-print("REFERENCE: Direct harmonic synthesis (no wavelet)")
-print("=" * 50)
 
-from symcrash_python_ap.wavelet.sine_core import sin_cos_q15
+def main():
+    print("MOLLIFIER WINDOW COMPARISON")
+    print("=" * 50)
+    print(f"{'Window':<20} {'Flat Std':>10} {'Peak':>10}")
+    print("-" * 50)
 
-def direct_synth(window_fn, num_samples=5400):
-    """Generate square wave by direct harmonic sum."""
-    samples = []
-    H = 32
-    phase = 0
-    for _ in range(num_samples):
-        val = 0
-        for h in range(1, H + 1, 2):  # Odd harmonics
-            weight = (1.0 / h) * window_fn(h, H)
-            h_phase = (phase * h) & 0xFFFFFFFF
-            s, _ = sin_cos_q15(h_phase)
-            val += int(s * weight)
-        samples.append(np.clip(val, -32768, 32767))
-        phase = (phase + phase_inc) & 0xFFFFFFFF
-    return np.array(samples, dtype=np.int16)
+    windows = [
+        (window_none, "None (raw)"),
+        (window_sigma, "Sigma (sinc)"),
+        (window_sigma2, "Sigma^2 (Fejer)"),
+        (window_raised_cos, "Raised Cosine"),
+        (window_gaussian, "Gaussian"),
+    ]
 
-for fn, name in windows:
-    samples = direct_synth(fn)
-    max_val = np.max(np.abs(samples))
-    high_mask = samples > 0.7 * max_val
-    flat_std = np.std(samples[high_mask]) if np.sum(high_mask) > 0 else 0
-    print(f"{name:<20} flat_std={flat_std:.1f}")
+    baseline_std = None
+    for fn, name in windows:
+        std, peak = _eval_window(fn, name)
+        if baseline_std is None:
+            baseline_std = std
+        ratio = baseline_std / std if std > 0 else 0
+        print(f"{name:<20} {std:>10.1f} {peak:>10}  ({ratio:.1f}x)")
 
+    # Compare to direct synthesis (no wavelet)
+    print("\n" + "=" * 50)
+    print("REFERENCE: Direct harmonic synthesis (no wavelet)")
+    print("=" * 50)
+
+    from symcrash_python_ap.wavelet.sine_core import sin_cos_q15
+
+    def direct_synth(window_fn, num_samples=5400):
+        """Generate square wave by direct harmonic sum."""
+        samples = []
+        H = 32
+        phase = 0
+        for _ in range(num_samples):
+            val = 0
+            for h in range(1, H + 1, 2):  # Odd harmonics
+                weight = (1.0 / h) * window_fn(h, H)
+                h_phase = (phase * h) & 0xFFFFFFFF
+                s, _ = sin_cos_q15(h_phase)
+                val += int(s * weight)
+            samples.append(np.clip(val, -32768, 32767))
+            phase = (phase + phase_inc) & 0xFFFFFFFF
+        return np.array(samples, dtype=np.int16)
+
+    for fn, name in windows:
+        samples = direct_synth(fn)
+        max_val = np.max(np.abs(samples))
+        high_mask = samples > 0.7 * max_val
+        flat_std = np.std(samples[high_mask]) if np.sum(high_mask) > 0 else 0
+        print(f"{name:<20} flat_std={flat_std:.1f}")
+
+
+if __name__ == "__main__":
+    main()

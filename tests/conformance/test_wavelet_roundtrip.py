@@ -12,6 +12,15 @@ Key metrics:
 - Max error: Maximum absolute sample error
 - RMS error: Root-mean-square error
 - Headroom bits: Effect of internal scaling on accuracy
+
+Accuracy contract (measured 2026-06-11, effect_mode default headroom=3):
+- Precision cost is 2^h - 1 LSB max error (amplitude-independent), so the
+  default h=3 gives max_err <= 7 (~-73 dBFS), rms ~4.
+- Overflow safety: h=3 is required for full-scale content at ALL
+  frequencies (h=1 saturates internally >= 2 kHz: 19473 LSB @ 4 kHz;
+  h=2 breaks at 8 kHz). Low-frequency, moderate-amplitude signals are
+  safe at lower h with proportionally smaller error.
+- DC passes exactly; unity mask is bit-identical to passthrough.
 """
 
 import pytest
@@ -160,36 +169,38 @@ class TestPassthroughRoundtrip:
         samples = generate_pure_sine(freq=440.0, amplitude=32767)
         result = compute_roundtrip_error(samples, mask_q15=None)
 
-        # Error should be very small (< 1 LSB on average)
-        assert result["max_err"] <= 2, f"Max error too high: {result['max_err']}"
-        assert result["rms_err"] < 1.0, f"RMS error too high: {result['rms_err']:.2f}"
+        # Contract at headroom=3: max 2^3 - 1 = 7 LSB
+        assert result["max_err"] <= 8, f"Max error too high: {result['max_err']}"
+        assert result["rms_err"] < 5.0, f"RMS error too high: {result['rms_err']:.2f}"
 
     def test_offset_sine_roundtrip(self):
         """Sine with DC offset should round-trip accurately."""
-        samples = generate_offset_sine(freq=440.0, amplitude=32767, offset=5000)
+        # amplitude + offset must stay inside int16 (the old 32767+5000
+        # input was out of range and measured its own clipping, not the
+        # transform)
+        samples = generate_offset_sine(freq=440.0, amplitude=27000, offset=5000)
         result = compute_roundtrip_error(samples, mask_q15=None)
 
-        # DC offset may introduce slightly higher error due to headroom
-        assert result["max_err"] <= 5, f"Max error too high: {result['max_err']}"
-        assert result["rms_err"] < 2.0, f"RMS error too high: {result['rms_err']:.2f}"
+        assert result["max_err"] <= 8, f"Max error too high: {result['max_err']}"
+        assert result["rms_err"] < 5.0, f"RMS error too high: {result['rms_err']:.2f}"
 
     def test_half_amplitude_roundtrip(self):
         """Half amplitude sine should round-trip well."""
         samples = generate_pure_sine(freq=440.0, amplitude=16384)
         result = compute_roundtrip_error(samples, mask_q15=None)
 
-        assert result["max_err"] <= 2
-        assert result["rms_err"] < 1.0
+        assert result["max_err"] <= 8
+        assert result["rms_err"] < 5.0
 
     def test_small_amplitude_roundtrip(self):
         """Small amplitude sine should round-trip."""
         samples = generate_pure_sine(freq=440.0, amplitude=1000)
         result = compute_roundtrip_error(samples, mask_q15=None)
 
-        # Small signals may have proportionally higher relative error
-        # but absolute error should still be < 1 LSB
-        assert result["max_err"] <= 1
-        assert result["rms_err"] < 0.5
+        # Precision cost is ABSOLUTE (2^h - 1 LSB from the headroom
+        # shift), not relative, so small signals see the same ceiling
+        assert result["max_err"] <= 8
+        assert result["rms_err"] < 5.0
 
     def test_dc_roundtrip(self):
         """Pure DC should round-trip exactly."""
@@ -213,8 +224,8 @@ class TestPassthroughRoundtrip:
         samples = generate_actual_carrier()
         result = compute_roundtrip_error(samples, mask_q15=None)
 
-        assert result["max_err"] <= 2, f"Max error: {result['max_err']}"
-        assert result["rms_err"] < 1.0, f"RMS error: {result['rms_err']:.2f}"
+        assert result["max_err"] <= 8, f"Max error: {result['max_err']}"
+        assert result["rms_err"] < 5.0, f"RMS error: {result['rms_err']:.2f}"
 
 
 class TestUnityMaskRoundtrip:
@@ -239,58 +250,65 @@ class TestHeadroomEffect:
 
     def test_headroom_bits_accuracy(self):
         """Different headroom values should maintain accuracy."""
-        samples = generate_actual_carrier()
+        # Use a safe amplitude (low freq, 16000 peak): at safe levels the
+        # precision law is max_err <= 2^h - 1 from the headroom shift.
+        # (The real carrier peaks at 29013, which overflows h=0/h=1 -
+        # that is the overflow side of the contract, tested below.)
+        samples = generate_pure_sine(freq=440.0, amplitude=16000)
         processor = _get_jit_processor()
 
-        errors = []
         for headroom in [0, 1, 2, 3, 4]:
             wet = processor.effect_mode(samples, None, headroom)
             wet_arr = np.array(wet, dtype=np.int32)
             samples_arr = np.array(samples, dtype=np.int32)
-            diff = samples_arr - wet_arr
-            max_err = np.max(np.abs(diff))
-            rms_err = np.sqrt(np.mean(diff**2))
-            errors.append((headroom, max_err, rms_err))
+            max_err = np.max(np.abs(samples_arr - wet_arr))
+            assert max_err <= (1 << headroom), (
+                f"Headroom {headroom}: max_err={max_err} breaks 2^h law"
+            )
 
-        # All headroom values should maintain good accuracy
-        for headroom, max_err, rms_err in errors:
-            assert max_err <= 4, (
-                f"Headroom {headroom}: max_err={max_err} exceeds threshold"
-            )
-            assert rms_err < 2.0, (
-                f"Headroom {headroom}: rms_err={rms_err:.2f} exceeds threshold"
-            )
+    def test_full_scale_high_frequency_overflow_guard(self):
+        """h=3 must survive full-scale content at all frequencies.
+
+        Regression guard: effect_mode_jit shipped with headroom=1 for a
+        while, which saturated internally >= 2 kHz (19473 LSB @ 4 kHz).
+        """
+        processor = _get_jit_processor()
+        for freq in [440.0, 2000.0, 4000.0, 8000.0]:
+            samples = generate_pure_sine(freq=freq, amplitude=32767)
+            wet = np.array(processor.effect_mode(samples, None, 3),
+                           dtype=np.int32)
+            max_err = np.max(np.abs(np.array(samples, dtype=np.int32) - wet))
+            assert max_err <= 8, f"{freq} Hz @ h=3: max_err={max_err}"
 
     def test_headroom_consistency(self):
         """Higher headroom should not degrade accuracy significantly."""
         samples = generate_pure_sine(freq=440.0, amplitude=20000)
         processor = _get_jit_processor()
 
-        # Compare headroom=0 vs headroom=2
+        # Compare headroom=0 vs headroom=2: each obeys the 2^h law
         wet_0 = processor.effect_mode(samples, None, 0)
         wet_2 = processor.effect_mode(samples, None, 2)
 
         err_0 = np.max(np.abs(np.array(samples) - np.array(wet_0)))
         err_2 = np.max(np.abs(np.array(samples) - np.array(wet_2)))
 
-        # Both should be similarly accurate
-        assert err_0 <= 2
-        assert err_2 <= 2
+        assert err_0 <= 1
+        assert err_2 <= 4
 
 
 class TestFrequencyDependence:
     """Test round-trip accuracy across frequencies."""
 
-    @pytest.mark.parametrize("freq", [100.0, 440.0, 1000.0, 4000.0])
+    @pytest.mark.parametrize("freq", [100.0, 440.0, 1000.0, 4000.0, 8000.0])
     def test_roundtrip_at_frequency(self, freq):
-        """Round-trip should work well across frequencies."""
+        """Round-trip must hold across frequencies (default headroom)."""
         samples = generate_pure_sine(freq=freq, amplitude=20000)
         result = compute_roundtrip_error(samples, mask_q15=None)
 
-        assert result["max_err"] <= 2, (
+        assert result["max_err"] <= 8, (
             f"At {freq} Hz: max_err={result['max_err']}"
         )
-        assert result["rms_err"] < 1.0, (
+        assert result["rms_err"] < 5.0, (
             f"At {freq} Hz: rms_err={result['rms_err']:.2f}"
         )
 

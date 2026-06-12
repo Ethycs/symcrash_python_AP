@@ -161,13 +161,18 @@ class TestBasisFrameGeneration:
 class TestBasisFrameAtlas:
     """Tests for basis frame atlas (WSE-STD-210 Section 5)."""
 
-    def test_octave_anchors(self):
-        """Verify octave-based anchor selection."""
-        # Notes in same octave should use same anchor
+    def test_per_note_anchors(self):
+        """Anchor selection is per-note (design change from octave anchors).
+
+        The basis atlas was reworked to per-note basis frames for exact
+        tuning (anchor_freq matches the note frequency precisely); the
+        old octave-shared-anchor scheme is gone.
+        """
         basis_60 = get_basis_for_note(60)  # C4
         basis_65 = get_basis_for_note(65)  # F4
 
-        assert basis_60.anchor_note == basis_65.anchor_note
+        assert basis_60.anchor_note == 60
+        assert basis_65.anchor_note == 65
 
     def test_different_octave_anchors(self):
         """Different octaves should have different anchors."""

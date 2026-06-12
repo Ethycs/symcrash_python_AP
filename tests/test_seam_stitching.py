@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from symcrash_python_ap.vm.harmonic_bank import (
     ModeBState, get_basis_for_note, mode_b_generate_coeffs, mode_b_advance_phase,
-    VM_K, BLOCK_SIZE
+    VM_K, COEFF_LEN, BLOCK_SIZE
 )
 from symcrash_python_ap.wavelet.sine_core import freq_to_phase_inc
 from symcrash_python_ap.wavelet.idwpt_streaming import idwpt_polyphase_block
@@ -45,14 +45,13 @@ def generate_ccs_audio_blocks(note: int, num_blocks: int = 100, use_polyphase: b
 
     blocks = []
     for _ in range(num_blocks):
-        coeffs = np.zeros(512, dtype=np.int16)
+        coeffs = np.zeros(COEFF_LEN, dtype=np.int16)
         mode_b_generate_coeffs(state, basis, coeffs)
 
         if use_polyphase:
-            # K=4 polyphase (new method)
+            # K-slot polyphase (new method); idwpt_polyphase_block accepts any K
             coeff_2d = coeffs.reshape(64, VM_K)
-            coeff_k4 = coeff_2d[:, ::2].astype(np.int16)
-            audio = idwpt_polyphase_block(coeff_k4, headroom_bits=1)
+            audio = idwpt_polyphase_block(coeff_2d, headroom_bits=1)
         else:
             # k=0 only (old method)
             coeff_64 = coeffs[::VM_K].tolist()

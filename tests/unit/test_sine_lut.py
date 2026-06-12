@@ -163,15 +163,28 @@ class TestSineLUTSymmetry:
         assert max_diff <= 2, f"Symmetry violated: {max_diff}"
 
 
-@pytest.mark.benchmark
 class TestSineLUTPerformance:
     """Performance tests for sine LUT."""
 
-    def test_vectorized_performance(self, benchmark):
-        """Benchmark vectorized sine lookup."""
+    def test_vectorized_performance(self):
+        """Vectorized sine lookup over a full phase sweep is fast.
+
+        (Was a pytest-benchmark test; rewritten with manual timing since
+        pytest-benchmark is not part of the environment.)
+        """
+        import time
+
         phases = np.arange(65536, dtype=np.int32)
 
-        # Benchmark should complete in reasonable time
-        result = benchmark(sine_q15_vectorized, phases)
+        # Warm up (JIT / cache effects)
+        result = sine_q15_vectorized(phases)
+        assert len(result) == 65536
+
+        start = time.perf_counter()
+        for _ in range(10):
+            result = sine_q15_vectorized(phases)
+        elapsed = (time.perf_counter() - start) / 10
 
         assert len(result) == 65536
+        # Generous threshold: a vectorized 64K lookup should be well under 100 ms
+        assert elapsed < 0.1, f"sine_q15_vectorized too slow: {elapsed*1000:.1f} ms per 64K sweep"

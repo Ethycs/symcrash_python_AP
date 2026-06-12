@@ -127,9 +127,16 @@ class TestRegimeBudgets:
         assert budget.allow_nonlinear is True
 
     def test_residual_is_tight(self):
-        """RESIDUAL should have tight budget."""
+        """RESIDUAL should have a tight budget relative to main voices.
+
+        Every regime budget must fit the EMERGENCY tail (1152 ticks), so
+        the old <=500 bound is impossible; "tight" now means: at the
+        tail-fit floor and far below the STABLE_TONE main-voice budget.
+        """
         budget = get_regime_budget(RegimeId.RESIDUAL)
-        assert budget.max_ticks_per_block <= 500
+        main = get_regime_budget(RegimeId.STABLE_TONE)
+        assert budget.tail_reserved_ticks <= budget.max_ticks_per_block <= 1300
+        assert budget.max_ticks_per_block * 4 <= main.max_ticks_per_block
         assert budget.max_active_nodes_K <= 8
         assert budget.allow_nonlinear is False
 
@@ -163,14 +170,15 @@ class TestTailModes:
         assert len(get_tail_ops(TailMode.FULL)) == 3
         assert len(get_tail_ops(TailMode.MID)) == 2
         assert len(get_tail_ops(TailMode.MIN)) == 1
-        assert len(get_tail_ops(TailMode.EMERGENCY)) == 1
+        # WSE-STD-070 §10: EMERGENCY = FineClamp + EmergencySimplify
+        assert len(get_tail_ops(TailMode.EMERGENCY)) == 2
 
     def test_tail_ops_contents(self):
         """Tail ops should contain correct operators."""
         assert get_tail_ops(TailMode.FULL) == [2, 11, 23]
         assert get_tail_ops(TailMode.MID) == [2, 11]
         assert get_tail_ops(TailMode.MIN) == [2]
-        assert get_tail_ops(TailMode.EMERGENCY) == [19]
+        assert get_tail_ops(TailMode.EMERGENCY) == [2, 19]
 
     def test_nonlinear_constraint(self):
         """FULL and MID use nonlinear ops."""
@@ -227,7 +235,7 @@ class TestPatternTable:
         """Pattern table should have entries for K ladder."""
         for k in K_LADDER:
             pattern = get_pattern_for_k(k)
-            assert pattern.k_value <= k
+            assert pattern.k_count <= k
 
     def test_get_next_lower_k(self):
         """Next lower K should follow ladder."""

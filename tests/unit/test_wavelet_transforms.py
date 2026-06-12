@@ -79,13 +79,17 @@ class TestWaveletRoundtrip:
         """Roundtrip error should be amplitude-independent."""
         samples = generate_test_signal(freq=440, amplitude=amplitude)
 
-        coeffs = fwpt_jit(samples)
-        reconstructed = idwpt_jit(coeffs)
+        # Amplitudes near full scale overflow the lifting stages at the
+        # h=1 default (the headroom contract: h=1 is safe to ~28k at low
+        # freq); use h=3 there, which costs 2^3 - 1 = 7 LSB of precision.
+        headroom = 3 if amplitude > 28000 else 1
+        coeffs = fwpt_jit(samples, headroom_bits=headroom)
+        reconstructed = idwpt_jit(coeffs, headroom_bits=headroom)
 
         error = [abs(s - r) for s, r in zip(samples, reconstructed)]
         max_error = max(error)
 
-        assert max_error <= 4, (
+        assert max_error <= (1 << headroom) + 2, (
             f"At amplitude {amplitude}: max error = {max_error}"
         )
 
@@ -167,8 +171,10 @@ class TestEdgeCases:
         """Large amplitude signal should still roundtrip."""
         samples = generate_test_signal(amplitude=30000)
 
-        coeffs = fwpt_jit(samples)
-        reconstructed = idwpt_jit(coeffs)
+        # Near-full-scale needs h=3 (overflow side of the headroom
+        # contract); precision cost is 2^3 - 1 = 7 LSB
+        coeffs = fwpt_jit(samples, headroom_bits=3)
+        reconstructed = idwpt_jit(coeffs, headroom_bits=3)
 
         error = [abs(s - r) for s, r in zip(samples, reconstructed)]
         max_error = max(error)

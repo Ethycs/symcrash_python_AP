@@ -159,9 +159,9 @@ class TestVMExecutor:
         frame = MockVoiceFrame(f0_hz=440.0)
 
         def get_phase(s):
-            # Use CoeffOsc phase when using CCS path, legacy phase otherwise
+            # Use CCS oscillator phase when using CCS path, legacy phase otherwise
             if s.use_coeff_osc:
-                return int(s.coeff_osc.node_phases[0])
+                return int(s.ccs_state.phase)
             return s.phase
 
         phases = []

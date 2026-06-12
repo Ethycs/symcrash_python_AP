@@ -95,7 +95,7 @@ class TestEnums:
         assert EventLane.EVT_OP_TOGGLE == 1
         assert EventLane.EVT_TREE_MORPH == 2
         assert EventLane.EVT_K_MODE == 3
-        assert EventLane.EVT_INJECT_NOTE == 4
+        assert EventLane.EVT_CARRIER_CFG == 4  # was EVT_INJECT_NOTE
         assert EventLane.EVT_MATERIAL_HIT == 5
         assert EventLane.EVT_CLOUD_PUSH == 6
         assert EventLane.EVT_RESERVED == 7

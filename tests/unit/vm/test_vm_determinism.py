@@ -249,7 +249,7 @@ class TestPhaseConsistency:
     def _get_phase(self, state: VMState) -> int:
         """Get the active phase accumulator (CCS or legacy)."""
         if state.use_coeff_osc:
-            return int(state.coeff_osc.node_phases[0])
+            return int(state.ccs_state.phase)
         return state.phase
 
     def test_phase_increases_monotonically(self):

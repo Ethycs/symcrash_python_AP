@@ -37,13 +37,13 @@ class TestBlockLayout:
         """L must be 64 (refactored from 32)."""
         assert L == 64
 
-    def test_coeffs_per_leaf_is_4(self):
-        """K must be 4 (refactored from 8)."""
-        assert K == 4
+    def test_coeffs_per_leaf_is_8(self):
+        """K must be 8 (WSE-STD-010: coeffs_per_leaf MUST be 8 in v0)."""
+        assert K == 8
 
-    def test_coeff_len_is_256(self):
-        """COEFF_LEN must be 256."""
-        assert COEFF_LEN == 256
+    def test_coeff_len_is_512(self):
+        """COEFF_LEN must be 512 (64 leaves x 8 coeffs per leaf)."""
+        assert COEFF_LEN == 512
 
 
 class TestCanonicalLeafOrder:
@@ -112,12 +112,12 @@ class TestTreeValidation:
             desc = lib.get_tree_descriptor(tree_id)
             assert desc.leaf_count == 64, f"Tree {tree_id} leaf_count must be 64"
 
-    def test_all_trees_have_4_coeffs_per_leaf(self):
-        """All trees must have 4 coefficients per leaf (refactored from 8)."""
+    def test_all_trees_have_8_coeffs_per_leaf(self):
+        """All trees must have 8 coefficients per leaf (WSE-STD-010 v0)."""
         lib = get_tree_library()
         for tree_id in lib.get_all_tree_ids():
             desc = lib.get_tree_descriptor(tree_id)
-            assert desc.coeffs_per_leaf == 4, f"Tree {tree_id} coeffs_per_leaf must be 4"
+            assert desc.coeffs_per_leaf == 8, f"Tree {tree_id} coeffs_per_leaf must be 8"
 
     def test_invalid_tree_fails_validation(self):
         """Invalid tree_id should fail validation."""

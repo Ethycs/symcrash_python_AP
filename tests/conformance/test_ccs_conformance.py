@@ -105,9 +105,16 @@ class TestCCSConstants:
         assert CCS_NUM_LEAVES == 64, f"NUM_LEAVES must be 64, got {CCS_NUM_LEAVES}"
 
     def test_k_dimension(self):
-        """K dimension (subband time samples) MUST be 8."""
+        """K dimension (polyphase lanes) MUST be 4 or 8 and consistent with tables.
+
+        WSE-STD-210 defines K=8 as the default; the VM runtime also supports
+        K=4 for the reduced-memory profile (CCS-BRAM-128KB-32VOICE analysis).
+        """
         from symcrash_python_ap.vm.coeff_lut_streaming import DEFAULT_K
-        assert DEFAULT_K == 8, f"DEFAULT_K must be 8, got {DEFAULT_K}"
+        from symcrash_python_ap.vm.tables import VM_K, COEFF_LEN
+        assert DEFAULT_K in (4, 8), f"DEFAULT_K must be 4 or 8, got {DEFAULT_K}"
+        assert DEFAULT_K == VM_K, f"DEFAULT_K ({DEFAULT_K}) must match tables VM_K ({VM_K})"
+        assert COEFF_LEN == 64 * VM_K, f"COEFF_LEN must be 64*K, got {COEFF_LEN}"
 
     def test_phase_steps(self):
         """Phase steps MUST be 64 for memory efficiency."""

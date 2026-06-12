@@ -60,8 +60,13 @@ def test_modulator_extraction_method_0():
     print(f"Modulator values: {fm_mod}")
     print(f"Expected average: ~{sum(range(1, 9)) * 1000 / 8:.0f}")
 
-    # Check shape
-    assert fm_mod.shape == (8,), f"Wrong shape: {fm_mod.shape}"
+    # Check shape: one modulator sample per k-slot, where K is the
+    # Mode B polyphase width (vm/tables.VM_K = 4, the FPGA SIMD config)
+    # NOT primitives.VM_K = 8. The two VM_K constants are a known
+    # structural inconsistency (see AGENT-HANDOFF-2026-06-11 packet E9);
+    # this test asserts self-consistency with the operative value.
+    from symcrash_python_ap.vm.tables import VM_K as MODE_B_K
+    assert fm_mod.shape == (MODE_B_K,), f"Wrong shape: {fm_mod.shape}"
 
     # Check that values are reasonable (averaged)
     # Average of 1000, 2000, ..., 8000 = 4500

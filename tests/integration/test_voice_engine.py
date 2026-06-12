@@ -330,7 +330,7 @@ class TestV3RegimeGraphStability:
                     reached_regimes.add(frame.regime)
 
         # Should reach at least attack, stable, and one other
-        assert Regime.R1_ATTACK_IGNITION in reached_regimes
+        assert Regime.R1_ATTACK in reached_regimes
         assert len(reached_regimes) >= 2, f"Only reached: {reached_regimes}"
 
 
@@ -522,14 +522,14 @@ class TestV5VoiceFrameContractIntegrity:
 
         # First frame should be attack regime
         frame = voice_engine.step_voice(vid)
-        assert frame.regime == Regime.R1_ATTACK_IGNITION
+        assert frame.regime == Regime.R1_ATTACK
 
         # Run through attack
         for _ in range(20):
             frame = voice_engine.step_voice(vid)
 
         # Should have transitioned to sustain regime
-        assert frame.regime in {Regime.R2_STABLE_TONE, Regime.R3_GRAIN_AIR}
+        assert frame.regime in {Regime.R2_STABLE, Regime.R3_AIR}
 
 
 # =============================================================================
@@ -581,14 +581,14 @@ class TestV6CMMMLegacyAcceptance:
 
         # Should start in attack regime
         frame = voice_engine.step_voice(vid)
-        assert frame.regime == Regime.R1_ATTACK_IGNITION
+        assert frame.regime == Regime.R1_ATTACK
 
         # Step through attack
         for _ in range(10):
             frame = voice_engine.step_voice(vid)
 
         # Should transition to sustain regime
-        assert frame.regime in {Regime.R2_STABLE_TONE, Regime.R3_GRAIN_AIR}
+        assert frame.regime in {Regime.R2_STABLE, Regime.R3_AIR}
 
     def test_family_weights(self, q15_one, q15_half):
         """Family weights computed correctly from intent."""
@@ -602,7 +602,7 @@ class TestV6CMMMLegacyAcceptance:
         intent.lanes[I_BOW] = q15_half
         intent.lanes[I_GLUE] = q15_one
 
-        weights = compute_family_weights(intent, Regime.R2_STABLE_TONE)
+        weights = compute_family_weights(intent, Regime.R2_STABLE)
 
         # Color should be high (tone + bow)
         assert weights[F_COLOR] > q15_half
@@ -673,7 +673,7 @@ class TestV7CMMStateSnapshot:
         state = VoiceState(voice_id=42)
         state.phase = VoicePhase.SUSTAIN
         state.phase_block = 100
-        state.regime = Regime.R3_GRAIN_AIR
+        state.regime = Regime.R3_AIR
         state.regime_blocks = 50
         state.gesture = GestureBasis(gate=True, pressure_q15=q15_half, chaos_q15=1000)
         state.intent.lanes[I_AIR] = 20000
@@ -766,16 +766,16 @@ class TestV8CMMRegimeGraph:
         intent = IntentVector()
         intent.lanes[I_GLITCH] = int(q15_one * 0.7)
 
-        target = graph.check_transition(Regime.R2_STABLE_TONE, intent, dwell_blocks=10)
-        assert target == Regime.R4_GLITCH_CHATTER
+        target, _ = graph.check_transition(Regime.R2_STABLE, intent, dwell_blocks=10)
+        assert target == Regime.R4_GLITCH
 
         # Test: Short dwell time should prevent transition
-        target = graph.check_transition(Regime.R2_STABLE_TONE, intent, dwell_blocks=2)
+        target, _ = graph.check_transition(Regime.R2_STABLE, intent, dwell_blocks=2)
         assert target is None
 
         # Test: From R4, very high glitch triggers R5
         intent.lanes[I_GLITCH] = int(q15_one * 0.95)
-        target = graph.check_transition(Regime.R4_GLITCH_CHATTER, intent, dwell_blocks=20)
+        target, _ = graph.check_transition(Regime.R4_GLITCH, intent, dwell_blocks=20)
         assert target == Regime.R5_CATASTROPHE
 
     def test_arc_modulation(self, voice_engine, q15_half):
@@ -832,7 +832,7 @@ class TestV9CMMRegimeSpecPolicies:
 
         # Check regime tower levels
         assert spec_idle.tower_level == TowerLevel.L4_SCALAR
-        assert REGIME_SPECS[Regime.R2_STABLE_TONE].tower_level == TowerLevel.L0_FULL
+        assert REGIME_SPECS[Regime.R2_STABLE].tower_level == TowerLevel.L0_FULL
 
     def test_degradation_levels(self, voice_engine, q15_half):
         """Degradation levels correctly disable operator families."""
@@ -877,7 +877,7 @@ class TestV9CMMRegimeSpecPolicies:
             frame = voice_engine.step_voice(vid)
 
         # Stable tone should use L0
-        if frame.regime_id == int(Regime.R2_STABLE_TONE):
+        if frame.regime_id == int(Regime.R2_STABLE):
             assert frame.tower_level == TowerLevel.L0_FULL
 
 

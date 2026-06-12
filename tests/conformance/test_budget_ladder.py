@@ -64,8 +64,8 @@ class TestKLadderConformance:
                 f"At K={expected_k}: pattern_id={pattern.pattern_id}, "
                 f"expected {pattern_id}"
             )
-            assert pattern.k_value == expected_k, (
-                f"Pattern {pattern_id} has K={pattern.k_value}, expected {expected_k}"
+            assert pattern.k_count == expected_k, (
+                f"Pattern {pattern_id} has K={pattern.k_count}, expected {expected_k}"
             )
 
     def test_k_reduction_follows_ladder(self):
