@@ -55,3 +55,11 @@ vgcore.*
 # Audio presets
 *.json
 *.bin
+# Scratch / working files (underscore-prefixed at repo root)
+# Convention: _foo.py / _foo.txt / _foo/ are local working files, kept
+# but never committed. Promote by moving into tools/ (see tools/migrate_*).
+/_*
+
+# Third-party media (analysis inputs only, never committed)
+reference_audio/
+*.pdf
