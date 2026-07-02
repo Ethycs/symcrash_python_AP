@@ -24,7 +24,7 @@ instrument_ir_v0:
   meta:
     id: "fm-bell-v0"
     name: "FM Bell"
-    version: 0
+    version: 1
     author: "symcrash"
     seed: 0x464D424C
 
@@ -36,7 +36,7 @@ instrument_ir_v0:
     fm6:
       type: FM6
       output: amp1
-      algorithm: 5
+      algorithm: 35  # legacy WSE topology (pre-DX7-table-fix sound, preserved)
       feedback: 1
       operators:
         - ratio: 1.0

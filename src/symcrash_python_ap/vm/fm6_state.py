@@ -126,11 +126,13 @@ class FM6State:
         self._post_filter_state = 0
 
     def set_algorithm(self, alg_id: int):
-        """Set algorithm ID (1-32)."""
-        if 1 <= alg_id <= 32:
+        """Set algorithm ID (1-32 canonical DX7, 33+ legacy WSE)."""
+        from .fm_algorithms import ALGORITHMS
+        if alg_id in ALGORITHMS:
             self.algorithm_id = alg_id
         else:
-            raise ValueError(f"Algorithm ID must be 1-32, got {alg_id}")
+            raise ValueError(
+                f"Algorithm ID must be one of {sorted(ALGORITHMS)}, got {alg_id}")
 
     def set_operator_ratio(self, op_idx: int, ratio_q16: int):
         """Set operator frequency ratio."""

@@ -24,7 +24,7 @@ instrument_ir_v0:
   meta:
     id: "acoustic-marimba-v0"
     name: "Acoustic Marimba"
-    version: 1
+    version: 2
     author: "symcrash"
     seed: 0x41434D42
 
@@ -36,7 +36,7 @@ instrument_ir_v0:
     fm6:
       type: FM6
       output: amp1
-      algorithm: 5
+      algorithm: 35  # legacy WSE topology (pre-DX7-table-fix sound, preserved)
       feedback: 0
       post_filter_hz: 2600.0
       # Mallet-contact "tok": deterministic pink-noise exciter, summed into

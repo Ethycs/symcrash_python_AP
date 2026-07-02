@@ -56,6 +56,7 @@ a later Dexed pass knows exactly where to look.
 """
 
 import argparse
+import math
 import re
 import sys
 import zlib
@@ -544,7 +545,9 @@ def convert_voice(index, voice):
         scale = CARRIER_SUM_MAX / carrier_sum
         cv.carrier_scale = scale
         for i in carrier_idx:
-            levels[i] = round(levels[i] * scale, 4)
+            # floor, not round: the headroom limit is a ceiling, and rounding
+            # half-up across several carriers can push the sum back over it
+            levels[i] = math.floor(levels[i] * scale * 10000) / 10000
         notes.append(
             f"carrier levels normalized x{scale:.3f} "
             f"(raw sum {carrier_sum:.3f} > {CARRIER_SUM_MAX} headroom limit)")

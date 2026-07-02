@@ -14,7 +14,7 @@ instrument_ir_v0:
   meta:
     id: "dx-clav-v0"
     name: "DX Clav"
-    version: 2
+    version: 3
     author: "symcrash"
     seed: 0x44434C56
 
@@ -26,7 +26,7 @@ instrument_ir_v0:
     fm6:
       type: FM6
       output: amp1
-      algorithm: 4
+      algorithm: 34  # legacy WSE topology (pre-DX7-table-fix sound, preserved)
       feedback: 2
       operators:
         # Carrier levels (alg 4: Op1+Op4) sum to 0.54: slightly over the

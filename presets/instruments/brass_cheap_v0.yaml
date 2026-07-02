@@ -26,7 +26,7 @@ instrument_ir_v0:
   meta:
     id: "brass-cheap-v0"
     name: "Brass Cheap"
-    version: 0
+    version: 1
     author: "symcrash"
     seed: 0x42524348
 
@@ -38,7 +38,7 @@ instrument_ir_v0:
     fm6:
       type: FM6
       output: amp1
-      algorithm: 19
+      algorithm: 38  # legacy WSE topology (pre-DX7-table-fix sound, preserved)
       feedback: 1
       operators:
         - ratio: 1.0

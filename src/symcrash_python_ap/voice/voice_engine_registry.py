@@ -635,7 +635,12 @@ VOICE_ENGINE_REGISTRY_V0: List[VoiceParamEntry] = [
         name="fm6_algorithm",
         value_type=ValueType.ENUM8,
         min_value=1,
-        max_value=32,  # DX7 algorithms 1-32
+        # 1-32: canonical DX7 chart (audited vs Dexed/msfa 2026-06-25).
+        # 33-38: legacy WSE topologies preserving pre-fix ear-tuned presets.
+        # Additive range extension within the frozen ENUM8 wire format —
+        # no bit-level ABI change; budget-neutral (FM6 cost is per-op, and
+        # every algorithm evaluates the same 6 operators).
+        max_value=38,
         default_value=1,  # Algorithm 1
         update_mode=UpdateMode.ABS,
         persistence=Persistence.PROGRAM,

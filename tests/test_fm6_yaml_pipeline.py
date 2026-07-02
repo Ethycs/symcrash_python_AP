@@ -60,7 +60,7 @@ class TestInstrumentIRFM6Extraction:
         params = fm6_node.params
 
         # Algorithm 22 is classic brass
-        assert params.algorithm == 22
+        assert params.algorithm == 38  # legacy WSE id (old alg 22 topology preserved)
 
         # Should have 6 operator ratios
         assert params.op_ratios is not None
@@ -120,7 +120,7 @@ class TestCapsuleCompilerFM6Extraction:
         defaults = compiler._extract_voice_param_defaults_from_ir(brass_stab_ir)
 
         assert VoiceParamID.FM6_ALGORITHM in defaults
-        assert defaults[VoiceParamID.FM6_ALGORITHM] == 22
+        assert defaults[VoiceParamID.FM6_ALGORITHM] == 38  # legacy WSE id
 
     def test_extracts_feedback(self, compiler, brass_stab_ir):
         """Verify FM6_FEEDBACK is extracted."""
@@ -248,7 +248,7 @@ class TestVoiceFrameEmitterFM6:
         frame = emitter.emit_frame()
 
         assert frame.coeff_osc_mode == 3
-        assert frame.fm_algorithm_id == 22
+        assert frame.fm_algorithm_id == 22  # passthrough of the inline input above
         assert frame.fm_feedback_depth == 4
         assert frame.fm_op_ratios is not None
         assert len(frame.fm_op_ratios) == 6

@@ -3,18 +3,29 @@ DX7-Style 6-Operator FM Algorithm Definitions
 ==============================================
 
 Per WSE-STD-FM-TOPOLOGY-v0:
-- All 32 DX7 algorithms as FMAlgorithm instances
+- Algorithms 1-32: the CANONICAL DX7 algorithm chart, generated from a compact
+  spec audited bit-for-bit against Dexed/msfa's reference table
+  (music-synthesizer-for-android fm_core.cc, the de-facto DX7 ground truth).
+  Fixed 2026-06-25: the previous hand-written table diverged from the real
+  DX7 chart on 29 of 32 algorithms (tests/test_fm_algorithms_dx7_conformance.py
+  now pins the table so it cannot drift again).
+- Algorithms 33-38: LEGACY WSE topologies — the pre-fix structures that
+  existing ear-tuned presets were voiced against. Kept verbatim so those
+  presets render bit-exact; new presets and DX7 imports use 1-32.
 - Modulation matrix [6,6] where M[i,j]=True means Op_i modulates Op_j
 - Carrier mask (bitmask): which operators sum to output
-- Feedback operator: which op self-modulates (-1 if none)
-- Eval order: topological sort (modulators before carriers)
+- Feedback operator: which op self-modulates (-1 if none).
+  KNOWN APPROXIMATION: real DX7 algorithms 4 and 6 use *loop* feedback
+  (op4->op6 and op5->op6 respectively); this engine models self-feedback
+  only, so both are approximated as self-feedback on op6 (the loop reader).
+  TODO(loop-fb): support distinct feedback reader/writer ops.
 
 Key insight: DX7 algorithms are DAGs with at most one feedback edge.
 Standard graph theory is sufficient - no knot invariants needed.
 """
 
 from dataclasses import dataclass, field
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 import numpy as np
 
 
@@ -24,7 +35,7 @@ class FMAlgorithm:
     FM algorithm topology definition (DX7-compatible).
 
     Attributes:
-        alg_id: Algorithm number (1-32)
+        alg_id: Algorithm number (1-32 canonical DX7; 33-38 legacy WSE)
         name: Human-readable name
         modulation_matrix: [6,6] bool array - M[i,j]=True if Op_i modulates Op_j
         carrier_mask: Bitmask where bit i set means Op_i is a carrier
@@ -83,687 +94,120 @@ def _make_matrix(*edges) -> np.ndarray:
 
 
 # =============================================================================
-# DX7 Algorithm Definitions (32 algorithms)
+# Canonical DX7 algorithm spec (1-32)
 # =============================================================================
 #
-# Naming convention:
-# - Operators are numbered 1-6 in diagrams (DX7 convention)
-# - Internally we use 0-5 (Python convention)
-# - Feedback is shown with ↺ symbol
-# - Carriers are marked with * or → OUT
+# Format: alg_id: (name, carriers, edges, feedback_op) — ALL 1-BASED
+#   carriers: tuple of carrier operator numbers (sum to audio out)
+#   edges:    tuple of (modulator, target) pairs
+#   feedback: operator with self-feedback
 #
-# The eval_order ensures modulators compute before their targets.
+# Source of truth: decoded from Dexed/msfa fm_core.cc FmCore::algorithms[32]
+# (flags: OUT_BUS 0=audio out, IN/OUT mod buses, FB_IN/FB_OUT; rows op6..op1).
+# The conformance test embeds the same reference independently.
+#
+# Algorithms 4 and 6: real DX7 feedback is a loop (4->6, 5->6); approximated
+# here as self-feedback on op6 — see module docstring.
 
-ALGORITHMS = {
-    # =========================================================================
-    # Algorithm 1: 6-op chain
-    # [6] → [5] → [4] → [3] → [2] → [1*]
-    #                               ↺fb
-    # =========================================================================
-    1: FMAlgorithm(
-        alg_id=1,
-        name="6-Op Chain",
-        modulation_matrix=_make_matrix(
-            (5, 4),  # Op6 → Op5
-            (4, 3),  # Op5 → Op4
-            (3, 2),  # Op4 → Op3
-            (2, 1),  # Op3 → Op2
-            (1, 0),  # Op2 → Op1
-        ),
-        carrier_mask=0b000001,  # Op1 is carrier
-        feedback_op=0,          # Op1 has feedback
-        eval_order=[5, 4, 3, 2, 1, 0],
-    ),
+_DX7_SPEC: Dict[int, Tuple[str, Tuple[int, ...], Tuple[Tuple[int, int], ...], int]] = {
+    1:  ("Stack+Pair A",            (1, 3),          ((2, 1), (4, 3), (5, 4), (6, 5)), 6),
+    2:  ("Stack+Pair B (fb2)",      (1, 3),          ((2, 1), (4, 3), (5, 4), (6, 5)), 2),
+    3:  ("Dual Stacks",             (1, 4),          ((2, 1), (3, 2), (5, 4), (6, 5)), 6),
+    4:  ("Dual Stacks (loop fb)",   (1, 4),          ((2, 1), (3, 2), (5, 4), (6, 5)), 6),
+    5:  ("Three Pairs (E.Piano)",   (1, 3, 5),       ((2, 1), (4, 3), (6, 5)), 6),
+    6:  ("Three Pairs (loop fb)",   (1, 3, 5),       ((2, 1), (4, 3), (6, 5)), 6),
+    7:  ("Pair + Branched Stack",   (1, 3),          ((2, 1), (4, 3), (5, 3), (6, 5)), 6),
+    8:  ("Pair + Branch (fb4)",     (1, 3),          ((2, 1), (4, 3), (5, 3), (6, 5)), 4),
+    9:  ("Pair + Branch (fb2)",     (1, 3),          ((2, 1), (4, 3), (5, 3), (6, 5)), 2),
+    10: ("Stack + Dual Mod (fb3)",  (1, 4),          ((2, 1), (3, 2), (5, 4), (6, 4)), 3),
+    11: ("Stack + Dual Mod (fb6)",  (1, 4),          ((2, 1), (3, 2), (5, 4), (6, 4)), 6),
+    12: ("Pair + Triple Mod (fb2)", (1, 3),          ((2, 1), (4, 3), (5, 3), (6, 3)), 2),
+    13: ("Pair + Triple Mod (fb6)", (1, 3),          ((2, 1), (4, 3), (5, 3), (6, 3)), 6),
+    14: ("Pair + Forked Stack",     (1, 3),          ((2, 1), (4, 3), (5, 4), (6, 4)), 6),
+    15: ("Forked Stack (fb2)",      (1, 3),          ((2, 1), (4, 3), (5, 4), (6, 4)), 2),
+    16: ("Three-Branch Mono",       (1,),            ((2, 1), (3, 1), (4, 3), (5, 1), (6, 5)), 6),
+    17: ("Three-Branch Mono (fb2)", (1,),            ((2, 1), (3, 1), (4, 3), (5, 1), (6, 5)), 2),
+    18: ("Three-Branch Deep",       (1,),            ((2, 1), (3, 1), (4, 1), (5, 4), (6, 5)), 3),
+    19: ("Stack + Split Mod",       (1, 4, 5),       ((2, 1), (3, 2), (6, 4), (6, 5)), 6),
+    20: ("Shared Mod + Pair",       (1, 2, 4),       ((3, 1), (3, 2), (5, 4), (6, 4)), 3),
+    21: ("Dual Shared Mods",        (1, 2, 4, 5),    ((3, 1), (3, 2), (6, 4), (6, 5)), 3),
+    22: ("Pair + Triple Split",     (1, 3, 4, 5),    ((2, 1), (6, 3), (6, 4), (6, 5)), 6),
+    23: ("Free 1 + Pair + Split",   (1, 2, 4, 5),    ((3, 2), (6, 4), (6, 5)), 6),
+    24: ("Triple Split + Free",     (1, 2, 3, 4, 5), ((6, 3), (6, 4), (6, 5)), 6),
+    25: ("Dual Split + Free",       (1, 2, 3, 4, 5), ((6, 4), (6, 5)), 6),
+    26: ("Two Pairs + Dual Mod",    (1, 2, 4),       ((3, 2), (5, 4), (6, 4)), 6),
+    27: ("Two Pairs + Dual (fb3)",  (1, 2, 4),       ((3, 2), (5, 4), (6, 4)), 3),
+    28: ("Stack + Free 6",          (1, 3, 6),       ((2, 1), (4, 3), (5, 4)), 5),
+    29: ("Two Free + Two Pairs",    (1, 2, 3, 5),    ((4, 3), (6, 5)), 6),
+    30: ("Free + Stack + Free 6",   (1, 2, 3, 6),    ((4, 3), (5, 4)), 5),
+    31: ("Five Free + Pair",        (1, 2, 3, 4, 5), ((6, 5),), 6),
+    32: ("All Carriers",            (1, 2, 3, 4, 5, 6), (), 6),
+}
 
-    # =========================================================================
-    # Algorithm 2: 5-op chain + 1 carrier
-    # [6] → [5] → [4] → [3] → [2] → [1*]
-    #                         ↺fb
-    # =========================================================================
-    2: FMAlgorithm(
-        alg_id=2,
-        name="5-Op Chain + FB on Op2",
-        modulation_matrix=_make_matrix(
-            (5, 4),  # Op6 → Op5
-            (4, 3),  # Op5 → Op4
-            (3, 2),  # Op4 → Op3
-            (2, 1),  # Op3 → Op2
-            (1, 0),  # Op2 → Op1
-        ),
-        carrier_mask=0b000001,  # Op1 is carrier
-        feedback_op=1,          # Op2 has feedback
-        eval_order=[5, 4, 3, 2, 1, 0],
-    ),
+# =============================================================================
+# Legacy WSE topologies (33-38)
+# =============================================================================
+#
+# These are the structures the pre-2026-06-25 hand-written table shipped under
+# DX7 numbers. They do not exist in the real DX7 chart, but 17 ear-tuned
+# presets were voiced against them; renumbering the presets onto these ids
+# preserves their sound bit-exact. Mapping (old wrong id -> legacy id):
+#   old 1  -> 33   old 4 -> 34   old 5 -> 35   old 16 -> 36
+#   old 18 -> 37   old 19 and old 22 (identical) -> 38
 
-    # =========================================================================
-    # Algorithm 3: 4-op chain + 2-op chain
-    # [6] → [5] → [4] → [3*]
-    #             [2] → [1*]
-    #             ↺fb
-    # =========================================================================
-    3: FMAlgorithm(
-        alg_id=3,
-        name="4-Op + 2-Op Chains",
-        modulation_matrix=_make_matrix(
-            (5, 4),  # Op6 → Op5
-            (4, 3),  # Op5 → Op4
-            (3, 2),  # Op4 → Op3
-            (1, 0),  # Op2 → Op1
-        ),
-        carrier_mask=0b000101,  # Op1, Op3 are carriers
-        feedback_op=1,          # Op2 has feedback
-        eval_order=[5, 4, 3, 1, 2, 0],
-    ),
+_LEGACY_SPEC: Dict[int, Tuple[str, Tuple[int, ...], Tuple[Tuple[int, int], ...], int]] = {
+    33: ("Legacy 6-Op Chain (old 1)",       (1,),         ((2, 1), (3, 2), (4, 3), (5, 4), (6, 5)), 1),
+    34: ("Legacy Dual Stack (old 4)",       (1, 4),       ((2, 1), (3, 2), (5, 4), (6, 5)), 1),
+    35: ("Legacy E.Piano Stack (old 5)",    (1,),         ((2, 1), (3, 2), (4, 1), (5, 4), (6, 5)), 6),
+    36: ("Legacy Flat Bright (old 16)",     (1,),         ((2, 1), (3, 1), (4, 1), (5, 1), (6, 1)), 6),
+    37: ("Legacy Brass Branch (old 18)",    (1,),         ((2, 1), (3, 2), (4, 1), (5, 1), (6, 5)), 6),
+    38: ("Legacy Fan-Out (old 19/22)",      (1, 2, 3, 4), ((5, 2), (5, 3), (5, 4), (6, 5)), 6),
+}
 
-    # =========================================================================
-    # Algorithm 4: 3-op chain + 3-op chain
-    # [6] → [5] → [4*]
-    # [3] → [2] → [1*]
-    #             ↺fb
-    # =========================================================================
-    4: FMAlgorithm(
-        alg_id=4,
-        name="3-Op + 3-Op Chains",
-        modulation_matrix=_make_matrix(
-            (5, 4),  # Op6 → Op5
-            (4, 3),  # Op5 → Op4
-            (2, 1),  # Op3 → Op2
-            (1, 0),  # Op2 → Op1
-        ),
-        carrier_mask=0b001001,  # Op1, Op4 are carriers
-        feedback_op=0,          # Op1 has feedback
-        eval_order=[5, 4, 2, 1, 3, 0],
-    ),
 
-    # =========================================================================
-    # Algorithm 5: Dual stack into carrier (E.Piano)
-    # [6] → [5] → [4] ─┐
-    #                   ├─→ [1*]
-    # [3] → [2] ───────┘
-    #       ↺fb
-    # =========================================================================
-    5: FMAlgorithm(
-        alg_id=5,
-        name="E.Piano (Dual Stack)",
-        modulation_matrix=_make_matrix(
-            (5, 4),  # Op6 → Op5
-            (4, 3),  # Op5 → Op4
-            (3, 0),  # Op4 → Op1
-            (2, 1),  # Op3 → Op2
-            (1, 0),  # Op2 → Op1
-        ),
-        carrier_mask=0b000001,  # Op1 is carrier
-        feedback_op=5,          # Op6 has feedback
-        eval_order=[5, 4, 2, 1, 3, 0],
-    ),
+def _topological_eval_order(edges: Tuple[Tuple[int, int], ...]) -> List[int]:
+    """Order all 6 ops (0-indexed) so every modulator precedes its targets."""
+    deps = {op: set() for op in range(6)}          # op -> its modulators
+    for src, dst in edges:
+        deps[dst - 1].add(src - 1)
+    order: List[int] = []
+    remaining = set(range(6))
+    while remaining:
+        ready = sorted(op for op in remaining if deps[op] <= set(order))
+        if not ready:  # cycle — cannot happen for valid DAG specs
+            raise ValueError(f"cyclic FM spec: {edges}")
+        # Deterministic: highest op number first (modulators live high, matches
+        # the historical 5..0 ordering for pure chains).
+        nxt = ready[-1]
+        order.append(nxt)
+        remaining.discard(nxt)
+    return order
 
-    # =========================================================================
-    # Algorithm 6: Parallel modulators into carrier
-    # [6]   [5] → [4] ─┐
-    #  │              ├─→ [1*]
-    #  └── [3] → [2] ─┘
-    #       ↺fb
-    # =========================================================================
-    6: FMAlgorithm(
-        alg_id=6,
-        name="Parallel Stacks",
-        modulation_matrix=_make_matrix(
-            (5, 2),  # Op6 → Op3
-            (4, 3),  # Op5 → Op4
-            (3, 0),  # Op4 → Op1
-            (2, 1),  # Op3 → Op2
-            (1, 0),  # Op2 → Op1
-        ),
-        carrier_mask=0b000001,  # Op1 is carrier
-        feedback_op=5,          # Op6 has feedback
-        eval_order=[5, 4, 2, 1, 3, 0],
-    ),
 
-    # =========================================================================
-    # Algorithm 7: 3-op stack + 3 carriers
-    # [6] → [5] → [4] → [1*]
-    #             [3*]
-    #             [2*]
-    #             ↺fb
-    # =========================================================================
-    7: FMAlgorithm(
-        alg_id=7,
-        name="3-Op Stack + 2 Carriers",
-        modulation_matrix=_make_matrix(
-            (5, 4),  # Op6 → Op5
-            (4, 3),  # Op5 → Op4
-            (3, 0),  # Op4 → Op1
-        ),
-        carrier_mask=0b000111,  # Op1, Op2, Op3 are carriers
-        feedback_op=5,          # Op6 has feedback
-        eval_order=[5, 4, 3, 2, 1, 0],
-    ),
+def _build(alg_id: int, spec) -> FMAlgorithm:
+    name, carriers, edges, fb = spec
+    return FMAlgorithm(
+        alg_id=alg_id,
+        name=name,
+        modulation_matrix=_make_matrix(*(((s - 1), (d - 1)) for s, d in edges)),
+        carrier_mask=sum(1 << (c - 1) for c in carriers),
+        feedback_op=fb - 1,
+        eval_order=_topological_eval_order(edges),
+    )
 
-    # =========================================================================
-    # Algorithm 8: 2-op pair modulating 2 carriers + 2 carriers
-    # [6] → [5] ─┬─→ [4*]
-    #            └─→ [3*]
-    #            [2*]
-    #            [1*]
-    #            ↺fb on Op6
-    # =========================================================================
-    8: FMAlgorithm(
-        alg_id=8,
-        name="Split Modulator",
-        modulation_matrix=_make_matrix(
-            (5, 4),  # Op6 → Op5
-            (4, 3),  # Op5 → Op4
-            (4, 2),  # Op5 → Op3
-        ),
-        carrier_mask=0b001111,  # Op1-4 are carriers
-        feedback_op=5,          # Op6 has feedback
-        eval_order=[5, 4, 3, 2, 1, 0],
-    ),
 
-    # =========================================================================
-    # Algorithm 9: 3+2+1 modulator arrangement
-    # [6] → [5] → [4*]
-    # [3] → [2] → [1*]
-    #       ↺fb on Op3
-    # =========================================================================
-    9: FMAlgorithm(
-        alg_id=9,
-        name="Dual 3-Op Chains",
-        modulation_matrix=_make_matrix(
-            (5, 4),  # Op6 → Op5
-            (4, 3),  # Op5 → Op4
-            (2, 1),  # Op3 → Op2
-            (1, 0),  # Op2 → Op1
-        ),
-        carrier_mask=0b001001,  # Op1, Op4 are carriers
-        feedback_op=2,          # Op3 has feedback
-        eval_order=[5, 4, 2, 1, 3, 0],
-    ),
-
-    # =========================================================================
-    # Algorithm 10: 2+2+2 modulator pairs
-    # [6] → [5*]
-    # [4] → [3*]
-    # [2] → [1*]
-    #       ↺fb on Op4
-    # =========================================================================
-    10: FMAlgorithm(
-        alg_id=10,
-        name="Three 2-Op Pairs",
-        modulation_matrix=_make_matrix(
-            (5, 4),  # Op6 → Op5
-            (3, 2),  # Op4 → Op3
-            (1, 0),  # Op2 → Op1
-        ),
-        carrier_mask=0b010101,  # Op1, Op3, Op5 are carriers
-        feedback_op=3,          # Op4 has feedback
-        eval_order=[5, 3, 1, 4, 2, 0],
-    ),
-
-    # =========================================================================
-    # Algorithm 11: Like 10 but different feedback
-    # [6] → [5*]
-    # [4] → [3*]
-    # [2] → [1*]
-    #       ↺fb on Op6
-    # =========================================================================
-    11: FMAlgorithm(
-        alg_id=11,
-        name="Three 2-Op Pairs (FB6)",
-        modulation_matrix=_make_matrix(
-            (5, 4),  # Op6 → Op5
-            (3, 2),  # Op4 → Op3
-            (1, 0),  # Op2 → Op1
-        ),
-        carrier_mask=0b010101,  # Op1, Op3, Op5 are carriers
-        feedback_op=5,          # Op6 has feedback
-        eval_order=[5, 3, 1, 4, 2, 0],
-    ),
-
-    # =========================================================================
-    # Algorithm 12: 4 modulators into 2 carriers
-    # [6] → [5] → [4] → [3*]
-    #             [2] → [1*]
-    #             ↺fb on Op6
-    # =========================================================================
-    12: FMAlgorithm(
-        alg_id=12,
-        name="4+2 Split",
-        modulation_matrix=_make_matrix(
-            (5, 4),  # Op6 → Op5
-            (4, 3),  # Op5 → Op4
-            (3, 2),  # Op4 → Op3
-            (1, 0),  # Op2 → Op1
-        ),
-        carrier_mask=0b000101,  # Op1, Op3 are carriers
-        feedback_op=5,          # Op6 has feedback
-        eval_order=[5, 4, 3, 1, 2, 0],
-    ),
-
-    # =========================================================================
-    # Algorithm 13: 3+3 arrangement
-    # [6] → [5] → [4*]
-    #       [3] → [2] → [1*]
-    #       ↺fb on Op6
-    # =========================================================================
-    13: FMAlgorithm(
-        alg_id=13,
-        name="3+3 Arrangement",
-        modulation_matrix=_make_matrix(
-            (5, 4),  # Op6 → Op5
-            (4, 3),  # Op5 → Op4
-            (2, 1),  # Op3 → Op2
-            (1, 0),  # Op2 → Op1
-        ),
-        carrier_mask=0b001001,  # Op1, Op4 are carriers
-        feedback_op=5,          # Op6 has feedback
-        eval_order=[5, 4, 2, 1, 3, 0],
-    ),
-
-    # =========================================================================
-    # Algorithm 14: 4-op chain + 2 carriers
-    # [6] → [5] → [4] → [3*]
-    #                   [2*]
-    #                   [1*]
-    #                   ↺fb on Op6
-    # =========================================================================
-    14: FMAlgorithm(
-        alg_id=14,
-        name="4-Op + 2 Carriers",
-        modulation_matrix=_make_matrix(
-            (5, 4),  # Op6 → Op5
-            (4, 3),  # Op5 → Op4
-            (3, 2),  # Op4 → Op3
-        ),
-        carrier_mask=0b000111,  # Op1, Op2, Op3 are carriers
-        feedback_op=5,          # Op6 has feedback
-        eval_order=[5, 4, 3, 2, 1, 0],
-    ),
-
-    # =========================================================================
-    # Algorithm 15: 2-op modulator + 2 carriers + 2 carriers
-    # [6] → [5*]
-    #       [4*]
-    # [2] → [3*]
-    #       [1*]
-    #       ↺fb on Op6
-    # =========================================================================
-    15: FMAlgorithm(
-        alg_id=15,
-        name="2-Op + 4 Carriers",
-        modulation_matrix=_make_matrix(
-            (5, 4),  # Op6 → Op5
-            (1, 2),  # Op2 → Op3
-        ),
-        carrier_mask=0b011101,  # Op1, Op3, Op4, Op5 are carriers
-        feedback_op=5,          # Op6 has feedback
-        eval_order=[5, 1, 4, 3, 2, 0],
-    ),
-
-    # =========================================================================
-    # Algorithm 16: Brass (parallel into carrier)
-    # [6] ─┐
-    # [5] ─┼─→ [1*]
-    # [4] ─┤
-    # [3] ─┤
-    # [2] ─┘
-    # ↺fb on Op6
-    # =========================================================================
-    16: FMAlgorithm(
-        alg_id=16,
-        name="Brass (5 into 1)",
-        modulation_matrix=_make_matrix(
-            (5, 0),  # Op6 → Op1
-            (4, 0),  # Op5 → Op1
-            (3, 0),  # Op4 → Op1
-            (2, 0),  # Op3 → Op1
-            (1, 0),  # Op2 → Op1
-        ),
-        carrier_mask=0b000001,  # Op1 is carrier
-        feedback_op=5,          # Op6 has feedback
-        eval_order=[5, 4, 3, 2, 1, 0],
-    ),
-
-    # =========================================================================
-    # Algorithm 17: Similar to 16, different routing
-    # [6] ─┐
-    # [5] ─┼─→ [1*]
-    # [4] ─┘
-    # [3] ─┤
-    # [2] ─┘
-    # ↺fb on Op6
-    # =========================================================================
-    17: FMAlgorithm(
-        alg_id=17,
-        name="5 Modulators Split",
-        modulation_matrix=_make_matrix(
-            (5, 0),  # Op6 → Op1
-            (4, 0),  # Op5 → Op1
-            (3, 0),  # Op4 → Op1
-            (2, 0),  # Op3 → Op1
-            (1, 0),  # Op2 → Op1
-        ),
-        carrier_mask=0b000001,  # Op1 is carrier
-        feedback_op=5,          # Op6 has feedback
-        eval_order=[5, 4, 3, 2, 1, 0],
-    ),
-
-    # =========================================================================
-    # Algorithm 18: 3 stacks feeding carrier
-    # [6] → [5] ─┐
-    # [4] ───────┼─→ [1*]
-    # [3] → [2] ─┘
-    # ↺fb on Op6
-    # =========================================================================
-    18: FMAlgorithm(
-        alg_id=18,
-        name="3 Stacks into 1",
-        modulation_matrix=_make_matrix(
-            (5, 4),  # Op6 → Op5
-            (4, 0),  # Op5 → Op1
-            (3, 0),  # Op4 → Op1
-            (2, 1),  # Op3 → Op2
-            (1, 0),  # Op2 → Op1
-        ),
-        carrier_mask=0b000001,  # Op1 is carrier
-        feedback_op=5,          # Op6 has feedback
-        eval_order=[5, 3, 2, 4, 1, 0],
-    ),
-
-    # =========================================================================
-    # Algorithm 19: 3-op + 3 carriers
-    # [6] → [5] ─┬─→ [4*]
-    #            ├─→ [3*]
-    #            └─→ [2*]
-    #            [1*]
-    # ↺fb on Op6
-    # =========================================================================
-    19: FMAlgorithm(
-        alg_id=19,
-        name="Split to 3 Carriers",
-        modulation_matrix=_make_matrix(
-            (5, 4),  # Op6 → Op5
-            (4, 3),  # Op5 → Op4
-            (4, 2),  # Op5 → Op3
-            (4, 1),  # Op5 → Op2
-        ),
-        carrier_mask=0b001111,  # Op1, Op2, Op3, Op4 are carriers
-        feedback_op=5,          # Op6 has feedback
-        eval_order=[5, 4, 3, 2, 1, 0],
-    ),
-
-    # =========================================================================
-    # Algorithm 20: 2+2 modulators into 2 carriers
-    # [6] → [5] → [4*]
-    #       [3] ─┬─→ [2*]
-    #            └─→ [1*]
-    # ↺fb on Op4
-    # =========================================================================
-    20: FMAlgorithm(
-        alg_id=20,
-        name="2+2 into 2 Carriers",
-        modulation_matrix=_make_matrix(
-            (5, 4),  # Op6 → Op5
-            (4, 3),  # Op5 → Op4
-            (2, 1),  # Op3 → Op2
-            (2, 0),  # Op3 → Op1
-        ),
-        carrier_mask=0b001011,  # Op1, Op2, Op4 are carriers
-        feedback_op=3,          # Op4 has feedback
-        eval_order=[5, 4, 2, 3, 1, 0],
-    ),
-
-    # =========================================================================
-    # Algorithm 21: 2 modulators into 4 carriers
-    # [6] → [5] ─┬─→ [4*]
-    #            └─→ [3*]
-    #       [2] ─┬─→ [1*]
-    #            (no mod to 2nd carrier)
-    # ↺fb on Op6
-    # =========================================================================
-    21: FMAlgorithm(
-        alg_id=21,
-        name="2 Mod Pairs + 2 Carriers",
-        modulation_matrix=_make_matrix(
-            (5, 4),  # Op6 → Op5
-            (4, 3),  # Op5 → Op4
-            (4, 2),  # Op5 → Op3
-            (1, 0),  # Op2 → Op1
-        ),
-        carrier_mask=0b001111,  # Op1, Op2, Op3, Op4 are carriers
-        feedback_op=5,          # Op6 has feedback
-        eval_order=[5, 4, 1, 3, 2, 0],
-    ),
-
-    # =========================================================================
-    # Algorithm 22: Brass/Organ
-    # [6] → [5] ─┬─→ [4*]
-    #            ├─→ [3*]
-    #            └─→ [2*]
-    #            [1*]
-    # ↺fb on Op6
-    # =========================================================================
-    22: FMAlgorithm(
-        alg_id=22,
-        name="Brass (Split 3)",
-        modulation_matrix=_make_matrix(
-            (5, 4),  # Op6 → Op5
-            (4, 3),  # Op5 → Op4
-            (4, 2),  # Op5 → Op3
-            (4, 1),  # Op5 → Op2
-        ),
-        carrier_mask=0b001111,  # Op1, Op2, Op3, Op4 are carriers
-        feedback_op=5,          # Op6 has feedback
-        eval_order=[5, 4, 3, 2, 1, 0],
-    ),
-
-    # =========================================================================
-    # Algorithm 23: 5 carriers + 1 modulator
-    # [6] → [5*]
-    #       [4*]
-    #       [3*]
-    #       [2*]
-    #       [1*]
-    # ↺fb on Op6
-    # =========================================================================
-    23: FMAlgorithm(
-        alg_id=23,
-        name="1 Mod + 5 Carriers",
-        modulation_matrix=_make_matrix(
-            (5, 4),  # Op6 → Op5
-        ),
-        carrier_mask=0b011111,  # Op1-5 are carriers
-        feedback_op=5,          # Op6 has feedback
-        eval_order=[5, 4, 3, 2, 1, 0],
-    ),
-
-    # =========================================================================
-    # Algorithm 24: All carriers (slight modulation)
-    # [6] → [5*]
-    #       [4*]
-    #       [3*]
-    #       [2*]
-    #       [1*]
-    # ↺fb on Op6
-    # =========================================================================
-    24: FMAlgorithm(
-        alg_id=24,
-        name="1 Mod + 5 Carriers (v2)",
-        modulation_matrix=_make_matrix(
-            (5, 4),  # Op6 → Op5
-        ),
-        carrier_mask=0b011111,  # Op1-5 are carriers
-        feedback_op=5,          # Op6 has feedback
-        eval_order=[5, 4, 3, 2, 1, 0],
-    ),
-
-    # =========================================================================
-    # Algorithm 25: Similar with different feedback
-    # [6] → [5*]
-    #       [4*]
-    #       [3*]
-    #       [2*]
-    #       [1*]
-    # ↺fb on Op6
-    # =========================================================================
-    25: FMAlgorithm(
-        alg_id=25,
-        name="1 Mod + 5 Carriers (v3)",
-        modulation_matrix=_make_matrix(
-            (5, 4),  # Op6 → Op5
-        ),
-        carrier_mask=0b011111,  # Op1-5 are carriers
-        feedback_op=5,          # Op6 has feedback
-        eval_order=[5, 4, 3, 2, 1, 0],
-    ),
-
-    # =========================================================================
-    # Algorithm 26: 2 modulators + 4 carriers
-    # [6] → [5*]
-    #       [4*]
-    # [3] → [2*]
-    #       [1*]
-    # ↺fb on Op6
-    # =========================================================================
-    26: FMAlgorithm(
-        alg_id=26,
-        name="2 Mods + 4 Carriers",
-        modulation_matrix=_make_matrix(
-            (5, 4),  # Op6 → Op5
-            (2, 1),  # Op3 → Op2
-        ),
-        carrier_mask=0b010011,  # Op1, Op2, Op5 are carriers
-        feedback_op=5,          # Op6 has feedback
-        eval_order=[5, 2, 4, 3, 1, 0],
-    ),
-
-    # =========================================================================
-    # Algorithm 27: 2 modulators + 4 carriers (different config)
-    # [6] → [5*]
-    #       [4*]
-    # [3] → [2*]
-    #       [1*]
-    # ↺fb on Op3
-    # =========================================================================
-    27: FMAlgorithm(
-        alg_id=27,
-        name="2 Mods + 4 Carriers (v2)",
-        modulation_matrix=_make_matrix(
-            (5, 4),  # Op6 → Op5
-            (2, 1),  # Op3 → Op2
-        ),
-        carrier_mask=0b010011,  # Op1, Op2, Op5 are carriers
-        feedback_op=2,          # Op3 has feedback
-        eval_order=[5, 2, 4, 3, 1, 0],
-    ),
-
-    # =========================================================================
-    # Algorithm 28: 3-op chain + 3 carriers
-    # [6] → [5] → [4*]
-    #             [3*]
-    #             [2*]
-    #             [1*]
-    # ↺fb on Op6
-    # =========================================================================
-    28: FMAlgorithm(
-        alg_id=28,
-        name="3-Op Chain + 3 Carriers",
-        modulation_matrix=_make_matrix(
-            (5, 4),  # Op6 → Op5
-            (4, 3),  # Op5 → Op4
-        ),
-        carrier_mask=0b001111,  # Op1, Op2, Op3, Op4 are carriers
-        feedback_op=5,          # Op6 has feedback
-        eval_order=[5, 4, 3, 2, 1, 0],
-    ),
-
-    # =========================================================================
-    # Algorithm 29: 2+2+2 carriers with modulation
-    # [6] → [5*]
-    # [4] → [3*]
-    #       [2*]
-    #       [1*]
-    # ↺fb on Op6
-    # =========================================================================
-    29: FMAlgorithm(
-        alg_id=29,
-        name="2+2+2 Pairs",
-        modulation_matrix=_make_matrix(
-            (5, 4),  # Op6 → Op5
-            (3, 2),  # Op4 → Op3
-        ),
-        carrier_mask=0b010111,  # Op1, Op2, Op3, Op5 are carriers
-        feedback_op=5,          # Op6 has feedback
-        eval_order=[5, 3, 4, 2, 1, 0],
-    ),
-
-    # =========================================================================
-    # Algorithm 30: 2 chains of 3
-    # [6] → [5] → [4*]
-    # [3] → [2] → [1*]
-    # ↺fb on Op6
-    # =========================================================================
-    30: FMAlgorithm(
-        alg_id=30,
-        name="2x 3-Op Chains",
-        modulation_matrix=_make_matrix(
-            (5, 4),  # Op6 → Op5
-            (4, 3),  # Op5 → Op4
-            (2, 1),  # Op3 → Op2
-            (1, 0),  # Op2 → Op1
-        ),
-        carrier_mask=0b001001,  # Op1, Op4 are carriers
-        feedback_op=5,          # Op6 has feedback
-        eval_order=[5, 4, 2, 1, 3, 0],
-    ),
-
-    # =========================================================================
-    # Algorithm 31: 5 carriers + 1 modulator
-    # [6] → [5*]
-    #       [4*]
-    #       [3*]
-    #       [2*]
-    #       [1*]
-    # ↺fb on Op6
-    # =========================================================================
-    31: FMAlgorithm(
-        alg_id=31,
-        name="1 Mod + 5 Carriers (v4)",
-        modulation_matrix=_make_matrix(
-            (5, 4),  # Op6 → Op5
-        ),
-        carrier_mask=0b011111,  # Op1-5 are carriers
-        feedback_op=5,          # Op6 has feedback
-        eval_order=[5, 4, 3, 2, 1, 0],
-    ),
-
-    # =========================================================================
-    # Algorithm 32: All carriers (Additive)
-    # [6*]
-    # [5*]
-    # [4*]
-    # [3*]
-    # [2*]
-    # [1*]
-    # ↺fb on Op6
-    # =========================================================================
-    32: FMAlgorithm(
-        alg_id=32,
-        name="Additive (6 Carriers)",
-        modulation_matrix=_make_matrix(),  # No modulation
-        carrier_mask=0b111111,  # All 6 are carriers
-        feedback_op=5,          # Op6 has feedback
-        eval_order=[5, 4, 3, 2, 1, 0],  # Any order works
-    ),
+ALGORITHMS: Dict[int, FMAlgorithm] = {
+    aid: _build(aid, spec)
+    for aid, spec in {**_DX7_SPEC, **_LEGACY_SPEC}.items()
 }
 
 
 def get_algorithm(alg_id: int) -> FMAlgorithm:
     """
-    Get algorithm by ID (1-32).
+    Get algorithm by ID.
 
     Args:
-        alg_id: Algorithm number (1-32)
+        alg_id: Algorithm number — 1-32 canonical DX7, 33-38 legacy WSE
 
     Returns:
         FMAlgorithm instance
@@ -772,7 +216,8 @@ def get_algorithm(alg_id: int) -> FMAlgorithm:
         KeyError: If algorithm ID not found
     """
     if alg_id not in ALGORITHMS:
-        raise KeyError(f"Algorithm {alg_id} not found. Valid range: 1-32")
+        raise KeyError(
+            f"Algorithm {alg_id} not found. Valid: 1-32 (DX7), 33-38 (legacy WSE)")
     return ALGORITHMS[alg_id]
 
 

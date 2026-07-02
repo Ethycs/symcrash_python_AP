@@ -20,7 +20,7 @@ instrument_ir_v0:
   meta:
     id: "dream-marimba-v0"
     name: "Dream Marimba"
-    version: 0
+    version: 1
     author: "symcrash"
     seed: 0x44524D42
 
@@ -32,7 +32,7 @@ instrument_ir_v0:
     fm6:
       type: FM6
       output: amp1
-      algorithm: 5
+      algorithm: 35  # legacy WSE topology (pre-DX7-table-fix sound, preserved)
       feedback: 0
       operators:
         # -- body pair: harmonic, low index, slow index decay

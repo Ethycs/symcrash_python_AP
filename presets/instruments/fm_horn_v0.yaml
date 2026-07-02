@@ -21,7 +21,7 @@ instrument_ir_v0:
   meta:
     id: "fm-horn-v0"
     name: "FM French Horn"
-    version: 0
+    version: 1
     author: "symcrash"
     seed: 0x484F524E
 
@@ -33,7 +33,7 @@ instrument_ir_v0:
     fm6:
       type: FM6
       output: amp1
-      algorithm: 22
+      algorithm: 38  # legacy WSE topology (pre-DX7-table-fix sound, preserved)
       feedback: 1
       operators:
         - ratio: 1.0

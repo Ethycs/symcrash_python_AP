@@ -208,7 +208,7 @@ class TestCapsuleCarriesEnvelopes:
         # FM6 config reconstructed from voice params
         assert p.osc_mode == 3
         assert p.fm6 is not None
-        assert p.fm6.algorithm_id == 5
+        assert p.fm6.algorithm_id == 35  # legacy WSE id (pre-DX7-table-fix topology preserved)
         # Amp envelope reconstructed from control defaults (block-quantized)
         assert p.amp_env is not None
         assert p.amp_env.decay_ms == pytest.approx(500.0, abs=2.0)

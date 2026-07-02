@@ -15,7 +15,7 @@ instrument_ir_v0:
   meta:
     id: "dx-epiano-v0"
     name: "DX E.Piano"
-    version: 2
+    version: 3
     author: "symcrash"
     seed: 0x44455031
 
@@ -27,7 +27,7 @@ instrument_ir_v0:
     fm6:
       type: FM6
       output: amp1
-      algorithm: 5
+      algorithm: 35  # legacy WSE topology (pre-DX7-table-fix sound, preserved)
       feedback: 2
       operators:
         # Carrier levels: the FM6->FWPT gateway auto-normalizes carrier

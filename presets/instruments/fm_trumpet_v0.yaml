@@ -22,7 +22,7 @@ instrument_ir_v0:
   meta:
     id: "fm-trumpet-v0"
     name: "FM Trumpet"
-    version: 0
+    version: 1
     author: "symcrash"
     seed: 0x54525550
 
@@ -34,7 +34,7 @@ instrument_ir_v0:
     fm6:
       type: FM6
       output: amp1
-      algorithm: 16
+      algorithm: 36  # legacy WSE topology (pre-DX7-table-fix sound, preserved)
       feedback: 3
       operators:
         - ratio: 1.0
