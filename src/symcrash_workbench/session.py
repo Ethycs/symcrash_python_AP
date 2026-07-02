@@ -61,12 +61,15 @@ class WorkbenchSession:
         # True while a Phase C streaming voice is live: suppresses the
         # debounce re-render (the stream itself is the audition path).
         self.streaming = False
+        # Called with the session after a successful load_preset() so
+        # transports can push_state / notify the surface.
+        self.on_preset_loaded: Optional[Callable] = None
 
         # Trajectory log (calibration data for the metric committee)
-        log_dir = Path(log_dir) if log_dir else REPO_ROOT / "_workbench_logs"
-        log_dir.mkdir(exist_ok=True)
+        self._log_dir = Path(log_dir) if log_dir else REPO_ROOT / "_workbench_logs"
+        self._log_dir.mkdir(exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        self._log_path = log_dir / f"{self.preset_path.stem}-{stamp}.jsonl"
+        self._log_path = self._log_dir / f"{self.preset_path.stem}-{stamp}.jsonl"
 
         self._dirty = threading.Event()
         self._stop = threading.Event()
@@ -80,6 +83,14 @@ class WorkbenchSession:
 
     def handle(self, address: str, value) -> bool:
         """Apply one control message. Returns True if it changed anything."""
+        # String-valued messages: route before the float coercion below.
+        if address == "/preset/load":
+            return self.load_preset(value) if value else False
+        if address == "/preset/list":
+            # The reply needs a feedback channel: the OSC transports
+            # (osc_server.serve / StreamingOSCBridge) answer this one.
+            return True
+
         if value is not None:
             try:
                 value = float(value)
@@ -250,9 +261,61 @@ class WorkbenchSession:
         print(f"[workbench] reloaded {self.preset_path.name}")
         self._touch("reload", 1)
 
+    # ------------------------------------------------------------- library
+
+    def list_presets(self):
+        """The loadable preset catalog (see library.scan_preset_catalog)."""
+        from .library import scan_preset_catalog
+        return scan_preset_catalog()
+
+    def load_preset(self, token) -> bool:
+        """
+        Swap this session to another preset (/preset/load). `token` is an
+        id-or-filename: a filename stem, meta id, display name, capsule
+        id from the library index, a YAML path, or a PresetEntry.
+
+        Unsaved knob edits on the old preset are dropped, the JSONL
+        trajectory context restarts in a fresh per-preset log file, and
+        on_preset_loaded fires so transports can push_state (knob snap).
+        """
+        from .library import PresetEntry, resolve_preset
+
+        entry = token if isinstance(token, PresetEntry) else \
+            resolve_preset(str(token))
+        if entry is None:
+            print(f"[workbench] unknown preset: {token}")
+            return False
+        try:
+            ir = load_instrument(str(entry.path))
+        except Exception as e:
+            print(f"[workbench] failed to load {entry.path.name}: {e}")
+            self._log("preset_load_error", preset=str(entry.path),
+                      error=str(e))
+            return False
+
+        self._log("preset_unload", preset=str(self.preset_path),
+                  discarded_edits=sorted(self.changed))
+        self.preset_path = entry.path
+        self.ir = ir
+        self.changed.clear()
+        # New trajectory context: one JSONL per (preset, load)
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        self._log_path = self._log_dir / f"{entry.path.stem}-{stamp}.jsonl"
+        self._log("session_start", preset=str(entry.path),
+                  via="preset_load")
+        print(f"[workbench] loaded {entry.path.name} "
+              f"({self.ir.meta.name} v{self.ir.meta.version})")
+        if self.on_preset_loaded is not None:
+            try:
+                self.on_preset_loaded(self)
+            except Exception as e:  # feedback must not kill the session
+                print(f"[workbench] preset-loaded callback failed: {e}")
+        self._touch("preset", 1)
+        return True
+
     # ------------------------------------------------------------- feedback
 
-    def push_state(self, send: Callable[[str, float], None]):
+    def push_state(self, send: Callable[[str, object], None]):
         """Send current values to the control surface (widget sync)."""
         for address, param in self.registry.items():
             try:
@@ -265,6 +328,8 @@ class WorkbenchSession:
         send("/velocity", float(self.velocity))
         send("/duration", float(self.duration))
         send("/autoplay", 1.0 if self.autoplay else 0.0)
+        # Snap the preset picker to the loaded preset (string payload)
+        send("/preset/load", self.preset_path.stem)
 
     # ------------------------------------------------------------- plumbing
 

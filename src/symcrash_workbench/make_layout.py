@@ -11,6 +11,7 @@ duration, autoplay, PLAY / SAVE / RELOAD). Re-run after adding params:
 import json
 from pathlib import Path
 
+from .library import scan_preset_catalog
 from .params import GROUPS, build_registry
 
 DEFAULT_LAYOUT_PATH = (Path(__file__).resolve().parents[2]
@@ -57,6 +58,34 @@ def _panel(widgets, height=None):
     return p
 
 
+def _preset_row():
+    """
+    Preset picker: a dropdown over the catalog scanned at layout
+    generation time (values = filename stems, what /preset/load takes)
+    plus a LIST button that asks the backend to re-send the catalog on
+    the feedback port (/preset/item + /preset/count).
+    """
+    values = {}
+    for entry in scan_preset_catalog():
+        label = entry.label
+        if label in values:  # duplicate display names: disambiguate
+            label = f"{label} ({entry.stem})"
+        values[label] = entry.stem
+    dropdown = {
+        "type": "dropdown",
+        "id": "preset_load",
+        "label": "PRESET",
+        "address": "/preset/load",
+        "values": values,
+        "expand": True,
+    }
+    return _panel([
+        _caption("PRESET"),
+        dropdown,
+        _button("LIST", "/preset/list"),
+    ], height=110)
+
+
 def _perform_row():
     return _panel([
         _caption("PERFORM"),
@@ -78,7 +107,7 @@ def _perform_row():
 
 def build_layout() -> dict:
     registry = build_registry()
-    rows = [_perform_row()]
+    rows = [_preset_row(), _perform_row()]
 
     for group, caption in GROUPS:
         group_params = [p for p in registry.values() if p.group == group]

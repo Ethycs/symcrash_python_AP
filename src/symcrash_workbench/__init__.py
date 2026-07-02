@@ -8,14 +8,25 @@ through the full render harness (tools/render/render_preset.py), and
 plays the result. Tuned values write back to the preset YAML with a
 version bump (comment-preserving via ruamel.yaml).
 
-Usage:
+Usage (canonical live entry - streaming mode: realtime audio, per-block
+parameter latch, preset browsing over OSC):
+
     pixi run python -m symcrash_workbench dx_marimba_v0
     open-stage-control --load tools/workbench/symcrash-workbench.json \
         --send 127.0.0.1:7400 --osc-port 7500
 
-Phase C (streaming + atlas mode, see streaming.py): a sustained note
-rendered block-by-block through the jit vm_step_block with per-block
-parameter latch and live single-axis sweeps:
+Offline mode (debounced full re-render on each edit, the old default):
+
+    pixi run python -m symcrash_workbench dx_marimba_v0 --offline
+
+Preset library over OSC: /preset/list replies with the catalog
+(presets/instruments/*.yaml plus capsule ids from the library index);
+/preset/load <id-or-filename> live-swaps the session - mid-stream the
+old note fades over one block and the new preset retriggers.
+
+Phase C internals (see streaming.py): a sustained note rendered
+block-by-block through the jit vm_step_block, atlas-mode sweeps, noise
+exciter and N-voice unison/stereo latched from the live IR every block:
 
     pixi run python -m symcrash_workbench.streaming string_pad_v0          # report + demo WAV
     pixi run python -m symcrash_workbench.streaming string_pad_v0 --serve  # live OSC + audio

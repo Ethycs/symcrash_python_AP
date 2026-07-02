@@ -493,6 +493,11 @@ def main():
     # Setup ImGui controls window if requested
     imgui_thread = None
     if args.imgui:
+        print("[ImGui] DEPRECATED: the imgui panel is superseded by the OSC")
+        print("[ImGui] workbench (realtime streaming + Open Stage Control):")
+        print("[ImGui]   pixi run python -m symcrash_workbench <preset>")
+        print("[ImGui]   open-stage-control --load tools/workbench/"
+              "symcrash-workbench.json --send 127.0.0.1:7400 --osc-port 7500")
         try:
             from imgui_bundle import hello_imgui
             from symcrash_imgui_controls.synth_bridge import ImGuiSynthBridge

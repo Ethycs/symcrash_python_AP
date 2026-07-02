@@ -281,6 +281,142 @@ def _axis_param(state, axis):
                  f"axis_{state}", get, set_, yapply)
 
 
+_NOISE_COLORS = ["white", "pink", "brown"]
+_NOISE_COLOR_IDS = {name: i for i, name in enumerate(_NOISE_COLORS)}
+
+
+def _noise_node(ir):
+    """The node noise params live on: the first node already authoring
+    noise, else the first generator node (so any preset can gain noise)."""
+    for n in ir.layers.L0_graph.nodes:
+        if getattr(n.params, "noise_level", None) is not None \
+                or n.type == "Noise":
+            return n
+    for n in ir.layers.L0_graph.nodes:
+        if n.type in ("Osc", "FM6"):
+            return n
+    return None
+
+
+def _ynoise(root, ir):
+    """The `noise:` mapping on the noise node's YAML entry (created)."""
+    node = _noise_node(ir)
+    if node is None:
+        return None
+    graph = root.get("graph")
+    if graph is None or node.id not in graph:
+        return None
+    y = graph[node.id]
+    if "noise" not in y or y["noise"] is None:
+        y["noise"] = {}
+    return y["noise"]
+
+
+def _noise_param(field, ykey, label, lo, hi, log=False, decimals=3):
+    """field: attr on node.params (noise_level / noise_attack_ms / ...)."""
+    def get(ir):
+        node = _noise_node(ir)
+        if node is None:
+            return None
+        v = getattr(node.params, field, None)
+        if v is None:
+            # bare Noise node inherits the extractor's default level
+            if field == "noise_level":
+                return 0.25 if node.type == "Noise" else 0.0
+            return None
+        return float(v)
+
+    def set_(ir, v):
+        node = _noise_node(ir)
+        if node is None:
+            return False
+        setattr(node.params, field, float(v))
+        return True
+
+    def yapply(root, ir, v):
+        y = _ynoise(root, ir)
+        if y is None:
+            return False
+        y[ykey] = round(float(v), 3)
+        return True
+
+    return Param(f"/noise/{ykey}", label, lo, hi, "noise", get, set_, yapply,
+                 log=log, decimals=decimals)
+
+
+def _noise_color_param():
+    """Noise color as a 0/1/2 stepped value (white / pink / brown)."""
+    def get(ir):
+        node = _noise_node(ir)
+        if node is None:
+            return None
+        name = (getattr(node.params, "color", None) or "white").lower()
+        return float(_NOISE_COLOR_IDS.get(name, 0))
+
+    def set_(ir, v):
+        node = _noise_node(ir)
+        if node is None:
+            return False
+        idx = max(0, min(len(_NOISE_COLORS) - 1, int(round(float(v)))))
+        node.params.color = _NOISE_COLORS[idx]
+        return True
+
+    def yapply(root, ir, v):
+        y = _ynoise(root, ir)
+        if y is None:
+            return False
+        idx = max(0, min(len(_NOISE_COLORS) - 1, int(round(float(v)))))
+        y["color"] = _NOISE_COLORS[idx]
+        return True
+
+    return Param("/noise/color", "COLOR", 0.0, 2.0, "noise",
+                 get, set_, yapply, decimals=0)
+
+
+def _unison_node(ir):
+    """First generator node (Osc/FM6) - where unison params live."""
+    for n in ir.layers.L0_graph.nodes:
+        if n.type in ("Osc", "FM6"):
+            return n
+    return None
+
+
+def _unison_param(field, ykey, label, lo, hi, cast=float, decimals=3,
+                  default=None):
+    """field: unison_voices / unison_spread / unison_width."""
+    def get(ir):
+        node = _unison_node(ir)
+        if node is None:
+            return None
+        return float(getattr(node.params, field, default))
+
+    def set_(ir, v):
+        node = _unison_node(ir)
+        if node is None:
+            return False
+        v = cast(round(float(v)) if cast is int else float(v))
+        v = cast(max(lo, min(hi, v)))
+        setattr(node.params, field, v)
+        return True
+
+    def yapply(root, ir, v):
+        node = _unison_node(ir)
+        if node is None:
+            return False
+        graph = root.get("graph")
+        if graph is None or node.id not in graph:
+            return False
+        y = graph[node.id]
+        if "unison" not in y or y["unison"] is None:
+            y["unison"] = {}
+        v = cast(round(float(v)) if cast is int else round(float(v), 3))
+        y["unison"][ykey] = cast(max(lo, min(hi, v)))
+        return True
+
+    return Param(f"/unison/{ykey}", label, lo, hi, "unison",
+                 get, set_, yapply, decimals=decimals)
+
+
 def _filter_param(field, label, lo, hi, log=False):
     def get(ir):
         node = _node(ir, "Filter")
@@ -352,6 +488,28 @@ def build_registry() -> Dict[str, Param]:
         _filter_param("env_amount", "ENV AMT", 0.0, 1.0),
     ]
 
+    # Noise exciter (Packet E4): level 0 = off (bit-exact engine no-op)
+    params += [
+        _noise_param("noise_level", "level", "LEVEL", 0.0, 1.0),
+        _noise_param("noise_attack_ms", "attack_ms", "ATK", 0.1, 100.0,
+                     log=True, decimals=1),
+        _noise_param("noise_decay_ms", "decay_ms", "DCY", 1.0, 1000.0,
+                     log=True, decimals=1),
+        _noise_color_param(),
+    ]
+
+    # Unison / stereo width (Packet E5): voices 1 = mono legacy path.
+    # Live semantics: spread/width latch per block; a voice-count change
+    # takes effect at the next note_on (the bank is fixed per note).
+    params += [
+        _unison_param("unison_voices", "voices", "VOICES", 1, 8,
+                      cast=int, decimals=0, default=1),
+        _unison_param("unison_spread", "spread_cents", "SPREAD", 0, 100,
+                      cast=int, decimals=0, default=10),
+        _unison_param("unison_width", "width", "WIDTH", 0.0, 1.0,
+                      default=1.0),
+    ]
+
     return {p.address: p for p in params}
 
 
@@ -364,4 +522,6 @@ GROUPS = [
     ("axis_attack", "AXES - ATTACK"),
     ("axis_stable", "AXES - STABLE"),
     ("filter", "FILTER"),
+    ("noise", "NOISE"),
+    ("unison", "UNISON"),
 ]

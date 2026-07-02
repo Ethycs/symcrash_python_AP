@@ -1,6 +1,20 @@
 """
-Symcrash Sound Design Workbench
-================================
+Symcrash Sound Design Workbench (DEPRECATED)
+=============================================
+
+.. deprecated::
+    This Dear ImGui panel is superseded by the OSC workbench stack
+    (``src/symcrash_workbench`` + Open Stage Control), which is now the
+    canonical live-synth surface: realtime streaming with per-block
+    parameter latch, preset browsing/loading over OSC, noise and
+    unison/stereo support, and YAML write-back. Use:
+
+        pixi run python -m symcrash_workbench <preset>
+        open-stage-control --load tools/workbench/symcrash-workbench.json \\
+            --send 127.0.0.1:7400 --osc-port 7500
+
+    This package is kept in place for the pico2 hardware bridge tooling
+    and existing tests; no new features land here.
 
 Dear ImGui-based sound design workbench for the Symcrash synthesizer.
 Provides preset browsing, character control knobs, and render-and-play.

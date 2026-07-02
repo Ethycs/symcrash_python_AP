@@ -13,6 +13,7 @@ from pythonosc.dispatcher import Dispatcher
 from pythonosc.osc_server import BlockingOSCUDPServer
 from pythonosc.udp_client import SimpleUDPClient
 
+from .library import send_preset_list
 from .session import WorkbenchSession
 
 
@@ -24,7 +25,17 @@ def serve(session: WorkbenchSession,
     if feedback_host and feedback_port:
         client = SimpleUDPClient(feedback_host, feedback_port)
 
+        def _on_preset_loaded(sess):
+            sess.push_state(client.send_message)
+            client.send_message("/preset/loaded", sess.preset_path.stem)
+
+        session.on_preset_loaded = _on_preset_loaded
+
     def on_message(address, *args):
+        if address == "/preset/list":
+            if client is not None:
+                send_preset_list(client.send_message)
+            return
         value = args[0] if args else None
         session.handle(address, value)
         # After save/reload, resync the surface

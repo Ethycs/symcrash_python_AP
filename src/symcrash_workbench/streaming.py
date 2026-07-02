@@ -40,6 +40,8 @@ with a live axis sweep to audio_out/workbench/.
 """
 
 import argparse
+import copy as _copylib
+import math
 import queue
 import sys
 import threading
@@ -65,9 +67,11 @@ from render_preset import (  # noqa: E402
 from symcrash_python_ap.envelope_targets import EnvelopeTarget  # noqa: E402
 from symcrash_python_ap.frames import VoiceFrame  # noqa: E402
 from symcrash_python_ap.instrument_ir import (  # noqa: E402
-    extract_filter_params, extract_oeis_params, extract_partials_q15,
-    extract_phase_spread_q15,
+    extract_filter_params, extract_noise_params, extract_oeis_params,
+    extract_partials_q15, extract_phase_spread_q15, extract_unison_params,
 )
+
+from .library import resolve_preset  # noqa: E402
 from symcrash_python_ap.vm.executor import vm_step_block  # noqa: E402
 from symcrash_python_ap.vm.harmonic_bank import (  # noqa: E402
     LFOTarget, clear_basis_atlas,
@@ -82,6 +86,15 @@ BUDGET_US = BLOCK_SEC * 1e6  # 1333.3 us realtime budget per block
 
 # "never" sentinel for the mod-envelope sustain hold while the gate is on
 _GATE_HELD = 1 << 30
+
+# Golden-ratio conjugate scaled to 2^32 - the repo's golden-angle phase
+# convention (same constant as render_preset.py / vm/harmonic_bank.py).
+_GOLDEN_Q32 = 0x9E3779B9
+
+# Fraction of the block budget the unison bank may consume before the
+# note_on-time voice-count clamp engages (headroom for frame build, GC,
+# device writes).
+_CLAMP_HEADROOM = 0.75
 
 try:
     from pythonosc.dispatcher import Dispatcher
@@ -134,6 +147,15 @@ class LatchRecord:
     wall_latency_s: float  # inject() call -> latch at block boundary
 
 
+@dataclass
+class _UnisonCopy:
+    """One unison voice copy: its own VMState + fixed stereo position."""
+
+    state: "VMState"
+    t: float           # -1..+1 position (detune + pan), fixed at note_on
+    phase_q32: int     # golden-angle Q32 start phase (also noise-seed XOR)
+
+
 # ====================================================================== voice
 
 class StreamingVoice:
@@ -161,10 +183,19 @@ class StreamingVoice:
         self.gate = False
         self.active = False
 
+        # Unison bank (None = legacy mono path, bit-exact).
+        self.copies: Optional[List[_UnisonCopy]] = None
+        self._unison: Optional[dict] = None
+        self._unison_gain = 1.0     # causal peak guard (only ever decreases)
+        # Clamp the unison voice count to the measured realtime budget at
+        # note_on. Tests that need the authored count set this to False.
+        self.autoclamp = True
+
         self._queue: "queue.SimpleQueue" = queue.SimpleQueue()
         self._sweeps: List[AxisSweep] = []
         self._sweep_lock = threading.Lock()
         self.latch_log: deque = deque(maxlen=256)
+        self._pending_preset: Optional[str] = None
 
         self._note_off_block = 0
         self._release_from_q15 = 0
@@ -183,16 +214,24 @@ class StreamingVoice:
         self.note = self.session.note
         clear_basis_atlas()
         self.session.streaming = True
-        self.state = VMState.create(voice_id=0)
-        self.state.reset_for_note_on(note=self.note)
         self.block_index = 0
         self.gate = True
         self.active = True
         self._note_off_block = 0
         self._release_from_q15 = 0
         self._last_gain_q15 = 0
+        self._unison_gain = 1.0
+        self._unison = extract_unison_params(self.session.ir)
+        if self._unison:
+            self.state = None
+            self._init_unison_bank()
+        else:
+            self.copies = None
+            self.state = VMState.create(voice_id=0)
+            self.state.reset_for_note_on(note=self.note)
         self.session._log("stream_note_on", note=self.note,
-                          velocity=self.session.velocity)
+                          velocity=self.session.velocity,
+                          unison_voices=len(self.copies) if self.copies else 1)
 
     def note_off(self):
         """Release the gate; the voice renders its release tail then stops."""
@@ -242,21 +281,35 @@ class StreamingVoice:
 
     # ------------------------------------------------------------- render
 
+    @property
+    def stereo(self) -> bool:
+        """True when the unison bank is active (blocks are (64, 2))."""
+        return self.copies is not None
+
     def render_block(self) -> np.ndarray:
-        """Latch pending input, render one 64-sample block (int16 copy)."""
+        """
+        Latch pending input, render one 64-sample block.
+
+        Mono presets return a 1-D int16 array (bit-exact legacy path);
+        unison presets return an int16 (BLOCK_SIZE, 2) = (L, R) block.
+        """
         if not self.active:
-            return np.zeros(BLOCK_SIZE, dtype=np.int16)
+            return self._silence()
         self._apply_sweeps()
         self._drain_queue()
+        if self._pending_preset is not None:
+            token, self._pending_preset = self._pending_preset, None
+            swapped = self._swap_preset(token)
+            if swapped is not None:
+                return swapped
         frame = self._build_frame()
-        self.state, out = vm_step_block(self.state, frame)
+        out = self._step_bank(frame)
         self.block_index += 1
         if not self.gate and self.block_index >= (
                 self._note_off_block + self._release_blocks):
             self.active = False
             self.session.streaming = False
-        # vm_step_block reuses its output buffer: copy or blocks alias
-        return out.copy()
+        return out
 
     def render_seconds(self, seconds: float) -> np.ndarray:
         """Render up to `seconds` of audio (stops early if voice ends)."""
@@ -267,6 +320,11 @@ class StreamingVoice:
             blocks.append(self.render_block())
         if not blocks:
             return np.zeros(0, dtype=np.int16)
+        # A /preset/load swap can change the channel count mid-render:
+        # upmix mono blocks so the concatenation stays consistent.
+        if len({b.ndim for b in blocks}) > 1:
+            blocks = [b if b.ndim == 2 else np.stack([b, b], axis=1)
+                      for b in blocks]
         return np.concatenate(blocks)
 
     def play_realtime(self, seconds: Optional[float] = None) -> bool:
@@ -274,18 +332,40 @@ class StreamingVoice:
         Stream to the default audio device (best-effort; returns False
         when sounddevice is unavailable). Blocks until the voice ends,
         `seconds` elapse, or KeyboardInterrupt.
+
+        The device stream is opened stereo; mono blocks are upmixed for
+        playback only, so a live /preset/load swap between mono and
+        unison presets never needs to reopen the device. If the render
+        loop sustains an over-budget block time, one unison copy is
+        dropped at a time (with a log line) instead of glitching.
         """
         if sd is None:
             print("[stream] sounddevice unavailable; cannot play realtime")
             return False
         deadline = None if seconds is None else time.monotonic() + seconds
+        recent = deque(maxlen=48)
         # 8 blocks of device buffer (10.7 ms) absorbs the rare OS/GC
         # stall (observed max ~8 ms) while keeping knob->ear ~12 ms.
-        with sd.OutputStream(samplerate=FS, channels=1, dtype="int16",
+        with sd.OutputStream(samplerate=FS, channels=2, dtype="int16",
                              blocksize=BLOCK_SIZE * 8) as out:
             try:
                 while self.active:
-                    out.write(self.render_block().reshape(-1, 1))
+                    t0 = time.perf_counter()
+                    block = self.render_block()
+                    recent.append((time.perf_counter() - t0) * 1e6)
+                    if block.ndim == 1:
+                        block = np.stack([block, block], axis=1)
+                    out.write(block)
+                    if (self.copies and len(self.copies) > 1
+                            and len(recent) == recent.maxlen
+                            and sum(recent) / len(recent) > BUDGET_US):
+                        dropped = self.copies.pop()
+                        recent.clear()
+                        print(f"[stream] over budget: dropped unison copy "
+                              f"t={dropped.t:+.2f} -> "
+                              f"{len(self.copies)} voices")
+                        self.session._log("unison_drop",
+                                          voices=len(self.copies))
                     if deadline is not None and time.monotonic() > deadline:
                         break
             except KeyboardInterrupt:
@@ -293,6 +373,134 @@ class StreamingVoice:
         return True
 
     # ------------------------------------------------------------- internals
+
+    def _silence(self) -> np.ndarray:
+        if self.copies is not None:
+            return np.zeros((BLOCK_SIZE, 2), dtype=np.int16)
+        return np.zeros(BLOCK_SIZE, dtype=np.int16)
+
+    def _init_unison_bank(self):
+        """
+        Build the N-copy unison bank (mirrors render_preset._render_voice
+        semantics: symmetric cents detune, golden-angle Q32 start phases,
+        per-copy noise-seed XOR, equal-power pan, 1/sqrt(N) mix).
+
+        When autoclamp is on, the per-copy block cost is measured on a
+        scratch VMState first and the voice count is clamped so the bank
+        fits the realtime budget (graceful degradation, no glitching).
+        """
+        n_authored = int(self._unison["voices"])
+        n = n_authored
+        if self.autoclamp:
+            cost_us = self._measure_copy_cost_us()
+            ceiling = max(1, int((BUDGET_US * _CLAMP_HEADROOM) //
+                                 max(cost_us, 1e-3)))
+            if n > ceiling:
+                print(f"[stream] unison: clamped {n} -> {ceiling} voices "
+                      f"(measured {cost_us:.0f} us/copy, budget "
+                      f"{BUDGET_US:.0f} us/block)")
+                self.session._log("unison_clamp", authored=n, voices=ceiling,
+                                  copy_cost_us=round(cost_us, 1))
+                n = ceiling
+        self.copies = []
+        for k in range(n):
+            t = 0.0 if n == 1 else (2 * k - (n - 1)) / (n - 1)
+            st = VMState.create(voice_id=0)
+            st.reset_for_note_on(note=self.note)
+            phase_q32 = (k * _GOLDEN_Q32) & 0xFFFFFFFF
+            if phase_q32:
+                st.mode_b_state.phase_offset_q32 = phase_q32
+            self.copies.append(_UnisonCopy(state=st, t=t, phase_q32=phase_q32))
+
+    def _measure_copy_cost_us(self, warmup: int = 3, timed: int = 8) -> float:
+        """
+        Measure one voice copy's vm_step_block cost (us) on a throwaway
+        VMState. Stateful LFO modulators are swapped for deep copies for
+        the duration so the live IR's LFO phase is untouched; the basis
+        atlas and JIT kernels get warmed as a side benefit.
+        """
+        ir = self.session.ir
+        saved_mods = getattr(ir, "modulators", None)
+        if saved_mods:
+            ir.modulators = _copylib.deepcopy(saved_mods)
+        try:
+            st = VMState.create(voice_id=0)
+            st.reset_for_note_on(note=self.note)
+            for _ in range(warmup):
+                st, _ = vm_step_block(st, self._build_frame())
+            costs = []
+            for _ in range(timed):
+                frame = self._build_frame()
+                t0 = time.perf_counter()
+                st, _ = vm_step_block(st, frame)
+                costs.append(time.perf_counter() - t0)
+            costs.sort()
+            return costs[len(costs) // 2] * 1e6  # median: jitter-robust
+        finally:
+            if saved_mods:
+                ir.modulators = saved_mods
+
+    def _step_bank(self, frame: VoiceFrame) -> np.ndarray:
+        """Step the VM: mono legacy path, or the N-copy unison stereo mix."""
+        if self.copies is None:
+            self.state, out = vm_step_block(self.state, frame)
+            # vm_step_block reuses its output buffer: copy or blocks alias
+            return out.copy()
+
+        # Unison: spread/width re-read from the live IR each block (knob
+        # edits latch); the copy count is fixed until the next note_on.
+        live = extract_unison_params(self.session.ir) or self._unison
+        spread = live["spread_cents"]
+        width = live["width"]
+        noise_on = getattr(frame, "noise_level_q15", 0) > 0
+        base_cents = frame.cents
+        base_seed = getattr(frame, "noise_seed_u32", 0)
+        n = len(self.copies)
+        mix_l = np.zeros(BLOCK_SIZE, dtype=np.float64)
+        mix_r = np.zeros(BLOCK_SIZE, dtype=np.float64)
+        for c in self.copies:
+            f = _copylib.copy(frame)  # shallow: per-copy scalar overrides
+            f.cents = base_cents + round(spread * c.t)
+            if noise_on and c.phase_q32:
+                f.noise_seed_u32 = (base_seed ^ c.phase_q32) & 0xFFFFFFFF
+            c.state, out = vm_step_block(c.state, f)
+            theta = (width * c.t + 1.0) * (math.pi / 4.0)  # equal-power pan
+            o = out.astype(np.float64)
+            mix_l += o * math.cos(theta)
+            mix_r += o * math.sin(theta)
+        # Decorrelated copies sum in power -> 1/sqrt(N); the peak guard is
+        # causal (gain ratchets down only) so it never pumps per block.
+        norm = self._unison_gain / math.sqrt(n)
+        peak = max(float(np.abs(mix_l).max()),
+                   float(np.abs(mix_r).max())) * norm
+        if peak > 32000.0:
+            self._unison_gain *= 32000.0 / peak
+            norm = self._unison_gain / math.sqrt(n)
+        left = np.clip(np.rint(mix_l * norm), -32768, 32767).astype(np.int16)
+        right = np.clip(np.rint(mix_r * norm), -32768, 32767).astype(np.int16)
+        return np.stack([left, right], axis=1)
+
+    def _swap_preset(self, token) -> Optional[np.ndarray]:
+        """
+        Live /preset/load at a block boundary: fade the old voice out over
+        one block (clean note end), swap the session IR, retrigger the
+        note on the new preset (fresh attack from silence -> no click),
+        and keep the stream running. Returns the fade-out block, or None
+        when the token doesn't resolve (stream continues untouched).
+        """
+        entry = resolve_preset(str(token))
+        if entry is None:
+            print(f"[stream] /preset/load: unknown preset {token!r}")
+            self.session._log("preset_load_unknown", token=str(token))
+            return None
+        out = self._step_bank(self._build_frame()).astype(np.float64)
+        ramp = np.linspace(1.0, 0.0, BLOCK_SIZE)
+        out *= ramp[:, None] if out.ndim == 2 else ramp
+        fade = np.rint(out).astype(np.int16)
+        self.clear_sweeps()
+        if self.session.load_preset(entry):
+            self.note_on(self.note, self.session.velocity)
+        return fade
 
     def _apply_sweeps(self):
         with self._sweep_lock:
@@ -321,6 +529,13 @@ class StreamingVoice:
                 # An offline debounce render mid-stream would clear the
                 # basis atlas under the streaming voice; the stream IS
                 # the audition, so /play is a no-op here.
+                continue
+            if address == "/preset/load":
+                # Swapping the IR under a mid-block frame build is not
+                # safe from the OSC thread: defer to the block boundary
+                # (render_block handles it right after this drain).
+                if value is not None:
+                    self._pending_preset = str(value)
                 continue
             ok = self.session.handle(address, value)
             if ok:
@@ -434,6 +649,19 @@ class StreamingVoice:
                 elif routing.target == LFOTarget.PWM_WIDTH:
                     pwm_width = max(1638, min(31130, pwm_width + scaled))
 
+        # --- Noise exciter (re-extracted per block: knob edits latch;
+        #     empty kwargs keep the VM's bit-exact no-op defaults) ---
+        noise_params = extract_noise_params(ir)
+        noise_kwargs = {}
+        if noise_params:
+            noise_kwargs = dict(
+                noise_color=noise_params["color"],
+                noise_level_q15=noise_params["level_q15"],
+                noise_attack_blocks=ms_to_blocks(noise_params["attack_ms"]),
+                noise_decay_blocks=ms_to_blocks(noise_params["decay_ms"]),
+                noise_seed_u32=noise_params["seed_u32"],
+            )
+
         # --- Spectrum sources (re-extracted per block: knob edits latch) ---
         harmonic_amps = extract_partials_q15(ir) or []
         phase_spread_q15 = extract_phase_spread_q15(ir)
@@ -483,6 +711,7 @@ class StreamingVoice:
                     env_targets_q15=env_targets_q15,
                     ops_enable=ops_enable,
                     families=families,
+                    **noise_kwargs,
                 )
 
         # --- Mode B path ---
@@ -503,6 +732,7 @@ class StreamingVoice:
             pwm_width_q15=pwm_width,
             pwm_enabled=pwm_enabled,
             env_targets_q15=env_targets_q15,
+            **noise_kwargs,
         )
 
 
@@ -512,18 +742,34 @@ class StreamingOSCBridge:
     """
     Thin OSC shim over StreamingVoice (active when python-osc exists).
 
+    In (default udp/7400):
     /stream/note_on [note] [velocity]   (re)trigger the sustained note
     /stream/note_off                    release
     /stream/sweep  addr lo hi dur [loop]  start an axis sweep
     /stream/sweep_stop                  clear sweeps
+    /preset/list                        reply with the preset catalog
+    /preset/load  <id-or-filename>      live-swap the session's preset
     anything else                       -> voice.inject(address, value)
+
+    Out (feedback, default udp/7500 = Open Stage Control's --osc-port):
+    /preset/item  stem id name capsules   one per catalog entry
+    /preset/count n                        end of /preset/list reply
+    /preset/loaded stem                    after a successful load
+    <param address> value                  push_state widget sync
     """
 
     def __init__(self, voice: StreamingVoice,
-                 listen_host: str = "0.0.0.0", listen_port: int = 7400):
+                 listen_host: str = "0.0.0.0", listen_port: int = 7400,
+                 feedback_host: Optional[str] = "127.0.0.1",
+                 feedback_port: Optional[int] = 7500):
         if not OSC_AVAILABLE:
             raise RuntimeError("python-osc not installed")
         self.voice = voice
+        self.client = None
+        if feedback_host and feedback_port:
+            from pythonosc.udp_client import SimpleUDPClient
+            self.client = SimpleUDPClient(feedback_host, feedback_port)
+            voice.session.on_preset_loaded = self._on_preset_loaded
         dispatcher = Dispatcher()
         dispatcher.set_default_handler(self._route)
         self.server = ThreadingOSCUDPServer((listen_host, listen_port),
@@ -537,11 +783,20 @@ class StreamingOSCBridge:
 
     def start(self):
         self._thread.start()
+        if self.client is not None:
+            # Mirror the loaded preset onto the surface at connect time
+            self.voice.session.push_state(self.client.send_message)
         return self
 
     def stop(self):
         self.server.shutdown()
         self.server.server_close()
+
+    def _on_preset_loaded(self, session):
+        if self.client is not None:
+            session.push_state(self.client.send_message)
+            self.client.send_message("/preset/loaded",
+                                     session.preset_path.stem)
 
     def _route(self, address, *args):
         v = self.voice
@@ -557,6 +812,16 @@ class StreamingOSCBridge:
                               float(args[3]), loop=loop)
             elif address == "/stream/sweep_stop":
                 v.clear_sweeps()
+            elif address == "/preset/list":
+                if self.client is not None:
+                    from .library import send_preset_list
+                    send_preset_list(self.client.send_message)
+            elif address == "/preset/load":
+                token = str(args[0]) if args else ""
+                if v.active:
+                    v.inject(address, token)   # safe swap at block boundary
+                elif token:
+                    v.session.load_preset(token)
             else:
                 v.inject(address, args[0] if args else None)
         except Exception as e:  # keep the OSC thread alive on bad input
@@ -566,12 +831,14 @@ class StreamingOSCBridge:
 # ============================================================== measurements
 
 def _write_wav(path: Path, samples: np.ndarray):
+    samples = np.asarray(samples, dtype=np.int16)
     path.parent.mkdir(parents=True, exist_ok=True)
     with wave.open(str(path), "wb") as w:
-        w.setnchannels(1)
+        w.setnchannels(2 if samples.ndim == 2 else 1)
         w.setsampwidth(2)
         w.setframerate(FS)
-        w.writeframes(np.asarray(samples, dtype=np.int16).tobytes())
+        # (n, 2) C-order tobytes() is already L/R interleaved
+        w.writeframes(samples.tobytes())
 
 
 def boundary_step_metrics(samples: np.ndarray) -> dict:
