@@ -63,3 +63,5 @@ vgcore.*
 # Third-party media (analysis inputs only, never committed)
 reference_audio/
 *.pdf
+
+ingest/
