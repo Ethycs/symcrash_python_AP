@@ -1086,10 +1086,15 @@ class MockUART:
 # =============================================================================
 # PATTERN TABLE (per WSE-STD-020 Section 3.3)
 # =============================================================================
+# NOTE: this is the UART link's band-group/odd-even leaf-mask table
+# (pattern ids 0-8 per WSE-STD-020 §3.3). It is a DIFFERENT table from the
+# CMMM K-staircase pattern table (primitives.K_LADDER_MASKS /
+# tables/pattern_table.py, WSE-STD-DEGRADE-v0 §3.1) - same name, different
+# standard and semantics. Do not merge them.
 
 @dataclass
 class PatternEntry:
-    """Pattern table entry."""
+    """Pattern table entry (WSE-STD-020 §3.3 wire-link table)."""
     leaf_mask_u32: int = 0xFFFFFFFF  # Bit i selects leaf i
     coeff_mask_default_u8: int = 0xFF  # Default coeff mask
 

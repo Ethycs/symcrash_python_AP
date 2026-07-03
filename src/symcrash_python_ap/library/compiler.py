@@ -118,6 +118,7 @@ class CapsuleCompiler:
         control_program: 'ControlProgram' = None,
         envelopes: List[dict] = None,
         amp_dynamics: dict = None,
+        sound_extras: dict = None,
     ) -> CompileResult:
         """
         Compile inputs to CapsuleInstrument.
@@ -139,6 +140,8 @@ class CapsuleCompiler:
             envelopes: Optional matrix envelope binding dicts (id/adsr/targets/
                 velocity_sens/key_scale_rate) carried into the capsule
             amp_dynamics: Optional amp dynamics dict (velocity_sens/key_scale_rate)
+            sound_extras: Optional SOUND_EXTRAS dict (material ramp, FM6
+                post-filter, partials, PWM, LFOs) closing capsule lossiness
 
         Returns:
             CompileResult with capsule in COMPILED state
@@ -208,6 +211,7 @@ class CapsuleCompiler:
             control=control_program,  # System macro defaults for cockpit
             envelopes=envelopes,      # Matrix envelope bindings (packet E6)
             amp_dynamics=amp_dynamics,
+            sound_extras=sound_extras,
         )
 
         # Validate capsule structure
@@ -517,6 +521,10 @@ class CapsuleCompiler:
         # Extract amp dynamics (velocity_sens / key_scale_rate) from Amp node
         amp_dynamics = self._extract_amp_dynamics_from_ir(ir)
 
+        # Sound extras: close the capsule's documented lossiness vs the IR
+        # (material ramp, FM6 post-filter, partials/PWM, LFO modulators)
+        sound_extras = self._extract_sound_extras_from_ir(ir)
+
         # Use standard compile_instrument with extracted values
         return self.compile_instrument(
             program_id=program_id,
@@ -534,6 +542,7 @@ class CapsuleCompiler:
             control_program=control_program,
             envelopes=envelopes,
             amp_dynamics=amp_dynamics,
+            sound_extras=sound_extras,
         )
 
     def compile_from_macro(
@@ -608,16 +617,15 @@ class CapsuleCompiler:
             else:
                 warnings.append(f"Unknown macro {macro.id} - no control mapping")
 
-        # Extract ADSR from L0 Amp node if present
-        for node in ir.layers.L0_graph.nodes:
-            if node.type == "Amp" and node.params.adsr:
-                adsr = node.params.adsr
-                # Convert ms to blocks (64 samples @ 48kHz = 1.33ms/block)
-                ms_per_block = 64 / 48.0  # ~1.33ms
-                defaults[ControlID.ATK_BLOCKS] = max(1, int(adsr.a_ms / ms_per_block))
-                defaults[ControlID.DCY_BLOCKS] = max(1, int(adsr.d_ms / ms_per_block))
-                defaults[ControlID.SUS_Q15] = int(adsr.s * Q15_ONE)
-                defaults[ControlID.REL_BLOCKS] = max(1, int(adsr.r_ms / ms_per_block))
+        # Extract ADSR from L0 Amp node if present (shared IR extraction)
+        from ..primitives import ms_to_blocks
+        from .ir_extract import extract_amp
+        amp = extract_amp(ir)
+        if amp is not None:
+            defaults[ControlID.ATK_BLOCKS] = ms_to_blocks(amp.a_ms)
+            defaults[ControlID.DCY_BLOCKS] = ms_to_blocks(amp.d_ms)
+            defaults[ControlID.SUS_Q15] = int(amp.s * Q15_ONE)
+            defaults[ControlID.REL_BLOCKS] = ms_to_blocks(amp.r_ms)
 
         defaults['_warnings'] = warnings
         return defaults
@@ -636,64 +644,58 @@ class CapsuleCompiler:
         """
         defaults: Dict[int, int] = {}
 
-        # Extract from L0 nodes
-        for node in ir.layers.L0_graph.nodes:
-            if node.type == "Osc":
-                # Could map waveform, detune, pulse width to voice params
-                if node.params.waveform:
-                    # Map waveform string to ID
-                    wave_map = {'sine': 0, 'saw': 1, 'pulse': 2, 'tri': 3}
-                    wave_id = wave_map.get(node.params.waveform.lower(), 0)
-                    # Would need VoiceParamID.WAVEFORM constant
-                    pass
+        # Shared IR extraction (library/ir_extract.py). Only values the IR
+        # actually declares are written; registry defaults stand otherwise.
+        # (Osc waveform is not carried in voice params yet; when it is,
+        # use instrument_ir.extract_waveform_type - the single canonical
+        # name->id mapping - rather than a local table.)
+        from .ir_extract import extract_fm6
+        fm6 = extract_fm6(ir)
+        if fm6 is not None:
+            # Set OSC_MODE to 3 (FM6)
+            defaults[VoiceParamID.OSC_MODE] = 3
 
-            elif node.type == "FM6":
-                # Extract FM6 synthesis parameters
-                # Set OSC_MODE to 3 (FM6)
-                defaults[VoiceParamID.OSC_MODE] = 3
+            # Algorithm (1-32)
+            if fm6.algorithm is not None:
+                defaults[VoiceParamID.FM6_ALGORITHM] = fm6.algorithm
 
-                # Algorithm (1-32)
-                if node.params.algorithm is not None:
-                    defaults[VoiceParamID.FM6_ALGORITHM] = node.params.algorithm
+            # Feedback (0-7)
+            if fm6.feedback is not None:
+                defaults[VoiceParamID.FM6_FEEDBACK] = fm6.feedback
 
-                # Feedback (0-7)
-                if node.params.feedback is not None:
-                    defaults[VoiceParamID.FM6_FEEDBACK] = node.params.feedback
+            # Operator ratios (Q16.16: 65536 = 1.0x), stored as U32
+            if fm6.op_ratios:
+                ratio_params = [
+                    VoiceParamID.FM6_OP0_RATIO,
+                    VoiceParamID.FM6_OP1_RATIO,
+                    VoiceParamID.FM6_OP2_RATIO,
+                    VoiceParamID.FM6_OP3_RATIO,
+                    VoiceParamID.FM6_OP4_RATIO,
+                    VoiceParamID.FM6_OP5_RATIO,
+                ]
+                for i, ratio in enumerate(fm6.op_ratios[:6]):
+                    defaults[ratio_params[i]] = ratio
 
-                # Operator ratios (Q16.16: 65536 = 1.0x)
-                # Stored as U32 to support ratios > 1.0x
-                if node.params.op_ratios:
-                    ratio_params = [
-                        VoiceParamID.FM6_OP0_RATIO,
-                        VoiceParamID.FM6_OP1_RATIO,
-                        VoiceParamID.FM6_OP2_RATIO,
-                        VoiceParamID.FM6_OP3_RATIO,
-                        VoiceParamID.FM6_OP4_RATIO,
-                        VoiceParamID.FM6_OP5_RATIO,
-                    ]
-                    for i, ratio in enumerate(node.params.op_ratios[:6]):
-                        defaults[ratio_params[i]] = ratio
+            # Operator levels (Q15: 32767 = full)
+            if fm6.op_levels:
+                level_params = [
+                    VoiceParamID.FM6_OP0_LEVEL,
+                    VoiceParamID.FM6_OP1_LEVEL,
+                    VoiceParamID.FM6_OP2_LEVEL,
+                    VoiceParamID.FM6_OP3_LEVEL,
+                    VoiceParamID.FM6_OP4_LEVEL,
+                    VoiceParamID.FM6_OP5_LEVEL,
+                ]
+                for i, level in enumerate(fm6.op_levels[:6]):
+                    defaults[level_params[i]] = level
 
-                # Operator levels (Q15: 32767 = full)
-                if node.params.op_levels:
-                    level_params = [
-                        VoiceParamID.FM6_OP0_LEVEL,
-                        VoiceParamID.FM6_OP1_LEVEL,
-                        VoiceParamID.FM6_OP2_LEVEL,
-                        VoiceParamID.FM6_OP3_LEVEL,
-                        VoiceParamID.FM6_OP4_LEVEL,
-                        VoiceParamID.FM6_OP5_LEVEL,
-                    ]
-                    for i, level in enumerate(node.params.op_levels[:6]):
-                        defaults[level_params[i]] = level
-
-                # Topology morphing
-                if node.params.fm6_topo_a is not None:
-                    defaults[VoiceParamID.FM6_TOPO_A] = node.params.fm6_topo_a
-                if node.params.fm6_topo_b is not None:
-                    defaults[VoiceParamID.FM6_TOPO_B] = node.params.fm6_topo_b
-                if node.params.fm6_topo_blend_q15 is not None:
-                    defaults[VoiceParamID.FM6_TOPO_BLEND] = node.params.fm6_topo_blend_q15
+            # Topology morphing
+            if fm6.topo_a is not None:
+                defaults[VoiceParamID.FM6_TOPO_A] = fm6.topo_a
+            if fm6.topo_b is not None:
+                defaults[VoiceParamID.FM6_TOPO_B] = fm6.topo_b
+            if fm6.topo_blend_q15 is not None:
+                defaults[VoiceParamID.FM6_TOPO_BLEND] = fm6.topo_blend_q15
 
         return defaults
 
@@ -749,6 +751,70 @@ class CapsuleCompiler:
                     }
                 return None
         return None
+
+    def _extract_sound_extras_from_ir(
+        self,
+        ir: 'InstrumentIR',
+    ) -> Optional[dict]:
+        """
+        Extract the SOUND_EXTRAS payload: everything the older chunks could
+        not carry (material beta ramp, FM6 post-filter, resolved harmonic
+        profile / phase spread, engine osc mode, PWM, LFO modulators).
+        """
+        from .ir_extract import (
+            extract_fm6, extract_pwm_width_q15, extract_harmonics_q15,
+            lfo_to_dict,
+        )
+        from ..instrument_ir import (
+            extract_phase_spread_q15, extract_waveform_type,
+        )
+
+        extras: dict = {}
+
+        # Material beta ramp (compile.material)
+        mat = getattr(getattr(ir, 'compile', None), 'material', None)
+        if mat is not None and (mat.beta_start_q15 or mat.beta_target_q15
+                                or mat.beta_ramp_blocks != 1):
+            extras['material'] = {
+                'beta_start_q15': mat.beta_start_q15,
+                'beta_target_q15': mat.beta_target_q15,
+                'beta_ramp_blocks': mat.beta_ramp_blocks,
+            }
+
+        # FM6 post filter
+        fm6 = extract_fm6(ir)
+        if fm6 is not None and fm6.post_filter_hz is not None:
+            extras['fm6_post_filter_hz'] = float(fm6.post_filter_hz)
+
+        # Resolved harmonic profile (custom partials win over the named
+        # waveform's default profile) + phase spread (Mode B spectrum)
+        harmonics = extract_harmonics_q15(ir)
+        if harmonics:
+            extras['harmonic_amps_q15'] = harmonics
+        spread = extract_phase_spread_q15(ir)
+        if spread:
+            extras['phase_spread_q15'] = spread
+
+        # Engine osc mode + waveform id (resolves the OSC_MODE=0 ambiguity:
+        # 3 = FM6 via voice params; Mode B presets are explicit here)
+        if fm6 is None:
+            extras['osc_mode'] = 1  # Mode B (harmonic bank)
+        extras['waveform_type'] = extract_waveform_type(ir)
+
+        # PWM
+        pwm_width = extract_pwm_width_q15(ir)
+        if pwm_width is not None:
+            extras['pwm'] = {'enabled': True, 'width_q15': pwm_width}
+
+        # LFO modulators
+        lfos = getattr(ir, 'modulators', None) or []
+        if lfos:
+            extras['lfos'] = [lfo_to_dict(lfo) for lfo in lfos]
+
+        # Always emitted: the loader relies on osc_mode/waveform_type to
+        # resolve the OSC_MODE=0 (unset vs Mode A) ambiguity. Chunk is
+        # JSON/manifest-only; binary chunks stay byte-identical.
+        return extras
 
     def _extract_regime_graph_id(self, ir: 'InstrumentIR') -> Optional[int]:
         """

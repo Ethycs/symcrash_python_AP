@@ -261,7 +261,9 @@ class VoiceEngineAdapter:
             beta_target_q15=self.preset.material.beta_target_q15,
             partial_amps_q15=list(self.preset.harmonic_amps_q15),
             ops_enable=self.preset.backbone_ops(),
-            families=list(abi.w_family_q15),  # From VoiceEngine family weights
+            # Dict keyed by operator (frames.VoiceFrame contract); the old
+            # list(abi.w_family_q15) form crashed executor's families.get()
+            families=self.preset.backbone_families(),
             tree_a_id=abi.tree_a_id,
             tree_b_id=abi.tree_b_id,
             tree_blend_q15=abi.tree_blend_q15,

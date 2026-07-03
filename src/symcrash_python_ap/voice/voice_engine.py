@@ -144,20 +144,9 @@ class VoiceEngineOutput:
 # DETERMINISTIC RNG (xorshift32 per spec Section 11)
 # =============================================================================
 
-def xorshift32(state: int) -> Tuple[int, int]:
-    """
-    Deterministic xorshift32 RNG.
-
-    Per spec Section 11: All randomness derives from VoiceState.rng_u32.
-    The RNG update is deterministic and documented.
-
-    Returns: (new_state, random_value)
-    """
-    x = state & 0xFFFFFFFF
-    x ^= (x << 13) & 0xFFFFFFFF
-    x ^= (x >> 17) & 0xFFFFFFFF
-    x ^= (x << 5) & 0xFFFFFFFF
-    return x & 0xFFFFFFFF, x & 0xFFFFFFFF
+# Single owner: vm/state.py (identical update; per spec Section 11 all
+# randomness derives from VoiceState.rng_u32)
+from ..vm.state import xorshift32
 
 
 def rng_q15(state: int) -> Tuple[int, int]:
@@ -3624,7 +3613,9 @@ class VoiceEngine:
             beta_target_q15=state.beta_current_q15,
             partial_amps_q15=list(preset.harmonic_amps_q15),
             ops_enable=preset.backbone_ops(),
-            families=list(preset.backbone_families().values()),
+            # Dict keyed by operator (frames.VoiceFrame contract); the old
+            # list(...) form crashed executor._get_dynamic_backbone's .get()
+            families=preset.backbone_families(),
             tree_a_id=preset.latch.tree_a_id,
             tree_b_id=preset.latch.tree_b_id,
             tree_blend_q15=preset.latch.tree_blend_q15,

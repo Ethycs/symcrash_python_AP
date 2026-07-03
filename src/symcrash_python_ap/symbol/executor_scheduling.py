@@ -73,8 +73,11 @@ COST_EVENT_PERMUTE = 60
 # OPERATOR COST TABLE (per Section 4.1)
 # =============================================================================
 
-# Cost units per operator (must be stable across builds)
-OPERATOR_COSTS: Dict[int, int] = {
+# Cost units per operator (must be stable across builds).
+# NOTE: these are WSE-STD-030 §4.1 scheduler COST UNITS, a different unit
+# and standard from tables/operator_costs.OPERATOR_COSTS (per-coefficient
+# ticks). Renamed to STD030_COST_UNITS; the old name stays as an alias.
+STD030_COST_UNITS: Dict[int, int] = {
     0: 10,      # Identity
     1: 80,      # Tilt (diagonal)
     2: 60,      # FineClamp (projection)
@@ -100,6 +103,9 @@ OPERATOR_COSTS: Dict[int, int] = {
     22: 70,     # SwallowtailMask (diagonal)
     23: 110,    # SheafProject (projection)
 }
+
+# Back-compat alias (pre-2026-07 name; prefer STD030_COST_UNITS)
+OPERATOR_COSTS = STD030_COST_UNITS
 
 # Event lane costs
 EVENT_LANE_COSTS: Dict[int, int] = {
@@ -663,7 +669,7 @@ class Executor030:
                 continue  # Rule B3: Skip without PRNG draw
 
             # Check budget (Rule D1: drop remainder, not reorder)
-            cost = OPERATOR_COSTS.get(op_id, COST_UNIT_BASE)
+            cost = STD030_COST_UNITS.get(op_id, COST_UNIT_BASE)
             reserve = self.budget.reserve_for_events() + self.budget.reserve_for_tail()
 
             if not self.budget.can_afford(cost, reserve):

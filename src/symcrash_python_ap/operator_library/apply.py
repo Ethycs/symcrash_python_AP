@@ -3,6 +3,10 @@ Operator Application (Bit-Accurate)
 ===================================
 
 Functions for applying operators to coefficient vectors.
+
+NOTE: this is the AUTHORING/ANALYSIS implementation (used by the legacy
+symbol engine and conformance tests). vm/lanes.py is the authoritative
+runtime implementation for audio - do not add render-path consumers here.
 """
 
 import numpy as np

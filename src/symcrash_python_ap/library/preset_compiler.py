@@ -357,15 +357,9 @@ class CompiledPreset:
 # INSTRUMENT IR -> COMPILED PRESET ADAPTER
 # =============================================================================
 
-# Waveform name -> default Q15 harmonic profile (matches synth_master.py)
-_WAVEFORM_HARMONICS = {
-    'sine': [Q15_ONE, 0, 0, 0, 0, 0, 0, 0],
-    'saw': [Q15_ONE, Q15_HALF, 10922, 8191, 6553, 5461, 4681, 4096],
-    'square': [Q15_ONE, 0, 10922, 0, 6553, 0, 4681, 0],
-    'pulse': [Q15_ONE, 0, 10922, 0, 6553, 0, 4681, 0],
-    'tri': [Q15_ONE, 0, 3640, 0, 1310, 0, 668, 0],
-    'triangle': [Q15_ONE, 0, 3640, 0, 1310, 0, 668, 0],
-}
+# Waveform name -> default Q15 harmonic profile (canonical home:
+# library/ir_extract.py; old private name kept as an alias)
+from .ir_extract import WAVEFORM_HARMONICS as _WAVEFORM_HARMONICS
 
 
 def compiled_preset_from_ir(ir) -> CompiledPreset:
@@ -393,49 +387,44 @@ def compiled_preset_from_ir(ir) -> CompiledPreset:
     Returns:
         CompiledPreset ready for VoiceFrameEmitter / Simple-mode VoiceEngine
     """
-    from ..instrument_ir import extract_partials_q15
     from ..envelope_scheduler import ADSRSpec
+    from .ir_extract import (
+        extract_amp, extract_fm6, extract_pwm_width_q15, extract_harmonics_q15,
+    )
 
     amp_env = None
     amp_velocity_sens = 1.0
     amp_key_scale_rate = 0.0
     fm6_config = None
     osc_mode = 0
-    harmonic_amps = None
-    pwm_width_q15 = Q15_HALF
 
-    for node in ir.layers.L0_graph.nodes:
-        params = node.params
-        if node.type == "Amp" and params.adsr is not None:
-            adsr = params.adsr
-            amp_env = ADSRSpec(
-                attack_ms=adsr.a_ms,
-                decay_ms=adsr.d_ms,
-                sustain=adsr.s,
-                release_ms=adsr.r_ms,
-            )
-            amp_velocity_sens = float(getattr(params, 'velocity_sens', 1.0))
-            amp_key_scale_rate = float(getattr(params, 'key_scale_rate', 0.0))
-        elif node.type == "Osc":
-            if params.pwm_enable:
-                pwm_width_q15 = params.pwm_width_q15
-            wf = (params.waveform or '').lower()
-            if wf in _WAVEFORM_HARMONICS:
-                harmonic_amps = list(_WAVEFORM_HARMONICS[wf])
-        elif node.type == "FM6":
-            fm6_config = FM6Config(
-                algorithm_id=params.algorithm if params.algorithm is not None else 1,
-                op_ratios=list(params.op_ratios) if params.op_ratios else [Q16_ONE] * 6,
-                op_levels=list(params.op_levels) if params.op_levels else [Q15_ONE] + [0] * 5,
-                feedback_depth=params.feedback if params.feedback is not None else 0,
-                post_filter_hz=getattr(params, 'post_filter_hz', None),
-            )
-            osc_mode = 3  # OSC_MODE_FM6
+    amp = extract_amp(ir)
+    if amp is not None:
+        amp_env = ADSRSpec(
+            attack_ms=amp.a_ms,
+            decay_ms=amp.d_ms,
+            sustain=amp.s,
+            release_ms=amp.r_ms,
+        )
+        amp_velocity_sens = amp.velocity_sens
+        amp_key_scale_rate = amp.key_scale_rate
 
-    # Custom partials (waveform: partials) take priority over waveform profile
-    partials = extract_partials_q15(ir)
-    if partials:
-        harmonic_amps = partials
+    fm6 = extract_fm6(ir)
+    if fm6 is not None:
+        fm6_config = FM6Config(
+            algorithm_id=fm6.algorithm if fm6.algorithm is not None else 1,
+            op_ratios=fm6.op_ratios if fm6.op_ratios else [Q16_ONE] * 6,
+            op_levels=fm6.op_levels if fm6.op_levels else [Q15_ONE] + [0] * 5,
+            feedback_depth=fm6.feedback if fm6.feedback is not None else 0,
+            post_filter_hz=fm6.post_filter_hz,
+        )
+        osc_mode = 3  # OSC_MODE_FM6
+
+    pwm = extract_pwm_width_q15(ir)
+    pwm_width_q15 = pwm if pwm is not None else Q15_HALF
+
+    # Custom partials win over waveform profile (extract_harmonics_q15)
+    harmonic_amps = extract_harmonics_q15(ir)
     if harmonic_amps is None:
         # Default saw harmonics: 1/n falloff
         harmonic_amps = [Q15_ONE // n for n in range(1, 9)]
@@ -477,8 +466,9 @@ def compiled_preset_from_ir(ir) -> CompiledPreset:
 # =============================================================================
 
 # Block duration in ms at 48kHz / 64-sample blocks (capsule ADSR is stored
-# as block counts in control_defaults)
-_MS_PER_BLOCK = 64000.0 / 48000.0  # ~1.333 ms
+# as block counts in control_defaults). Canonical constant from primitives;
+# the old module-local name is kept as an alias.
+from ..primitives import MS_PER_BLOCK as _MS_PER_BLOCK
 
 
 def envelope_bindings_from_capsule(capsule) -> Optional[list]:
@@ -526,18 +516,18 @@ def compiled_preset_from_capsule(capsule) -> CompiledPreset:
     - Amp ADSR from defaults.control_defaults (ATK/DCY/SUS/REL blocks)
     - Matrix envelope bindings from capsule.envelopes (packet E6 chunk)
     - Amp dynamics (velocity_sens / key_scale_rate) from capsule.amp_dynamics
-
-    Not carried by the capsule format (defaults used):
-    - Material beta ramp (defaults to dry: beta 0, ramp 1)
-    - FM6 post filter, LFO modulators, custom partials
+    - Material ramp, FM6 post-filter, custom partials, PWM and LFO
+      modulators from capsule.sound_extras (SOUND_EXTRAS chunk); capsules
+      compiled before that chunk fall back to the old defaults.
     """
     from ..voice.voice_engine_registry import VoiceParamID
     from ..control_registry import ControlID
 
     vp = capsule.defaults.voice_param_defaults or {}
     cd = capsule.defaults.control_defaults or {}
+    extras = getattr(capsule, 'sound_extras', None) or {}
 
-    # FM6 config from voice params
+    # FM6 config from voice params (+ post filter from sound extras)
     fm6_config = None
     osc_mode = int(vp.get(int(VoiceParamID.OSC_MODE), 0))
     if osc_mode == 3:
@@ -550,7 +540,11 @@ def compiled_preset_from_capsule(capsule) -> CompiledPreset:
                 int(vp.get(lid, 0)) for lid in level_ids[1:]
             ],
             feedback_depth=int(vp.get(int(VoiceParamID.FM6_FEEDBACK), 0)),
+            post_filter_hz=extras.get('fm6_post_filter_hz'),
         )
+    elif 'osc_mode' in extras:
+        # SOUND_EXTRAS resolves the OSC_MODE=0 "unset vs Mode A" ambiguity
+        osc_mode = int(extras['osc_mode'])
 
     # Amp envelope from control defaults (stored as block counts)
     amp_env = None
@@ -567,6 +561,32 @@ def compiled_preset_from_capsule(capsule) -> CompiledPreset:
     amp_velocity_sens = float(amp_dynamics.get('velocity_sens', 1.0))
     amp_key_scale_rate = float(amp_dynamics.get('key_scale_rate', 0.0))
 
+    # Material ramp from sound extras (pre-chunk capsules: dry output)
+    mat = extras.get('material') or {}
+    material = MaterialConfig(
+        beta_start_q15=int(mat.get('beta_start_q15', 0)),
+        beta_target_q15=int(mat.get('beta_target_q15', 0)),
+        beta_ramp_blocks=int(mat.get('beta_ramp_blocks', 1)),
+    )
+
+    # Custom partials / PWM / LFO modulators from sound extras
+    harmonic_amps = extras.get('harmonic_amps_q15')
+    pwm = extras.get('pwm') or {}
+    pwm_width_q15 = int(pwm.get('width_q15', Q15_HALF))
+    lfos = None
+    if extras.get('lfos'):
+        from .ir_extract import lfo_from_dict
+        lfos = [lfo_from_dict(d) for d in extras['lfos']]
+
+    kwargs = {}
+    if harmonic_amps is not None:
+        kwargs['harmonic_amps_q15'] = [int(a) for a in harmonic_amps]
+    elif extras:
+        # SOUND_EXTRAS present but no profile authored: same 1/n saw
+        # fallback as compiled_preset_from_ir (pre-chunk capsules keep the
+        # legacy dataclass default)
+        kwargs['harmonic_amps_q15'] = [Q15_ONE // n for n in range(1, 9)]
+
     return CompiledPreset(
         preset_id=capsule.identity.capsule_id,
         preset_version='v0',
@@ -577,16 +597,17 @@ def compiled_preset_from_capsule(capsule) -> CompiledPreset:
         operator_lib_id='WSE-OPLIB-24 v0',
         latch=LatchDefaults(),
         amp_env=amp_env,
-        # Capsules don't carry the material ramp; default to dry output
-        material=MaterialConfig(beta_start_q15=0, beta_target_q15=0,
-                                beta_ramp_blocks=1),
+        material=material,
         backbone=[],
         fm6=fm6_config,
         osc_mode=osc_mode,
         cmmm=CmmmDefaults(),
+        pwm_width_q15=pwm_width_q15,
+        lfos=lfos or [],
         envelope_bindings=envelope_bindings_from_capsule(capsule),
         amp_velocity_sens=amp_velocity_sens,
         amp_key_scale_rate=amp_key_scale_rate,
+        **kwargs,
     )
 
 

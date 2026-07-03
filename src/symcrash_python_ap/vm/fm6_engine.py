@@ -87,6 +87,11 @@ def fm6_gateway_level_overrides(state: 'FM6State', alg: 'FMAlgorithm' = None):
     return overrides
 
 
+# Single owner of the FM6 fixed-point helpers (fm6_morph_engine imports
+# these). NOTE: _rshift_rne deliberately differs from primitives.RSHIFT_RNE
+# (arithmetic-shift form; different negative/tie behavior) - the FM6 output
+# is ear-pinned (DX7 fidelity contract, legacy algorithm ids 33-38), so the
+# law must not change.
 def _sat16(x: int) -> int:
     """Saturate to int16 range."""
     if x > Q15_ONE:

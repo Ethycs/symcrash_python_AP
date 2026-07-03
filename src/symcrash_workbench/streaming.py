@@ -60,15 +60,17 @@ for _p in (str(REPO_ROOT / "src"), str(REPO_ROOT / "tools" / "render")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from render_preset import (  # noqa: E402
-    _EnvelopeState, _filtered_partials, extract_waveform,
-    get_emit_template, ms_to_blocks,
-)
-from symcrash_python_ap.envelope_targets import EnvelopeTarget  # noqa: E402
 from symcrash_python_ap.frames import VoiceFrame  # noqa: E402
 from symcrash_python_ap.instrument_ir import (  # noqa: E402
-    extract_filter_params, extract_noise_params, extract_oeis_params,
-    extract_partials_q15, extract_phase_spread_q15, extract_unison_params,
+    extract_unison_params,
+)
+from symcrash_python_ap.voice.frame_builder import (  # noqa: E402
+    GATE_HELD as _GATE_HELD,
+    GOLDEN_Q32 as _GOLDEN_Q32,
+    IRFrameBuilder,
+    NoteClock,
+    equal_power_pan,
+    unison_positions,
 )
 
 from .library import resolve_preset  # noqa: E402
@@ -84,12 +86,7 @@ BLOCK_SEC = BLOCK_SIZE / FS
 BLOCKS_PER_SEC = FS // BLOCK_SIZE
 BUDGET_US = BLOCK_SEC * 1e6  # 1333.3 us realtime budget per block
 
-# "never" sentinel for the mod-envelope sustain hold while the gate is on
-_GATE_HELD = 1 << 30
-
-# Golden-ratio conjugate scaled to 2^32 - the repo's golden-angle phase
-# convention (same constant as render_preset.py / vm/harmonic_bank.py).
-_GOLDEN_Q32 = 0x9E3779B9
+# _GATE_HELD / _GOLDEN_Q32 are imported from frame_builder (single home).
 
 # Fraction of the block budget the unison bank may consume before the
 # note_on-time voice-count clamp engages (headroom for frame build, GC,
@@ -403,11 +400,9 @@ class StreamingVoice:
                                   copy_cost_us=round(cost_us, 1))
                 n = ceiling
         self.copies = []
-        for k in range(n):
-            t = 0.0 if n == 1 else (2 * k - (n - 1)) / (n - 1)
+        for t, phase_q32 in unison_positions(n):
             st = VMState.create(voice_id=0)
             st.reset_for_note_on(note=self.note)
-            phase_q32 = (k * _GOLDEN_Q32) & 0xFFFFFFFF
             if phase_q32:
                 st.mode_b_state.phase_offset_q32 = phase_q32
             self.copies.append(_UnisonCopy(state=st, t=t, phase_q32=phase_q32))
@@ -464,10 +459,10 @@ class StreamingVoice:
             if noise_on and c.phase_q32:
                 f.noise_seed_u32 = (base_seed ^ c.phase_q32) & 0xFFFFFFFF
             c.state, out = vm_step_block(c.state, f)
-            theta = (width * c.t + 1.0) * (math.pi / 4.0)  # equal-power pan
+            pan_l, pan_r = equal_power_pan(c.t, width)  # equal-power pan
             o = out.astype(np.float64)
-            mix_l += o * math.cos(theta)
-            mix_r += o * math.sin(theta)
+            mix_l += o * pan_l
+            mix_r += o * pan_r
         # Decorrelated copies sum in power -> 1/sqrt(N); the peak guard is
         # causal (gain ratchets down only) so it never pumps per block.
         norm = self._unison_gain / math.sqrt(n)
@@ -547,193 +542,29 @@ class StreamingVoice:
                     time.perf_counter() - t_in))
 
     def _build_frame(self) -> VoiceFrame:
-        """Rebuild the VoiceFrame from the live IR: the per-block latch."""
-        ir = self.session.ir
-        note = self.note
-        b = self.block_index
-        velocity_q15 = int(self.session.velocity * Q15_ONE)
+        """Rebuild the VoiceFrame from the live IR: the per-block latch.
 
-        # --- Amp ADSR, gate-driven (sustain holds until note_off) ---
-        a_blocks, d_blocks, r_blocks = 1, 1, 1
-        s_q15 = 32767
-        vel_sens_q15 = 32767
-        for node in ir.layers.L0_graph.nodes:
-            if node.type == "Amp" and node.params.adsr:
-                adsr = node.params.adsr
-                ks = float(getattr(node.params, "key_scale_rate", 0.0))
-                mult = 2.0 ** (-ks * (note - 60) / 24.0) if ks else 1.0
-                a_blocks = ms_to_blocks(adsr.a_ms * mult)
-                d_blocks = ms_to_blocks(adsr.d_ms * mult)
-                r_blocks = ms_to_blocks(adsr.r_ms * mult)
-                s_q15 = int(adsr.s * Q15_ONE)
-                vel_sens_q15 = int(
-                    getattr(node.params, "velocity_sens", 1.0) * Q15_ONE)
-                break
-        self._release_blocks = r_blocks
-        vel_scale_q15 = (Q15_ONE - vel_sens_q15
-                         + ((vel_sens_q15 * velocity_q15) >> 15))
-
-        if self.gate:
-            if b < a_blocks:
-                gain_q15 = int(Q15_ONE * b / a_blocks)
-                phase = "ATTACK"
-            elif b < a_blocks + d_blocks:
-                t = (b - a_blocks) / d_blocks
-                gain_q15 = int(Q15_ONE - (Q15_ONE - s_q15) * t)
-                phase = "DECAY"
-            else:
-                gain_q15 = s_q15
-                phase = "SUSTAIN"
-            env_sustain_blocks = _GATE_HELD
-        else:
-            t = (b - self._note_off_block) / max(1, r_blocks)
-            gain_q15 = int(self._release_from_q15 * max(0.0, 1.0 - t))
-            phase = "RELEASE"
-            env_sustain_blocks = self._note_off_block
-        gain_q15 = max(0, min(Q15_ONE, gain_q15))
-        self._last_gain_q15 = gain_q15
-
-        # --- Emphasis operators by envelope phase (simple-form mapping,
-        #     same as the offline harness) ---
-        phase_to_template = {"ATTACK": "T_ATTACK", "DECAY": "T_STABLE",
-                             "SUSTAIN": "T_STABLE", "RELEASE": "T_RECOVERY"}
-        templates = ir.layers.L3_cmmm.emit_templates
-        ops_enable: list = []
-        families: dict = {}
-        for cand in (phase_to_template.get(phase, "T_STABLE"),
-                     "T_STABLE", "T_IDLE"):
-            if cand in templates:
-                tmpl = get_emit_template(ir, cand)
-                ops_enable = tmpl["ops_enable"]
-                families = tmpl["families"]
-                break
-
-        # --- Mod-envelope bindings (rebuilt per block: knob edits latch) ---
-        env_states = [_EnvelopeState(bind, note)
-                      for bind in (getattr(ir, "envelopes", None) or [])]
-        env_targets_q15 = None
-        if env_states:
-            env_targets_q15 = {}
-            for es in env_states:
-                value = es.value_q15(b, env_sustain_blocks)
-                if es.velocity_sens_q15:
-                    scale = (Q15_ONE - es.velocity_sens_q15
-                             + ((es.velocity_sens_q15 * velocity_q15) >> 15))
-                    value = (value * scale) >> 15
-                for target_id in es.target_ids:
-                    env_targets_q15[target_id] = value
-
-        # --- LFO modulators (stateful objects on the IR) ---
-        total_cents = 0
-        gain_scale_q15 = 32767
-        pwm_width = 16384
-        pwm_enabled = False
-        for node in ir.layers.L0_graph.nodes:
-            if node.type == "Osc":
-                if getattr(node.params, "pwm_width_q15", None) not in (None, Q15_HALF):
-                    pwm_width = node.params.pwm_width_q15
-                if getattr(node.params, "pw", 0.5) != 0.5:
-                    pwm_width = int(node.params.pw * Q15_ONE)
-                pwm_enabled = bool(getattr(node.params, "pwm_enable", False))
-                break
-        lfos = list(getattr(ir, "modulators", None) or [])
-        for lfo in lfos:
-            lfo.advance_block()
-            lfo_val = lfo.get_lfo_value()
-            for routing in lfo.routings:
-                scaled = (lfo_val * routing.amount_q15 + Q15_HALF) >> 15
-                if routing.target == LFOTarget.PITCH:
-                    total_cents += scaled
-                elif routing.target == LFOTarget.GAIN:
-                    gain_scale_q15 = max(0, min(Q15_ONE, Q15_ONE + scaled))
-                elif routing.target == LFOTarget.PWM_WIDTH:
-                    pwm_width = max(1638, min(31130, pwm_width + scaled))
-
-        # --- Noise exciter (re-extracted per block: knob edits latch;
-        #     empty kwargs keep the VM's bit-exact no-op defaults) ---
-        noise_params = extract_noise_params(ir)
-        noise_kwargs = {}
-        if noise_params:
-            noise_kwargs = dict(
-                noise_color=noise_params["color"],
-                noise_level_q15=noise_params["level_q15"],
-                noise_attack_blocks=ms_to_blocks(noise_params["attack_ms"]),
-                noise_decay_blocks=ms_to_blocks(noise_params["decay_ms"]),
-                noise_seed_u32=noise_params["seed_u32"],
-            )
-
-        # --- Spectrum sources (re-extracted per block: knob edits latch) ---
-        harmonic_amps = extract_partials_q15(ir) or []
-        phase_spread_q15 = extract_phase_spread_q15(ir)
-        oeis_params = extract_oeis_params(ir)
-        if not harmonic_amps and any(
-            r.target == LFOTarget.PWM_WIDTH for lfo in lfos
-            for r in lfo.routings
-        ):
-            pwm_enabled = True
-
-        block_amps = harmonic_amps
-        filter_params = extract_filter_params(ir) if harmonic_amps else None
-        if filter_params and harmonic_amps:
-            env_v = 32767
-            filter_envs = [e for e in env_states if
-                           int(EnvelopeTarget.FILTER_CUTOFF) in e.target_ids]
-            if filter_envs:
-                env_v = max(e.value_q15(b, env_sustain_blocks)
-                            for e in filter_envs)
-            sweep_oct = 4.0 * filter_params["env_amount"] * (env_v / 32767.0)
-            eff_cutoff = filter_params["cutoff_hz"] * (2.0 ** sweep_oct)
-            f0 = 440.0 * 2 ** ((note - 69) / 12)
-            block_amps = _filtered_partials(
-                harmonic_amps, f0, eff_cutoff, filter_params["resonance"])
-
-        final_gain = ((((gain_q15 * gain_scale_q15 + Q15_HALF) >> 15)
-                       * vel_scale_q15 + Q15_HALF) >> 15)
-
-        # --- FM6 path ---
-        for node in ir.layers.L0_graph.nodes:
-            if node.type == "FM6":
-                post_hz = getattr(node.params, "post_filter_hz", None)
-                return VoiceFrame(
-                    note=note,
-                    cents=int(total_cents),
-                    coeff_osc_mode=OSC_MODE_FM6,
-                    gain_q15=final_gain,
-                    beta_target_q15=0,
-                    fm_algorithm_id=getattr(node.params, "algorithm", 1),
-                    fm_op_ratios=getattr(node.params, "op_ratios",
-                                         [Q16_ONE] * 6),
-                    fm_op_levels=getattr(node.params, "op_levels",
-                                         [Q15_ONE, 0, 0, 0, 0, 0]),
-                    fm_feedback_depth=getattr(node.params, "feedback", 0),
-                    fm_post_filter_enabled=bool(post_hz) or None,
-                    fm_post_filter_cutoff_hz=post_hz,
-                    env_targets_q15=env_targets_q15,
-                    ops_enable=ops_enable,
-                    families=families,
-                    **noise_kwargs,
-                )
-
-        # --- Mode B path ---
-        return VoiceFrame(
-            note=note,
-            cents=int(total_cents),
-            coeff_osc_mode=1,
-            H_request=len(harmonic_amps) or 16,
-            gain_q15=final_gain,
-            beta_target_q15=0,
-            partial_amps_q15=block_amps,
-            partial_phase_spread_q15=phase_spread_q15,
-            ops_enable=ops_enable,
-            families=families,
-            waveform_type=extract_waveform(ir),
-            oeis_sequence_id=oeis_params["sequence_id"] if oeis_params else -1,
-            oeis_rolloff_db=oeis_params["rolloff_db"] if oeis_params else -3.0,
-            pwm_width_q15=pwm_width,
-            pwm_enabled=pwm_enabled,
-            env_targets_q15=env_targets_q15,
-            **noise_kwargs,
+        All frame construction lives in voice/frame_builder.IRFrameBuilder
+        (relatch mode: every build re-extracts from the live IR so knob
+        edits latch at block boundaries and the IR's stateful LFO
+        modulators advance in place).
+        """
+        builder = IRFrameBuilder(
+            self.session.ir, self.note,
+            int(self.session.velocity * Q15_ONE),
+            relatch_per_block=True,
         )
+        if self.gate:
+            clock = NoteClock(self.block_index, gate=True,
+                              sustain_until_block=_GATE_HELD)
+        else:
+            clock = NoteClock(self.block_index, gate=False,
+                              sustain_until_block=self._note_off_block,
+                              release_from_q15=self._release_from_q15)
+        frame = builder.build(clock)
+        self._release_blocks = builder.release_blocks
+        self._last_gain_q15 = builder.last_amp_gain_q15
+        return frame
 
 
 # ================================================================ OSC bridge

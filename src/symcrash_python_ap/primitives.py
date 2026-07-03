@@ -114,6 +114,25 @@ L_TOTAL_NODES = COEFF_LEN // NODE_LEN  # 64 total nodes (for mask operations)
 SAMPLE_RATE_HZ = 48000    # Default sample rate
 BLOCK_RATE_HZ = SAMPLE_RATE_HZ // BLOCK_SIZE  # ~750 Hz block rate
 
+# Canonical ms <-> block conversion (single source; compilers, renderers and
+# loaders must use these rather than re-deriving the constant).
+MS_PER_BLOCK = BLOCK_SIZE * 1000.0 / SAMPLE_RATE_HZ  # ~1.333 ms
+
+
+def ms_to_blocks(ms: float) -> int:
+    """
+    Convert milliseconds to whole blocks (floor, minimum 1 block).
+
+    Uses the multiply form (ms / 1000 * BLOCK_RATE_HZ): 0.75 is exact in
+    binary floating point, so this matches the render path bit-for-bit.
+    """
+    return max(1, int(ms / 1000.0 * BLOCK_RATE_HZ))
+
+
+def blocks_to_ms(blocks: int) -> float:
+    """Convert block count to milliseconds."""
+    return blocks * MS_PER_BLOCK
+
 
 # =============================================================================
 # NODE ITERATION HELPERS
@@ -981,30 +1000,32 @@ def compute_timbral_mode_from_intent(intent_lanes: List[int]) -> int:
 
 class KLadder(IntEnum):
     """
-    K ladder pattern IDs (WSE-STD-070 §10).
+    K ladder pattern IDs (WSE-STD-DEGRADE-v0 §3.1, frozen).
 
-    Canonical node masks for graceful degradation.
+    Canonical node masks for graceful degradation. pattern_id maps
+    directly to the rung in K_RUNG_LIST = [32, 24, 16, 12, 8, 4, 1].
+    (An earlier WSE-STD-070 §10 draft had an extra K20 rung at id 2;
+    removed 2026-07-02 to conform to the frozen standard, matching
+    vm/tables.py K_LADDER and tables/pattern_table.py.)
     """
     K32 = 0               # 0xFFFFFFFF - Full resolution
     K24 = 1               # 0x00FFFFFF - 24 nodes
-    K20 = 2               # 0x000FFFFF - 20 nodes
-    K16 = 3               # 0x0000FFFF - 16 nodes
-    K12 = 4               # 0x00000FFF - 12 nodes
-    K8 = 5                # 0x000000FF - 8 nodes
-    K4 = 6                # 0x0000000F - 4 nodes
-    K1 = 7                # 0x00000001 - 1 node
+    K16 = 2               # 0x0000FFFF - 16 nodes
+    K12 = 3               # 0x00000FFF - 12 nodes
+    K8 = 4                # 0x000000FF - 8 nodes
+    K4 = 5                # 0x0000000F - 4 nodes
+    K1 = 6                # 0x00000001 - 1 node
 
 
-# Pattern ID → mask mapping
+# Pattern ID → mask mapping (WSE-STD-DEGRADE-v0 §3.1 frozen table)
 K_LADDER_MASKS: Dict[int, int] = {
     0: 0xFFFFFFFF,  # K=32
     1: 0x00FFFFFF,  # K=24
-    2: 0x000FFFFF,  # K=20
-    3: 0x0000FFFF,  # K=16
-    4: 0x00000FFF,  # K=12
-    5: 0x000000FF,  # K=8
-    6: 0x0000000F,  # K=4
-    7: 0x00000001,  # K=1
+    2: 0x0000FFFF,  # K=16
+    3: 0x00000FFF,  # K=12
+    4: 0x000000FF,  # K=8
+    5: 0x0000000F,  # K=4
+    6: 0x00000001,  # K=1
 }
 
 

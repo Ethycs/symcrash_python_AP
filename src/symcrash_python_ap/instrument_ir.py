@@ -3455,6 +3455,41 @@ def extract_partials_q15(ir: InstrumentIR) -> Optional[List[int]]:
     return None
 
 
+# Single source for YAML waveform-name -> engine WaveformType id
+# (vm/waveform_matrix.WaveformType: 0=SINE 1=SQUARE 2=PULSE 3=SAW
+#  4=SAW_DOWN 5=TRIANGLE). "partials" maps to SINE so the custom harmonic
+# profile drives the spectrum via the harmonic bank.
+WAVEFORM_NAME_TO_ID: Dict[str, int] = {
+    "sine": 0,
+    "square": 1,
+    "pulse": 2,
+    "saw": 3,
+    "saw_down": 4,
+    "tri": 5,
+    "triangle": 5,
+    "partials": 0,
+}
+
+WAVEFORM_ID_DEFAULT = 3  # SAW (widest-consumed render-path default)
+
+
+def extract_waveform_type(
+    ir: InstrumentIR, default: int = WAVEFORM_ID_DEFAULT
+) -> int:
+    """
+    Extract the engine waveform id from an instrument's first Osc node.
+
+    Uses the canonical WAVEFORM_NAME_TO_ID mapping; unknown names and
+    presets without an Osc waveform fall back to `default` (SAW unless the
+    caller overrides it).
+    """
+    for node in ir.layers.L0_graph.nodes:
+        if node.type == "Osc" and node.params.waveform:
+            name = node.params.waveform.lower()
+            return WAVEFORM_NAME_TO_ID.get(name, default)
+    return default
+
+
 def extract_phase_spread_q15(ir: InstrumentIR) -> int:
     """
     Extract the partials phase-spread (Q15) from an instrument's Osc node.

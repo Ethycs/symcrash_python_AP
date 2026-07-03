@@ -125,14 +125,18 @@ PATTERN_BANDS_0_1 = 11    # Fundamental + body
 PATTERN_BAND_0 = 12       # Fundamental only
 
 
-# Build canonical patterns
-_FULL_MASK = 0xFFFFFFFF
-_K24_MASK = first_k_nodes_mask(24)
-_K16_MASK = first_k_nodes_mask(16)
-_K12_MASK = first_k_nodes_mask(12)
-_K8_MASK = first_k_nodes_mask(8)
-_K4_MASK = first_k_nodes_mask(4)
-_K1_MASK = first_k_nodes_mask(1)
+# Build canonical patterns. K-staircase masks come from the single data
+# source primitives.K_LADDER_MASKS (WSE-STD-DEGRADE-v0 §3.1 frozen mapping;
+# identical to first_k_nodes_mask(k) because band node ranges are contiguous).
+from ..primitives import K_LADDER_MASKS as _K_LADDER_MASKS
+
+_FULL_MASK = _K_LADDER_MASKS[PATTERN_FULL]
+_K24_MASK = _K_LADDER_MASKS[PATTERN_K24]
+_K16_MASK = _K_LADDER_MASKS[PATTERN_K16]
+_K12_MASK = _K_LADDER_MASKS[PATTERN_K12]
+_K8_MASK = _K_LADDER_MASKS[PATTERN_K8]
+_K4_MASK = _K_LADDER_MASKS[PATTERN_K4]
+_K1_MASK = _K_LADDER_MASKS[PATTERN_K1]
 _BANDS_0_1_2_MASK = bands_to_mask([0, 1, 2])
 _BANDS_0_1_MASK = bands_to_mask([0, 1])
 _BAND_0_MASK = band_to_mask(0)

@@ -40,10 +40,14 @@ from symcrash_python_ap.vm.state import VMState, OSC_MODE_FM6
 from symcrash_python_ap.frames import VoiceFrame
 from symcrash_python_ap.audio_io import AudioWriter
 
-# Constants
-FS = 48000
-BLOCK_SIZE = 64
-BLOCKS_PER_SEC = FS // BLOCK_SIZE
+# Constants (canonical conversion from primitives; re-exported here for
+# the existing workbench/scripts import surface)
+from symcrash_python_ap.primitives import (
+    SAMPLE_RATE_HZ as FS,
+    BLOCK_SIZE,
+    BLOCK_RATE_HZ as BLOCKS_PER_SEC,
+    ms_to_blocks,
+)
 
 OUTPUT_DIR = str(Path(__file__).parent.parent.parent / "audio_out")
 
@@ -51,23 +55,18 @@ OUTPUT_DIR = str(Path(__file__).parent.parent.parent / "audio_out")
 DEFAULT_PRESET = Path(__file__).parent.parent.parent / "presets/instruments/glitch_lead_v0.yaml"
 
 
-def ms_to_blocks(ms: float) -> int:
-    """Convert milliseconds to blocks."""
-    return max(1, int(ms / 1000.0 * BLOCKS_PER_SEC))
-
-
 def extract_envelope_params(ir) -> dict:
-    """Extract envelope parameters from InstrumentIR."""
-    # Try to find ADSR from L0 graph amp nodes
-    for node in ir.layers.L0_graph.nodes:
-        if node.type == "Amp" and node.params.adsr:
-            adsr = node.params.adsr
-            return {
-                'attack_blocks': ms_to_blocks(adsr.a_ms),
-                'decay_blocks': ms_to_blocks(adsr.d_ms),
-                'sustain': adsr.s,
-                'release_blocks': ms_to_blocks(adsr.r_ms),
-            }
+    """Extract envelope parameters from InstrumentIR (shared ir_extract)."""
+    from symcrash_python_ap.library.ir_extract import extract_amp
+
+    amp = extract_amp(ir)
+    if amp is not None:
+        return {
+            'attack_blocks': ms_to_blocks(amp.a_ms),
+            'decay_blocks': ms_to_blocks(amp.d_ms),
+            'sustain': amp.s,
+            'release_blocks': ms_to_blocks(amp.r_ms),
+        }
 
     # Default envelope
     return {
@@ -78,83 +77,29 @@ def extract_envelope_params(ir) -> dict:
     }
 
 
-def extract_waveform(ir) -> int:
-    """Extract waveform type from InstrumentIR (canonical WaveformType values:
-    0=SINE, 1=SQUARE, 2=PULSE, 3=SAW, 4=SAW_DOWN, 5=TRIANGLE)."""
-    for node in ir.layers.L0_graph.nodes:
-        if node.type == "Osc" and node.params.waveform:
-            wf = node.params.waveform.lower()
-            if wf == "sine":
-                return 0
-            elif wf in ("square",):
-                return 1
-            elif wf == "pulse":
-                return 2
-            elif wf == "saw":
-                return 3
-            elif wf in ("tri", "triangle"):
-                return 5
-            elif wf == "partials":
-                # 0 lets the custom harmonic profile (partials) drive the
-                # spectrum via the harmonic bank.
-                return 0
-    return 3  # Default to saw
+# Canonical waveform-name -> id extraction (single source in instrument_ir;
+# kept under the old name for the workbench/scripts import surface)
+from symcrash_python_ap.instrument_ir import (
+    extract_waveform_type as extract_waveform,
+)
 
 
-class _EnvelopeState:
-    """ADSR state for one matrix-envelope binding (mirrors voice_engine)."""
+# Canonical binding-envelope evaluator (single owner in envelope_scheduler;
+# old name kept for the workbench streaming import surface)
+from symcrash_python_ap.envelope_scheduler import BindingEnvelope as _EnvelopeState
 
-    def __init__(self, binding, note: int = 60):
-        adsr = binding.adsr
-        # DX7-style EG key scaling: higher notes get shorter envelopes
-        ks = float(getattr(binding, 'key_scale_rate', 0.0))
-        mult = 2.0 ** (-ks * (note - 60) / 24.0) if ks else 1.0
-        self.attack_blocks = ms_to_blocks(adsr.a_ms * mult)
-        self.decay_blocks = ms_to_blocks(adsr.d_ms * mult)
-        self.sustain = adsr.s
-        self.release_blocks = ms_to_blocks(adsr.r_ms * mult)
-        self.target_ids = []
-        for name in binding.targets:
-            try:
-                self.target_ids.append(int(EnvelopeTarget[name]))
-            except KeyError:
-                pass
-        self.velocity_sens_q15 = int(getattr(binding, 'velocity_sens', 0.0) * 32767)
-
-    def value_q15(self, block_idx, sustain_blocks):
-        a, d, s, r = (self.attack_blocks, self.decay_blocks,
-                      self.sustain, self.release_blocks)
-        s_q15 = int(s * 32767)
-        if block_idx < a:
-            v = int(32767 * (block_idx / a)) if a > 0 else 32767
-        elif block_idx < a + d:
-            t = (block_idx - a) / d if d > 0 else 1
-            v = int(32767 - (32767 - s_q15) * t)
-        elif block_idx < sustain_blocks:
-            v = s_q15
-        else:
-            t = (block_idx - sustain_blocks) / r if r > 0 else 1
-            v = int(s_q15 * (1.0 - t))
-        return max(0, min(32767, v))
-
-
-def _filtered_partials(base_amps_q15, f0_hz, cutoff_hz, resonance):
-    """
-    Reshape a harmonic profile through a 24 dB/oct LPF magnitude curve with
-    a resonance bump at the cutoff. Authoring-side float math; the engine
-    consumes the resulting Q15 ints per block (phase-continuously).
-    """
-    out = []
-    for i, amp in enumerate(base_amps_q15):
-        f = (i + 1) * f0_hz
-        ratio = f / max(cutoff_hz, 20.0)
-        gain = 1.0 / (1.0 + ratio ** 4)
-        if resonance > 0:
-            # Peak around the cutoff, ~1.5x at resonance=1
-            x = math.log2(max(ratio, 1e-6))
-            gain += resonance * 1.5 * math.exp(-(x * x) * 8.0)
-        out.append(max(0, min(32767, round(amp * gain))))
-    return out
+# Shared frame builder (single owner of per-block frame construction);
+# helper re-exports keep the old local names for the streaming import
+# surface.
+from symcrash_python_ap.voice.frame_builder import (
+    IRFrameBuilder,
+    NoteClock,
+    GOLDEN_Q32 as _GOLDEN_Q32,
+    equal_power_pan,
+    filtered_partials as _filtered_partials,
+    get_emit_template,
+    unison_positions,
+)
 
 
 def get_regime_info(ir) -> list:
@@ -162,18 +107,6 @@ def get_regime_info(ir) -> list:
     if ir.layers.L2_regimes.regime_nodes:
         return [(n.id, n.kind, n.emit_template, n.dwell_ms) for n in ir.layers.L2_regimes.regime_nodes]
     return []
-
-
-def get_emit_template(ir, template_name: str) -> dict:
-    """Get emit template by name."""
-    templates = ir.layers.L3_cmmm.emit_templates
-    if template_name in templates:
-        t = templates[template_name]
-        return {
-            'families': dict(t.families),
-            'ops_enable': list(t.ops_enable),
-        }
-    return {'families': {}, 'ops_enable': []}
 
 
 def _render_voice(
@@ -210,43 +143,26 @@ def _render_voice(
             get decorrelated attack noise.
         verbose: Print render header info.
     """
-    # Extract parameters
-    env = extract_envelope_params(ir)
-    waveform = extract_waveform(ir)
-
-    attack_blocks = env['attack_blocks']
-    decay_blocks = env['decay_blocks']
-    sustain = env['sustain']
-    release_blocks = env['release_blocks']
-
-    # Amp dynamics (WSE-STD-PRESET-AUTHORING 3.3): EG key scaling and the
-    # velocity->gain curve, mirroring voice_engine semantics
-    amp_velocity_sens_q15 = 32767
-    for node in ir.layers.L0_graph.nodes:
-        if node.type == "Amp" and node.params.adsr:
-            ks = float(getattr(node.params, 'key_scale_rate', 0.0))
-            if ks:
-                mult = 2.0 ** (-ks * (note - 60) / 24.0)
-                attack_blocks = max(1, int(attack_blocks * mult))
-                decay_blocks = max(1, int(decay_blocks * mult))
-                release_blocks = max(1, int(release_blocks * mult))
-            amp_velocity_sens_q15 = int(
-                getattr(node.params, 'velocity_sens', 1.0) * 32767)
-            break
-    vel_scale_q15 = (32767 - amp_velocity_sens_q15
-                     + ((amp_velocity_sens_q15 * velocity_q15) >> 15))
+    # One shared frame builder (voice/frame_builder.py) owns all
+    # per-block frame construction; this function keeps only the offline
+    # timeline (total blocks), the L2 regime/risk state machine, and the
+    # VM stepping loop.
+    builder = IRFrameBuilder(
+        ir, note, velocity_q15,
+        cents_offset=cents_offset, noise_seed_xor=noise_seed_xor,
+    )
+    attack_blocks = builder.attack_blocks
+    decay_blocks = builder.decay_blocks
+    release_blocks = builder.release_blocks
 
     sustain_blocks = int(duration_sec * BLOCKS_PER_SEC) - attack_blocks
     total_blocks = attack_blocks + sustain_blocks + release_blocks
+    sustain_until = attack_blocks + sustain_blocks
 
     # Regime info
     regimes = get_regime_info(ir)
     current_regime = "R2_STABLE"  # Start in stable after attack
     regime_dwell = 0
-
-    # ADSR levels
-    attack_level_q15 = 32767
-    sustain_level_q15 = int(sustain * 32767)
 
     # Create VM state
     state = VMState.create(voice_id=0)
@@ -258,86 +174,13 @@ def _render_voice(
     if phase_offset_q32:
         state.mode_b_state.phase_offset_q32 = phase_offset_q32 & 0xFFFFFFFF
 
-    # Harmonic profile: use the preset's partials when defined; otherwise pass
-    # no custom harmonics so waveform_type drives the spectrum (custom
-    # harmonics always win over waveform_type in the executor).
-    harmonic_amps = extract_partials_q15(ir) or []
-    phase_spread_q15 = extract_phase_spread_q15(ir)
-
-    # OEIS partial selection (outranks custom partials and waveform_type
-    # in the executor)
-    oeis_params = extract_oeis_params(ir)
-
-    # Noise exciter (Packet E4): deterministic broadband attack transient.
-    # No noise authored -> kwargs stay empty and the frame keeps its
-    # level-0 defaults (bit-exact no-op in the VM).
-    noise_params = extract_noise_params(ir)
-    noise_frame_kwargs = {}
-    if noise_params:
-        noise_frame_kwargs = dict(
-            noise_color=noise_params['color'],
-            noise_level_q15=noise_params['level_q15'],
-            noise_attack_blocks=ms_to_blocks(noise_params['attack_ms']),
-            noise_decay_blocks=ms_to_blocks(noise_params['decay_ms']),
-            noise_seed_u32=(noise_params['seed_u32'] ^ noise_seed_xor) & 0xFFFFFFFF,
-        )
-
-    # Filter node (Hz-domain): applied as per-block partials reshaping,
-    # swept by any envelope binding targeting FILTER_CUTOFF.
-    filter_params = extract_filter_params(ir) if harmonic_amps else None
-
-    # Matrix-envelope bindings (FILTER_CUTOFF sweeps etc.)
-    envelope_states = [
-        _EnvelopeState(b, note) for b in (getattr(ir, 'envelopes', None) or [])
-    ]
-    filter_envs = [e for e in envelope_states
-                   if int(EnvelopeTarget.FILTER_CUTOFF) in e.target_ids]
-
-    # LFO modulators (vibrato / PWM motion / tremolo) — same routing
-    # semantics as voice_engine.step_voice_simple. Deep-copied so each
-    # unison voice copy advances its own LFO state from the authored
-    # initial phase (and the IR itself is never mutated).
-    lfos = [copy.deepcopy(m) for m in (getattr(ir, 'modulators', None) or [])]
-
-    # PWM base width from the Osc node (pulse waveform)
-    pwm_width_base = 16384
-    pwm_enabled = False
-    for node in ir.layers.L0_graph.nodes:
-        if node.type == "Osc":
-            if getattr(node.params, 'pwm_width_q15', None) not in (None, 16384):
-                pwm_width_base = node.params.pwm_width_q15
-            if getattr(node.params, 'pw', 0.5) != 0.5:
-                pwm_width_base = int(node.params.pw * 32767)
-            pwm_enabled = bool(getattr(node.params, 'pwm_enable', False))
-            break
-
-    # FM6 synthesis (DX7-style) — frames carry the operator config and the
-    # matrix-envelope targets (modulator decay is what makes FM breathe)
-    use_fm6 = False
-    fm6_params = None
-    for node in ir.layers.L0_graph.nodes:
-        if node.type == "FM6":
-            use_fm6 = True
-            fm6_params = {
-                'algorithm': getattr(node.params, 'algorithm', 1),
-                'feedback': getattr(node.params, 'feedback', 0),
-                'op_ratios': getattr(node.params, 'op_ratios', [65536] * 6),
-                'op_levels': getattr(node.params, 'op_levels', [32767, 0, 0, 0, 0, 0]),
-                'post_filter_hz': getattr(node.params, 'post_filter_hz', None),
-            }
-            break
-    # A PWM-targeted LFO implies PWM (only meaningful without custom partials)
-    if not harmonic_amps and any(
-        r.target == LFOTarget.PWM_WIDTH for lfo in lfos for r in lfo.routings
-    ):
-        pwm_enabled = True
-
     samples = []
 
     if verbose:
         print(f"  Rendering {total_blocks} blocks...")
-        print(f"  Envelope: A={attack_blocks} D={decay_blocks} S={sustain:.2f} R={release_blocks}")
-        print(f"  Waveform type: {waveform}")
+        print(f"  Envelope: A={attack_blocks} D={decay_blocks} "
+              f"S={builder.sustain_q15 / 32767:.2f} R={release_blocks}")
+        print(f"  Waveform type: {builder.waveform_type}")
 
         if regimes:
             print(f"  Regime graph: {len(regimes)} states")
@@ -345,25 +188,7 @@ def _render_voice(
                 print(f"    {r_id} ({r_kind}) -> {r_template}, dwell={r_dwell}ms")
 
     for block_idx in range(total_blocks):
-        # Compute gain envelope (ADSR)
-        if block_idx < attack_blocks:
-            t = block_idx / attack_blocks
-            gain_q15 = int(attack_level_q15 * t)
-            phase = "ATTACK"
-        elif block_idx < attack_blocks + decay_blocks:
-            t = (block_idx - attack_blocks) / decay_blocks
-            gain_q15 = int(attack_level_q15 - (attack_level_q15 - sustain_level_q15) * t)
-            phase = "DECAY"
-        elif block_idx < attack_blocks + sustain_blocks:
-            gain_q15 = sustain_level_q15
-            phase = "SUSTAIN"
-        else:
-            release_idx = block_idx - (attack_blocks + sustain_blocks)
-            t = release_idx / release_blocks
-            gain_q15 = int(sustain_level_q15 * (1.0 - t))
-            phase = "RELEASE"
-
-        gain_q15 = max(0, min(32767, gain_q15))
+        clock = NoteClock(block_idx, sustain_until_block=sustain_until)
 
         # Handle risk profile for regime transitions (if provided)
         risk_value = 0.0
@@ -372,11 +197,14 @@ def _render_voice(
                 if block_idx >= ridx:
                     risk_value = rval
 
-        # Determine current regime based on risk (simplified state machine)
-        ops_enable = []
-        families = {}
-
+        # L2 regime machine drives emission when present; otherwise the
+        # builder maps the ADSR phase to an emit template (simple form).
+        ops_enable = None
+        families = None
         if regimes:
+            ops_enable = []
+            families = {}
+
             # Simple state machine: STABLE <-> GLITCH based on risk
             if risk_value > 0.7 and "GLITCH" not in current_regime:
                 current_regime = "R3_GLITCH"
@@ -415,115 +243,14 @@ def _render_voice(
                 template = get_emit_template(ir, template_name)
                 ops_enable = template['ops_enable']
                 families = template['families']
-        else:
-            # No explicit L2 regime graph (simple-form preset): drive the emit
-            # templates by envelope phase so the behaviour-state operators still
-            # reach the audio.  Without this, simple-form presets render with no
-            # operators applied and emphasis edits are inaudible.
-            phase_to_template = {
-                'ATTACK': 'T_ATTACK', 'DECAY': 'T_STABLE',
-                'SUSTAIN': 'T_STABLE', 'RELEASE': 'T_RECOVERY',
-            }
-            templates = ir.layers.L3_cmmm.emit_templates
-            for cand in (phase_to_template.get(phase, 'T_STABLE'), 'T_STABLE', 'T_IDLE'):
-                if cand in templates:
-                    tmpl = get_emit_template(ir, cand)
-                    ops_enable = tmpl['ops_enable']
-                    families = tmpl['families']
-                    break
 
-        # --- Per-block modulation: LFOs + filter envelope ---
-        total_cents = 0
-        gain_scale_q15 = 32767
-        pwm_width = pwm_width_base
-        for lfo in lfos:
-            lfo.advance_block()
-            lfo_val = lfo.get_lfo_value()
-            for routing in lfo.routings:
-                scaled = (lfo_val * routing.amount_q15 + 16384) >> 15
-                if routing.target == LFOTarget.PITCH:
-                    total_cents += scaled
-                elif routing.target == LFOTarget.GAIN:
-                    gain_scale_q15 = max(0, min(32767, 32767 + scaled))
-                elif routing.target == LFOTarget.PWM_WIDTH:
-                    pwm_width = max(1638, min(31130, pwm_width + scaled))
-
-        block_amps = harmonic_amps
-        if filter_params and harmonic_amps:
-            env_v = 32767
-            if filter_envs:
-                env_v = max(e.value_q15(block_idx, attack_blocks + sustain_blocks)
-                            for e in filter_envs)
-            sweep_oct = 4.0 * filter_params['env_amount'] * (env_v / 32767.0)
-            eff_cutoff = filter_params['cutoff_hz'] * (2.0 ** sweep_oct)
-            f0 = 440.0 * 2 ** ((note - 69) / 12)
-            block_amps = _filtered_partials(
-                harmonic_amps, f0, eff_cutoff, filter_params['resonance'])
-
-        # Matrix-envelope targets (FM operator decay etc.)
-        env_targets_q15 = None
-        if envelope_states:
-            env_targets_q15 = {}
-            for env_state in envelope_states:
-                value = env_state.value_q15(block_idx, attack_blocks + sustain_blocks)
-                if env_state.velocity_sens_q15:
-                    # velocity_sens: value *= (1 - sens + sens*velocity)
-                    scale = (32767 - env_state.velocity_sens_q15
-                             + ((env_state.velocity_sens_q15 * velocity_q15) >> 15))
-                    value = (value * scale) >> 15
-                for target_id in env_state.target_ids:
-                    env_targets_q15[target_id] = value
-
-        # Create frame
-        if use_fm6 and fm6_params:
-            frame = VoiceFrame(
-                note=note,
-                cents=int(total_cents) + cents_offset,
-                coeff_osc_mode=OSC_MODE_FM6,
-                gain_q15=((((gain_q15 * gain_scale_q15 + 16384) >> 15) * vel_scale_q15 + 16384) >> 15),
-                beta_target_q15=0,
-                fm_algorithm_id=fm6_params['algorithm'],
-                fm_op_ratios=fm6_params['op_ratios'],
-                fm_op_levels=fm6_params['op_levels'],
-                fm_feedback_depth=fm6_params['feedback'],
-                fm_post_filter_enabled=bool(fm6_params['post_filter_hz']) or None,
-                fm_post_filter_cutoff_hz=fm6_params['post_filter_hz'],
-                env_targets_q15=env_targets_q15,
-                ops_enable=ops_enable,
-                families=families,
-                **noise_frame_kwargs,
-            )
-        else:
-            frame = VoiceFrame(
-                note=note,
-                cents=int(total_cents) + cents_offset,
-                coeff_osc_mode=1,  # Mode B
-                H_request=len(harmonic_amps) or 16,
-                gain_q15=((((gain_q15 * gain_scale_q15 + 16384) >> 15) * vel_scale_q15 + 16384) >> 15),
-                beta_target_q15=0,
-                partial_amps_q15=block_amps,
-                partial_phase_spread_q15=phase_spread_q15,
-                ops_enable=ops_enable,
-                families=families,
-                waveform_type=waveform,
-                oeis_sequence_id=oeis_params['sequence_id'] if oeis_params else -1,
-                oeis_rolloff_db=oeis_params['rolloff_db'] if oeis_params else -3.0,
-                pwm_width_q15=pwm_width,
-                pwm_enabled=pwm_enabled,
-                env_targets_q15=env_targets_q15,
-                **noise_frame_kwargs,
-            )
+        frame = builder.build(clock, ops_enable=ops_enable, families=families)
 
         # Render block
         state, output = vm_step_block(state, frame)
         samples.extend(output.tolist())
 
     return np.array(samples, dtype=np.int16)
-
-
-# Golden-ratio conjugate scaled to 2^32 — the repo's golden-angle phase
-# convention (see vm/harmonic_bank.py partial phase spread).
-_GOLDEN_Q32 = 0x9E3779B9
 
 
 def render_preset_note(
@@ -566,9 +293,7 @@ def render_preset_note(
 
     mix_l = None
     mix_r = None
-    for k in range(n_voices):
-        t = (2 * k - (n_voices - 1)) / (n_voices - 1)  # -1..+1, left -> right
-        phase_q32 = (k * _GOLDEN_Q32) & 0xFFFFFFFF
+    for k, (t, phase_q32) in enumerate(unison_positions(n_voices)):
         voice = _render_voice(
             ir, note=note, duration_sec=duration_sec,
             risk_profile=risk_profile, velocity_q15=velocity_q15,
@@ -577,13 +302,13 @@ def render_preset_note(
             noise_seed_xor=phase_q32,
             verbose=(k == 0),
         ).astype(np.float64)
-        theta = (width * t + 1.0) * (math.pi / 4.0)  # equal-power pan
+        pan_l, pan_r = equal_power_pan(t, width)
         if mix_l is None:
-            mix_l = voice * math.cos(theta)
-            mix_r = voice * math.sin(theta)
+            mix_l = voice * pan_l
+            mix_r = voice * pan_r
         else:
-            mix_l += voice * math.cos(theta)
-            mix_r += voice * math.sin(theta)
+            mix_l += voice * pan_l
+            mix_r += voice * pan_r
 
     # Decorrelated copies sum in power -> 1/sqrt(N), plus a deterministic
     # peak guard (copies are still partly correlated early in the note).

@@ -29,52 +29,26 @@ BLOCK_SIZE = 64
 BLOCKS_PER_SEC = FS // BLOCK_SIZE
 
 
-def _ms_to_blocks(ms: float) -> int:
-    return max(1, int(ms / 1000.0 * BLOCKS_PER_SEC))
+from symcrash_python_ap.primitives import ms_to_blocks as _ms_to_blocks
+
+
+# Canonical closed-form ADSR + binding evaluator (single owner in
+# envelope_scheduler). BindingEnvelope additionally honors key_scale_rate /
+# velocity_sens on bindings, which this module's old private copy ignored.
+from symcrash_python_ap.envelope_scheduler import (
+    adsr_value_q15,
+    BindingEnvelope as _EnvelopeState,
+)
+from symcrash_python_ap.voice.frame_builder import IRFrameBuilder, NoteClock
 
 
 def _compute_envelope(block_idx, attack_blocks, decay_blocks, sustain,
                       release_blocks, sustain_blocks):
     """Compute ADSR envelope value (Q15) at a given block."""
-    sustain_q15 = int(sustain * 32767)
-    attack_q15 = 32767
-
-    if block_idx < attack_blocks:
-        t = block_idx / attack_blocks if attack_blocks > 0 else 1
-        return int(attack_q15 * t)
-    elif block_idx < attack_blocks + decay_blocks:
-        t = (block_idx - attack_blocks) / decay_blocks if decay_blocks > 0 else 1
-        return int(attack_q15 - (attack_q15 - sustain_q15) * t)
-    elif block_idx < attack_blocks + sustain_blocks:
-        return sustain_q15
-    else:
-        release_idx = block_idx - (attack_blocks + sustain_blocks)
-        t = release_idx / release_blocks if release_blocks > 0 else 1
-        return int(sustain_q15 * (1.0 - t))
-
-
-class _EnvelopeState:
-    """Tracks envelope state for a single binding."""
-
-    def __init__(self, binding):
-        adsr = binding.adsr
-        self.attack_blocks = _ms_to_blocks(adsr.a_ms)
-        self.decay_blocks = _ms_to_blocks(adsr.d_ms)
-        self.sustain = adsr.s
-        self.release_blocks = _ms_to_blocks(adsr.r_ms)
-        self.target_ids = []
-        for name in binding.targets:
-            try:
-                self.target_ids.append(int(EnvelopeTarget[name]))
-            except KeyError:
-                pass
-
-    def get_value(self, block_idx, sustain_blocks):
-        value = _compute_envelope(
-            block_idx, self.attack_blocks, self.decay_blocks,
-            self.sustain, self.release_blocks, sustain_blocks
-        )
-        return max(0, min(32767, value))
+    return adsr_value_q15(
+        attack_blocks, decay_blocks, int(sustain * 32767), release_blocks,
+        block_idx, attack_blocks + sustain_blocks,
+    )
 
 
 # =========================================================================
@@ -177,44 +151,24 @@ def render_with_character(
     clear_basis_atlas()
     ir = load_instrument(str(preset_path))
 
-    # Extract base envelope and synthesis params from L0 graph
-    env = {'attack_blocks': 7, 'decay_blocks': 75, 'sustain': 0.7, 'release_blocks': 150}
-    waveform = 1  # saw default
-    use_fm6 = False
-    fm6_params = None
-
-    for node in ir.layers.L0_graph.nodes:
-        if node.type == "Amp" and node.params.adsr:
-            adsr = node.params.adsr
-            env = {
-                'attack_blocks': _ms_to_blocks(adsr.a_ms),
-                'decay_blocks': _ms_to_blocks(adsr.d_ms),
-                'sustain': adsr.s,
-                'release_blocks': _ms_to_blocks(adsr.r_ms),
-            }
-        if node.type == "Osc" and node.params.waveform:
-            wf = node.params.waveform.lower()
-            waveform = {
-                'sine': 0, 'square': 1, 'pulse': 2,
-                'saw': 3, 'tri': 5, 'triangle': 5,
-            }.get(wf, 0)
-        if node.type == "FM6":
-            use_fm6 = True
-            fm6_params = {
-                'algorithm': getattr(node.params, 'algorithm', 1),
-                'feedback': getattr(node.params, 'feedback', 0),
-                'op_ratios': getattr(node.params, 'op_ratios', [65536] * 6),
-                'op_levels': getattr(node.params, 'op_levels', [32767, 0, 0, 0, 0, 0]),
-            }
-
-    # Extract envelope bindings
-    envelope_states = []
-    if hasattr(ir, 'envelopes') and ir.envelopes:
-        for binding in ir.envelopes:
-            envelope_states.append(_EnvelopeState(binding))
+    # Shared frame builder (voice/frame_builder.py) owns frame
+    # construction; this function only applies the character transforms
+    # (energy -> envelope, brightness/density -> harmonics, brightness ->
+    # FM6 modulator levels) on top of the extracted parameters.
+    builder = IRFrameBuilder(ir, note)
 
     # --- Apply character modifications ---
+    env = {
+        'attack_blocks': builder.attack_blocks,
+        'decay_blocks': builder.decay_blocks,
+        'sustain': builder.sustain_q15 / 32767.0,
+        'release_blocks': builder.release_blocks,
+    }
     env = _apply_energy_to_envelope(env, energy)
+    builder.attack_blocks = env['attack_blocks']
+    builder.decay_blocks = env['decay_blocks']
+    builder.sustain_q15 = int(env['sustain'] * 32767)
+    builder.release_blocks = env['release_blocks']
 
     harmonic_amps = [32767, 16383, 10922, 8191, 6553, 5461, 4681, 4096]
     if hasattr(ir, 'carrier') and ir.carrier and hasattr(ir.carrier, 'harmonic_amps_q15'):
@@ -229,29 +183,21 @@ def render_with_character(
     harmonic_amps = _apply_density(harmonic_amps, density)
 
     # For FM6 presets, apply brightness to operator levels
-    if use_fm6 and fm6_params:
-        levels = list(fm6_params['op_levels'])
+    fm6 = builder._fm6
+    if fm6 is not None:
+        levels = list(fm6['op_levels'])
         for i in range(2, len(levels)):
             scale = 0.3 + 0.7 * brightness
             levels[i] = int(levels[i] * scale)
-        fm6_params['op_levels'] = levels
-
-    phase_noise = _apply_risk_to_phases(
-        int(duration_sec * BLOCKS_PER_SEC) + env['release_blocks'] + 100,
-        risk,
-    )
+        builder.set_fm6_op_levels(levels)
 
     # --- Render ---
-    attack_blocks = env['attack_blocks']
-    decay_blocks = env['decay_blocks']
-    sustain = env['sustain']
-    release_blocks = env['release_blocks']
+    attack_blocks = builder.attack_blocks
+    release_blocks = builder.release_blocks
 
     sustain_blocks = int(duration_sec * BLOCKS_PER_SEC) - attack_blocks
     total_blocks = attack_blocks + sustain_blocks + release_blocks
-
-    attack_level_q15 = 32767
-    sustain_level_q15 = int(sustain * 32767)
+    sustain_until = attack_blocks + sustain_blocks
 
     state = VMState.create(voice_id=0)
     state.reset_for_note_on(note=note)
@@ -259,55 +205,10 @@ def render_with_character(
     samples = []
 
     for block_idx in range(total_blocks):
-        # Gain envelope
-        if block_idx < attack_blocks:
-            t = block_idx / attack_blocks if attack_blocks > 0 else 1
-            gain_q15 = int(attack_level_q15 * t)
-        elif block_idx < attack_blocks + decay_blocks:
-            t = (block_idx - attack_blocks) / decay_blocks if decay_blocks > 0 else 1
-            gain_q15 = int(attack_level_q15 - (attack_level_q15 - sustain_level_q15) * t)
-        elif block_idx < attack_blocks + sustain_blocks:
-            gain_q15 = sustain_level_q15
-        else:
-            release_idx = block_idx - (attack_blocks + sustain_blocks)
-            t = release_idx / release_blocks if release_blocks > 0 else 1
-            gain_q15 = int(sustain_level_q15 * (1.0 - t))
-
-        gain_q15 = max(0, min(32767, gain_q15))
-
-        # Matrix envelope targets
-        env_targets_q15 = None
-        if envelope_states:
-            env_targets_q15 = {}
-            for env_state in envelope_states:
-                value = env_state.get_value(block_idx, sustain_blocks)
-                for target_id in env_state.target_ids:
-                    env_targets_q15[target_id] = value
-
-        if use_fm6 and fm6_params:
-            frame = VoiceFrame(
-                note=note,
-                coeff_osc_mode=OSC_MODE_FM6,
-                gain_q15=gain_q15,
-                beta_target_q15=0,
-                fm_algorithm_id=fm6_params['algorithm'],
-                fm_op_ratios=fm6_params['op_ratios'],
-                fm_op_levels=fm6_params['op_levels'],
-                fm_feedback_depth=fm6_params['feedback'],
-                env_targets_q15=env_targets_q15,
-            )
-        else:
-            frame = VoiceFrame(
-                note=note,
-                coeff_osc_mode=OSC_MODE_B,
-                H_request=len(harmonic_amps),
-                gain_q15=gain_q15,
-                beta_target_q15=0,
-                partial_amps_q15=harmonic_amps,
-                waveform_type=waveform,
-                env_targets_q15=env_targets_q15,
-            )
-
+        frame = builder.build(
+            NoteClock(block_idx, sustain_until_block=sustain_until),
+            amps_override=harmonic_amps,
+        )
         state, output = vm_step_block(state, frame)
         samples.extend(output.tolist())
 

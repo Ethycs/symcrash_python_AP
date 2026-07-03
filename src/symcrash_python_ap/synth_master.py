@@ -44,7 +44,6 @@ from .safety.safety_engine import SafetyEngine
 from .symbol.executor_scheduling import HealthTelemetry
 from .primitives import BLOCK_SIZE
 from .voice.voice_engine import VoiceEngine
-from .voice.emitter_bridge import VoiceEngineAdapter
 from .frames import ParamFrame, VoiceFrame
 from .vm.state import VMState, OSC_MODE_A, OSC_MODE_B, OSC_MODE_FM6
 from .vm.executor import vm_step_block
@@ -186,8 +185,9 @@ class SynthMaster:
             block_size=self.config.block_size,
         )
 
-        # VoiceEngineAdapters for each voice (created when preset is loaded)
-        self._voice_adapters: List[Optional[VoiceEngineAdapter]] = [None] * self.config.n_voices
+        # Reserved per-voice slots (kept for API compat; the CompiledPreset
+        # Simple-mode chain replaced the old VoiceEngineAdapter indirection)
+        self._voice_adapters: List[Optional[object]] = [None] * self.config.n_voices
 
         # VM states for audio generation (VoiceEngine provides VoiceFrames, VM renders audio)
         self._voice_slots: List[VoiceSlot] = [
@@ -214,6 +214,8 @@ class SynthMaster:
 
         self._current_preset = record.capsule
         self._preset_name = record.capsule.identity.name
+        self._compiled_preset = None  # recompiled lazily from the capsule
+        self._voice_adapters = [None] * self.config.n_voices
 
         # Extract parameters from capsule
         self._extract_preset_params(record.capsule)
@@ -232,8 +234,12 @@ class SynthMaster:
         """
         try:
             from .instrument_ir import load_instrument
+            from .library.preset_compiler import compiled_preset_from_ir
             ir = load_instrument(yaml_path)
             self._extract_params_from_ir(ir)
+            # Documented chain: IR -> CompiledPreset -> Simple-mode
+            # VoiceEngine (step_voice_simple owns frame building)
+            self.load_compiled_preset(compiled_preset_from_ir(ir))
             self._preset_name = ir.meta.name or Path(yaml_path).stem
             return True
         except Exception as e:
@@ -247,9 +253,7 @@ class SynthMaster:
 
     def _extract_params_from_ir(self, ir):
         """Extract parameters from InstrumentIR."""
-        # Helper function
-        def ms_to_blocks(ms):
-            return max(1, int(ms / 1000.0 * self.config.sample_rate / self.config.block_size))
+        from .primitives import ms_to_blocks
 
         # Extract envelope and synthesis params from L0 graph
         for node in ir.layers.L0_graph.nodes:
@@ -333,22 +337,15 @@ class SynthMaster:
 
         slot = self._voice_slots[voice_id]
 
-        # Create adapter if needed (lazy creation per voice)
-        if self._voice_adapters[voice_id] is None:
-            preset = self._get_compiled_preset()
-            if preset is not None:
-                self._voice_adapters[voice_id] = VoiceEngineAdapter(
-                    preset=preset,
-                    engine=self.voice_engine,
-                    voice_id=voice_id,
-                )
-
-        # Trigger note through adapter or directly on engine
-        adapter = self._voice_adapters[voice_id]
-        if adapter is not None:
-            adapter.note_on(note=note, velocity_q15=velocity_q15)
+        # Documented chain: CompiledPreset -> Simple-mode VoiceEngine
+        # (step_voice_simple owns frame building, single-owner rule).
+        preset = self._get_compiled_preset()
+        if preset is not None:
+            self.voice_engine.allocate_voice_from_preset(preset, voice_id)
+            self.voice_engine.note_on_simple(
+                voice_id, note=note, velocity_q15=velocity_q15)
         else:
-            # Fallback: use engine directly (no preset loaded)
+            # Fallback: no preset loaded - engine default program (CMMM)
             self.voice_engine.note_on(voice_id, velocity_q15=velocity_q15)
 
         # Update slot state
@@ -363,20 +360,21 @@ class SynthMaster:
         return voice_id
 
     def _get_compiled_preset(self) -> Optional['CompiledPreset']:
-        """Get compiled preset for VoiceEngine adapters."""
-        # If we have a compiled preset cached, return it
-        if hasattr(self, '_compiled_preset') and self._compiled_preset is not None:
+        """
+        Get the CompiledPreset for the loaded preset (documented chain:
+        capsule/IR -> CompiledPreset -> Simple-mode VoiceEngine).
+        """
+        if getattr(self, '_compiled_preset', None) is not None:
             return self._compiled_preset
 
-        # Try to compile from current preset
         if self._current_preset is not None:
             try:
-                from .library.preset_compiler import PresetCompiler
-                compiler = PresetCompiler()
-                # For now return None - full implementation would compile from capsule
-                return None
-            except Exception:
-                pass
+                from .library.preset_compiler import compiled_preset_from_capsule
+                self._compiled_preset = compiled_preset_from_capsule(
+                    self._current_preset)
+                return self._compiled_preset
+            except Exception as e:
+                print(f"Failed to compile capsule preset: {e}")
 
         return None
 
@@ -402,20 +400,12 @@ class SynthMaster:
         """
         if voice_id is not None:
             # Release specific voice
-            adapter = self._voice_adapters[voice_id] if voice_id < len(self._voice_adapters) else None
-            if adapter is not None:
-                adapter.note_off()
-            else:
-                self.voice_engine.note_off(voice_id)
+            self.voice_engine.note_off(voice_id)
         elif note is not None:
             # Find voice playing this note
             for i, slot in enumerate(self._voice_slots):
                 if slot.active and slot.note == note:
-                    adapter = self._voice_adapters[i] if i < len(self._voice_adapters) else None
-                    if adapter is not None:
-                        adapter.note_off()
-                    else:
-                        self.voice_engine.note_off(i)
+                    self.voice_engine.note_off(i)
                     break
 
     # =========================================================================
@@ -478,7 +468,11 @@ class SynthMaster:
                     slot.vm_state = VMState.create(voice_id=voice_id)
                     slot.vm_state.reset_for_note_on(note=slot.note)
 
-                # Enrich frame with preset parameters if needed
+                # Compat shim for frames the preset does not fully own:
+                # CompiledPreset.osc_mode uses 0 both for "unset" and
+                # Mode A, so Mode B presets rely on this default (gap
+                # tracked for the capsule-lossiness step); the other two
+                # only fire on the no-preset fallback path.
                 if not frame.partial_amps_q15:
                     frame.partial_amps_q15 = self._harmonic_amps
                 if frame.beta_target_q15 == 0:
@@ -512,7 +506,7 @@ class SynthMaster:
         filter_enabled = False
 
         for item in engine_output.render_batch:
-            frame = item.voice_frame
+            frame = item.frame
             if frame is not None:
                 fc = getattr(frame, 'filter_cutoff_q15', Q15_ONE)
                 fr = getattr(frame, 'filter_reso_q15', 0)
@@ -762,19 +756,19 @@ class SynthMaster:
             s: Sustain level (0.0 to 1.0)
             r_ms: Release time in milliseconds
         """
-        blocks_per_sec = self.config.sample_rate // self.config.block_size
+        from .primitives import ms_to_blocks
 
         if a_ms is not None:
-            self._attack_blocks = max(1, int(a_ms / 1000.0 * blocks_per_sec))
+            self._attack_blocks = ms_to_blocks(a_ms)
             self.cockpit.set_control(ControlID.ATK_BLOCKS, self._attack_blocks)
         if d_ms is not None:
-            self._decay_blocks = max(1, int(d_ms / 1000.0 * blocks_per_sec))
+            self._decay_blocks = ms_to_blocks(d_ms)
             self.cockpit.set_control(ControlID.DCY_BLOCKS, self._decay_blocks)
         if s is not None:
             self._sustain = max(0.0, min(1.0, s))
             self.cockpit.set_control(ControlID.SUS_Q15, int(self._sustain * Q15_ONE))
         if r_ms is not None:
-            self._release_blocks = max(1, int(r_ms / 1000.0 * blocks_per_sec))
+            self._release_blocks = ms_to_blocks(r_ms)
             self.cockpit.set_control(ControlID.REL_BLOCKS, self._release_blocks)
 
     def pitch_bend(self, value: int) -> None:
@@ -804,10 +798,7 @@ class SynthMaster:
 
     def get_active_voice_count(self) -> int:
         """Get count of currently active voices."""
-        if self._use_orchestrator:
-            return self.orchestrator.get_active_voice_count()
-        else:
-            return sum(1 for slot in self._voice_slots if slot.active)
+        return sum(1 for slot in self._voice_slots if slot.active)
 
     def get_preset_name(self) -> Optional[str]:
         """Get name of currently loaded preset."""

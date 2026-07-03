@@ -18,7 +18,7 @@ Engine Architecture:
 from .symbol import SymbolEngine, SymbolExecutor
 from .wavelet import WaveletEngine, PacketTreeSet, HarmonicTargetGenerator, WaveType
 from .material import MaterialEngine
-from .safety import SafetyEngine, UnifiedRenderer
+from .safety import SafetyEngine
 from .voice import VoiceEngine, VoiceBank, BlockScheduler, BlockOrchestrator
 
 # Unified pipeline
@@ -57,7 +57,6 @@ __all__ = [
     'PacketTreeSet',
     'HarmonicTargetGenerator',
     'WaveType',
-    'UnifiedRenderer',
     # Scheduling
     'BlockScheduler',
     'BlockOrchestrator',

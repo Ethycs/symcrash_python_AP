@@ -27,15 +27,12 @@ from .anti_click import (
 from .unified_renderer import (
     # Main class (v2 architecture)
     UnifiedOutputStage,
-    # Backwards compatibility aliases
+    # Backwards compatibility alias
     CarrierLiftPipeline,
-    UnifiedRenderer,  # Deprecated
     # Backend protocol and adapters
     SynthesisBackend,
     HarmonicScaffoldBackend,
     WaveletBackend,
-    # Deprecated data class
-    RenderFrame,
 )
 
 __all__ = [
@@ -57,9 +54,7 @@ __all__ = [
     'UnifiedOutputStage',
     # Backwards compatibility
     'CarrierLiftPipeline',
-    'UnifiedRenderer',  # Deprecated
     'SynthesisBackend',
     'HarmonicScaffoldBackend',
     'WaveletBackend',
-    'RenderFrame',  # Deprecated
 ]

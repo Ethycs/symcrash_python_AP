@@ -2,6 +2,12 @@
 Wavelet Engine
 ==============
 
+LEGACY - pre-VM path (quarantined 2026-07-02). Superseded by
+vm/executor.vm_step_block, the single realization kernel (see
+PIPELINE-ARCHITECTURE-GAP.md "Unified Execution Layer"). Kept for the
+legacy integration tests and FPGA reference material only; not part of
+the preset story. Do not add new consumers.
+
 Renders VoiceFrames to audio via inverse wavelet packet synthesis.
 Uses CDF 5/3 lifting with 5 tree types.
 

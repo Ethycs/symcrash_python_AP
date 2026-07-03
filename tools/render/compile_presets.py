@@ -199,44 +199,46 @@ def render_preview(
         from symcrash_python_ap.frames import VoiceFrame
         import numpy as np
 
-        sample_rate = 48000
-        block_size = 64
-        blocks_per_sec = sample_rate // block_size
-
-        def ms_to_blocks(ms):
-            return max(1, int(ms / 1000.0 * blocks_per_sec))
+        from symcrash_python_ap.primitives import (
+            SAMPLE_RATE_HZ as sample_rate,
+            BLOCK_SIZE as block_size,
+            ms_to_blocks,
+        )
 
         # Clear basis atlas for clean render
         clear_basis_atlas()
 
-        # Extract envelope and synthesis params from L0 graph
+        # Extract envelope and synthesis params via the shared IR extraction
+        # (library/ir_extract.py); this preview keeps its historical
+        # defaults (env fallback, unknown waveform -> SINE).
+        from symcrash_python_ap.library.ir_extract import (
+            extract_amp, extract_fm6, extract_waveform_type,
+        )
+
         env = {'attack_blocks': 7, 'decay_blocks': 75, 'sustain': 0.7, 'release_blocks': 150}
         waveform = 0  # sine default
         use_fm6 = False
         fm6_params = None
 
         if hasattr(ir, 'layers') and hasattr(ir.layers, 'L0_graph'):
-            for node in ir.layers.L0_graph.nodes:
-                if node.type == "Amp" and hasattr(node.params, 'adsr') and node.params.adsr:
-                    adsr = node.params.adsr
-                    env = {
-                        'attack_blocks': ms_to_blocks(adsr.a_ms),
-                        'decay_blocks': ms_to_blocks(adsr.d_ms),
-                        'sustain': adsr.s,
-                        'release_blocks': ms_to_blocks(adsr.r_ms),
-                    }
-                if node.type == "Osc" and hasattr(node.params, 'waveform') and node.params.waveform:
-                    wf = node.params.waveform.lower()
-                    # WaveformType: SINE=0, SQUARE=1, PULSE=2, SAW=3, SAW_DOWN=4, TRIANGLE=5
-                    waveform = {'sine': 0, 'square': 1, 'pulse': 2, 'saw': 3, 'tri': 5, 'triangle': 5}.get(wf, 0)
-                if node.type == "FM6":
-                    use_fm6 = True
-                    fm6_params = {
-                        'algorithm': getattr(node.params, 'algorithm', 1),
-                        'feedback': getattr(node.params, 'feedback', 0),
-                        'op_ratios': getattr(node.params, 'op_ratios', [65536] * 6),
-                        'op_levels': getattr(node.params, 'op_levels', [32767, 0, 0, 0, 0, 0]),
-                    }
+            amp = extract_amp(ir)
+            if amp is not None:
+                env = {
+                    'attack_blocks': ms_to_blocks(amp.a_ms),
+                    'decay_blocks': ms_to_blocks(amp.d_ms),
+                    'sustain': amp.s,
+                    'release_blocks': ms_to_blocks(amp.r_ms),
+                }
+            waveform = extract_waveform_type(ir, default=0)
+            fm6 = extract_fm6(ir)
+            if fm6 is not None:
+                use_fm6 = True
+                fm6_params = {
+                    'algorithm': fm6.algorithm if fm6.algorithm is not None else 1,
+                    'feedback': fm6.feedback if fm6.feedback is not None else 0,
+                    'op_ratios': fm6.op_ratios or [65536] * 6,
+                    'op_levels': fm6.op_levels or [32767, 0, 0, 0, 0, 0],
+                }
 
         # Choose appropriate note based on preset name
         name = capsule_id.lower()
@@ -383,16 +385,9 @@ def compile_instrument(yaml_path: Path, library: PresetLibraryV0, verbose: bool 
         for warning in result.warnings:
             print(f"  WARNING: {warning}")
 
-    # Convert to binary bundle
-    try:
-        bundle = capsule_to_bytes(result.capsule)
-    except Exception as e:
-        if verbose:
-            print(f"  SERIALIZE ERROR: {e}")
-        return False
-
-    # Import into library
-    import_result = library.import_capsule(bundle)
+    # Import into library directly (no bytes round-trip; serialization is
+    # covered by the codec round-trip pin test in tests/)
+    import_result = library.import_capsule(result.capsule)
 
     if not import_result.success:
         if verbose:
@@ -447,16 +442,8 @@ def compile_macro(yaml_path: Path, library: PresetLibraryV0, verbose: bool = Tru
             print(f"  COMPILE ERROR: {e}")
         return False
 
-    # Convert to binary bundle
-    try:
-        bundle = capsule_to_bytes(capsule)
-    except Exception as e:
-        if verbose:
-            print(f"  SERIALIZE ERROR: {e}")
-        return False
-
-    # Import into library
-    import_result = library.import_capsule(bundle)
+    # Import into library directly (no bytes round-trip)
+    import_result = library.import_capsule(capsule)
 
     if not import_result.success:
         if verbose:

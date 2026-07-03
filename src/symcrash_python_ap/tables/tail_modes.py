@@ -18,8 +18,9 @@ Per WSE-STD-070 §10 (and InstrumentIR v0 tail table):
 
 from typing import List, Dict
 
-# Import canonical TailMode from primitives (single source of truth)
-from ..primitives import TailMode, Operator
+# Import canonical TailMode and mode->ops data from primitives
+# (single source of truth; this module is the canonical API per CMMM-SPEC §4)
+from ..primitives import TailMode, Operator, TAIL_MODE_TABLE
 
 # Operator IDs for tail operators (from primitives)
 OP_FINE_CLAMP = Operator.FINE_CLAMP
@@ -28,12 +29,12 @@ OP_SHEAF_PROJECT = Operator.SHEAF_PROJECT
 OP_EMERGENCY_SIMPLIFY = Operator.EMERGENCY_SIMPLIFY
 
 
-# Canonical tail operator sets per mode
+# Canonical tail operator sets per mode, derived from the single data source
+# primitives.TAIL_MODE_TABLE (contents: FULL [2,11,23], MID [2,11], MIN [2],
+# EMERGENCY [2,19]).
 TAIL_OPS: Dict[TailMode, List[int]] = {
-    TailMode.FULL: [OP_FINE_CLAMP, OP_NORMALIZE_SCALE, OP_SHEAF_PROJECT],
-    TailMode.MID: [OP_FINE_CLAMP, OP_NORMALIZE_SCALE],
-    TailMode.MIN: [OP_FINE_CLAMP],
-    TailMode.EMERGENCY: [OP_FINE_CLAMP, OP_EMERGENCY_SIMPLIFY],
+    TailMode(mode_id): list(info.operators)
+    for mode_id, info in TAIL_MODE_TABLE.items()
 }
 
 

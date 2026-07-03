@@ -59,10 +59,8 @@ from .primitives import Q15_NEG_ONE, Q15_SCALE, Q16_HALF, Q16_ONE
 BLOCKS_PER_SECOND = BLOCK_RATE_HZ  # 750 blocks/sec at 48kHz/64
 
 
-def ms_to_blocks(ms: float) -> int:
-    """Convert milliseconds to block count (minimum 1)."""
-    blocks = int((ms / 1000.0) * BLOCKS_PER_SECOND)
-    return max(1, blocks)
+# Canonical conversion (single source in primitives)
+from .primitives import ms_to_blocks
 
 
 def hz_to_phase_inc(hz: float) -> int:

@@ -309,7 +309,7 @@ class PresetLibraryV0:
 
     def import_capsule(
         self,
-        bundle: Union[bytes, str],
+        bundle: Union[bytes, str, CapsuleV0],
         mode: str = None,
     ) -> ImportResult:
         """
@@ -326,7 +326,8 @@ class PresetLibraryV0:
         On failure: No partial capsule remains.
 
         Args:
-            bundle: Path to bundle directory or bytes (.wsecap)
+            bundle: CapsuleV0 object (in-process import, e.g. straight from
+                the compiler), path to bundle directory, or bytes (.wsecap)
             mode: Override default compatibility mode
 
         Returns:
@@ -337,7 +338,9 @@ class PresetLibraryV0:
 
         # Step 1: Load capsule
         try:
-            if isinstance(bundle, bytes):
+            if isinstance(bundle, CapsuleV0):
+                capsule = bundle
+            elif isinstance(bundle, bytes):
                 capsule = capsule_from_bytes(bundle)
             else:
                 capsule = load_capsule_bundle(bundle)

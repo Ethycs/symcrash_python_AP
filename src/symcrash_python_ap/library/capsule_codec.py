@@ -49,6 +49,7 @@ class ChunkType:
     SEEDS = 6
     CMMM_CONFIG = 7  # CMMM Enrichment (Phase P5): temperament, symbol_ops
     ENVELOPES = 8    # Matrix envelope bindings + amp dynamics (packet E6)
+    SOUND_EXTRAS = 9  # Material ramp, FM6 post-filter, partials, PWM, LFOs
 
 
 # =============================================================================
@@ -524,6 +525,18 @@ def unpack_envelopes(payload: bytes) -> Tuple[Optional[List[dict]], Optional[dic
     return bindings, amp
 
 
+def pack_sound_extras(extras: dict) -> bytes:
+    """Pack the SOUND_EXTRAS dict (JSON payload, like ENVELOPES)."""
+    return json.dumps(extras).encode('utf-8')
+
+
+def unpack_sound_extras(payload: bytes) -> Optional[dict]:
+    """Unpack the SOUND_EXTRAS dict; None when absent/empty."""
+    if not payload:
+        return None
+    return json.loads(payload.decode('utf-8')) or None
+
+
 # =============================================================================
 # FULL CAPSULE SERIALIZATION
 # =============================================================================
@@ -581,6 +594,11 @@ def capsule_to_bytes(capsule: CapsuleV0) -> bytes:
     if capsule.envelopes or capsule.amp_dynamics:
         payload = pack_envelopes(capsule.envelopes, capsule.amp_dynamics)
         chunks.append(pack_chunk(ChunkType.ENVELOPES, payload))
+
+    # Sound extras (material ramp, FM6 post-filter, partials, PWM, LFOs)
+    if capsule.sound_extras:
+        payload = pack_sound_extras(capsule.sound_extras)
+        chunks.append(pack_chunk(ChunkType.SOUND_EXTRAS, payload))
 
     # Combine chunks
     chunk_bytes = b''.join(chunks)
@@ -654,6 +672,7 @@ def capsule_from_bytes(data: bytes) -> CapsuleV0:
     cmmm_config = None  # Phase P5: CMMM enrichment
     envelopes = None
     amp_dynamics = None
+    sound_extras = None
 
     for _ in range(chunk_count):
         chunk_type, payload, offset = unpack_chunk(data, offset)
@@ -674,6 +693,8 @@ def capsule_from_bytes(data: bytes) -> CapsuleV0:
             cmmm_config = unpack_cmmm_config(payload)
         elif chunk_type == ChunkType.ENVELOPES:
             envelopes, amp_dynamics = unpack_envelopes(payload)
+        elif chunk_type == ChunkType.SOUND_EXTRAS:
+            sound_extras = unpack_sound_extras(payload)
 
     if identity is None:
         raise ValueError("Missing identity chunk")
@@ -687,6 +708,7 @@ def capsule_from_bytes(data: bytes) -> CapsuleV0:
         cmmm_config=cmmm_config,
         envelopes=envelopes,
         amp_dynamics=amp_dynamics,
+        sound_extras=sound_extras,
     )
 
 
@@ -789,6 +811,10 @@ def save_capsule_bundle(capsule: CapsuleV0, dirpath: str):
         manifest['envelopes'] = capsule.envelopes
     if capsule.amp_dynamics:
         manifest['amp_dynamics'] = capsule.amp_dynamics
+
+    # Sound extras (material ramp, FM6 post-filter, partials, PWM, LFOs)
+    if capsule.sound_extras:
+        manifest['sound_extras'] = capsule.sound_extras
 
     if capsule.assets:
         manifest['assets'] = [
@@ -905,6 +931,7 @@ def load_capsule_bundle(dirpath: str) -> CapsuleV0:
     # Matrix envelope bindings + amp dynamics (packet E6)
     envelopes = manifest.get('envelopes')
     amp_dynamics = manifest.get('amp_dynamics')
+    sound_extras = manifest.get('sound_extras')
 
     return CapsuleV0(
         identity=identity,
@@ -915,6 +942,7 @@ def load_capsule_bundle(dirpath: str) -> CapsuleV0:
         cmmm_config=cmmm_config,
         envelopes=envelopes,
         amp_dynamics=amp_dynamics,
+        sound_extras=sound_extras,
     )
 
 
@@ -929,6 +957,8 @@ __all__ = [
     'unpack_cmmm_config',
     'pack_envelopes',
     'unpack_envelopes',
+    'pack_sound_extras',
+    'unpack_sound_extras',
     'capsule_to_bytes',
     'capsule_from_bytes',
     'save_capsule',

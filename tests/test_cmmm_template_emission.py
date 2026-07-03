@@ -114,12 +114,13 @@ class TestCmmmTemplateEmission:
         """Pattern table references should be resolved correctly."""
         from symcrash_python_ap.library.preset_compiler import CmmmDefaults
 
-        # Pattern table: 0=K32, 1=K24, 2=K20, 3=K16, 4=K12, 5=K8, 6=K4, 7=K1
+        # Pattern table (WSE-STD-DEGRADE-v0 §3.1 frozen):
+        # 0=K32, 1=K24, 2=K16, 3=K12, 4=K8, 5=K4, 6=K1
         test_cases = [
             ("pattern:0", 0xFFFFFFFF),  # K=32
-            ("pattern:3", 0x0000FFFF),  # K=16
-            ("pattern:5", 0x000000FF),  # K=8
-            ("pattern:7", 0x00000001),  # K=1
+            ("pattern:2", 0x0000FFFF),  # K=16
+            ("pattern:4", 0x000000FF),  # K=8
+            ("pattern:6", 0x00000001),  # K=1
         ]
 
         for pattern_str, expected_mask in test_cases:

@@ -1,5 +1,5 @@
 """
-Budget Prediction & Verification (WSE-STD-033)
+Budget Prediction & Verification (WSE-STD-DEGRADE-v0 cost-model interface)
 ===============================================
 
 Predicts resource costs for operator chains BEFORE execution.

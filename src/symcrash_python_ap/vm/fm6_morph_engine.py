@@ -41,32 +41,9 @@ except ImportError:
 from ..primitives import NUM_LEAVES
 
 
-def _sat16(x: int) -> int:
-    """Saturate to int16 range."""
-    if x > Q15_ONE:
-        return Q15_ONE
-    elif x < Q15_NEG_ONE:
-        return Q15_NEG_ONE
-    return x
-
-
-def _rshift_rne(val: int, shift: int) -> int:
-    """Right shift with round-to-nearest-even."""
-    if shift <= 0:
-        return val
-    half = 1 << (shift - 1)
-    result = (val + half) >> shift
-    if (val & ((1 << shift) - 1)) == half:
-        result = result & ~1
-    return result
-
-
-def _rshift_rne_array(arr: np.ndarray, shift: int) -> np.ndarray:
-    """Right shift with round-to-nearest-even (array version)."""
-    if shift <= 0:
-        return arr
-    half = 1 << (shift - 1)
-    return (arr + half) >> shift
+# Fixed-point helpers: single owner is fm6_engine (identical law; the FM6
+# output is ear-pinned so these must stay in lock-step with the direct path)
+from .fm6_engine import _sat16, _rshift_rne, _rshift_rne_array
 
 
 @dataclass

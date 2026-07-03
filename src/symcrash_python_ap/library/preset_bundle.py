@@ -16,6 +16,15 @@ Bundle structure:
 - manifest.json (metadata, file references, CRCs)
 - voice_params.bin (packed overrides, sorted by persistence/domain/param_id)
 - control_defaults.bin (optional, ControlRegistry overrides)
+
+
+DEPRECATED (2026-07-02): the WSE_PRESET_V0 bundle format is
+superseded by CapsuleV0 / WSE_CAPSULE_V0 (library/capsule_codec.py,
+registry-driven ValueType packing incl. U32 FM6 ratios). Kept only
+because it implements WSE-STD-VOICEENGINEREGISTRY v0 section 6 and is
+pinned by tests/conformance/test_voice_registry.py. One owner per
+format (CAPSULE-COMPAT section 5.3): do not merge the packers, do not
+add new consumers.
 """
 
 import json

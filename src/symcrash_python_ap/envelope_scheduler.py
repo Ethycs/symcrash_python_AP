@@ -58,10 +58,8 @@ class ADSRSpec:
         return int(self.sustain * Q15_ONE)
 
 
-def ms_to_blocks(ms: float) -> int:
-    """Convert milliseconds to block count."""
-    blocks = int((ms / 1000.0) * BLOCKS_PER_SECOND)
-    return max(1, blocks)  # At least 1 block
+# Canonical conversion (single source in primitives; kept in __all__)
+from .primitives import ms_to_blocks
 
 
 # =============================================================================
@@ -234,6 +232,104 @@ def create_envelope(
 
 
 # =============================================================================
+# CLOSED-FORM BLOCK-INDEXED ADSR (offline/streaming law)
+# =============================================================================
+# Two envelope laws coexist deliberately:
+#   1. The stateful block-rate EnvelopeScheduler above (live voice_engine).
+#   2. This closed-form value(block_idx) evaluation, used by the offline
+#      renderer and workbench streaming, where the whole timeline is known
+#      (or the gate drives sustain_until_block).
+# They are NOT interchangeable; consolidating them would change ear-tuned
+# output. This module is the single home for both.
+
+# Sentinel for "gate still held": sustain lasts until further notice.
+GATE_HELD = 1 << 30
+
+
+def adsr_value_q15(
+    attack_blocks: int,
+    decay_blocks: int,
+    sustain_q15: int,
+    release_blocks: int,
+    block_idx: int,
+    sustain_until_block: int,
+    peak_q15: int = Q15_ONE,
+    release_from_q15: Optional[int] = None,
+) -> int:
+    """
+    Closed-form ADSR value (Q15) at a block index.
+
+    sustain_until_block: block where release begins (offline law:
+        attack_blocks + sustain_blocks; live law: note-off block, or
+        GATE_HELD while the gate is down).
+    peak_q15: attack peak (velocity-scaled attack level for amp envelopes).
+    release_from_q15: level release decays from; None = sustain level
+        (offline law). Streaming passes the latched gate-release level.
+
+    Float operation order matches the historical offline implementation
+    bit-for-bit (t computed first, then scaled).
+    """
+    if block_idx < attack_blocks:
+        v = (int(peak_q15 * (block_idx / attack_blocks))
+             if attack_blocks > 0 else peak_q15)
+    elif block_idx < attack_blocks + decay_blocks:
+        t = ((block_idx - attack_blocks) / decay_blocks
+             if decay_blocks > 0 else 1)
+        v = int(peak_q15 - (peak_q15 - sustain_q15) * t)
+    elif block_idx < sustain_until_block:
+        v = sustain_q15
+    else:
+        start = sustain_q15 if release_from_q15 is None else release_from_q15
+        t = ((block_idx - sustain_until_block) / release_blocks
+             if release_blocks > 0 else 1)
+        v = int(start * (1.0 - t))
+    return max(0, min(Q15_ONE, v))
+
+
+class BindingEnvelope:
+    """
+    Closed-form ADSR state for one matrix-envelope binding
+    (WSE-STD-ENVELOPE-MATRIX), with DX7-style key-scale-rate and velocity
+    sensitivity. Single owner; formerly duplicated as _EnvelopeState in
+    tools/render/render_preset.py, symcrash_workbench/streaming.py and
+    symcrash_imgui_controls/workbench_render.py.
+    """
+
+    def __init__(self, binding, note: int = 60):
+        from .envelope_targets import EnvelopeTarget
+
+        adsr = binding.adsr
+        # DX7-style EG key scaling: higher notes get shorter envelopes
+        ks = float(getattr(binding, 'key_scale_rate', 0.0))
+        mult = 2.0 ** (-ks * (note - 60) / 24.0) if ks else 1.0
+        self.attack_blocks = ms_to_blocks(adsr.a_ms * mult)
+        self.decay_blocks = ms_to_blocks(adsr.d_ms * mult)
+        self.sustain = adsr.s
+        self.release_blocks = ms_to_blocks(adsr.r_ms * mult)
+        self.target_ids = []
+        for name in binding.targets:
+            try:
+                self.target_ids.append(int(EnvelopeTarget[name]))
+            except KeyError:
+                pass
+        self.velocity_sens_q15 = int(
+            getattr(binding, 'velocity_sens', 0.0) * Q15_ONE)
+
+    def value_q15(self, block_idx: int, sustain_blocks: int) -> int:
+        return adsr_value_q15(
+            self.attack_blocks,
+            self.decay_blocks,
+            int(self.sustain * Q15_ONE),
+            self.release_blocks,
+            block_idx,
+            sustain_blocks,
+        )
+
+    # Back-compat alias (imgui workbench used get_value)
+    get_value = value_q15
+
+
+# =============================================================================
 # EXPORTS
 # =============================================================================
 
@@ -247,4 +343,7 @@ __all__ = [
     'EnvelopePhase',
     'EnvelopeScheduler',
     'create_envelope',
+    'GATE_HELD',
+    'adsr_value_q15',
+    'BindingEnvelope',
 ]

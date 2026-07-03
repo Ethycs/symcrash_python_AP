@@ -112,8 +112,7 @@ def update_cache_entry(yaml_path: Path, cache: Dict[str, float]) -> None:
 # RENDERING
 # =============================================================================
 
-def ms_to_blocks(ms):
-    return max(1, int(ms / 1000.0 * BLOCKS_PER_SEC))
+from symcrash_python_ap.primitives import ms_to_blocks
 
 
 def compute_envelope_value(block_idx, attack_blocks, decay_blocks, sustain, release_blocks,
@@ -193,8 +192,10 @@ def render_preset(preset_path, note, duration_sec):
             }
         if node.type == "Osc" and node.params.waveform:
             wf = node.params.waveform.lower()
-            # WaveformType: SINE=0, SQUARE=1, PULSE=2, SAW=3, SAW_DOWN=4, TRIANGLE=5
-            waveform = {'sine': 0, 'square': 1, 'pulse': 2, 'saw': 3, 'tri': 5, 'triangle': 5}.get(wf, 0)
+            # Canonical map (instrument_ir.WAVEFORM_NAME_TO_ID);
+            # keeps this tool's historical unknown->SINE default
+            from symcrash_python_ap.instrument_ir import WAVEFORM_NAME_TO_ID
+            waveform = WAVEFORM_NAME_TO_ID.get(wf, 0)
         if node.type == "FM6":
             use_fm6 = True
             fm6_params = {

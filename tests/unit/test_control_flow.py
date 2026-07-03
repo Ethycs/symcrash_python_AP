@@ -69,4 +69,5 @@ for i in range(5):
     frame = cockpit.tick()
     emitter.consume_control_frame(frame)
     vf = emitter.emit_frame()
-    print(f"Block {i+1}: gain={vf.gain_q15}, active={vf.is_active}, families={vf.families[:3]}")
+    # families is a Dict keyed by operator (frames.VoiceFrame contract)
+    print(f"Block {i+1}: gain={vf.gain_q15}, active={vf.is_active}, families={vf.families}")

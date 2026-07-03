@@ -297,6 +297,86 @@ def _get_dynamic_backbone(state: VMState, frame: 'VoiceFrame', cfg) -> list:
 
 
 # =============================================================================
+# UNIFIED COEFFICIENT-DOMAIN TAIL
+# =============================================================================
+
+def _run_coeff_tail(
+    state: VMState,
+    cfg,
+    backbone_instrs,
+    *,
+    evolution: bool = False,
+    extract_fm_mod: bool = False,
+) -> np.ndarray:
+    """
+    Shared coefficient-domain tail for every oscillator mode.
+
+    Runs the fixed lane sequence on an already-seeded coeff_state:
+    LANE_INJECT -> backbone dispatch (mask-aware, WSE-STD-070) -> LANE_TAIL
+    -> LANE_CCS_RENDER (IDWPT) -> noise exciter -> gain interpolation,
+    then latches eta/gain for the next block.
+
+    evolution: apply CMMM evolution-rate scaling around the backbone
+        dispatch (Gap G1; Mode A/B fallthrough only).
+    extract_fm_mod: capture the modulator signal after operators for the
+        next block's z^-1 FM feedback (WSE-STD-210 section 8.3).
+    """
+    # Step 1: LANE_INJECT (events modify seeded coeff_state)
+    lane_inject(state, cfg)
+
+    evolution_rate = Q15_ONE
+    if evolution:
+        evolution_rate = state.executor_latch.get_evolution_rate_q15()
+        if evolution_rate < Q15_ONE:
+            prev_coeffs = state.coeff_state.copy()
+
+    # Steps 2-5: Backbone lanes (mask-aware dispatch, WSE-STD-070)
+    for instr in backbone_instrs:
+        dispatch_coeff_op_crossfade(state, instr)
+
+    # CMMM evolution-rate scaling (Gap G1): EVOLVE=100%, HOLD~3%, FREEZE=0%
+    if evolution and evolution_rate < Q15_ONE:
+        if _hot.jit_enabled():
+            _hot.evolution_scale(state.coeff_state, prev_coeffs, evolution_rate)
+        else:
+            # Reference implementation (conformance path)
+            from .tables import COEFF_LEN
+            for idx in range(COEFF_LEN):
+                new_val = int(state.coeff_state[idx])
+                old_val = int(prev_coeffs[idx])
+                delta = new_val - old_val
+                scaled_delta = RSHIFT_RNE(delta * evolution_rate, 15)
+                state.coeff_state[idx] = np.clip(
+                    old_val + scaled_delta, Q15_NEG_ONE, Q15_ONE
+                )
+
+    # FM modulator extraction for NEXT block's z^-1 feedback loop
+    if extract_fm_mod:
+        from .harmonic_bank import extract_modulator_signal
+        state.prev_fm_mod_buffer = extract_modulator_signal(
+            state.coeff_state, method=0
+        )
+
+    # Step 6: LANE_TAIL (safety constraints)
+    lane_tail(state, cfg)
+
+    # Step 7: LANE_CCS_RENDER (IDWPT reconstruction back to audio)
+    output = lane_ccs_render(state, cfg)
+
+    # Noise exciter (Packet E4): pre-gain broadband transient
+    _mix_noise_exciter(state, cfg, output)
+
+    # Apply gain with proper rounding (WSE-STD-001 compliant)
+    if cfg.gain_curr_q15 != Q15_ONE or cfg.gain_prev_q15 != Q15_ONE:
+        _apply_block_gain(output, cfg.gain_prev_q15, cfg.gain_curr_q15)
+
+    # Update state for next block
+    state.eta_prev_q15 = cfg.eta_curr_q15
+    state.gain_prev_q15 = cfg.gain_curr_q15
+    return output
+
+
+# =============================================================================
 # MAIN EXECUTOR
 # =============================================================================
 
@@ -634,28 +714,9 @@ def vm_step_block(
         ).astype(np.int16)
         state.coeff_state[:64 * VM_K] = np.repeat(clipped_64[:64], VM_K)
 
-        # Apply coefficient-domain operators (may be empty, but lane_inject/tail still apply)
-        # Use mask-aware dispatch (WSE-STD-070)
-        lane_inject(state, cfg)
-        for instr in cfg.backbone_instrs:
-            dispatch_coeff_op_crossfade(state, instr)
-        lane_tail(state, cfg)
-
-        # IDWPT reconstruction back to audio
-        output = lane_ccs_render(state, cfg)
-
-        # Noise exciter (Packet E4): pre-gain broadband transient
-        _mix_noise_exciter(state, cfg, output)
-
-        # Apply gain interpolation
-        gain_curr = cfg.gain_curr_q15
-        gain_prev = cfg.gain_prev_q15
-        if gain_curr != Q15_ONE or gain_prev != Q15_ONE:
-            _apply_block_gain(output, gain_prev, gain_curr)
-
-        # Update state and return
-        state.eta_prev_q15 = cfg.eta_curr_q15
-        state.gain_prev_q15 = cfg.gain_curr_q15
+        # Coefficient-domain tail (may have empty backbone, but
+        # lane_inject/tail still apply)
+        output = _run_coeff_tail(state, cfg, cfg.backbone_instrs)
         return state, output
     elif osc_mode == OSC_MODE_WAVETABLE:
         # -----------------------------------------------------------------
@@ -709,27 +770,8 @@ def vm_step_block(
         for idx in range(COEFF_LEN):
             state.coeff_state[idx] = int(carrier_512[idx])
 
-        # Apply coefficient-domain operators (unified path)
-        lane_inject(state, cfg)
-        for instr in cfg.backbone_instrs:
-            dispatch_coeff_op_crossfade(state, instr)
-        lane_tail(state, cfg)
-
-        # IDWPT reconstruction back to audio
-        output = lane_ccs_render(state, cfg)
-
-        # Noise exciter (Packet E4): pre-gain broadband transient
-        _mix_noise_exciter(state, cfg, output)
-
-        # Apply gain interpolation
-        gain_curr = cfg.gain_curr_q15
-        gain_prev = cfg.gain_prev_q15
-        if gain_curr != Q15_ONE or gain_prev != Q15_ONE:
-            _apply_block_gain(output, gain_prev, gain_curr)
-
-        # Update state and return
-        state.eta_prev_q15 = cfg.eta_curr_q15
-        state.gain_prev_q15 = cfg.gain_curr_q15
+        # Coefficient-domain tail (unified path)
+        output = _run_coeff_tail(state, cfg, cfg.backbone_instrs)
         return state, output
     elif osc_mode == OSC_MODE_GRANULAR:
         # -----------------------------------------------------------------
@@ -772,27 +814,8 @@ def vm_step_block(
         for idx in range(COEFF_LEN):
             state.coeff_state[idx] = int(carrier_512[idx])
 
-        # Apply coefficient-domain operators (unified path)
-        lane_inject(state, cfg)
-        for instr in cfg.backbone_instrs:
-            dispatch_coeff_op_crossfade(state, instr)
-        lane_tail(state, cfg)
-
-        # IDWPT reconstruction back to audio
-        output = lane_ccs_render(state, cfg)
-
-        # Noise exciter (Packet E4): pre-gain broadband transient
-        _mix_noise_exciter(state, cfg, output)
-
-        # Apply gain interpolation
-        gain_curr = cfg.gain_curr_q15
-        gain_prev = cfg.gain_prev_q15
-        if gain_curr != Q15_ONE or gain_prev != Q15_ONE:
-            _apply_block_gain(output, gain_prev, gain_curr)
-
-        # Update state and return
-        state.eta_prev_q15 = cfg.eta_curr_q15
-        state.gain_prev_q15 = cfg.gain_curr_q15
+        # Coefficient-domain tail (unified path)
+        output = _run_coeff_tail(state, cfg, cfg.backbone_instrs)
         return state, output
     else:
         # -----------------------------------------------------------------
@@ -830,84 +853,24 @@ def vm_step_block(
 
             state.coeff_state[idx] = np.clip(blended, Q15_NEG_ONE, Q15_ONE)
 
-    # Step 1: LANE_INJECT (events modify carrier-seeded coeff_state)
-    lane_inject(state, cfg)
-
-    # -------------------------------------------------------------------------
-    # CMMM Enrichment: Capture pre-operator state for evolution rate scaling (Gap G1)
-    # -------------------------------------------------------------------------
-    evolution_rate = state.executor_latch.get_evolution_rate_q15()
-    if evolution_rate < Q15_ONE:
-        # Capture state before operators for scaling
-        prev_coeffs = state.coeff_state.copy()
-
     # -------------------------------------------------------------------------
     # CMMM Enrichment: Dynamic Operator Selection (Gap G4 - Timbral Sub-states)
     # -------------------------------------------------------------------------
     # Get backbone instructions - either from dynamic REGIME_SYMBOL_OPS or static backbone
     backbone_instrs = _get_dynamic_backbone(state, frame, cfg)
 
-    # Steps 2-5: Backbone lanes (operators modify carrier)
-    # Use mask-aware dispatch (WSE-STD-070)
-    for instr in backbone_instrs:
-        dispatch_coeff_op_crossfade(state, instr)
-
-    # -------------------------------------------------------------------------
-    # CMMM Enrichment: Apply evolution rate scaling (Gap G1)
-    # -------------------------------------------------------------------------
-    # Scale coefficient changes by evolution_rate:
-    # - EVOLVE (32767): Full evolution (100%)
-    # - HOLD (1024): Minimal evolution (~3%)
-    # - FREEZE (0): No evolution (0%)
-    if evolution_rate < Q15_ONE:
-        if _hot.jit_enabled():
-            _hot.evolution_scale(state.coeff_state, prev_coeffs, evolution_rate)
-        else:
-            # Reference implementation (conformance path)
-            for idx in range(COEFF_LEN):
-                new_val = int(state.coeff_state[idx])
-                old_val = int(prev_coeffs[idx])
-                delta = new_val - old_val
-                # Scale delta by evolution rate
-                scaled_delta = RSHIFT_RNE(delta * evolution_rate, 15)
-                state.coeff_state[idx] = np.clip(old_val + scaled_delta, Q15_NEG_ONE, Q15_ONE)
-
-    # === FM MODULATOR EXTRACTION (Phase 3 - WSE-STD-210 Section 8.3) ===
-    # Extract modulator from operator output for NEXT block's FM.
-    # This creates z⁻¹ block-delayed feedback loop.
-    if osc_mode == OSC_MODE_B and params.fm_source == FM_SOURCE_FEEDBACK:
-        from .harmonic_bank import extract_modulator_signal
-        state.prev_fm_mod_buffer = extract_modulator_signal(
-            state.coeff_state, method=0
-        )
-
-    # Step 6: LANE_TAIL (safety constraints)
-    lane_tail(state, cfg)
-
-    # Step 7: LANE_CCS_RENDER (all oscillator modes use standard CCS path)
-    # FM6 now generates true coefficients via basis frames, so it goes through
-    # the same IDWPT polyphase reconstruction as Mode A/B
-    output = lane_ccs_render(state, cfg)
-
-    # Noise exciter (Packet E4): pre-gain broadband transient
-    _mix_noise_exciter(state, cfg, output)
-
-    # Apply gain with proper rounding (WSE-STD-001 compliant)
-    gain_curr = cfg.gain_curr_q15
-    gain_prev = cfg.gain_prev_q15
-    if gain_curr != Q15_ONE or gain_prev != Q15_ONE:
-        # Interpolate gain across block using round-to-nearest
-        _apply_block_gain(output, gain_prev, gain_curr)
+    # Coefficient-domain tail with CMMM evolution-rate scaling (Gap G1) and
+    # FM modulator extraction for next block's z^-1 feedback (WSE-STD-210 8.3)
+    output = _run_coeff_tail(
+        state, cfg, backbone_instrs,
+        evolution=True,
+        extract_fm_mod=(osc_mode == OSC_MODE_B
+                        and params.fm_source == FM_SOURCE_FEEDBACK),
+    )
 
     # Advance CCS phase for next block (Mode A only - Mode B advances in generate)
     if osc_mode == OSC_MODE_A:
         state.ccs_state.advance_block()
-
-    # -------------------------------------------------------------------------
-    # Update state for next block
-    # -------------------------------------------------------------------------
-    state.eta_prev_q15 = cfg.eta_curr_q15
-    state.gain_prev_q15 = cfg.gain_curr_q15
 
     return state, output
 

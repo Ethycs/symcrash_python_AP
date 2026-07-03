@@ -1,6 +1,10 @@
 """
-Per-Regime Budget Limits (WSE-STD-032)
-======================================
+Per-Regime Budget Limits (WSE-STD-DEGRADE-v0 regime budgets)
+============================================================
+
+Historical note: formerly cited "WSE-STD-032", a planned standard number
+that was never published; its content is WSE-STD-DEGRADE-v0.md (5 -
+Standards/07 - Budget).
 
 Defines resource budgets for each regime and voice class.
 Budgets are FPGA-native: derived from hardware constraints.

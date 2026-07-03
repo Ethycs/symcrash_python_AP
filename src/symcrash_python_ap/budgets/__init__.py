@@ -1,6 +1,11 @@
 """
-CMMM Budget System (WSE-STD-031/032/033)
-========================================
+CMMM Budget System (WSE-STD-DEGRADE-v0)
+=======================================
+
+Normative sources: WSE-STD-DEGRADE-v0.md (frozen degradation/budget
+standard) and CMMM-SPEC.md (operator taxonomy). The WSE-STD-031/032/033
+numbers formerly cited here were planned but never published; their
+content was consolidated into those documents.
 
 Deterministic budget prediction and degradation for the Symbol Engine.
 Ensures bounded work and instrument-safe output.

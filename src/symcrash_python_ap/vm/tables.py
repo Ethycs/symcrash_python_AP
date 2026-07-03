@@ -124,7 +124,7 @@ def get_tail_ops(tail_mode: TailMode) -> List[int]:
 # PATTERN TABLE (K-LADDER MASKS)
 # =============================================================================
 
-# K-ladder values (decreasing)
+# K-ladder values (decreasing) - WSE-STD-DEGRADE-v0 §3 K_RUNG_LIST
 K_LADDER = [32, 24, 16, 12, 8, 4, 1]
 
 # Node priority order (low-bands first)
@@ -144,22 +144,12 @@ class PatternEntry:
     mask_u32: int
 
 
-# Pre-computed pattern table
-PATTERN_TABLE: Dict[int, PatternEntry] = {}
-
-
-def _build_pattern_table():
-    """Build pattern table from K-ladder."""
-    global PATTERN_TABLE
-    for idx, k in enumerate(K_LADDER):
-        mask = 0
-        for i in range(k):
-            node = NODE_PRIORITY[i]
-            mask |= (1 << node)
-        PATTERN_TABLE[idx] = PatternEntry(idx, k, mask)
-
-
-_build_pattern_table()
+# Pre-computed pattern table, derived from the single data source
+# primitives.K_LADDER_MASKS (WSE-STD-DEGRADE-v0 §3.1 frozen mapping).
+PATTERN_TABLE: Dict[int, PatternEntry] = {
+    pattern_id: PatternEntry(pattern_id, bin(mask).count('1'), mask)
+    for pattern_id, mask in K_LADDER_MASKS.items()
+}
 
 
 def get_pattern_by_id(pattern_id: int) -> PatternEntry:

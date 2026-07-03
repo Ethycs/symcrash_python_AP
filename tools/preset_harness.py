@@ -105,11 +105,8 @@ def do_compile_preset(yaml_path: Path, verbose: bool = True) -> CompileResult:
             for warning in result.warnings:
                 print(f"  WARNING: {warning}")
 
-        # Convert to binary bundle
-        bundle = capsule_to_bytes(result.capsule)
-
-        # Import into library
-        import_result = library.import_capsule(bundle)
+        # Import into library directly (no bytes round-trip)
+        import_result = library.import_capsule(result.capsule)
 
         if not import_result.success:
             if verbose:
@@ -159,14 +156,12 @@ def do_compile_preset(yaml_path: Path, verbose: bool = True) -> CompileResult:
 # RENDERING (replicating render_all_presets.py logic)
 # =============================================================================
 
-FS = 48000
-BLOCK_SIZE = 64
-BLOCKS_PER_SEC = FS // BLOCK_SIZE
-
-
-def ms_to_blocks(ms: float) -> int:
-    """Convert milliseconds to block count."""
-    return max(1, int(ms / 1000.0 * BLOCKS_PER_SEC))
+from symcrash_python_ap.primitives import (
+    SAMPLE_RATE_HZ as FS,
+    BLOCK_SIZE,
+    BLOCK_RATE_HZ as BLOCKS_PER_SEC,
+    ms_to_blocks,
+)
 
 
 def normalize_to_rms(samples: list, target_rms_dbfs: float = -12.0) -> list:
@@ -281,7 +276,8 @@ def do_render_preset(
                 }
             if node.type == "Osc" and node.params.waveform:
                 wf = node.params.waveform.lower()
-                waveform = {'sine': 0, 'square': 1, 'pulse': 2, 'saw': 3, 'tri': 5, 'triangle': 5}.get(wf, 3)
+                from symcrash_python_ap.instrument_ir import WAVEFORM_NAME_TO_ID
+                waveform = WAVEFORM_NAME_TO_ID.get(wf, 3)
             if node.type == "FM6":
                 use_fm6 = True
                 fm6_params = {

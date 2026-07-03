@@ -284,6 +284,19 @@ class CapsuleV0:
     #   {'velocity_sens': float, 'key_scale_rate': float}
     amp_dynamics: Optional[Dict] = None
 
+    # Sound extras (SOUND_EXTRAS chunk): closes the documented capsule
+    # lossiness vs the IR - JSON-friendly dict carrying what the older
+    # chunks could not:
+    #   {'material': {beta_start_q15, beta_target_q15, beta_ramp_blocks},
+    #    'fm6_post_filter_hz': float|None,
+    #    'harmonic_amps_q15': [int]|None, 'phase_spread_q15': int,
+    #    'osc_mode': int, 'waveform_type': int,
+    #    'pwm': {'enabled': bool, 'width_q15': int}|None,
+    #    'lfos': [ir_extract.lfo_to_dict(...)]}
+    # Loaders that predate this chunk ignore it deterministically
+    # (WSE-STD-CAPSULE-COMPAT forward-compat rule).
+    sound_extras: Optional[Dict] = None
+
     def validate(self, strict: bool = False) -> List[str]:
         """
         Validate capsule structure.

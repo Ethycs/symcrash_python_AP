@@ -58,36 +58,11 @@ from ..vm import vm_step_block, VMState, DecodedPlan, Tables
 
 
 # =============================================================================
-# DEPRECATED: RenderFrame (use VoiceFrame from frames.py instead)
-# =============================================================================
-
-@dataclass
-class RenderFrame:
-    """
-    DEPRECATED: Use VoiceFrame from frames.py instead.
-
-    Kept for backwards compatibility with old code.
-    """
-    voice_id: int = 0
-    note: int = 60
-    cents: int = 0
-    gain_q15: int = Q15_HALF
-    pan_q15: int = 0
-    tree_a_id: int = 1
-    tree_b_id: int = 1
-    tree_blend_q15: int = 0
-    coeff_q15: List[int] = field(default_factory=list)
-    waveform: str = "saw"
-    eta_q15: int = Q15_HALF
-    glide_active: bool = False
-    glide_target_note: int = 60
-    glide_target_cents: int = 0
-    glide_samples_remaining: int = 0
-
-
-# =============================================================================
 # UNIFIED OUTPUT STAGE (v2 Architecture)
 # =============================================================================
+# (The deprecated RenderFrame dataclass and UnifiedRenderer stub were
+# removed 2026-07-02; frames.VoiceFrame and UnifiedOutputStage are the
+# single owners.)
 
 class UnifiedOutputStage:
     """
@@ -358,29 +333,6 @@ class UnifiedOutputStage:
 # CarrierLiftPipeline is now UnifiedOutputStage
 CarrierLiftPipeline = UnifiedOutputStage
 
-# UnifiedRenderer is deprecated - use UnifiedOutputStage instead
-# Kept as stub for import compatibility
-class UnifiedRenderer:
-    """
-    DEPRECATED: Use UnifiedOutputStage instead.
-
-    The old dual-render crossfade approach is obsolete in v2 architecture.
-    CarrierLiftPipeline (now UnifiedOutputStage) uses AntiClickOperator
-    for all click prevention.
-    """
-    def __init__(self, *args, **kwargs):
-        import warnings
-        warnings.warn(
-            "UnifiedRenderer is deprecated. Use UnifiedOutputStage instead.",
-            DeprecationWarning,
-            stacklevel=2
-        )
-        # Create a UnifiedOutputStage as fallback
-        self._stage = UnifiedOutputStage()
-
-    def __getattr__(self, name):
-        return getattr(self._stage, name)
-
 
 # =============================================================================
 # EXPORTS
@@ -389,13 +341,10 @@ class UnifiedRenderer:
 __all__ = [
     # Main class (v2 architecture)
     'UnifiedOutputStage',
-    # Backwards compatibility aliases
+    # Backwards compatibility alias
     'CarrierLiftPipeline',
-    'UnifiedRenderer',  # Deprecated
     # Backend protocol and adapters (re-exported from wavelet.backends)
     'SynthesisBackend',
     'HarmonicScaffoldBackend',
     'WaveletBackend',
-    # Deprecated data class
-    'RenderFrame',
 ]
