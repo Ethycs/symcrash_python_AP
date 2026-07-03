@@ -26,11 +26,10 @@ Known-lossy points (handled explicitly, surfaced by ``--report``):
   * LFO AMS/AMD routing dropped; PMD/PMS mapped to a pitch LFO
   * pitch EG, keyboard level scaling, transpose, key sync dropped
   * fixed-frequency oscillator mode approximated as a ratio at middle C
-  * ENGINE DIVERGENCE: this repo's fm_algorithms.py table does not match
-    the real DX7 topology for many algorithm numbers (e.g. real DX7 alg 5
-    is three 2-op pairs; repo alg 5 is a dual stack into one carrier).
-    The importer keeps the WS1 "same numbering" map and reports voices
-    whose engine carrier set differs from the real DX7 carrier set.
+  * Topology: fm_algorithms.py algorithms 1-32 ARE the canonical DX7 chart
+    (fixed 2026-06-25, pinned by tests/test_fm_algorithms_dx7_conformance.py),
+    so the WS1 "same numbering" map is structurally faithful; carriers are
+    derived from the engine table (single owner).
 
 Usage:
     pixi run python tools/import_dx7_sysex.py <bank.syx> --out-dir <dir>
@@ -120,20 +119,11 @@ _LFO_WAVE_MAP = {
     5: ("square", "LFO sample&hold approximated as square"),
 }
 
-# Real DX7 carrier sets per algorithm (1-based), for divergence reporting
-# against this repo's fm_algorithms.py table.
-REAL_DX7_CARRIERS = {
-    1: {1, 3}, 2: {1, 3}, 3: {1, 4}, 4: {1, 4},
-    5: {1, 3, 5}, 6: {1, 3, 5}, 7: {1, 3}, 8: {1, 3},
-    9: {1, 3}, 10: {1, 4}, 11: {1, 4}, 12: {1, 3},
-    13: {1, 3}, 14: {1, 3}, 15: {1, 3}, 16: {1},
-    17: {1}, 18: {1}, 19: {1, 4, 5}, 20: {1, 2, 4},
-    21: {1, 2, 4, 5}, 22: {1, 3, 5}, 23: {1, 2, 4},
-    24: {1, 2, 3}, 25: {1, 2, 3}, 26: {1, 2, 4},
-    27: {1, 2, 4}, 28: {1, 3, 6}, 29: {1, 2, 3, 5},
-    30: {1, 2, 3, 6}, 31: {1, 2, 3, 4, 5},
-    32: {1, 2, 3, 4, 5, 6},
-}
+# Carrier sets come from the engine table (vm/fm_algorithms.py), which is
+# pinned to the canonical DX7 chart by tests/test_fm_algorithms_dx7_conformance.py.
+# (A duplicate REAL_DX7_CARRIERS dict lived here until 2026-07-03; it had
+# four wrong entries (algs 22-25) and produced false TOPOLOGY DIVERGENCE
+# reports on real ROM banks - single-owner rule applies.)
 
 
 # =============================================================================
@@ -505,13 +495,6 @@ def convert_voice(index, voice):
     engine_carriers = {i + 1 for i in alg.get_carriers()}   # 1-based
     cv.engine_carriers = engine_carriers
 
-    real_carriers = REAL_DX7_CARRIERS[alg_1b]
-    if engine_carriers != real_carriers:
-        notes.append(
-            f"TOPOLOGY DIVERGENCE: engine algorithm {alg_1b} has carriers "
-            f"{sorted(engine_carriers)} but the real DX7 algorithm {alg_1b} "
-            f"has carriers {sorted(real_carriers)} (fm_algorithms.py table "
-            "diverges from DX7; engine fix tracked under WS1c)")
 
     # --- Operators: ratio + level (+ EG peak folded into the level) ------
     ratios, levels, adsr_per_op, op_flags, peaks = [], [], [], [], []

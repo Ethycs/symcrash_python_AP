@@ -1,0 +1,119 @@
+# STRINGS 1 - imported from DX7 SysEx
+# ===================================
+#
+# Source: rom1a.syx, voice 4/32
+# DX7 algorithm 2 (engine carriers: Op1, Op3), feedback 7
+# Imported by tools/import_dx7_sysex.py (WS1b). Lossy points
+# for this voice are listed in the import report (--report).
+# Carrier levels normalized x0.377 to the ~0.5 headroom limit.
+# Conformance: Expressive (full articulation)
+
+instrument_ir_v0:
+  meta:
+    id: "dx7-strings-1-v0"
+    name: "STRINGS 1"
+    version: 1
+    author: "dx7-import"
+    seed: 0x3AE5C105
+
+  audio:
+    sample_rate: 48000
+    block_size: 64
+
+  graph:
+    fm6:
+      type: FM6
+      output: amp1
+      algorithm: 2
+      feedback: 7
+      operators:
+        - ratio: 1.0       # Op1 carrier
+          level: 0.3772
+        - ratio: 1.0       # Op2 modulator (feedback)
+          level: 0.0579
+        - ratio: 1.0       # Op3 carrier
+          level: 0.1227
+        - ratio: 1.0       # Op4 modulator
+          level: 0.1496
+        - ratio: 3.0       # Op5 modulator
+          level: 0.0891
+        - ratio: 14.0      # Op6 modulator
+          level: 0.0188
+    amp1:
+      type: Amp
+      attack: 666.7
+      decay: 1333.3
+      sustain: 0.0818
+      release: 2000.0
+      velocity_sens: 0.429
+      key_scale_rate: 0.286
+
+  envelopes:
+    mod_env:
+      attack: 23.2
+      decay: 14872.4
+      sustain: 0.1778
+      release: 1194.2
+      key_scale_rate: 0.143
+      targets: [FM_OP2]
+    carrier_env:
+      attack: 743.0
+      decay: 1439.6
+      sustain: 0.2304
+      release: 851.4
+      velocity_sens: 1.0
+      targets: [FM_OP3]
+    mod_env2:
+      attack: 2.3
+      decay: 4829.8
+      sustain: 0.3255
+      release: 882.4
+      velocity_sens: 0.286
+      key_scale_rate: 0.286
+      targets: [FM_OP4]
+    mod_env3:
+      attack: 297.2
+      decay: 4458.2
+      sustain: 1.0
+      release: 882.4
+      velocity_sens: 0.286
+      key_scale_rate: 0.286
+      targets: [FM_OP5]
+    mod_env4:
+      attack: 297.2
+      decay: 4829.8
+      sustain: 0.3255
+      release: 882.4
+      velocity_sens: 0.286
+      key_scale_rate: 0.286
+      targets: [FM_OP6]
+
+  modulators:
+    vibrato:
+      waveform: "triangle"
+      rate: 4.97
+      depth: 0.081
+      delay: 0.0
+      sync: "free"
+      targets:
+        - pitch: 0.002872
+
+  behavior:
+    idle:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    attack:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    stable:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    recovery:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+
+  compile:
+    material:
+      blend: 0.0
+      target: 0.0
+      ramp: 1

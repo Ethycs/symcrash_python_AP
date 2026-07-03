@@ -1,11 +1,11 @@
 # E.PIANO 1 - imported from DX7 SysEx
 # ===================================
 #
-# Source: dx7_demo_bank.syx, voice 1/32
-# DX7 algorithm 5 (engine carriers: Op1), feedback 6
+# Source: rom1a.syx, voice 11/32
+# DX7 algorithm 5 (engine carriers: Op1, Op3, Op5), feedback 6
 # Imported by tools/import_dx7_sysex.py (WS1b). Lossy points
 # for this voice are listed in the import report (--report).
-# Carrier levels normalized x0.500 to the ~0.5 headroom limit.
+# Carrier levels normalized x0.167 to the ~0.5 headroom limit.
 # Conformance: Expressive (full articulation)
 
 instrument_ir_v0:
@@ -14,7 +14,7 @@ instrument_ir_v0:
     name: "E.PIANO 1"
     version: 1
     author: "dx7-import"
-    seed: 0x0CEF3AEE
+    seed: 0x779ACFB0
 
   audio:
     sample_rate: 48000
@@ -27,18 +27,18 @@ instrument_ir_v0:
       algorithm: 5
       feedback: 6
       operators:
-        - ratio: 1.0       # Op1 carrier
-          level: 0.5
-        - ratio: 13.9153   # Op2 modulator
+        - ratio: 1.0026    # Op1 carrier
+          level: 0.1666
+        - ratio: 14.0      # Op2 modulator
           level: 0.029
-        - ratio: 1.0026    # Op3 modulator
-          level: 1.0
+        - ratio: 1.0       # Op3 carrier
+          level: 0.1666
         - ratio: 1.0       # Op4 modulator
           level: 0.4217
-        - ratio: 0.9974    # Op5 modulator
-          level: 1.0
+        - ratio: 0.994     # Op5 carrier
+          level: 0.1666
         - ratio: 1.0061    # Op6 modulator (feedback)
-          level: 0.1631
+          level: 0.1778
     amp1:
       type: Amp
       attack: 2.3
@@ -55,8 +55,9 @@ instrument_ir_v0:
       sustain: 0.0
       release: 37.2
       velocity_sens: 1.0
+      key_scale_rate: 0.429
       targets: [FM_OP2]
-    mod_env2:
+    carrier_env:
       attack: 2.9
       decay: 20000.0
       sustain: 0.0
@@ -64,37 +65,21 @@ instrument_ir_v0:
       velocity_sens: 0.286
       key_scale_rate: 0.429
       targets: [FM_OP3]
-    mod_env3:
+    mod_env2:
       attack: 2.9
       decay: 20000.0
       sustain: 0.0
       release: 743.0
       velocity_sens: 0.857
-      targets: [FM_OP4]
-    mod_env4:
+      key_scale_rate: 0.429
+      targets: [FM_OP4, FM_OP6]
+    carrier_env2:
       attack: 2.9
       decay: 20000.0
       sustain: 0.0
       release: 743.0
       key_scale_rate: 0.429
       targets: [FM_OP5]
-    mod_env5:
-      attack: 424.6
-      decay: 1040.3
-      sustain: 0.5464
-      release: 197.4
-      velocity_sens: 0.857
-      targets: [FM_OP6]
-
-  modulators:
-    vibrato:
-      waveform: "sine"
-      rate: 5.61
-      depth: 0.051
-      delay: 555.6
-      sync: "free"
-      targets:
-        - pitch: 0.004739
 
   behavior:
     idle:

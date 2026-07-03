@@ -1,0 +1,92 @@
+# TUB BELLS - imported from DX7 SysEx
+# ===================================
+#
+# Source: rom1a.syx, voice 26/32
+# DX7 algorithm 5 (engine carriers: Op1, Op3, Op5), feedback 7
+# Imported by tools/import_dx7_sysex.py (WS1b). Lossy points
+# for this voice are listed in the import report (--report).
+# Carrier levels normalized x0.185 to the ~0.5 headroom limit.
+# Conformance: Expressive (full articulation)
+
+instrument_ir_v0:
+  meta:
+    id: "dx7-tub-bells-v0"
+    name: "TUB BELLS"
+    version: 1
+    author: "dx7-import"
+    seed: 0x44176715
+
+  audio:
+    sample_rate: 48000
+    block_size: 64
+
+  graph:
+    fm6:
+      type: FM6
+      output: amp1
+      algorithm: 5
+      feedback: 7
+      operators:
+        - ratio: 1.0017    # Op1 carrier
+          level: 0.1307
+        - ratio: 3.5091    # Op2 modulator
+          level: 0.1631
+        - ratio: 0.9957    # Op3 carrier
+          level: 0.1846
+        - ratio: 3.4939    # Op4 modulator
+          level: 0.1259
+        - ratio: 1.2369    # Op5 carrier
+          level: 0.1846
+        - ratio: 1.9879    # Op6 modulator (feedback)
+          level: 0.2985
+    amp1:
+      type: Amp
+      attack: 2.9
+      decay: 1333.3
+      sustain: 0.0031
+      release: 2000.0
+      key_scale_rate: 0.286
+
+  envelopes:
+    mod_env:
+      attack: 1.9
+      decay: 20000.0
+      sustain: 0.0031
+      release: 9510.9
+      key_scale_rate: 0.286
+      targets: [FM_OP2, FM_OP4]
+    carrier_env:
+      attack: 23.2
+      decay: 73.7
+      sustain: 0.0
+      release: 92.9
+      velocity_sens: 0.714
+      key_scale_rate: 0.286
+      targets: [FM_OP5]
+    mod_env2:
+      attack: 1.9
+      decay: 15.4
+      sustain: 0.0
+      release: 9510.9
+      key_scale_rate: 0.286
+      targets: [FM_OP6]
+
+  behavior:
+    idle:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    attack:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    stable:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    recovery:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+
+  compile:
+    material:
+      blend: 0.0
+      target: 0.0
+      ramp: 1

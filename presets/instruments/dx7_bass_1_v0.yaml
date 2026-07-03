@@ -1,0 +1,109 @@
+# BASS    1 - imported from DX7 SysEx
+# ===================================
+#
+# Source: rom1a.syx, voice 15/32
+# DX7 algorithm 16 (engine carriers: Op1), feedback 7
+# Imported by tools/import_dx7_sysex.py (WS1b). Lossy points
+# for this voice are listed in the import report (--report).
+# Carrier levels normalized x0.500 to the ~0.5 headroom limit.
+# Conformance: Expressive (full articulation)
+
+instrument_ir_v0:
+  meta:
+    id: "dx7-bass-1-v0"
+    name: "BASS    1"
+    version: 1
+    author: "dx7-import"
+    seed: 0x056C0A5C
+
+  audio:
+    sample_rate: 48000
+    block_size: 64
+
+  graph:
+    fm6:
+      type: FM6
+      output: amp1
+      algorithm: 16
+      feedback: 7
+      operators:
+        - ratio: 0.5       # Op1 carrier
+          level: 0.5
+        - ratio: 0.5       # Op2 modulator
+          level: 0.1939
+        - ratio: 0.5       # Op3 modulator
+          level: 0.1778
+        - ratio: 5.0       # Op4 modulator
+          level: 0.2738
+        - ratio: 0.5       # Op5 modulator
+          level: 0.041
+        - ratio: 9.0       # Op6 modulator (feedback)
+          level: 0.1778
+    amp1:
+      type: Amp
+      attack: 2.9
+      decay: 1333.3
+      sustain: 0.0031
+      release: 297.2
+      key_scale_rate: 1.0
+
+  envelopes:
+    mod_env:
+      attack: 1.7
+      decay: 20000.0
+      sustain: 0.0
+      release: 20000.0
+      key_scale_rate: 1.0
+      targets: [FM_OP2]
+    mod_env2:
+      attack: 5.8
+      decay: 8638.8
+      sustain: 0.0
+      release: 6793.5
+      velocity_sens: 0.429
+      key_scale_rate: 0.857
+      targets: [FM_OP3]
+    mod_env3:
+      attack: 4.6
+      decay: 20000.0
+      sustain: 0.0
+      release: 424.6
+      velocity_sens: 0.714
+      key_scale_rate: 0.714
+      targets: [FM_OP4]
+    mod_env4:
+      attack: 1.7
+      decay: 20000.0
+      sustain: 0.0
+      release: 20000.0
+      velocity_sens: 0.429
+      key_scale_rate: 1.0
+      targets: [FM_OP5]
+    mod_env5:
+      attack: 2.9
+      decay: 12319.8
+      sustain: 0.0
+      release: 424.6
+      velocity_sens: 1.0
+      key_scale_rate: 0.143
+      targets: [FM_OP6]
+
+  behavior:
+    idle:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    attack:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    stable:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    recovery:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+
+  compile:
+    material:
+      blend: 0.0
+      target: 0.0
+      ramp: 1

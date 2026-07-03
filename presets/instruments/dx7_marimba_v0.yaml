@@ -1,0 +1,99 @@
+# MARIMBA - imported from DX7 SysEx
+# =================================
+#
+# Source: rom1a.syx, voice 22/32
+# DX7 algorithm 7 (engine carriers: Op1, Op3), feedback 0
+# Imported by tools/import_dx7_sysex.py (WS1b). Lossy points
+# for this voice are listed in the import report (--report).
+# Carrier levels normalized x0.293 to the ~0.5 headroom limit.
+# Conformance: Expressive (full articulation)
+
+instrument_ir_v0:
+  meta:
+    id: "dx7-marimba-v0"
+    name: "MARIMBA"
+    version: 1
+    author: "dx7-import"
+    seed: 0x3F8012B3
+
+  audio:
+    sample_rate: 48000
+    block_size: 64
+
+  graph:
+    fm6:
+      type: FM6
+      output: amp1
+      algorithm: 7
+      feedback: 0
+      operators:
+        - ratio: 0.5       # Op1 carrier
+          level: 0.2072
+        - ratio: 3.0       # Op2 modulator
+          level: 0.1778
+        - ratio: 0.5       # Op3 carrier
+          level: 0.2927
+        - ratio: 5.0       # Op4 modulator
+          level: 0.0688
+        - ratio: 0.75      # Op5 modulator
+          level: 0.1372
+        - ratio: 4.52      # Op6 modulator
+          level: 0.1631
+    amp1:
+      type: Amp
+      attack: 2.9
+      decay: 1333.3
+      sustain: 0.0
+      release: 1981.4
+      velocity_sens: 0.143
+      key_scale_rate: 0.429
+
+  envelopes:
+    carrier_env:
+      attack: 2.9
+      decay: 1852.3
+      sustain: 0.0
+      release: 424.6
+      key_scale_rate: 0.429
+      targets: [FM_OP1]
+    mod_env:
+      attack: 1.7
+      decay: 20000.0
+      sustain: 0.0
+      release: 20000.0
+      velocity_sens: 0.286
+      targets: [FM_OP2, FM_OP5]
+    mod_env2:
+      attack: 1.7
+      decay: 20000.0
+      sustain: 0.0
+      release: 23.2
+      velocity_sens: 0.286
+      targets: [FM_OP4]
+    mod_env3:
+      attack: 20000.0
+      decay: 703.2
+      sustain: 0.0
+      release: 20000.0
+      velocity_sens: 0.286
+      targets: [FM_OP6]
+
+  behavior:
+    idle:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    attack:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    stable:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+    recovery:
+      emphasis: {}
+      trees: {A: harmonic, B: harmonic, blend: 0.0}
+
+  compile:
+    material:
+      blend: 0.0
+      target: 0.0
+      ramp: 1
