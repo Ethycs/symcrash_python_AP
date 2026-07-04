@@ -72,7 +72,8 @@ def parse_packed_voice(rec: bytes) -> dict:
     return {"ops": ops, "global": g}
 
 
-_LFO_WAVE = ["TRIANGLE", "SAW DOWN", "SAW UP", "SQUARE", "SINE", "S&HOLD"]
+# NB: "TRIANGE" is Dexed's own misspelling of the enum value — must match it.
+_LFO_WAVE = ["TRIANGE", "SAW DOWN", "SAW UP", "SQUARE", "SINE", "S&HOLD"]
 
 
 def apply_voice_to_dexed(plug, voice: dict):
