@@ -11,7 +11,7 @@ requires = ["hatchling"]
 
 [tool.pixi.workspace]
 channels = ["conda-forge"]
-platforms = ["win-64"]
+platforms = ["win-64", "linux-64"]
 
 [tool.pixi.pypi-dependencies]
 symcrash_python_ap = { path = ".", editable = true }
@@ -39,6 +39,12 @@ workbench = "python -m symcrash_workbench"
 test = "python -m pytest tests/ -v"
 lint = "python tools/lint_presets.py presets/instruments/ -v"
 render-all = "python tools/render/render_all_presets.py"
+score-audio = "python tools/gym/timbre_distance.py"
+auto-refine = "python tools/gym/auto_refine.py"
+dx7-core-refine = "python tools/gym/dx7_core_refine.py"
+
+[tool.pixi.feature.scoring.tasks]
+zimtohrli-worker = "python tools/gym/zimtohrli_worker.py"
 
 [tool.pixi.dependencies]
 python = ">=3.14.2,<3.15"
@@ -48,3 +54,23 @@ pyserial = ">=3.5,<4"
 numba = ">=0.60.0,<1"
 scipy = ">=1.16.3,<2"
 pyyaml = ">=6.0.3,<7"
+
+[tool.pixi.feature.scoring.target.linux-64.dependencies]
+python = "3.12.*"
+numpy = "*"
+
+[tool.pixi.feature.scoring.target.linux-64.pypi-dependencies]
+zimtohrli = "==0.2.1.post1"
+
+[tool.pixi.feature.dexed.target.linux-64.dependencies]
+python = "3.12.*"
+numpy = "*"
+
+[tool.pixi.feature.dexed.target.linux-64.pypi-dependencies]
+pedalboard = "*"
+mido = "*"
+soundfile = "*"
+
+[tool.pixi.environments]
+scoring = { features = ["scoring"], no-default-feature = true }
+dexed = { features = ["dexed"], no-default-feature = true }

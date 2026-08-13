@@ -235,6 +235,7 @@ class TestVoiceFrameEmitterFM6:
             'fm6': {
                 'algorithm_id': 22,
                 'feedback_depth': 4,
+                'mod_index': 2.0,
                 'op_ratios': [65536, 65602, 65470, 65668, 65536, 131072],
                 'op_levels': [32767, 24576, 24576, 20480, 20480, 16384],
             }
@@ -250,6 +251,7 @@ class TestVoiceFrameEmitterFM6:
         assert frame.coeff_osc_mode == 3
         assert frame.fm_algorithm_id == 22  # passthrough of the inline input above
         assert frame.fm_feedback_depth == 4
+        assert frame.fm_mod_index_q16 == 2 * 65536
         assert frame.fm_op_ratios is not None
         assert len(frame.fm_op_ratios) == 6
         assert frame.fm_op_levels is not None

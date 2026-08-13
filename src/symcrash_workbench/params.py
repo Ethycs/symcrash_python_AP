@@ -187,7 +187,7 @@ def _fm6_scalar_param(field, label, lo, hi, log=False, decimals=1,
         y = _ynode(root, ir, "FM6")
         if y is None:
             return False
-        y[field] = cast(v) if cast is int else round(float(v), 1)
+        y[field] = cast(v) if cast is int else round(float(v), decimals)
         return True
 
     return Param(f"/fm/{field}", label, lo, hi, "fm6", get, set_, yapply,
@@ -462,6 +462,8 @@ def build_registry() -> Dict[str, Param]:
         params.append(_fm6_op_param(i, "level"))
     params += [
         _fm6_scalar_param("feedback", "FB", 0, 7, decimals=0, cast=int),
+        _fm6_scalar_param("mod_index", "MOD INDEX", 0.25, 4.0,
+                          decimals=3),
         _fm6_scalar_param("post_filter_hz", "POST LPF", 200.0, 20000.0,
                           log=True),
     ]

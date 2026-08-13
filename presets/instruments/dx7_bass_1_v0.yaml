@@ -12,7 +12,7 @@ instrument_ir_v0:
   meta:
     id: "dx7-bass-1-v0"
     name: "BASS    1"
-    version: 1
+    version: 3
     author: "dx7-import"
     seed: 0x056C0A5C
 
@@ -26,6 +26,7 @@ instrument_ir_v0:
       output: amp1
       algorithm: 16
       feedback: 7
+      mod_index: 1.0  # Per-voice Dexed fit: legacy +/-pi scale beats the universal DX7 2x prior
       operators:
         - ratio: 0.5       # Op1 carrier
           level: 0.5

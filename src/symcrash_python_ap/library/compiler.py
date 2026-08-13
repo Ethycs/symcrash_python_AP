@@ -786,6 +786,10 @@ class CapsuleCompiler:
         if fm6 is not None and fm6.post_filter_hz is not None:
             extras['fm6_post_filter_hz'] = float(fm6.post_filter_hz)
 
+        # FM6 phase-modulation depth scale (DX7-fidelity imports)
+        if fm6 is not None and fm6.mod_index is not None:
+            extras['fm6_mod_index'] = float(fm6.mod_index)
+
         # Resolved harmonic profile (custom partials win over the named
         # waveform's default profile) + phase spread (Mode B spectrum)
         harmonics = extract_harmonics_q15(ir)

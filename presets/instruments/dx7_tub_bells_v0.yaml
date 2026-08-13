@@ -12,7 +12,7 @@ instrument_ir_v0:
   meta:
     id: "dx7-tub-bells-v0"
     name: "TUB BELLS"
-    version: 1
+    version: 2
     author: "dx7-import"
     seed: 0x44176715
 
@@ -26,6 +26,7 @@ instrument_ir_v0:
       output: amp1
       algorithm: 5
       feedback: 7
+      mod_index: 2.0  # DX7 PM depth: +/-2pi at full level (legacy engine default is 1.0 = +/-pi)
       operators:
         - ratio: 1.0017    # Op1 carrier
           level: 0.1307

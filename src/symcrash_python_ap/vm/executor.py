@@ -620,6 +620,7 @@ def vm_step_block(
         fm_op_ratios = getattr(frame, 'fm_op_ratios', None)
         fm_op_levels = getattr(frame, 'fm_op_levels', None)
         fm_feedback_depth = getattr(frame, 'fm_feedback_depth', None)
+        fm_mod_index_q16 = getattr(frame, 'fm_mod_index_q16', None)
 
         if use_morphing:
             # -----------------------------------------------------------------
@@ -636,6 +637,10 @@ def vm_step_block(
             # Update operators using helper
             env_targets = getattr(frame, 'env_targets_q15', None)
             _update_fm6_operators(fm6_morph_state, fm_op_ratios, fm_op_levels, env_targets)
+
+            # Phase-modulation depth scale (legacy default when unspecified)
+            if fm_mod_index_q16 is not None:
+                fm6_morph_state.mod_index_q16 = fm_mod_index_q16
 
             # FM6 morphed audio generation
             base_phase_inc = params.phase_inc
@@ -675,6 +680,10 @@ def vm_step_block(
             if fm_post_filter_enabled is not None:
                 cutoff = fm_post_filter_cutoff if fm_post_filter_cutoff else 8000.0
                 fm6_state.set_post_filter(fm_post_filter_enabled, cutoff)
+
+            # Phase-modulation depth scale (legacy default when unspecified)
+            if fm_mod_index_q16 is not None:
+                fm6_state.mod_index_q16 = fm_mod_index_q16
 
             # FM6 generates audio directly at sample rate.
             # Gateway headroom (Packet E2): when summed CARRIER levels

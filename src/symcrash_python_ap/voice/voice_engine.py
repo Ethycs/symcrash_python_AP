@@ -68,6 +68,7 @@ from ..primitives import (
     INTENT_TABLE,              # Intent metadata
     BLOCK_SIZE,                # Samples per block (canonical)
     SAMPLE_RATE_HZ,            # Sample rate (canonical)
+    Q16_ONE,                   # Q16 unity (FM6 mod_index scaling)
 )
 
 # =============================================================================
@@ -3627,6 +3628,11 @@ class VoiceEngine:
             fm_op_ratios=list(fm6_config.op_ratios) if fm6_config else None,
             fm_op_levels=list(fm6_config.op_levels) if fm6_config else None,
             fm_feedback_depth=fm6_config.feedback_depth if fm6_config else None,
+            fm_mod_index_q16=(
+                round(fm6_config.mod_index * Q16_ONE)
+                if fm6_config and getattr(fm6_config, 'mod_index', None) is not None
+                else None
+            ),
             fm_post_filter_enabled=(
                 bool(getattr(fm6_config, 'post_filter_hz', None)) or None
                 if fm6_config else None

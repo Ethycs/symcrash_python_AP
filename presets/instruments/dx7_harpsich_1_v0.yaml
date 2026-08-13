@@ -12,7 +12,7 @@ instrument_ir_v0:
   meta:
     id: "dx7-harpsich-1-v0"
     name: "HARPSICH 1"
-    version: 1
+    version: 2
     author: "dx7-import"
     seed: 0x2BF4D21F
 
@@ -26,6 +26,7 @@ instrument_ir_v0:
       output: amp1
       algorithm: 5
       feedback: 1
+      mod_index: 2.0  # DX7 PM depth: +/-2pi at full level (legacy engine default is 1.0 = +/-pi)
       operators:
         - ratio: 4.0       # Op1 carrier
           level: 0.217

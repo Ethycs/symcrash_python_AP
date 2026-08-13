@@ -67,6 +67,7 @@ class IRFM6Params:
     topo_b: Optional[int] = None
     topo_blend_q15: Optional[int] = None
     post_filter_hz: Optional[float] = None
+    mod_index: Optional[float] = None        # PM depth scale (1.0 = legacy)
 
 
 def extract_amp(ir) -> Optional[IRAmpParams]:
@@ -99,6 +100,7 @@ def extract_fm6(ir) -> Optional[IRFM6Params]:
                 topo_b=getattr(p, 'fm6_topo_b', None),
                 topo_blend_q15=getattr(p, 'fm6_topo_blend_q15', None),
                 post_filter_hz=getattr(p, 'post_filter_hz', None),
+                mod_index=getattr(p, 'mod_index', None),
             )
     return None
 

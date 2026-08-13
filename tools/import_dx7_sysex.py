@@ -89,6 +89,15 @@ _LEVEL_LUT = [0, 5, 9, 13, 17, 20, 23, 25, 27, 29,
 # Approximation: DX7 detune (0-14, 7 = center) -> cents per step.
 DETUNE_CENTS_PER_STEP = 1.5
 
+# Phase-modulation depth scale for the engine's FM6 mod_index field.
+# The engine's legacy scale gives a full-level modulator +/-pi radians of
+# phase deviation; the real DX7 swings +/-2pi (4pi peak-to-peak), so
+# imports start at mod_index 2.0. Empirically fitted against the Dexed
+# per-harmonic differentials in ENGINE-BUG-upper-harmonic-rolloff
+# (HARP 1 gap spread 13.9 -> 3.7 dB). The automated Dexed refinement pass
+# may override this prior per voice; the core set validates both 1.0 and 2.0.
+DX7_MOD_INDEX = 2.0
+
 # Approximation: EG attack segments rise much faster than the dB-linear
 # decay at the same rate; scale the full-swing decay time down.
 ATTACK_TIME_FACTOR = 0.25
@@ -714,6 +723,8 @@ def voice_to_yaml(cv, source_name, prefix="dx7"):
     L.append("      output: amp1")
     L.append(f"      algorithm: {alg}")
     L.append(f"      feedback: {cv.ir['feedback']}")
+    L.append(f"      mod_index: {_fmt(DX7_MOD_INDEX)}  # DX7 PM depth: +/-2pi "
+             "at full level (legacy engine default is 1.0 = +/-pi)")
     L.append("      operators:")
     for i in range(6):
         ratio = _fmt(cv.ir["ratios"][i])

@@ -12,7 +12,7 @@ instrument_ir_v0:
   meta:
     id: "dx7-strings-1-v0"
     name: "STRINGS 1"
-    version: 1
+    version: 3
     author: "dx7-import"
     seed: 0x3AE5C105
 
@@ -26,6 +26,7 @@ instrument_ir_v0:
       output: amp1
       algorithm: 2
       feedback: 7
+      mod_index: 1.0  # Per-voice Dexed fit: legacy +/-pi scale beats the universal DX7 2x prior
       operators:
         - ratio: 1.0       # Op1 carrier
           level: 0.3772

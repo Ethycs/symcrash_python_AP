@@ -292,6 +292,8 @@ class IRFrameBuilder:
                 'op_ratios': fm6.op_ratios or [Q16_ONE] * 6,
                 'op_levels': fm6.op_levels or [Q15_ONE, 0, 0, 0, 0, 0],
                 'post_filter_hz': fm6.post_filter_hz,
+                'mod_index_q16': (round(fm6.mod_index * Q16_ONE)
+                                  if fm6.mod_index is not None else None),
             }
 
     def _live_lfos(self):
@@ -439,6 +441,7 @@ class IRFrameBuilder:
                 fm_op_ratios=self._fm6['op_ratios'],
                 fm_op_levels=self._fm6['op_levels'],
                 fm_feedback_depth=self._fm6['feedback'],
+                fm_mod_index_q16=self._fm6['mod_index_q16'],
                 fm_post_filter_enabled=bool(post_hz) or None,
                 fm_post_filter_cutoff_hz=post_hz,
                 env_targets_q15=env_targets_q15,

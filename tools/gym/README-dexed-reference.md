@@ -20,11 +20,11 @@ every optimization technique is scored against a fixed yardstick.
   the max-feedback op6, i.e. our feedback approximation. This is the
   fidelity-contract compromise made measurable (WS1c: "engine bugs for free").
 
-## Environment (WSL, current)
+## Environment (WSL + Pixi)
 
 Runs in WSL (Ubuntu-24.04) because the Linux Dexed VST3 hosts cleanly headless.
-The repo is reached at `/mnt/f/...`. Current setup (throwaway venv — see the
-pixi TODO):
+Python and all host libraries are locked in the repository's `dexed` Pixi
+environment. The Dexed binary remains an external, gitignored reference asset.
 
 ```bash
 # one-time: Dexed Linux build (binary, gitignored like the .syx banks)
@@ -34,25 +34,24 @@ mkdir -p dexed && (cd dexed && unzip -o -q ../dexed-lnx.zip)
 # runtime libs the JUCE plugin needs (sudo):
 sudo apt-get install -y libasound2t64 libfreetype6 libx11-6 libxext6 \
     libxrandr2 libxinerama1 libxcursor1 libgl1 libcurl4
-# python deps
-python3 -m venv --without-pip venv     # ensurepip absent on this box
-curl -sS https://bootstrap.pypa.io/get-pip.py | venv/bin/python
-venv/bin/python -m pip install pedalboard numpy soundfile mido
+# install the locked host environment (run from the repo in WSL)
+pixi install --environment dexed --frozen
 ```
 
 Render:
 
 ```bash
-cd ~/dx7_ref && . venv/bin/activate
 REPO=/mnt/f/Keytone/Documents/GitHub/symcrash_python_AP
-python "$REPO/tools/gym/dexed_reference.py" "$REPO/ingest/dx7_banks/rom1b.syx" \
+pixi run --manifest-path "$REPO/pyproject.toml" --environment dexed --frozen \
+  python "$REPO/tools/gym/dexed_reference.py" "$REPO/ingest/dx7_banks/rom1b.syx" \
     --voice 29 --note 60 --dur 1.5 --tail 1.0 --out ref.wav --fingerprint
 ```
 
-## TODO: formalize under pixi
+## Automated core validation
 
-The venv above is proof-of-capability only. Convert to a pixi-managed env so
-the control pipeline is reproducible (project convention: pixi, not ad-hoc
-pip). Options: a pixi env inside WSL, or a `dexed-ref` feature/environment in
-the repo's `pixi.toml` gated to `linux-64`. The Dexed binary and the `.syx`
-banks stay gitignored (we commit translations/renders, never vendor binaries).
+From Windows, `pixi run dx7-core-refine` renders the eight core ROM voices
+through this environment, sweeps the declared Symcrash parameter grid, and
+uses the process-isolated perceptual committee as a hard acceptance gate.
+References, candidates, audition WAVs, trajectories, and the summary report
+land under `audio_out/dx7_core_refine/`; source presets are never overwritten
+by the batch driver.

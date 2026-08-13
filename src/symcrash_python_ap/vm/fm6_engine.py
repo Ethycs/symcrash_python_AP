@@ -165,10 +165,10 @@ def fm6_generate_block(state: FM6State, base_phase_inc: int) -> np.ndarray:
 
             # Apply modulation to phase
             # Scale modulation: mod_sum is Q15, need to convert to phase offset
-            # FM modulation index: mod_phase = modulator_output << 16 (approx)
+            # mod_index_q16 = Q16_ONE reproduces the legacy << 16 bit-exactly
             # Convert to Python int to avoid numpy overflow
             mod_val = int(mod_sum[k])
-            mod_phase = (mod_val << 16) & Q32_MASK
+            mod_phase = (mod_val * state.mod_index_q16) & Q32_MASK
             effective_phase = (op.phase + mod_phase) & Q32_MASK
 
             # Compute sine
@@ -264,8 +264,8 @@ def fm6_generate_block_full(state: FM6State, base_phase_inc: int,
             # Advance phase
             op.phase = (op.phase + op_phase_inc) & Q32_MASK
 
-            # Apply modulation to phase
-            mod_phase = (int(mod_sum) << 16) & Q32_MASK
+            # Apply modulation to phase (Q16_ONE == legacy << 16, bit-exact)
+            mod_phase = (int(mod_sum) * state.mod_index_q16) & Q32_MASK
             effective_phase = (op.phase + mod_phase) & Q32_MASK
 
             # Compute sine
@@ -350,6 +350,7 @@ def _fm6_generate_block_full_jit(state: FM6State, alg: FMAlgorithm, base_phase_i
         alg.carrier_mask,
         len(carriers),
         state.master_level_q15,
+        state.mod_index_q16,
         fb_row,
         output,
     )

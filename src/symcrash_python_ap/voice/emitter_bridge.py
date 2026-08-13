@@ -41,7 +41,7 @@ Mode 3 Example (Full CMMM):
 
 from typing import TYPE_CHECKING, Optional, List
 from dataclasses import dataclass, field
-from ..primitives import Q15_HALF, Q15_ONE
+from ..primitives import Q15_HALF, Q15_ONE, Q16_ONE
 
 if TYPE_CHECKING:
     from ..library.preset_compiler import CompiledPreset
@@ -279,6 +279,11 @@ class VoiceEngineAdapter:
             fm_op_ratios=list(fm6_config.op_ratios) if fm6_config else None,
             fm_op_levels=list(fm6_config.op_levels) if fm6_config else None,
             fm_feedback_depth=fm6_config.feedback_depth if fm6_config else None,
+            fm_mod_index_q16=(
+                round(fm6_config.mod_index * Q16_ONE)
+                if fm6_config and getattr(fm6_config, 'mod_index', None) is not None
+                else None
+            ),
             fm_post_filter_enabled=(
                 bool(getattr(fm6_config, 'post_filter_hz', None)) or None
                 if fm6_config else None

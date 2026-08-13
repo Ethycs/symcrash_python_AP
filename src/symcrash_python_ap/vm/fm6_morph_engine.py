@@ -19,7 +19,7 @@ from .fm_archetypes import (
     compute_blended_matrix, compute_blended_carriers, blend_feedback_op,
     ARCH_CHAIN, Q15_ONE
 )
-from ..primitives import Q15_NEG_ONE, Q15_ONE
+from ..primitives import Q15_NEG_ONE, Q15_ONE, Q16_ONE
 from .fm6_state import FM6State, FMOperator, Q32_MASK
 from .tables import VM_K, COEFF_LEN
 
@@ -58,6 +58,8 @@ class FM6MorphState:
     op_outputs: np.ndarray = field(default_factory=lambda: np.zeros((6, VM_K), dtype=np.int32))
     feedback_buffer: np.ndarray = field(default_factory=lambda: np.zeros(VM_K, dtype=np.int16))
     master_level_q15: int = Q15_ONE
+    # Q16 phase-modulation depth scale; Q16_ONE == legacy << 16 (see FM6State)
+    mod_index_q16: int = Q16_ONE
 
     # Morphing state
     topo_a_id: int = ARCH_CHAIN      # Source archetype (0-7)
@@ -191,9 +193,9 @@ def fm6_generate_block_morphed(state: FM6MorphState, base_phase_inc: int) -> np.
             # Advance phase
             op.phase = (op.phase + op_phase_inc) & Q32_MASK
 
-            # Apply modulation to phase
+            # Apply modulation to phase (Q16_ONE == legacy << 16, bit-exact)
             mod_val = int(mod_sum[k])
-            mod_phase = (mod_val << 16) & Q32_MASK
+            mod_phase = (mod_val * state.mod_index_q16) & Q32_MASK
             effective_phase = (op.phase + mod_phase) & Q32_MASK
 
             # Compute sine

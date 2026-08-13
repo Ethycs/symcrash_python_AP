@@ -12,7 +12,7 @@ instrument_ir_v0:
   meta:
     id: "dx7-brass-1-v0"
     name: "BRASS   1"
-    version: 1
+    version: 2
     author: "dx7-import"
     seed: 0x2A2BDFDC
 
@@ -26,6 +26,7 @@ instrument_ir_v0:
       output: amp1
       algorithm: 22
       feedback: 7
+      mod_index: 2.0  # DX7 PM depth: +/-2pi at full level (legacy engine default is 1.0 = +/-pi)
       operators:
         - ratio: 0.503     # Op1 carrier
           level: 0.1196

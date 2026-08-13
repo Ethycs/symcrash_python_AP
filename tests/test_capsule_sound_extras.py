@@ -48,6 +48,7 @@ def _assert_lossless(from_ir, from_capsule, name):
     if from_ir.fm6 is not None:
         assert from_capsule.fm6 is not None, name
         assert from_capsule.fm6.post_filter_hz == from_ir.fm6.post_filter_hz, name
+        assert from_capsule.fm6.mod_index == from_ir.fm6.mod_index, name
 
     # Harmonic profile (custom partials / waveform profile)
     assert list(from_capsule.harmonic_amps_q15) == list(from_ir.harmonic_amps_q15), name

@@ -210,6 +210,12 @@ class VoiceFrame:
     # Maps to Q15 via DX7_FEEDBACK_TABLE
     fm_feedback_depth: Optional[int] = None
 
+    # Phase-modulation depth scale (Q16 multiplier; 65536 = legacy scale,
+    # where a full-scale modulator deviates the carrier by +/-pi radians).
+    # DX7 imports set 2x to match real-hardware modulation index
+    # (ENGINE-BUG-upper-harmonic-rolloff). None = legacy default.
+    fm_mod_index_q16: Optional[int] = None
+
     # Post-filter for FM6 output (optional per spec)
     # Softens harsh FM harmonics like vintage DX7 DAC filter
     fm_post_filter_enabled: Optional[bool] = None

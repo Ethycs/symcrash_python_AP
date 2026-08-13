@@ -12,7 +12,7 @@ instrument_ir_v0:
   meta:
     id: "dx7-vibe-1-v0"
     name: "VIBE    1"
-    version: 1
+    version: 3
     author: "dx7-import"
     seed: 0x74C4D51A
 
@@ -26,6 +26,7 @@ instrument_ir_v0:
       output: amp1
       algorithm: 23
       feedback: 5
+      mod_index: 1.0  # Per-voice Dexed fit: legacy +/-pi scale beats the universal DX7 2x prior
       operators:
         - ratio: 4.0       # Op1 carrier
           level: 0.0024

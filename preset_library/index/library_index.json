@@ -385,7 +385,7 @@
       }
     },
     "bass----1-15d3a0e31f7e": {
-      "latest_revision": 1,
+      "latest_revision": 3,
       "revisions": {
         "1": {
           "compatible": true,
@@ -394,6 +394,32 @@
           "kind": "INSTRUMENT",
           "name": "BASS    1",
           "path": "capsules/instruments/bass----1-15d3a0e31f7e/1",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "2": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-07-04T01:23:59.434304+00:00",
+          "kind": "INSTRUMENT",
+          "name": "BASS    1",
+          "path": "capsules/instruments/bass----1-15d3a0e31f7e/2",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "3": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-08-13T10:02:39.867285+00:00",
+          "kind": "INSTRUMENT",
+          "name": "BASS    1",
+          "path": "capsules/instruments/bass----1-15d3a0e31f7e/3",
           "retired": false,
           "tags": [
             "fm",
@@ -564,7 +590,7 @@
       }
     },
     "brass---1-b55649664ac9": {
-      "latest_revision": 11,
+      "latest_revision": 12,
       "revisions": {
         "1": {
           "compatible": true,
@@ -599,6 +625,19 @@
           "kind": "INSTRUMENT",
           "name": "BRASS   1",
           "path": "capsules/instruments/brass---1-b55649664ac9/11",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "12": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-07-04T01:23:59.522569+00:00",
+          "kind": "INSTRUMENT",
+          "name": "BRASS   1",
+          "path": "capsules/instruments/brass---1-b55649664ac9/12",
           "retired": false,
           "tags": [
             "fm",
@@ -2311,7 +2350,7 @@
       }
     },
     "e.piano-1-c64d666dcbc9": {
-      "latest_revision": 11,
+      "latest_revision": 12,
       "revisions": {
         "1": {
           "compatible": true,
@@ -2346,6 +2385,19 @@
           "kind": "INSTRUMENT",
           "name": "E.PIANO 1",
           "path": "capsules/instruments/e.piano-1-c64d666dcbc9/11",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "12": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-07-04T01:23:59.614377+00:00",
+          "kind": "INSTRUMENT",
+          "name": "E.PIANO 1",
+          "path": "capsules/instruments/e.piano-1-c64d666dcbc9/12",
           "retired": false,
           "tags": [
             "fm",
@@ -4248,7 +4300,7 @@
       }
     },
     "harpsich-1-b6cad434646a": {
-      "latest_revision": 1,
+      "latest_revision": 2,
       "revisions": {
         "1": {
           "compatible": true,
@@ -4257,6 +4309,19 @@
           "kind": "INSTRUMENT",
           "name": "HARPSICH 1",
           "path": "capsules/instruments/harpsich-1-b6cad434646a/1",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "2": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-07-04T01:23:59.706190+00:00",
+          "kind": "INSTRUMENT",
+          "name": "HARPSICH 1",
+          "path": "capsules/instruments/harpsich-1-b6cad434646a/2",
           "retired": false,
           "tags": [
             "fm",
@@ -5089,7 +5154,7 @@
       }
     },
     "marimba-651262fb03e0": {
-      "latest_revision": 1,
+      "latest_revision": 3,
       "revisions": {
         "1": {
           "compatible": true,
@@ -5098,6 +5163,32 @@
           "kind": "INSTRUMENT",
           "name": "MARIMBA",
           "path": "capsules/instruments/marimba-651262fb03e0/1",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "2": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-07-04T01:23:59.804745+00:00",
+          "kind": "INSTRUMENT",
+          "name": "MARIMBA",
+          "path": "capsules/instruments/marimba-651262fb03e0/2",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "3": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-08-13T10:02:39.940235+00:00",
+          "kind": "INSTRUMENT",
+          "name": "MARIMBA",
+          "path": "capsules/instruments/marimba-651262fb03e0/3",
           "retired": false,
           "tags": [
             "fm",
@@ -8502,7 +8593,7 @@
       }
     },
     "strings-1-014d877ccb74": {
-      "latest_revision": 1,
+      "latest_revision": 3,
       "revisions": {
         "1": {
           "compatible": true,
@@ -8511,6 +8602,32 @@
           "kind": "INSTRUMENT",
           "name": "STRINGS 1",
           "path": "capsules/instruments/strings-1-014d877ccb74/1",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "2": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-07-04T01:23:59.896689+00:00",
+          "kind": "INSTRUMENT",
+          "name": "STRINGS 1",
+          "path": "capsules/instruments/strings-1-014d877ccb74/2",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "3": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-08-13T10:02:40.016149+00:00",
+          "kind": "INSTRUMENT",
+          "name": "STRINGS 1",
+          "path": "capsules/instruments/strings-1-014d877ccb74/3",
           "retired": false,
           "tags": [
             "fm",
@@ -10419,7 +10536,7 @@
       }
     },
     "tub-bells-380c0c796984": {
-      "latest_revision": 1,
+      "latest_revision": 2,
       "revisions": {
         "1": {
           "compatible": true,
@@ -10433,11 +10550,24 @@
             "fm",
             "fm6"
           ]
+        },
+        "2": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-07-04T01:23:59.996611+00:00",
+          "kind": "INSTRUMENT",
+          "name": "TUB BELLS",
+          "path": "capsules/instruments/tub-bells-380c0c796984/2",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
         }
       }
     },
     "vibe----1-773adb5c060a": {
-      "latest_revision": 1,
+      "latest_revision": 3,
       "revisions": {
         "1": {
           "compatible": true,
@@ -10446,6 +10576,32 @@
           "kind": "INSTRUMENT",
           "name": "VIBE    1",
           "path": "capsules/instruments/vibe----1-773adb5c060a/1",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "2": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-07-04T01:24:00.096609+00:00",
+          "kind": "INSTRUMENT",
+          "name": "VIBE    1",
+          "path": "capsules/instruments/vibe----1-773adb5c060a/2",
+          "retired": false,
+          "tags": [
+            "fm",
+            "fm6"
+          ]
+        },
+        "3": {
+          "compatible": true,
+          "deprecated": false,
+          "imported_at": "2026-08-13T10:02:40.090621+00:00",
+          "kind": "INSTRUMENT",
+          "name": "VIBE    1",
+          "path": "capsules/instruments/vibe----1-773adb5c060a/3",
           "retired": false,
           "tags": [
             "fm",

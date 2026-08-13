@@ -601,6 +601,9 @@ class NodeParams:
     post_filter_hz: Optional[float] = None   # FM6 post-LPF cutoff (warmth)
     op_ratios: Optional[List[int]] = None    # 6 Q16.16 frequency ratios
     op_levels: Optional[List[int]] = None    # 6 Q0.15 output levels
+    mod_index: Optional[float] = None        # PM depth scale (1.0 = legacy +/-pi;
+                                             # DX7 imports use 2.0, see
+                                             # ENGINE-BUG-upper-harmonic-rolloff)
     # Legacy fields for backwards compatibility (prefer L1Lift.fm6_morph)
     fm6_topo_a: int = 0                      # Source archetype 0-7 (DEPRECATED: use L1Lift.fm6_morph)
     fm6_topo_b: int = 0                      # Target archetype 0-7 (DEPRECATED: use L1Lift.fm6_morph)
@@ -2141,6 +2144,8 @@ def _parse_node_params(data: dict) -> NodeParams:
         params.feedback = data['feedback']
     if 'post_filter_hz' in data:
         params.post_filter_hz = float(data['post_filter_hz'])
+    if 'mod_index' in data:
+        params.mod_index = float(data['mod_index'])
 
     # Support both legacy integer format and new float format per WSE-STD-FM-PROFILE-v0
     # Legacy: op_ratios: [65536, 65700, ...], op_levels: [32767, 32767, ...]

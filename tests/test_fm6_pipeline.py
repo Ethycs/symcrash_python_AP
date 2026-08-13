@@ -12,8 +12,9 @@ FM6 Pipeline architecture:
 
 import pytest
 import numpy as np
+from copy import deepcopy
 
-from symcrash_python_ap.vm.fm6_state import FM6State, Q15_ONE
+from symcrash_python_ap.vm.fm6_state import FM6State, Q15_ONE, Q16_ONE
 from symcrash_python_ap.vm.fm6_engine import (
     fm6_generate_block_full,
     fwpt_analyze_block,
@@ -73,6 +74,25 @@ class TestFM6DirectAudio:
         assert audio.shape == (64,)
         assert audio.min() < 0
         assert audio.max() > 0
+
+    def test_mod_index_changes_phase_modulation_but_unity_is_legacy(self):
+        state = FM6State()
+        configure_bell(state)
+        for op in state.operators:
+            op.env_value_q15 = Q15_ONE
+        legacy = deepcopy(state)
+        explicit_unity = deepcopy(state)
+        doubled = deepcopy(state)
+        explicit_unity.mod_index_q16 = Q16_ONE
+        doubled.mod_index_q16 = 2 * Q16_ONE
+
+        phase_inc = int((440 / 48000) * (2**32))
+        legacy_audio = fm6_generate_block_full(legacy, phase_inc)
+        unity_audio = fm6_generate_block_full(explicit_unity, phase_inc)
+        doubled_audio = fm6_generate_block_full(doubled, phase_inc)
+
+        assert np.array_equal(legacy_audio, unity_audio)
+        assert not np.array_equal(legacy_audio, doubled_audio)
 
 
 class TestFWPTAdapter:

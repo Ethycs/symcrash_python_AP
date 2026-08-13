@@ -82,6 +82,7 @@ class FM6Config:
     op_levels: list = field(default_factory=lambda: [Q15_ONE]*6)   # 6 × Q15 levels
     feedback_depth: int = 0                 # DX7 feedback level (0-7)
     post_filter_hz: Optional[float] = None  # Output LPF cutoff (None = bypass)
+    mod_index: Optional[float] = None       # PM depth scale (None/1.0 = legacy)
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> 'FM6Config':
@@ -113,6 +114,7 @@ class FM6Config:
             op_levels=op_levels[:6],
             feedback_depth=feedback_depth,
             post_filter_hz=d.get('post_filter_hz'),
+            mod_index=d.get('mod_index'),
         )
 
 
@@ -417,6 +419,7 @@ def compiled_preset_from_ir(ir) -> CompiledPreset:
             op_levels=fm6.op_levels if fm6.op_levels else [Q15_ONE] + [0] * 5,
             feedback_depth=fm6.feedback if fm6.feedback is not None else 0,
             post_filter_hz=fm6.post_filter_hz,
+            mod_index=fm6.mod_index,
         )
         osc_mode = 3  # OSC_MODE_FM6
 
@@ -541,6 +544,7 @@ def compiled_preset_from_capsule(capsule) -> CompiledPreset:
             ],
             feedback_depth=int(vp.get(int(VoiceParamID.FM6_FEEDBACK), 0)),
             post_filter_hz=extras.get('fm6_post_filter_hz'),
+            mod_index=extras.get('fm6_mod_index'),
         )
     elif 'osc_mode' in extras:
         # SOUND_EXTRAS resolves the OSC_MODE=0 "unset vs Mode A" ambiguity

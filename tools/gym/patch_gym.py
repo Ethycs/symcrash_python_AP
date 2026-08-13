@@ -40,6 +40,8 @@ from pathlib import Path
 import numpy as np
 import yaml
 
+from timbre_distance import score_audio_files
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RENDER_TOOL = REPO_ROOT / "tools" / "render" / "render_preset.py"
 AUDIO_OUT = REPO_ROOT / "audio_out" / "presets"
@@ -249,7 +251,12 @@ def best_perm(isos, cand_ops, truth_ops):
     return min(isos, key=cost) if isos else None
 
 
-def audio_compare(cand_wav: Path, truth_wav: Path) -> dict:
+def audio_compare(
+    cand_wav: Path,
+    truth_wav: Path,
+    *,
+    perceptual_backend: str = "auto",
+) -> dict:
     x, sr = read_wav_mono(cand_wav)
     y, _ = read_wav_mono(truth_wav)
     n = min(len(x), len(y))
@@ -287,13 +294,19 @@ def audio_compare(cand_wav: Path, truth_wav: Path) -> dict:
         if near:
             matched += 1
             level_err.append(abs(near[0][1] - dby))
-    return {
+    comparison = {
         "peaks_truth": len(py),
         "peaks_matched": matched,
         "mean_level_err_db": round(float(np.mean(level_err)), 2) if level_err else None,
         "decay60_cand_s": round(decay_60(x), 3),
         "decay60_truth_s": round(decay_60(y), 3),
     }
+    comparison["perceptual"] = score_audio_files(
+        truth_wav,
+        cand_wav,
+        zimtohrli_backend=perceptual_backend,
+    )
+    return comparison
 
 
 def cmd_grade(args):
@@ -354,7 +367,11 @@ def cmd_grade(args):
             truth_wav = render_note(
                 REPO_ROOT / key["source_preset"], note, key["duration"])
         cand_wav = render_note(cand_path, note, key["duration"])
-        audio = audio_compare(cand_wav, truth_wav)
+        audio = audio_compare(
+            cand_wav,
+            truth_wav,
+            perceptual_backend=args.perceptual_backend,
+        )
 
     report = {
         "exam": str(exam_dir), "candidate": str(cand_path),
@@ -384,6 +401,12 @@ def cmd_grade(args):
         print(f"AUDIO (advisory): {audio['peaks_matched']}/{audio['peaks_truth']} peaks matched, "
               f"mean level err {audio['mean_level_err_db']} dB, "
               f"decay60 {audio['decay60_cand_s']}s vs {audio['decay60_truth_s']}s")
+        perceptual = audio["perceptual"]
+        print(
+            "PERCEPTUAL (uncalibrated): "
+            f"committee {perceptual['composite']:.6f}, "
+            f"Zimtohrli {perceptual['zimtohrli'].get('status')}"
+        )
     print(f"Report: {out}")
 
 
@@ -431,6 +454,12 @@ def main():
     sg.add_argument("--exam", required=True)
     sg.add_argument("--note", type=int, default=60)
     sg.add_argument("--no-audio", action="store_true")
+    sg.add_argument(
+        "--perceptual-backend",
+        choices=("auto", "wsl", "local", "off"),
+        default="auto",
+        help="isolated Zimtohrli backend for advisory grading (default: auto)",
+    )
     sg.set_defaults(fn=cmd_grade)
 
     sl = sub.add_parser("ledger", help="append a graded round to the ledger")

@@ -324,6 +324,8 @@ class TestEndToEnd:
             assert result.errors == [], f"{f.name}: {result.errors}"
             assert result.warnings == [], f"{f.name}: {result.warnings}"
             data = yaml.safe_load(f.read_text(encoding="utf-8"))
+            fm6 = data["instrument_ir_v0"]["graph"]["fm6"]
+            assert fm6["mod_index"] == dx7.DX7_MOD_INDEX
             instrument = load_instrument_from_dict(data)
             assert instrument is not None
 

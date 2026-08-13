@@ -843,6 +843,7 @@ def fm6_block_full(
     carrier_mask,
     num_carriers,
     master_level,
+    mod_index_q16,
     fb_row,
     out_audio,
 ):
@@ -862,6 +863,7 @@ def fm6_block_full(
         carrier_mask: 6-bit carrier mask
         num_carriers: number of carriers (for normalization)
         master_level: Q15 master level
+        mod_index_q16: Q16 phase-modulation depth scale (65536 == legacy << 16)
         fb_row: int64[64] out - feedback operator's sample outputs
         out_audio: int16[64] out - final audio block (pre post-filter)
     """
@@ -893,7 +895,7 @@ def fm6_block_full(
 
             phase = (phase + op_phase_inc) & Q32_MASK
 
-            mod_phase = (mod_sum << 16) & Q32_MASK
+            mod_phase = (mod_sum * mod_index_q16) & Q32_MASK
             effective_phase = (phase + mod_phase) & Q32_MASK
 
             sin_val = _sine_q15_k(lut, effective_phase)

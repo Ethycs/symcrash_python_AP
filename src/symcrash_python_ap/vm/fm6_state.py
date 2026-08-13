@@ -111,6 +111,14 @@ class FM6State:
     master_level_q15: int = Q15_ONE   # Overall output scaling (Q15)
     master_pitch_bend: int = 0        # Pitch bend (cents, ±8192 typical)
 
+    # Modulation index scale (Q16 multiplier on the phase-modulation depth).
+    # Q16_ONE (65536) reproduces the legacy mod_sum << 16 bit-exactly:
+    # a full-scale Q15 modulator deviates the carrier phase by ±pi radians.
+    # The true DX7 deviates ~2x further at output level 99; imported DX7
+    # voices set mod_index in the IR to close that gap (ENGINE-BUG-upper-
+    # harmonic-rolloff). Legacy ear-tuned presets leave it at the default.
+    mod_index_q16: int = Q16_ONE
+
     # Post-filter (optional one-pole lowpass)
     # When enabled, softens harsh FM harmonics (like vintage DX7 DAC filter)
     post_filter_enabled: bool = False
