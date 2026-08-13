@@ -12,9 +12,13 @@ wbs.sd = None  # no audio device in CI-style run
 from symcrash_workbench.session import WorkbenchSession
 
 SCRATCH = Path("_smoketest_preset.yaml")
-shutil.copy("presets/instruments/dx_marimba_v0.yaml", SCRATCH)
+SOURCE = Path("presets/instruments/dx_marimba_v0.yaml")
+source_text = SOURCE.read_bytes().decode("utf-8")
+source_has_crlf = "\r\n" in source_text
+shutil.copy(SOURCE, SCRATCH)
 
 s = WorkbenchSession(SCRATCH, autoplay=False)
+initial_version = s.ir.meta.version
 
 # 1. Reads
 checks = []
@@ -28,6 +32,8 @@ v = s.registry["/axis/stable/warp"].get(s.ir)
 checks.append(("axis stable warp read (empty)", v == 0.0, v))
 v = s.registry["/filter/cutoff_hz"].get(s.ir)
 checks.append(("filter read on no-Filter preset", v is None, v))
+v = s.registry["/system/dream"].get(s.ir)
+checks.append(("system dream default read", v == 0.0, v))
 
 # 2. Render baseline, mutate, render again -> output must change
 base = s.render()
@@ -35,6 +41,7 @@ assert s.handle("/amp/decay", 1200.0)
 assert s.handle("/fm/op2/level", 0.55)
 assert s.handle("/axis/stable/warp", 0.4)
 assert s.handle("/env1/decay", 300.0)
+assert s.handle("/system/dream", 0.25)
 mod = s.render()
 n = min(len(base), len(mod))
 diff = int(abs(base[:n].astype("i8") - mod[:n].astype("i8")).max())
@@ -55,19 +62,23 @@ checks.append(("velocity changes render", vdiff > 100, vdiff))
 # 3. Save -> version bump + values in YAML + comments preserved
 assert s.save()
 text = SCRATCH.read_bytes().decode("utf-8")
-checks.append(("version bumped", "version: 12" in text, None))
+expected_version = initial_version + 1
+checks.append(("version bumped", f"version: {expected_version}" in text,
+               expected_version))
 checks.append(("decay written", "decay: 1200.0" in text, None))
 checks.append(("op level written", "level: 0.55" in text, None))
 checks.append(("emphasis written", "warp: 0.4" in text, None))
+checks.append(("system axis written", "dream: 0.25" in text, None))
 checks.append(("comments preserved", "faithful Operator recipe" in text, None))
-checks.append(("CRLF preserved", "\r\n" in text, None))
+checks.append(("newline style preserved", ("\r\n" in text) == source_has_crlf,
+               "CRLF" if source_has_crlf else "LF"))
 
 # 4. Reload from disk reflects saved state
 s.handle("/reload", 1)
 time.sleep(0.1)
 v = s.registry["/amp/decay"].get(s.ir)
 checks.append(("reload sees saved decay", abs(v - 1200.0) < 1e-6, v))
-checks.append(("reload sees version", s.ir.meta.version == 12,
+checks.append(("reload sees version", s.ir.meta.version == expected_version,
                s.ir.meta.version))
 
 # 5. push_state emits sane pairs

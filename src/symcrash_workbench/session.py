@@ -155,12 +155,17 @@ class WorkbenchSession:
                 self.render_and_play()
 
     def render(self) -> np.ndarray:
+        from .system_axes import SystemAxisRuntime
+
         with self._render_lock:
             clear_basis_atlas()
             t0 = time.monotonic()
+            system_axes = SystemAxisRuntime(self.ir)
             samples = render_preset_note(
                 self.ir, note=self.note, duration_sec=self.duration,
-                velocity_q15=int(self.velocity * Q15_ONE))
+                velocity_q15=int(self.velocity * Q15_ONE),
+                frame_transform=lambda frame: system_axes.apply(
+                    frame, self.ir))
             dt = time.monotonic() - t0
         samples = np.asarray(samples, dtype=np.int16)
         self._log("render", note=self.note, velocity=self.velocity,

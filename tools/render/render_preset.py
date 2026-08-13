@@ -120,6 +120,7 @@ def _render_voice(
     phase_offset_q32: int = 0,
     noise_seed_xor: int = 0,
     verbose: bool = True,
+    frame_transform=None,
 ) -> np.ndarray:
     """
     Render one (mono) voice of a note using the preset parameters.
@@ -142,6 +143,9 @@ def _render_voice(
         noise_seed_xor: XORed into the noise exciter seed so unison copies
             get decorrelated attack noise.
         verbose: Print render header info.
+        frame_transform: Optional authoring/control callback applied to each
+            completed VoiceFrame before VM execution.  The default ``None``
+            preserves the canonical render path bit-exactly.
     """
     # One shared frame builder (voice/frame_builder.py) owns all
     # per-block frame construction; this function keeps only the offline
@@ -245,6 +249,8 @@ def _render_voice(
                 families = template['families']
 
         frame = builder.build(clock, ops_enable=ops_enable, families=families)
+        if frame_transform is not None:
+            frame = frame_transform(frame)
 
         # Render block
         state, output = vm_step_block(state, frame)
@@ -259,6 +265,7 @@ def render_preset_note(
     duration_sec: float = 2.0,
     risk_profile: list = None,
     velocity_q15: int = 32767,
+    frame_transform=None,
 ) -> np.ndarray:
     """
     Render a single note using the preset parameters.
@@ -284,7 +291,8 @@ def render_preset_note(
     unison = extract_unison_params(ir)
     if not unison:
         return _render_voice(ir, note=note, duration_sec=duration_sec,
-                             risk_profile=risk_profile, velocity_q15=velocity_q15)
+                             risk_profile=risk_profile, velocity_q15=velocity_q15,
+                             frame_transform=frame_transform)
 
     n_voices = unison['voices']
     spread = unison['spread_cents']
@@ -301,6 +309,7 @@ def render_preset_note(
             phase_offset_q32=phase_q32,
             noise_seed_xor=phase_q32,
             verbose=(k == 0),
+            frame_transform=frame_transform,
         ).astype(np.float64)
         pan_l, pan_r = equal_power_pan(t, width)
         if mix_l is None:

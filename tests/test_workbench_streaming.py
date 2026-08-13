@@ -125,6 +125,91 @@ def test_play_message_ignored_mid_stream(make_session):
     assert session.streaming is False
 
 
+# =========================================================== system manifold
+
+def test_system_axis_registry_and_yaml_roundtrip(make_session):
+    """The 11 controller-owned axes have saveable /system/* routes."""
+    from ruamel.yaml import YAML
+
+    session = make_session()
+    expected = {
+        "energy", "motion", "focus", "brightness", "density", "risk",
+        "space", "material", "unity", "dream", "slip",
+    }
+    addresses = {a.removeprefix("/system/") for a in session.registry
+                 if a.startswith("/system/")}
+    assert addresses == expected
+    assert session.ir.control is None
+
+    param = session.registry["/system/dream"]
+    assert param.get(session.ir) == 0.0
+    assert param.set(session.ir, 0.625)
+    assert session.ir.control is not None
+    assert param.get(session.ir) == 0.625
+
+    yaml = YAML()
+    doc = yaml.load(session.preset_path.read_bytes().decode("utf-8"))
+    root = doc["instrument_ir_v0"]
+    assert param.yaml_apply(root, session.ir, 0.625)
+    assert root["character"]["dream"] == 0.625
+
+
+def test_system_axis_latches_with_macro_slew_and_changes_audio(make_session):
+    """A hidden system axis reaches sound at a block boundary via its slew."""
+    from symcrash_python_ap.primitives import SystemMacro
+
+    inject_at = SUSTAIN_BLOCK + 20
+    total = inject_at + 80
+
+    control_voice = StreamingVoice(make_session())
+    control_voice.note_on(60)
+    control = _render_blocks(control_voice, total)
+    control_voice.stop()
+
+    session = make_session()
+    voice = StreamingVoice(session)
+    voice.note_on(60)
+    injected = []
+    for i in range(total):
+        if i == inject_at:
+            voice.inject("/system/dream", 1.0)
+        injected.append(voice.render_block())
+
+    dream_id = SystemMacro.DREAM
+    current = voice.system_axes.runtime.get_system_macro(dream_id)
+    target = voice.system_axes.runtime.macro_target_q15[dream_id]
+    voice.stop()
+
+    first_diff = next(
+        (i for i, (a, b) in enumerate(zip(injected, control))
+         if not np.array_equal(a, b)), None)
+    assert first_diff is not None and first_diff >= inject_at
+    assert 0 < current < target == 32767
+    assert session.changed["/system/dream"] == 1.0
+
+
+def test_offline_workbench_render_applies_system_projection(make_session,
+                                                            monkeypatch):
+    """Legacy --offline audition uses the same system-axis projection."""
+    from symcrash_python_ap.frames import VoiceFrame
+
+    seen = {}
+
+    def fake_render(ir, **kwargs):
+        transform = kwargs["frame_transform"]
+        frame = transform(VoiceFrame(ops_enable=[], families={}))
+        seen["ops"] = frame.ops_enable
+        return np.zeros(BLOCK_SIZE, dtype=np.int16)
+
+    monkeypatch.setattr("symcrash_workbench.session.render_preset_note",
+                        fake_render)
+    session = make_session()
+    session._write_wav = lambda samples: None
+    assert session.handle("/system/dream", 1.0)
+    session.render()
+    assert {"BandShear", "SwapBands", "RotateNodes"} <= set(seen["ops"])
+
+
 # ====================================================================== gate
 
 def test_note_off_release_then_inactive(make_session):
@@ -255,6 +340,18 @@ def test_osc_bridge_routes_to_latch(make_session):
                 break
         assert latched, "OSC message never latched into the stream"
         assert voice.latch_log[-1].address == "/amp/sustain"
+
+        # The controller-owned manifold uses the same OSC -> queue ->
+        # block-latch path as ordinary patch parameters.
+        client.send_message("/system/dream", 0.75)
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            voice.render_block()
+            if abs(session.registry["/system/dream"].get(session.ir)
+                   - 0.75) < 1e-6:
+                break
+        assert abs(session.ir.control.dream - 0.75) < 1e-6
+        assert voice.latch_log[-1].address == "/system/dream"
     finally:
         bridge.stop()
         voice.stop()

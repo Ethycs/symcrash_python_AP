@@ -24,6 +24,16 @@ Preset library over OSC: /preset/list replies with the catalog
 /preset/load <id-or-filename> live-swaps the session - mid-stream the
 old note fades over one block and the new preset retriggers.
 
+The controller-owned L1 manifold is available as normalized OSC targets:
+
+    /system/energy  /system/motion  /system/focus  /system/brightness
+    /system/density /system/risk    /system/space  /system/material
+    /system/unity   /system/dream   /system/slip
+
+These are block-latched and use the SystemMacro slew laws.  They are
+separate from /axis/{attack,stable}/*, which edits the preset's structural
+operator emphasis rather than live controller intent.
+
 Phase C internals (see streaming.py): a sustained note rendered
 block-by-block through the jit vm_step_block, atlas-mode sweeps, noise
 exciter and N-voice unison/stereo latched from the live IR every block:

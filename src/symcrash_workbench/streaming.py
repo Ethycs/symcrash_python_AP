@@ -74,6 +74,7 @@ from symcrash_python_ap.voice.frame_builder import (  # noqa: E402
 )
 
 from .library import resolve_preset  # noqa: E402
+from .system_axes import SystemAxisRuntime  # noqa: E402
 from symcrash_python_ap.vm.executor import vm_step_block  # noqa: E402
 from symcrash_python_ap.vm.harmonic_bank import (  # noqa: E402
     LFOTarget, clear_basis_atlas,
@@ -199,6 +200,10 @@ class StreamingVoice:
         self._release_blocks = 1
         self._last_gain_q15 = 0
 
+        # Controller-owned L1 axes use their frozen MacroRuntime slew laws;
+        # the live IR remains the target/source of truth for OSC and SAVE.
+        self.system_axes = SystemAxisRuntime(session.ir)
+
     # ------------------------------------------------------------- gate
 
     def note_on(self, note: Optional[int] = None,
@@ -218,6 +223,7 @@ class StreamingVoice:
         self._release_from_q15 = 0
         self._last_gain_q15 = 0
         self._unison_gain = 1.0
+        self.system_axes.reset_from_ir(self.session.ir)
         self._unison = extract_unison_params(self.session.ir)
         if self._unison:
             self.state = None
@@ -562,6 +568,7 @@ class StreamingVoice:
                               sustain_until_block=self._note_off_block,
                               release_from_q15=self._release_from_q15)
         frame = builder.build(clock)
+        self.system_axes.apply(frame, self.session.ir)
         self._release_blocks = builder.release_blocks
         self._last_gain_q15 = builder.last_amp_gain_q15
         return frame

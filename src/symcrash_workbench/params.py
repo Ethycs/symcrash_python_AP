@@ -18,10 +18,13 @@ from typing import Any, Callable, Dict, List, Optional
 from symcrash_python_ap.instrument_ir import (
     ADSR,
     AXIS_OPERATORS,
+    ControlConfig,
     EmitTemplate,
     derive_operators_from_emphasis,
 )
 from symcrash_python_ap.primitives import Q16_ONE
+
+from .system_axes import SYSTEM_AXIS_MACROS
 
 AXES = list(AXIS_OPERATORS.keys())  # color, body, spread, snap, glue, warp, chaos
 
@@ -32,6 +35,29 @@ AXIS_STATES = ["attack", "stable"]
 
 # Mod-envelope bindings exposed by index (env1 = first binding in YAML order).
 ENV_SLOTS = 2
+
+# Controller-owned SystemMacro inputs.  These are distinct from the seven
+# /axis/{state}/* authoring coordinates above: /axis edits the patch's
+# per-regime operator emphasis, while /system addresses the live L1 control
+# manifold that steers those compiled behaviors.
+SYSTEM_AXES = list(SYSTEM_AXIS_MACROS)
+
+_SYSTEM_LABELS = {
+    "energy": "ENERGY",
+    "motion": "MOTION",
+    "focus": "FOCUS",
+    "brightness": "BRIGHT",
+    "density": "DENSITY",
+    "risk": "RISK",
+    "space": "SPACE",
+    "material": "MATERIAL",
+    "unity": "UNITY",
+    "dream": "DREAM",
+    "slip": "SLIP",
+}
+_SYSTEM_DEFAULTS = {
+    axis: float(getattr(ControlConfig(), axis)) for axis in SYSTEM_AXES
+}
 
 
 @dataclass
@@ -281,6 +307,35 @@ def _axis_param(state, axis):
                  f"axis_{state}", get, set_, yapply)
 
 
+def _system_axis_param(axis):
+    """A controller-owned L1/SystemMacro coordinate under /system/*."""
+    def get(ir):
+        control = ir.control
+        if control is None:
+            return _SYSTEM_DEFAULTS[axis]
+        return float(getattr(control, axis))
+
+    def set_(ir, v):
+        if ir.control is None:
+            ir.control = ControlConfig()
+        setattr(ir.control, axis, max(0.0, min(1.0, float(v))))
+        return True
+
+    def yapply(root, ir, v):
+        # All shipped workbench presets use the sound-design form, where
+        # ``character`` translates to L1Lift.control on load.  Creating the
+        # mapping makes the system manifold saveable even for older presets
+        # that did not author character defaults.
+        if "character" not in root or root["character"] is None:
+            root["character"] = {}
+        root["character"][axis] = round(
+            max(0.0, min(1.0, float(v))), 4)
+        return True
+
+    return Param(f"/system/{axis}", _SYSTEM_LABELS[axis], 0.0, 1.0,
+                 "system", get, set_, yapply)
+
+
 _NOISE_COLORS = ["white", "pink", "brown"]
 _NOISE_COLOR_IDS = {name: i for i, name in enumerate(_NOISE_COLORS)}
 
@@ -484,6 +539,9 @@ def build_registry() -> Dict[str, Param]:
         for axis in AXES:
             params.append(_axis_param(state, axis))
 
+    for axis in SYSTEM_AXES:
+        params.append(_system_axis_param(axis))
+
     params += [
         _filter_param("cutoff_hz", "CUTOFF", 50.0, 20000.0, log=True),
         _filter_param("resonance", "RESO", 0.0, 1.0),
@@ -523,6 +581,7 @@ GROUPS = [
     ("env2", "MOD ENV 2"),
     ("axis_attack", "AXES - ATTACK"),
     ("axis_stable", "AXES - STABLE"),
+    ("system", "SYSTEM MANIFOLD"),
     ("filter", "FILTER"),
     ("noise", "NOISE"),
     ("unison", "UNISON"),
