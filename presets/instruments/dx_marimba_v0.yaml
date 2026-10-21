@@ -30,7 +30,7 @@ instrument_ir_v0:
   meta:
     id: "dx-marimba-v0"
     name: "DX Marimba"
-    version: 12
+    version: 14
     author: "symcrash"
     seed: 0x444D5242
 
@@ -46,18 +46,18 @@ instrument_ir_v0:
       feedback: 0
       post_filter_hz: 5500.0
       operators:
-        - ratio: 1.0      # Op1 carrier - sine (recipe Osc A)
-          level: 0.40
-        - ratio: 2.0      # Op2 modulator - sine at 2:1 (recipe Osc B)
-          level: 0.40
-        - ratio: 1.004    # Op3 carrier - detuned double (slow beat)
-          level: 0.10
-        - ratio: 2.008    # Op4 modulator - detuned knock
-          level: 0.28
-        - ratio: 1.0
-          level: 0.0
-        - ratio: 1.0
-          level: 0.0
+      - ratio: 1.0        # Op1 carrier - sine (recipe Osc A)
+        level: 0.40
+      - ratio: 2.0        # Op2 modulator - sine at 2:1 (recipe Osc B)
+        level: 0.40
+      - ratio: 1.004      # Op3 carrier - detuned double (slow beat)
+        level: 0.10
+      - ratio: 2.008      # Op4 modulator - detuned knock
+        level: 0.28
+      - ratio: 1.0
+        level: 0.0
+      - ratio: 1.0
+        level: 0.0
     amp1:
       type: Amp
       attack: 1.0

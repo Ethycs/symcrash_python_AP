@@ -180,6 +180,7 @@ class StreamingVoice:
         self.block_index = 0
         self.gate = False
         self.active = False
+        self._stop_event = threading.Event()
 
         # Unison bank (None = legacy mono path, bit-exact).
         self.copies: Optional[List[_UnisonCopy]] = None
@@ -194,6 +195,7 @@ class StreamingVoice:
         self._sweep_lock = threading.Lock()
         self.latch_log: deque = deque(maxlen=256)
         self._pending_preset: Optional[str] = None
+        self._autoplay_at: Optional[float] = None
 
         self._note_off_block = 0
         self._release_from_q15 = 0
@@ -215,6 +217,7 @@ class StreamingVoice:
             self.session.velocity = max(0.0, min(1.0, float(velocity)))
         self.note = self.session.note
         clear_basis_atlas()
+        self._stop_event.clear()
         self.session.streaming = True
         self.block_index = 0
         self.gate = True
@@ -223,6 +226,7 @@ class StreamingVoice:
         self._release_from_q15 = 0
         self._last_gain_q15 = 0
         self._unison_gain = 1.0
+        self._autoplay_at = None
         self.system_axes.reset_from_ir(self.session.ir)
         self._unison = extract_unison_params(self.session.ir)
         if self._unison:
@@ -247,6 +251,7 @@ class StreamingVoice:
 
     def stop(self):
         """Hard-stop the voice and re-enable the session debounce render."""
+        self._stop_event.set()
         self.gate = False
         self.active = False
         self.session.streaming = False
@@ -289,6 +294,11 @@ class StreamingVoice:
         """True when the unison bank is active (blocks are (64, 2))."""
         return self.copies is not None
 
+    @property
+    def stopped(self) -> bool:
+        """True after an explicit service stop (distinct from note silence)."""
+        return self._stop_event.is_set()
+
     def render_block(self) -> np.ndarray:
         """
         Latch pending input, render one 64-sample block.
@@ -296,15 +306,22 @@ class StreamingVoice:
         Mono presets return a 1-D int16 array (bit-exact legacy path);
         unison presets return an int16 (BLOCK_SIZE, 2) = (L, R) block.
         """
-        if not self.active:
-            return self._silence()
-        self._apply_sweeps()
+        if self.active:
+            self._apply_sweeps()
         self._drain_queue()
         if self._pending_preset is not None:
             token, self._pending_preset = self._pending_preset, None
-            swapped = self._swap_preset(token)
-            if swapped is not None:
-                return swapped
+            if self.active:
+                swapped = self._swap_preset(token)
+                if swapped is not None:
+                    return swapped
+            else:
+                self.session.load_preset(token)
+                self.system_axes.reset_from_ir(self.session.ir)
+        # A silent live service still drains the input queue above, allowing
+        # the next keyboard or PLAY event to reactivate it at a block edge.
+        if not self.active:
+            return self._silence()
         frame = self._build_frame()
         out = self._step_bank(frame)
         self.block_index += 1
@@ -330,11 +347,13 @@ class StreamingVoice:
                       for b in blocks]
         return np.concatenate(blocks)
 
-    def play_realtime(self, seconds: Optional[float] = None) -> bool:
+    def play_realtime(self, seconds: Optional[float] = None,
+                      keep_open: bool = False) -> bool:
         """
         Stream to the default audio device (best-effort; returns False
-        when sounddevice is unavailable). Blocks until the voice ends,
-        `seconds` elapse, or KeyboardInterrupt.
+        when sounddevice is unavailable). Blocks until the voice ends (or an
+        explicit stop when ``keep_open`` is true), `seconds` elapse, or
+        KeyboardInterrupt.
 
         The device stream is opened stereo; mono blocks are upmixed for
         playback only, so a live /preset/load swap between mono and
@@ -352,7 +371,7 @@ class StreamingVoice:
         with sd.OutputStream(samplerate=FS, channels=2, dtype="int16",
                              blocksize=BLOCK_SIZE * 8) as out:
             try:
-                while self.active:
+                while not self.stopped and (keep_open or self.active):
                     t0 = time.perf_counter()
                     block = self.render_block()
                     recent.append((time.perf_counter() - t0) * 1e6)
@@ -521,15 +540,42 @@ class StreamingVoice:
                         self._sweeps.remove(sweep)
 
     def _drain_queue(self):
+        play_requested = False
         while True:
             try:
                 address, value, t_in = self._queue.get_nowait()
             except queue.Empty:
                 break
+            if address == "/stream/keyboard":
+                try:
+                    note, gate = value
+                    note = max(0, min(127, int(note)))
+                    gate = float(gate)
+                except (TypeError, ValueError):
+                    continue
+                if gate >= 0.5:
+                    self.note_on(note, self.session.velocity)
+                elif note == self.note:
+                    # A stale release from a previously traversed key must
+                    # not silence the newer monophonic note.
+                    self.note_off()
+                self.latch_log.append(LatchRecord(
+                    self.block_index, address, gate,
+                    time.perf_counter() - t_in))
+                continue
             if address == "/play":
-                # An offline debounce render mid-stream would clear the
-                # basis atlas under the streaming voice; the stream IS
-                # the audition, so /play is a no-op here.
+                # PLAY is a live note retrigger.  Do not route it through
+                # WorkbenchSession.handle(), whose implementation starts the
+                # legacy offline renderer and clears the shared basis atlas.
+                try:
+                    pressed = value is None or float(value) >= 0.5
+                except (TypeError, ValueError):
+                    pressed = False
+                if pressed:
+                    play_requested = True
+                    self.latch_log.append(LatchRecord(
+                        self.block_index, address, 1.0,
+                        time.perf_counter() - t_in))
                 continue
             if address == "/preset/load":
                 # Swapping the IR under a mid-block frame build is not
@@ -538,14 +584,45 @@ class StreamingVoice:
                 if value is not None:
                     self._pending_preset = str(value)
                 continue
-            ok = self.session.handle(address, value)
+            if address == "/editor/source/apply":
+                ok, _ = self.session.apply_source(str(value))
+                if ok:
+                    # Source replacement can change graph, unison bank, and
+                    # system state together; rebuild the voice coherently.
+                    play_requested = True
+                self.latch_log.append(LatchRecord(
+                    self.block_index, address, 1.0 if ok else 0.0,
+                    time.perf_counter() - t_in))
+                continue
+            if address.startswith("/editor/"):
+                payload = value if isinstance(value, tuple) else (value,)
+                ok = self.session.handle_message(address, *payload)
+            else:
+                ok = self.session.handle(address, value)
             if ok:
                 if address == "/note":
                     self.note = self.session.note
+                if address == "/autoplay":
+                    if not self.session.autoplay:
+                        self._autoplay_at = None
+                elif (self.session.autoplay
+                      and address not in {"/save", "/preset/list"}):
+                    # Preserve the offline workbench's debounce semantics:
+                    # continuous knob traffic remains smoothly live, then
+                    # the completed edit retriggers the attack once.
+                    self._autoplay_at = (time.monotonic()
+                                         + self.session.debounce)
                 self.latch_log.append(LatchRecord(
                     self.block_index, address,
-                    float(value) if value is not None else 0.0,
+                    (float(value) if value is not None
+                     and not isinstance(value, tuple) else 1.0),
                     time.perf_counter() - t_in))
+
+        if play_requested:
+            self.note_on(self.session.note, self.session.velocity)
+        elif (self._autoplay_at is not None
+              and time.monotonic() >= self._autoplay_at):
+            self.note_on(self.session.note, self.session.velocity)
 
     def _build_frame(self) -> VoiceFrame:
         """Rebuild the VoiceFrame from the live IR: the per-block latch.
@@ -608,6 +685,7 @@ class StreamingOSCBridge:
             from pythonosc.udp_client import SimpleUDPClient
             self.client = SimpleUDPClient(feedback_host, feedback_port)
             voice.session.on_preset_loaded = self._on_preset_loaded
+            voice.session.on_state_changed = self._on_state_changed
         dispatcher = Dispatcher()
         dispatcher.set_default_handler(self._route)
         self.server = ThreadingOSCUDPServer((listen_host, listen_port),
@@ -636,6 +714,10 @@ class StreamingOSCBridge:
             self.client.send_message("/preset/loaded",
                                      session.preset_path.stem)
 
+    def _on_state_changed(self, session):
+        if self.client is not None:
+            session.push_state(self.client.send_message)
+
     def _route(self, address, *args):
         v = self.voice
         try:
@@ -644,6 +726,11 @@ class StreamingOSCBridge:
                           float(args[1]) if len(args) > 1 else None)
             elif address == "/stream/note_off":
                 v.note_off()
+            elif address == "/stream/keyboard" and len(args) >= 2:
+                # The Open Stage Control keyboard sends
+                # /stream/keyboard <midi-note> <on|off>.  Queue it so VM
+                # reset/release occurs at the next audio block boundary.
+                v.inject(address, (int(args[0]), float(args[1])))
             elif address == "/stream/sweep" and len(args) >= 4:
                 loop = str(args[4]) if len(args) > 4 else "none"
                 v.start_sweep(str(args[0]), float(args[1]), float(args[2]),
@@ -660,6 +747,10 @@ class StreamingOSCBridge:
                     v.inject(address, token)   # safe swap at block boundary
                 elif token:
                     v.session.load_preset(token)
+            elif address.startswith("/editor/"):
+                # Patchbay widgets send input + zero or more outputs. Keep
+                # the entire message together until the audio block boundary.
+                v.inject(address, tuple(args))
             else:
                 v.inject(address, args[0] if args else None)
         except Exception as e:  # keep the OSC thread alive on bad input
@@ -866,8 +957,8 @@ def main():
         voice.note_on(args.note)
         print(f"[stream] sustaining note {args.note}; Ctrl+C to stop")
         try:
-            if not voice.play_realtime():
-                while voice.active:  # headless fallback: free-run
+            if not voice.play_realtime(keep_open=True):
+                while not voice.stopped:  # headless OSC service: free-run
                     voice.render_block()
         finally:
             voice.stop()

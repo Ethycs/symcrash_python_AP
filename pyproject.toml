@@ -34,6 +34,8 @@ virtual-synth-mp = "python tools/virtual_synth_mp.py"
 imgui-controls = "python -m symcrash_imgui_controls"
 # OSC tuning workbench (Open Stage Control front-end)
 workbench = "python -m symcrash_workbench"
+# Portable Windows UI bootstrap/launcher (installed under ignored .pixi/)
+workbench-ui = "pwsh -NoProfile -File tools/workbench/launch_open_stage_control.ps1"
 
 # === Development Tasks ===
 test = "python -m pytest tests/ -v"

@@ -25,8 +25,9 @@ from symcrash_workbench.session import WorkbenchSession  # noqa: E402
 from symcrash_workbench.streaming import (  # noqa: E402
     OSC_AVAILABLE, StreamingVoice,
 )
+from symcrash_python_ap.paths import PRESET_INSTRUMENTS_DIR  # noqa: E402
 
-PRESET_DIR = REPO_ROOT / "presets" / "instruments"
+PRESET_DIR = PRESET_INSTRUMENTS_DIR
 
 # Pre-change golden SHA256 of 0.5 s mono streams (note 60, fresh session).
 # Captured on the legacy mono path BEFORE the noise/unison/stereo work:
@@ -202,14 +203,29 @@ def test_catalog_scan_known_ids():
     assert pad.path.exists()
 
 
-def test_catalog_capsule_ids_resolve():
-    """Capsule ids from the library index map back to YAML sources."""
+def test_catalog_capsule_ids_resolve(tmp_path, monkeypatch):
+    """Capsule ids from a generated index map back to YAML sources."""
+    import json
+    import symcrash_workbench.library as library_module
+
+    index = tmp_path / "index" / "library_index.json"
+    index.parent.mkdir()
+    index.write_text(json.dumps({
+        "capsules": {
+            "string-pad-0123456789ab": {
+                "latest_revision": 1,
+                "revisions": {"1": {"name": "String Pad"}},
+            },
+        },
+    }), encoding="utf-8")
+    monkeypatch.setattr(library_module, "LIBRARY_INDEX", index)
+
     catalog = scan_preset_catalog()
     with_capsules = [e for e in catalog if e.capsule_ids]
-    assert with_capsules, "no capsule ids resolved from the library index"
+    assert len(with_capsules) == 1
     entry = with_capsules[0]
-    resolved = resolve_preset(entry.capsule_ids[0], catalog)
-    assert resolved is entry
+    assert entry.stem == "string_pad_v0"
+    assert resolve_preset("string-pad-0123456789ab", catalog) is entry
 
 
 def test_resolve_preset_forms():

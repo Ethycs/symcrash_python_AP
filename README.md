@@ -29,9 +29,14 @@ symcrash_python_AP/
 ├── pipeline_tests/               # Pipeline validation tests
 ├── audio_generation_tests/       # Audio output tests & analysis
 ├── tools/                        # Development and demo scripts
+├── presets/                      # Preset YAML source + ignored .build library
 ├── docs/                         # Architecture documentation (WSE-STD-*)
 └── audio_out/                    # Generated audio files
 ```
+
+`presets/` is the only preset root. Tracked YAML source lives in its category
+folders; compiled capsules, indexes, caches, and previews are regenerated in
+`presets/.build/`. See [`presets/README.md`](presets/README.md).
 
 ## Test Organization
 

@@ -49,6 +49,7 @@ from .vm.state import VMState, OSC_MODE_A, OSC_MODE_B, OSC_MODE_FM6
 from .vm.executor import vm_step_block
 from .primitives import Q15_ONE, Q15_HALF, Q15_NEG_ONE, SAMPLE_RATE_HZ
 from .primitives import Q16_ONE
+from .paths import PRESET_BUILD_DIR
 
 
 # =============================================================================
@@ -62,7 +63,7 @@ class SynthConfig:
     block_size: int = BLOCK_SIZE
     n_voices: int = 8
     output_dir: str = "audio_out"
-    library_dir: str = "preset_library"
+    library_dir: str = str(PRESET_BUILD_DIR)
 
 
 # =============================================================================

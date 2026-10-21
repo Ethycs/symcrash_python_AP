@@ -31,16 +31,17 @@ def serve(session: WorkbenchSession,
 
         session.on_preset_loaded = _on_preset_loaded
 
+        def _on_state_changed(sess):
+            sess.push_state(client.send_message)
+
+        session.on_state_changed = _on_state_changed
+
     def on_message(address, *args):
         if address == "/preset/list":
             if client is not None:
                 send_preset_list(client.send_message)
             return
-        value = args[0] if args else None
-        session.handle(address, value)
-        # After save/reload, resync the surface
-        if address in ("/reload",) and client is not None:
-            session.push_state(client.send_message)
+        session.handle_message(address, *args)
 
     dispatcher = Dispatcher()
     dispatcher.set_default_handler(on_message)

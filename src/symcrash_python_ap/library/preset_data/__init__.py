@@ -43,17 +43,14 @@ Available macro presets:
     - tremolo_fast_v0     - Fast tremolo effect
     - portamento_slow_v0  - Slow pitch glide
 """
-from pathlib import Path
 from typing import Dict, List
 
 from ...instrument_ir import InstrumentIR, load_instrument
-
-# Find the presets directory (relative to repo root)
-_MODULE_DIR = Path(__file__).parent
-_REPO_ROOT = _MODULE_DIR.parent.parent.parent.parent  # src/symcrash.../library/preset_data -> repo root
-PRESET_DIR = _REPO_ROOT / "presets"
-INSTRUMENTS_DIR = PRESET_DIR / "instruments"
-MACROS_DIR = PRESET_DIR / "macros"
+from ...paths import (
+    PRESETS_DIR as PRESET_DIR,
+    PRESET_INSTRUMENTS_DIR as INSTRUMENTS_DIR,
+    PRESET_MACROS_DIR as MACROS_DIR,
+)
 
 
 def list_presets(category: str = None) -> List[str]:

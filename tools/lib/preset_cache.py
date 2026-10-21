@@ -46,7 +46,7 @@ def load_cache(library_dir: Path) -> PresetCache:
     Load cache from disk.
 
     Args:
-        library_dir: Path to preset_library directory
+        library_dir: Path to the generated preset build directory
 
     Returns:
         PresetCache instance (empty if file doesn't exist or is invalid)
@@ -88,7 +88,7 @@ def save_cache(cache: PresetCache, library_dir: Path) -> None:
 
     Args:
         cache: PresetCache instance to save
-        library_dir: Path to preset_library directory
+        library_dir: Path to the generated preset build directory
     """
     cache_path = get_cache_path(library_dir)
 
@@ -120,7 +120,7 @@ def get_modified_presets(
 
     Args:
         presets_dir: Path to presets/ directory
-        library_dir: Path to preset_library/ directory
+        library_dir: Path to the generated preset build directory
         pattern: Optional filter pattern (e.g., "brass")
         check_compiled: If True, check if preset needs recompilation
         check_rendered: If True, check if preset needs re-rendering
@@ -206,7 +206,7 @@ def mark_compiled(
     Mark a preset as compiled.
 
     Args:
-        library_dir: Path to preset_library/ directory
+        library_dir: Path to the generated preset build directory
         preset_path: Path to the preset YAML file
         presets_dir: Path to presets/ directory
         capsule_id: ID of the compiled capsule
@@ -241,7 +241,7 @@ def mark_rendered(
     Mark a preset as rendered.
 
     Args:
-        library_dir: Path to preset_library/ directory
+        library_dir: Path to the generated preset build directory
         preset_path: Path to the preset YAML file
         presets_dir: Path to presets/ directory
     """
@@ -273,7 +273,7 @@ def mark_tested(
     Mark a preset as tested.
 
     Args:
-        library_dir: Path to preset_library/ directory
+        library_dir: Path to the generated preset build directory
         preset_path: Path to the preset YAML file
         presets_dir: Path to presets/ directory
     """
@@ -301,7 +301,7 @@ def clear_cache(library_dir: Path) -> None:
     Clear the cache file.
 
     Args:
-        library_dir: Path to preset_library/ directory
+        library_dir: Path to the generated preset build directory
     """
     cache_path = get_cache_path(library_dir)
     if cache_path.exists():
@@ -317,7 +317,7 @@ def get_cache_entry(
     Get cache entry for a preset.
 
     Args:
-        library_dir: Path to preset_library/ directory
+        library_dir: Path to the generated preset build directory
         preset_path: Path to the preset YAML file
         presets_dir: Path to presets/ directory
 

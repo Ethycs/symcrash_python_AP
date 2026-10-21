@@ -2,8 +2,8 @@
 Preset catalog: what the workbench can load, addressable over OSC.
 
 Scans presets/instruments/*.yaml (the authoring sources the session can
-mutate and SAVE) and cross-references the compiled capsule library index
-(preset_library/index/library_index.json) so capsule ids resolve back to
+mutate and SAVE) and cross-references the generated capsule library index
+(presets/.build/index/library_index.json) so capsule ids resolve back to
 their YAML source where one exists.
 
 Consumed by:
@@ -17,9 +17,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-PRESET_DIR = REPO_ROOT / "presets" / "instruments"
-LIBRARY_INDEX = REPO_ROOT / "preset_library" / "index" / "library_index.json"
+from symcrash_python_ap.paths import PRESET_INDEX_PATH, PRESET_INSTRUMENTS_DIR
+
+PRESET_DIR = PRESET_INSTRUMENTS_DIR
+LIBRARY_INDEX = PRESET_INDEX_PATH
 
 # capsule ids look like "<name-slug>-<12 hex chars>"
 _CAPSULE_HASH_RE = re.compile(r"-[0-9a-f]{12}$")

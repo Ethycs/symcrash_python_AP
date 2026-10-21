@@ -3,21 +3,21 @@
 Compile authoring presets (YAML) to capsule bundles.
 
 This script transforms human-editable YAML preset files into compiled
-capsule bundles stored in the preset_library.
+capsule bundles stored under presets/.build.
 
 Usage:
-    pixi run python scripts/compile_presets.py              # Compile modified presets only
-    pixi run python scripts/compile_presets.py brass_stab   # Compile matching presets
-    pixi run python scripts/compile_presets.py --clean      # Clean and recompile all
-    pixi run python scripts/compile_presets.py --all        # Force recompile all
-    pixi run python scripts/compile_presets.py --preview    # Render audio previews
+    pixi run python tools/render/compile_presets.py              # Compile modified presets only
+    pixi run python tools/render/compile_presets.py brass_stab   # Compile matching presets
+    pixi run python tools/render/compile_presets.py --clean      # Clean and recompile all
+    pixi run python tools/render/compile_presets.py --all        # Force recompile all
+    pixi run python tools/render/compile_presets.py --preview    # Render audio previews
 Directory structure:
     presets/
         instruments/   <- Instrument preset YAML files (instrument_ir_v0)
         synths/        <- Synth preset YAML files (synth_ir_v0)
         macros/        <- Macro preset YAML files (macro_ir_v0)
 
-    preset_library/
+    presets/.build/
         capsules/
             instruments/   <- Compiled instrument capsules (CapsuleKind.INSTRUMENT)
             synths/        <- Compiled synth capsules (CapsuleKind.SYNTH)
@@ -41,9 +41,9 @@ from symcrash_python_ap.macro_ir import load_macro, is_macro_preset
 from symcrash_python_ap.library.compiler import CapsuleCompiler
 from symcrash_python_ap.library.preset_library import PresetLibraryV0
 from symcrash_python_ap.library.capsule_codec import capsule_to_bytes
+from symcrash_python_ap.paths import PRESETS_DIR, PRESET_BUILD_DIR
 
-PRESETS_DIR = Path(__file__).parent.parent.parent / "presets"
-LIBRARY_DIR = Path(__file__).parent.parent.parent / "preset_library"
+LIBRARY_DIR = PRESET_BUILD_DIR
 CACHE_FILE = LIBRARY_DIR / ".compile_cache.json"
 
 

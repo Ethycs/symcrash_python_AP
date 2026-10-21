@@ -112,17 +112,117 @@ def test_latch_wall_latency_recorded(make_session):
     assert rec.wall_latency_s < 0.050
 
 
-def test_play_message_ignored_mid_stream(make_session):
-    """/play must not trigger the offline render path during streaming."""
+def test_play_message_retriggers_without_offline_render(make_session,
+                                                        monkeypatch):
+    """PLAY restarts the live attack without touching the offline renderer."""
     session = make_session()
     voice = StreamingVoice(session)
     voice.note_on(60)
+    _render_blocks(voice, 12)
+    assert voice.block_index == 12
+
+    def fail_offline_render():
+        raise AssertionError("PLAY entered the offline render path")
+
+    monkeypatch.setattr(session, "render_and_play", fail_offline_render)
     voice.inject("/play", 1.0)
-    voice.render_block()  # would race clear_basis_atlas if not ignored
+    voice.render_block()
+
+    # note_on resets the clock, then the requested attack renders block 0.
+    assert voice.block_index == 1
     assert session.streaming is True
-    assert len(voice.latch_log) == 0
+    assert voice.latch_log[-1].address == "/play"
     voice.stop()
     assert session.streaming is False
+
+
+def test_autoplay_retriggers_once_after_edit_debounce(make_session):
+    """AUTO re-articulates after an edit rather than on every knob packet."""
+    session = make_session()
+    session.debounce = 0.01
+    voice = StreamingVoice(session)
+    voice.note_on(60)
+    _render_blocks(voice, 12)
+
+    voice.inject("/autoplay", 1.0)
+    voice.render_block()
+    assert session.autoplay is True
+    assert voice.block_index == 13
+
+    voice.inject("/amp/sustain", 0.25)
+    voice.render_block()
+    assert voice.block_index == 14  # edit is live; retrigger is debounced
+
+    time.sleep(0.015)
+    voice.render_block()
+    assert voice.block_index == 1
+    assert voice.latch_log[-1].address == "/amp/sustain"
+
+    # It is a one-shot debounce action, not a retrigger every block.
+    voice.render_block()
+    assert voice.block_index == 2
+
+
+def test_autoplay_off_leaves_live_stream_clock_running(make_session):
+    """With AUTO off, edits latch without resetting the current note."""
+    session = make_session()
+    session.debounce = 0.0
+    voice = StreamingVoice(session)
+    voice.note_on(60)
+    _render_blocks(voice, 8)
+
+    voice.inject("/amp/sustain", 0.25)
+    voice.render_block()
+
+    assert session.autoplay is False
+    assert voice.block_index == 9
+
+
+def test_keyboard_note_events_latch_and_stale_release_is_ignored(make_session):
+    """The surface keyboard controls the monophonic live gate safely."""
+    voice = StreamingVoice(make_session())
+    voice.note_on(60)
+    _render_blocks(voice, 8)
+
+    voice.inject("/stream/keyboard", (67, 1.0))
+    voice.render_block()
+    assert voice.note == 67
+    assert voice.gate is True
+    assert voice.block_index == 1
+
+    # Traversing from one key to another can deliver the prior key's
+    # release after the new note-on.  It must not release the new note.
+    voice.inject("/stream/keyboard", (60, 0.0))
+    voice.render_block()
+    assert voice.note == 67
+    assert voice.gate is True
+
+    voice.inject("/stream/keyboard", (67, 0.0))
+    voice.render_block()
+    assert voice.gate is False
+    assert voice.latch_log[-1].address == "/stream/keyboard"
+
+
+def test_silent_service_accepts_next_keyboard_note(make_session):
+    """Finishing a release must not strand the live OSC keyboard."""
+    voice = StreamingVoice(make_session())
+    voice.note_on(60)
+    _render_blocks(voice, 8)
+    voice.note_off()
+    for _ in range(1000):
+        voice.render_block()
+        if not voice.active:
+            break
+    assert voice.active is False
+    assert voice.stopped is False
+
+    voice.inject("/stream/keyboard", (72, 1.0))
+    audio = voice.render_block()
+
+    assert voice.active is True
+    assert voice.gate is True
+    assert voice.note == 72
+    assert audio.shape[0] == BLOCK_SIZE
 
 
 # =========================================================== system manifold
@@ -352,6 +452,48 @@ def test_osc_bridge_routes_to_latch(make_session):
                 break
         assert abs(session.ir.control.dream - 0.75) < 1e-6
         assert voice.latch_log[-1].address == "/system/dream"
+
+        client.send_message("/autoplay", 1.0)
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and not session.autoplay:
+            voice.render_block()
+        assert session.autoplay is True
+
+        client.send_message("/play", 1.0)
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            voice.render_block()
+            if voice.latch_log[-1].address == "/play":
+                break
+        assert voice.latch_log[-1].address == "/play"
+        assert voice.gate is True
+
+        client.send_message("/stream/keyboard", [69, 1.0])
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            voice.render_block()
+            if voice.note == 69:
+                break
+        assert voice.note == 69
+        assert voice.gate is True
+
+        client.send_message("/stream/keyboard", [69, 0.0])
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and voice.gate:
+            voice.render_block()
+        assert voice.gate is False
+
+        # Native patchbays send input plus zero or more outputs. The bridge
+        # must retain the full OSC argument list until the block boundary.
+        client.send_message("/editor/graph", ["node1", "audio"])
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            voice.render_block()
+            if not any(edge.src == session.ir.layers.L0_graph.nodes[0].id
+                       for edge in session.ir.layers.L0_graph.edges):
+                break
+        assert not any(edge.src == session.ir.layers.L0_graph.nodes[0].id
+                       for edge in session.ir.layers.L0_graph.edges)
     finally:
         bridge.stop()
         voice.stop()

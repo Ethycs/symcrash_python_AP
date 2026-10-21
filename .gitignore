@@ -65,3 +65,7 @@ reference_audio/
 *.pdf
 
 ingest/
+
+# Presets: YAML under presets/{instruments,macros,synths}/ is source.
+# Compiled capsules, indexes, caches, and previews are reproducible output.
+/presets/.build/

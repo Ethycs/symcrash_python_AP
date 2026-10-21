@@ -516,6 +516,8 @@ def build_registry() -> Dict[str, Param]:
         params.append(_fm6_op_param(i, "ratio"))
         params.append(_fm6_op_param(i, "level"))
     params += [
+        _fm6_scalar_param("algorithm", "ALGORITHM", 1, 38,
+                          decimals=0, cast=int),
         _fm6_scalar_param("feedback", "FB", 0, 7, decimals=0, cast=int),
         _fm6_scalar_param("mod_index", "MOD INDEX", 0.25, 4.0,
                           decimals=3),

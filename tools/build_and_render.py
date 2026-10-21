@@ -15,12 +15,12 @@ Usage:
     pixi run python tools/build_and_render.py --render-only      # Just render
     pixi run python tools/build_and_render.py --clean            # Clean everything, rebuild
     pixi run python tools/build_and_render.py --all              # Force all
-    pixi run python tools/build_and_render.py --preview          # Also generate preset_library/previews
+    pixi run python tools/build_and_render.py --preview          # Also generate presets/.build/previews
 
 Output locations:
-    preset_library/capsules/       <- Compiled capsule bundles
-    preset_library/index/          <- Library index
-    preset_library/previews/       <- Quick audio previews (--preview)
+    presets/.build/capsules/       <- Compiled capsule bundles
+    presets/.build/index/          <- Library index
+    presets/.build/previews/       <- Quick audio previews (--preview)
     audio_out/presets/             <- Full rendered audio samples
 """
 
@@ -28,6 +28,8 @@ import argparse
 import subprocess
 import sys
 from pathlib import Path
+
+from symcrash_python_ap.paths import PRESET_BUILD_DIR
 
 PROJECT_ROOT = Path(__file__).parent.parent
 COMPILE_SCRIPT = PROJECT_ROOT / "tools" / "render" / "compile_presets.py"
@@ -42,7 +44,7 @@ def run_compile(pattern=None, clean=False, force_all=False, preview=False, quiet
         pattern: Optional pattern to filter preset names
         clean: If True, clean existing capsules and cache first
         force_all: If True, force recompile all presets
-        preview: If True, render audio previews to preset_library/previews
+        preview: If True, render audio previews to presets/.build/previews
         quiet: If True, suppress progress output
 
     Returns:
@@ -126,7 +128,7 @@ def main():
     parser.add_argument(
         "--preview",
         action="store_true",
-        help="Also render quick previews to preset_library/previews"
+        help="Also render quick previews to presets/.build/previews"
     )
     parser.add_argument(
         "-q", "--quiet",
@@ -194,9 +196,9 @@ def main():
         print()
         print("Output locations:")
         if not args.render_only:
-            print(f"  Capsules: {PROJECT_ROOT / 'preset_library' / 'capsules'}")
+            print(f"  Capsules: {PRESET_BUILD_DIR / 'capsules'}")
             if args.preview:
-                print(f"  Previews: {PROJECT_ROOT / 'preset_library' / 'previews'}")
+                print(f"  Previews: {PRESET_BUILD_DIR / 'previews'}")
         if not args.compile_only:
             print(f"  Audio:    {PROJECT_ROOT / 'audio_out' / 'presets'}")
 

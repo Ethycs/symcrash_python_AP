@@ -8,9 +8,12 @@ result, logs every change as a (parameters, verdict) trajectory, and
 writes tuned values back to the preset YAML with a meta.version bump.
 """
 
+import hashlib
 import io
 import json
+import os
 import sys
+import tempfile
 import threading
 import time
 import wave
@@ -31,6 +34,7 @@ from symcrash_python_ap.instrument_ir import load_instrument  # noqa: E402
 from symcrash_python_ap.vm.harmonic_bank import clear_basis_atlas  # noqa: E402
 
 from .params import build_registry  # noqa: E402
+from .patchboard import PatchboardController  # noqa: E402
 
 FS = 48000
 
@@ -47,8 +51,11 @@ class WorkbenchSession:
                  autoplay: bool = True, log_dir: Optional[Path] = None):
         self.preset_path = Path(preset_path)
         self.ir = load_instrument(str(self.preset_path))
+        self._source_fingerprint = self._fingerprint(
+            self.preset_path.read_bytes())
         self.registry = build_registry()
         self.changed: dict = {}
+        self.patchboard = PatchboardController(self)
 
         # Performance state
         self.note = 60
@@ -64,6 +71,9 @@ class WorkbenchSession:
         # Called with the session after a successful load_preset() so
         # transports can push_state / notify the surface.
         self.on_preset_loaded: Optional[Callable] = None
+        # Called after any structural edit (including rejected edits, whose
+        # cords need to snap back), SAVE, RELOAD, or source replacement.
+        self.on_state_changed: Optional[Callable] = None
 
         # Trajectory log (calibration data for the metric committee)
         self._log_dir = Path(log_dir) if log_dir else REPO_ROOT / "_workbench_logs"
@@ -80,6 +90,24 @@ class WorkbenchSession:
         self._log("session_start", preset=str(self.preset_path))
 
     # ------------------------------------------------------------- handling
+
+    def handle_message(self, address: str, *args) -> bool:
+        """Apply a complete OSC message, preserving multi-argument payloads.
+
+        Ordinary knobs remain scalar and flow through :meth:`handle`.
+        Patchbay widgets send ``input, output...`` and must arrive intact.
+        """
+        if self.patchboard.handles(address):
+            ok = self.patchboard.handle(address, args)
+            if ok and address != "/editor/resync":
+                self._log("structure_set", address=address,
+                          args=[str(arg) for arg in args])
+                self._touch(address, list(args))
+            # Re-send even on rejection so an illegal cord snaps back to the
+            # last accepted structure and the diagnostic becomes visible.
+            self._notify_state_changed()
+            return ok
+        return self.handle(address, args[0] if args else None)
 
     def handle(self, address: str, value) -> bool:
         """Apply one control message. Returns True if it changed anything."""
@@ -133,9 +161,12 @@ class WorkbenchSession:
         if not param.set(self.ir, value):
             print(f"[workbench] {address}: preset has no such target")
             return False
+        was_dirty = bool(self.changed) or self.patchboard.dirty.any
         self.changed[address] = value
         self._log("set", address=address, value=value)
         self._touch(address, value)
+        if not was_dirty or address in {"/fm/algorithm", "/fm/feedback"}:
+            self._notify_state_changed()
         return True
 
     def _touch(self, what, value):
@@ -212,7 +243,7 @@ class WorkbenchSession:
 
     def save(self) -> bool:
         """Write changed params back to the preset YAML, bump meta.version."""
-        if not self.changed:
+        if not self.changed and not self.patchboard.dirty.any:
             print("[workbench] nothing to save")
             return False
         from ruamel.yaml import YAML
@@ -221,7 +252,13 @@ class WorkbenchSession:
         yaml.preserve_quotes = True
         yaml.width = 4096
         # read_bytes: read_text() would translate CRLF away (repo is CRLF)
-        text = self.preset_path.read_bytes().decode("utf-8")
+        source_bytes = self.preset_path.read_bytes()
+        if self._fingerprint(source_bytes) != self._source_fingerprint:
+            self.patchboard.status = (
+                "SAVE rejected: source changed on disk; RELOAD before saving")
+            self._notify_state_changed()
+            return False
+        text = source_bytes.decode("utf-8")
         crlf = "\r\n" in text
         doc = yaml.load(text)
         root = doc["instrument_ir_v0"]
@@ -236,35 +273,182 @@ class WorkbenchSession:
                 ok = False
             (applied if ok else failed).append(address)
 
+        try:
+            applied.extend(self.patchboard.apply_yaml(root))
+        except Exception as e:
+            self.patchboard.status = f"SAVE failed: {e}"
+            self._log("save_error", error=str(e))
+            print(f"[workbench] structural save failed: {e}")
+            self._notify_state_changed()
+            return False
+
+        if failed:
+            self.patchboard.status = (
+                f"SAVE rejected: {len(failed)} field(s) could not be written")
+            self._log("save_error", failed=failed)
+            print(f"[workbench] save rejected; not written: {failed}")
+            self._notify_state_changed()
+            return False
+
         old_version = int(root["meta"].get("version", 0))
         root["meta"]["version"] = old_version + 1
-        self.ir.meta.version = old_version + 1
 
         buf = io.StringIO()
         yaml.dump(doc, buf)
         out = buf.getvalue()
         if crlf:
             out = out.replace("\r\n", "\n").replace("\n", "\r\n")
-        with open(self.preset_path, "w", encoding="utf-8", newline="") as f:
-            f.write(out)
+        try:
+            self._atomic_write_source(out)
+        except Exception as e:
+            self.patchboard.status = f"SAVE write failed: {e}"
+            self._log("save_error", error=str(e))
+            print(f"[workbench] save write failed: {e}")
+            self._notify_state_changed()
+            return False
+        self.ir.meta.version = old_version + 1
+        self._source_fingerprint = self._fingerprint(out.encode("utf-8"))
 
         self._log("save", version=old_version + 1, applied=applied,
                   failed=failed)
         print(f"[workbench] saved {self.preset_path.name} "
               f"v{old_version} -> v{old_version + 1} "
               f"({len(applied)} fields{', ' + str(len(failed)) + ' failed' if failed else ''})")
-        if failed:
-            print(f"[workbench]   not written: {failed}")
         self.changed.clear()
+        self.patchboard.reset(
+            f"Saved {self.preset_path.name} v{old_version + 1}")
+        self._notify_state_changed()
         return True
 
     def reload(self):
         """Re-read the preset from disk (after a manual YAML edit)."""
         self.ir = load_instrument(str(self.preset_path))
+        self._source_fingerprint = self._fingerprint(
+            self.preset_path.read_bytes())
         self.changed.clear()
+        self.patchboard.reset(f"Reloaded {self.preset_path.name}")
         self._log("reload")
         print(f"[workbench] reloaded {self.preset_path.name}")
         self._touch("reload", 1)
+        self._notify_state_changed()
+
+    def validate_source(self, source: str):
+        """Validate complete YAML text through the real InstrumentIR loader."""
+        if not isinstance(source, str) or not source.strip():
+            return False, "Source is empty", None
+        scratch = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                    mode="w", encoding="utf-8", suffix=".yaml",
+                    newline="", delete=False) as file:
+                scratch = Path(file.name)
+                file.write(source)
+            ir = load_instrument(str(scratch))
+            valid, error = ir.validate()
+            if not valid:
+                return False, error, None
+            return True, "YAML and InstrumentIR are valid", ir
+        except Exception as e:
+            return False, str(e), None
+        finally:
+            if scratch is not None:
+                try:
+                    scratch.unlink(missing_ok=True)
+                except OSError:
+                    pass
+
+    def apply_source(self, source: str):
+        """Atomically replace the preset from the embedded source editor.
+
+        The round-trip YAML parser bumps ``meta.version`` while retaining
+        comments. The complete result is validated before the backing file or
+        live IR is touched.
+        """
+        from ruamel.yaml import YAML
+
+        if self.changed or self.patchboard.dirty.any:
+            message = ("Source apply rejected: SAVE or RELOAD pending knob/"
+                       "patchboard edits first")
+            self.patchboard.status = message
+            return False, message
+
+        try:
+            yaml = YAML()
+            yaml.preserve_quotes = True
+            yaml.width = 4096
+            doc = yaml.load(source)
+            root = doc["instrument_ir_v0"]
+            meta = root["meta"]
+            incoming_version = int(meta.get("version", 0))
+            current_bytes = self.preset_path.read_bytes()
+            if self._fingerprint(current_bytes) != self._source_fingerprint:
+                message = ("Source apply rejected: file changed on disk; "
+                           "RELOAD and REFRESH before applying")
+                self.patchboard.status = message
+                return False, message
+            current = current_bytes.decode("utf-8")
+            disk_doc = yaml.load(current)
+            disk_version = int(
+                disk_doc["instrument_ir_v0"]["meta"].get("version", 0))
+            if incoming_version != disk_version:
+                message = ("Source apply rejected: editor version "
+                           f"{incoming_version} is stale; disk is "
+                           f"{disk_version}. REFRESH before applying")
+                self.patchboard.status = message
+                return False, message
+            meta["version"] = disk_version + 1
+            buffer = io.StringIO()
+            yaml.dump(doc, buffer)
+            rendered = buffer.getvalue()
+        except Exception as e:
+            message = f"YAML parse failed: {e}"
+            self.patchboard.status = message
+            return False, message
+
+        valid, message, ir = self.validate_source(rendered)
+        if not valid:
+            self.patchboard.status = f"Source rejected: {message}"
+            return False, self.patchboard.status
+
+        if "\r\n" in current:
+            rendered = rendered.replace("\r\n", "\n").replace("\n", "\r\n")
+        try:
+            self._atomic_write_source(rendered)
+        except Exception as e:
+            message = f"Source write failed: {e}"
+            self.patchboard.status = message
+            return False, message
+
+        self.ir = ir
+        self._source_fingerprint = self._fingerprint(rendered.encode("utf-8"))
+        self.changed.clear()
+        self.patchboard.reset(
+            f"Applied source: {self.preset_path.name} v{disk_version + 1}")
+        self._log("source_apply", version=disk_version + 1)
+        self._touch("source_apply", 1)
+        self._notify_state_changed()
+        return True, self.patchboard.status
+
+    def _atomic_write_source(self, text: str):
+        """Durably replace the backing YAML without exposing a partial file."""
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                    mode="w", encoding="utf-8", suffix=".yaml.tmp",
+                    prefix=f".{self.preset_path.stem}-",
+                    dir=self.preset_path.parent, newline="", delete=False) as file:
+                temp_path = Path(file.name)
+                file.write(text)
+                file.flush()
+                os.fsync(file.fileno())
+            os.replace(temp_path, self.preset_path)
+        except Exception:
+            if temp_path is not None:
+                try:
+                    temp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            raise
 
     # ------------------------------------------------------------- library
 
@@ -302,7 +486,9 @@ class WorkbenchSession:
                   discarded_edits=sorted(self.changed))
         self.preset_path = entry.path
         self.ir = ir
+        self._source_fingerprint = self._fingerprint(entry.path.read_bytes())
         self.changed.clear()
+        self.patchboard.reset(f"Loaded {entry.path.name}")
         # New trajectory context: one JSONL per (preset, load)
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         self._log_path = self._log_dir / f"{entry.path.stem}-{stamp}.jsonl"
@@ -335,8 +521,25 @@ class WorkbenchSession:
         send("/autoplay", 1.0 if self.autoplay else 0.0)
         # Snap the preset picker to the loaded preset (string payload)
         send("/preset/load", self.preset_path.stem)
+        self.patchboard.push_state(send)
+        send("/editor/dirty",
+             1.0 if self.changed or self.patchboard.dirty.any else 0.0)
+        send("/editor/preset/path", str(self.preset_path))
+        send("/editor/version", float(self.ir.meta.version))
+
+    def _notify_state_changed(self):
+        if self.on_state_changed is None:
+            return
+        try:
+            self.on_state_changed(self)
+        except Exception as e:  # feedback must not kill the session
+            print(f"[workbench] state callback failed: {e}")
 
     # ------------------------------------------------------------- plumbing
+
+    @staticmethod
+    def _fingerprint(data: bytes) -> str:
+        return hashlib.sha256(data).hexdigest()
 
     def _log(self, event: str, **fields):
         entry = {"t": datetime.now().isoformat(timespec="milliseconds"),

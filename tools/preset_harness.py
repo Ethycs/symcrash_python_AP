@@ -7,20 +7,20 @@ Compiles, renders, and verifies presets in a single workflow.
 Only processes presets that have been modified since last run.
 
 Usage:
-    pixi run python tools/test_harness.py              # Test modified presets only
-    pixi run python tools/test_harness.py --all        # Test all presets
-    pixi run python tools/test_harness.py brass        # Test matching pattern
-    pixi run python tools/test_harness.py --compile    # Only compile modified
-    pixi run python tools/test_harness.py --render     # Only render modified
-    pixi run python tools/test_harness.py --verify     # Only verify modified
-    pixi run python tools/test_harness.py --clean      # Clean cache, test all
+    pixi run python tools/preset_harness.py              # Test modified presets only
+    pixi run python tools/preset_harness.py --all        # Test all presets
+    pixi run python tools/preset_harness.py brass        # Test matching pattern
+    pixi run python tools/preset_harness.py --compile    # Only compile modified
+    pixi run python tools/preset_harness.py --render     # Only render modified
+    pixi run python tools/preset_harness.py --verify     # Only verify modified
+    pixi run python tools/preset_harness.py --clean      # Clean cache, test all
 
     # Render instruments with macro applied:
-    pixi run python tools/test_harness.py --with-macro vibrato_classic_v0
-    pixi run python tools/test_harness.py violin --with-macro tremolo_fast_v0
+    pixi run python tools/preset_harness.py --with-macro vibrato_classic_v0
+    pixi run python tools/preset_harness.py violin --with-macro tremolo_fast_v0
 
 Output locations:
-    preset_library/capsules/    <- Compiled capsule bundles
+    presets/.build/capsules/    <- Compiled capsule bundles
     audio_out/presets/          <- Rendered audio samples
 """
 
@@ -44,11 +44,13 @@ from lib.preset_cache import (
     mark_tested,
     clear_cache,
 )
+from symcrash_python_ap.paths import (
+    PRESETS_DIR,
+    PRESET_MACROS_DIR as MACROS_DIR,
+    PRESET_BUILD_DIR as LIBRARY_DIR,
+)
 
 # Paths
-PRESETS_DIR = PROJECT_ROOT / "presets"
-MACROS_DIR = PROJECT_ROOT / "presets" / "macros"
-LIBRARY_DIR = PROJECT_ROOT / "preset_library"
 AUDIO_OUT_DIR = PROJECT_ROOT / "audio_out" / "presets"
 
 

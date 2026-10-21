@@ -1,18 +1,32 @@
-from pathlib import Path
-
 from symcrash_python_ap.control_registry import ControlID
-from symcrash_python_ap.instrument_ir import ms_to_blocks, pct_to_q15
+from symcrash_python_ap.instrument_ir import (
+    load_instrument,
+    ms_to_blocks,
+    pct_to_q15,
+)
 from symcrash_python_ap.library import PresetLibraryV0, ResolutionSelector
+from symcrash_python_ap.library.compiler import CapsuleCompiler
+from symcrash_python_ap.paths import PRESET_INSTRUMENTS_DIR
 
 # Capsule IDs are now content-hashed (slug + digest); this is the violin
 # capsule compiled from presets/instruments/violin_ir_v1.yaml.
 VIOLIN_CAPSULE_ID = "violin-ir-256819fd62e4"
 
 
-def test_violin_capsule_bundle_in_library() -> None:
-    repo_root = Path(__file__).resolve().parents[3]
-    library_root = repo_root / "preset_library"
+def test_violin_capsule_bundle_in_library(tmp_path) -> None:
+    """Compile the source into an isolated generated library.
+
+    A clean checkout intentionally contains no compiled preset payloads.
+    """
+    ir = load_instrument(str(PRESET_INSTRUMENTS_DIR / "violin_ir_v1.yaml"))
+    compiled = CapsuleCompiler().compile_from_ir(ir)
+    assert compiled.success
+    assert compiled.capsule_id == VIOLIN_CAPSULE_ID
+
+    library_root = tmp_path / "preset-build"
     library = PresetLibraryV0(str(library_root))
+    imported = library.import_capsule(compiled.capsule)
+    assert imported.success
 
     record = library.resolve_capsule(VIOLIN_CAPSULE_ID, selector=ResolutionSelector.LATEST)
     assert record is not None

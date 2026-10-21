@@ -12,9 +12,8 @@ CLI entry point - the canonical live-synth surface.
     # legacy offline mode (debounced full re-render on each edit)
     pixi run python -m symcrash_workbench dx_marimba_v0 --offline
 
-    # then launch the surface (separate terminal / any machine):
-    open-stage-control --load tools/workbench/symcrash-workbench.json ^
-        --send 127.0.0.1:7400 --osc-port 7500
+    # then launch the surface (separate terminal, Windows):
+    pixi run workbench-ui
 """
 
 import argparse
@@ -63,6 +62,9 @@ def main():
     ap.add_argument("--feedback", default="127.0.0.1:7500",
                     help="host:port for widget feedback to Open Stage Control "
                          "(its --osc-port); 'none' to disable")
+    ap.add_argument("--source-port", type=int, default=7410,
+                    help="loopback port for the YAML editor embedded in the "
+                         "SOURCE tab; 0 disables it (default 7410)")
     ap.add_argument("--debounce", type=float, default=180.0,
                     help="[offline] ms of knob silence before auto re-render")
     ap.add_argument("--no-autoplay", action="store_true",
@@ -87,9 +89,7 @@ def main():
     if not DEFAULT_LAYOUT_PATH.exists():
         write_layout()
         print(f"[workbench] generated layout: {DEFAULT_LAYOUT_PATH}")
-    print("[workbench] surface: open-stage-control "
-          f"--load {DEFAULT_LAYOUT_PATH.relative_to(REPO_ROOT)} "
-          f"--send 127.0.0.1:{args.listen_port} --osc-port 7500")
+    print("[workbench] surface (second terminal): pixi run workbench-ui")
 
     feedback_host, feedback_port = None, None
     if args.feedback.lower() != "none":
@@ -98,13 +98,23 @@ def main():
 
     if args.offline:
         from .osc_server import serve
+        from .source_editor import SourceEditorServer
 
         session = WorkbenchSession(preset_path, debounce_ms=args.debounce,
                                    autoplay=not args.no_autoplay)
+        source_editor = (SourceEditorServer(session, args.source_port).start()
+                         if args.source_port else None)
+        if source_editor is not None:
+            print(f"[workbench] YAML editor http://127.0.0.1:"
+                  f"{source_editor.port}/")
         print(f"[workbench] loaded {preset_path.name} "
               f"({session.ir.meta.name} v{session.ir.meta.version}) [offline]")
-        serve(session, listen_port=args.listen_port,
-              feedback_host=feedback_host, feedback_port=feedback_port)
+        try:
+            serve(session, listen_port=args.listen_port,
+                  feedback_host=feedback_host, feedback_port=feedback_port)
+        finally:
+            if source_editor is not None:
+                source_editor.stop()
         return
 
     # ------------------------------------------------- streaming (default)
@@ -114,6 +124,14 @@ def main():
     print(f"[workbench] loaded {preset_path.name} "
           f"({session.ir.meta.name} v{session.ir.meta.version}) [streaming]")
     voice = StreamingVoice(session, note=args.note, velocity=args.velocity)
+    from .source_editor import SourceEditorServer
+    source_editor = (SourceEditorServer(
+        session, args.source_port,
+        submit=lambda source: voice.inject("/editor/source/apply", source),
+    ).start() if args.source_port else None)
+    if source_editor is not None:
+        print(f"[workbench] YAML editor http://127.0.0.1:"
+              f"{source_editor.port}/")
     bridge = None
     if OSC_AVAILABLE:
         bridge = StreamingOSCBridge(
@@ -127,8 +145,8 @@ def main():
     voice.note_on(args.note)
     print(f"[workbench] sustaining note {args.note}; Ctrl+C to stop")
     try:
-        if not voice.play_realtime():
-            while voice.active:  # headless fallback: free-run
+        if not voice.play_realtime(keep_open=True):
+            while not voice.stopped:  # headless OSC service: free-run
                 voice.render_block()
     except KeyboardInterrupt:
         pass
@@ -136,6 +154,8 @@ def main():
         voice.stop()
         if bridge is not None:
             bridge.stop()
+        if source_editor is not None:
+            source_editor.stop()
         session.close()
 
 
