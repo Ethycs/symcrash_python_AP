@@ -1720,6 +1720,9 @@ class SafetyEngine:
         Returns:
             Corrected audio samples
         """
+        if _tail_jit_active() and len(x) > 0:
+            return self._apply_c1_patch_jit(x, voice_id, patch_radius)
+
         # Energy-aware detection with hysteresis
         discontinuities, is_degenerate = self.detect_discontinuity_energy_aware(
             x, voice_id
@@ -2169,6 +2172,27 @@ class SafetyEngine:
             self.master_ola_R = tail_R.tolist()
         return outL.tolist(), outR.tolist()
 
+    def _apply_c1_patch_jit(self, x: List[int], voice_id: int, patch_radius: int) -> List[int]:
+        """apply_c1_patch via safety_tail_jit.c1_patch_block; per-voice state stays in
+        self.degenerate_mode / self.prev_output exactly as in the pure-Python path."""
+        import numpy as np
+        from . import safety_tail_jit as stj
+
+        n = len(x)
+        xa = np.asarray(x, dtype=np.int64)
+        out = np.empty(n, dtype=np.int64)
+        idx = np.empty(n, dtype=np.int64)
+        is_deg, last = stj.c1_patch_block(
+            xa, n, out, idx,
+            bool(self.degenerate_mode.get(voice_id, False)),
+            int(self.prev_output.get(voice_id, 0)),
+            SLEW_MAX, R_CURVATURE_MAX, E_FLOOR_RMS, E_FLOOR_HYSTERESIS,
+            J_DEGENERATE_THRESHOLD, patch_radius, _SQRT_LUT_ARR,
+        )
+        self.degenerate_mode[voice_id] = bool(is_deg)
+        self.prev_output[voice_id] = int(last)
+        return out.tolist()
+
     def step_block_with_voices(self, voice_blocks: List[Tuple[int, List[int], List[int]]],
                                 params: ParamFrame) -> Tuple[List[int], List[int]]:
         """
@@ -2186,6 +2210,19 @@ class SafetyEngine:
             declicked_blocks.append((dL, dR))
 
         # Mix to stereo
+        if _tail_jit_active() and all(len(dL) >= self.B and len(dR) >= self.B
+                                      for dL, dR in declicked_blocks):
+            import numpy as np
+            from . import safety_tail_jit as stj
+            acc_L = np.zeros(self.B, dtype=np.int64)
+            acc_R = np.zeros(self.B, dtype=np.int64)
+            for dL, dR in declicked_blocks:
+                stj.mix_sat16(acc_L, np.asarray(dL[:self.B], dtype=np.int64), self.B)
+                stj.mix_sat16(acc_R, np.asarray(dR[:self.B], dtype=np.int64), self.B)
+            mix_L = acc_L.tolist()
+            mix_R = acc_R.tolist()
+            return self.step_block(mix_L, mix_R, params, apply_master_ola=False)
+
         mix_L = [0] * self.B
         mix_R = [0] * self.B
 

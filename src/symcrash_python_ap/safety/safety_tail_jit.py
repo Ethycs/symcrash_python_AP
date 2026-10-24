@@ -307,3 +307,175 @@ def safety_tail_step(L, R, n, st, flags, k_mode,
             for i in range(n):
                 outL[i] = _sat16(outL[i] - dch)
                 outR[i] = _sat16(outR[i] - dch)
+
+
+# =============================================================================
+# PER-VOICE DE-CLICK: C1 DISCONTINUITY PATCHER (bit-exact ports)
+# =============================================================================
+# Ports of compute_local_rms, detect_discontinuities_energy_aware,
+# apply_degenerate_hold, hermite_bridge and SafetyEngine.apply_c1_patch.
+# hermite_bridge and apply_degenerate_hold use IEEE-754 double arithmetic in the
+# reference; the same expressions are evaluated here in the same order, with no
+# fastmath, so CPython and numba agree bit for bit. int() truncates toward zero
+# in both.
+
+@njit(cache=True)
+def _local_rms(x, n, center, window, sqrt_lut):
+    """compute_local_rms(samples, center, window)."""
+    if n == 0:
+        return 0
+    start = center - window
+    if start < 0:
+        start = 0
+    end = center + window
+    if end > n:
+        end = n
+    m = end - start
+    if m == 0:
+        return 0
+    energy = 0
+    for i in range(start, end):
+        s = x[i]
+        energy += (s * s) >> 16
+    avg = energy // m
+    if avg > Q15_ONE:
+        avg = Q15_ONE
+    return _sqrt_q15(avg, sqrt_lut)
+
+
+@njit(cache=True)
+def _detect_energy_aware(x, n, prev_sample, slew_thr, curv_thr, energy_floor,
+                         degen_slew, sqrt_lut, idx_out):
+    """detect_discontinuities_energy_aware -> (count, is_degenerate); indices in idx_out."""
+    if n < 3:
+        return 0, False
+    block_rms = _local_rms(x, n, n // 2, n // 2, sqrt_lut)
+    is_deg = block_rms < energy_floor
+    cnt = 0
+    prev = prev_sample
+    prev_delta = 0
+    for i in range(n):
+        s = x[i]
+        delta = s - prev
+        abs_delta = abs(delta)
+        if i > 0:
+            curvature = abs(delta - prev_delta)
+        else:
+            curvature = 0
+        if is_deg:
+            local_rms = _local_rms(x, n, i, 8, sqrt_lut)
+            if local_rms < energy_floor:
+                if abs_delta > degen_slew:
+                    idx_out[cnt] = i
+                    cnt += 1
+            else:
+                if abs_delta > slew_thr or curvature > curv_thr:
+                    idx_out[cnt] = i
+                    cnt += 1
+        else:
+            if abs_delta > slew_thr or curvature > curv_thr:
+                idx_out[cnt] = i
+                cnt += 1
+        prev_delta = delta
+        prev = s
+    return cnt, is_deg
+
+
+@njit(cache=True)
+def _degenerate_hold(x, n, out, prev_output, energy_floor, sqrt_lut):
+    """apply_degenerate_hold(samples, prev_output, energy_floor) into out."""
+    block_rms = _local_rms(x, n, n // 2, n // 2, sqrt_lut)
+    if block_rms >= energy_floor:
+        for i in range(n):
+            out[i] = x[i]
+        return
+    fade_target = prev_output
+    for i in range(n):
+        s = x[i]
+        local_rms = _local_rms(x, n, i, 8, sqrt_lut)
+        if local_rms < energy_floor // 2:
+            fade_amount = 0.8
+        elif local_rms < energy_floor:
+            fade_amount = 0.5
+        else:
+            fade_amount = 0.2
+        blended = int(s * (1 - fade_amount) + fade_target * fade_amount)
+        out[i] = _sat16(blended)
+        fade_target = int(fade_target * 0.95)
+
+
+@njit(cache=True)
+def _hermite_bridge(out, n, k, bl):
+    """hermite_bridge(samples, k, bridge_len) applied in place.
+
+    The reference reads p0/p1/m0/m1 from its input before writing a copy, and each
+    successive bridge reads the previous bridge's output, so reading the context
+    first and then writing in place is equivalent.
+    """
+    if k < bl or k >= n - bl:
+        return
+    left = k - bl
+    right = k + bl
+    p0 = out[left]
+    p1 = out[right]
+    if left >= 2:
+        m0 = ((out[left] - out[left - 1]) + (out[left - 1] - out[left - 2])) // 2
+    elif left >= 1:
+        m0 = out[left] - out[left - 1]
+    else:
+        m0 = 0
+    if right < n - 2:
+        m1 = ((out[right + 1] - out[right]) + (out[right + 2] - out[right + 1])) // 2
+    elif right < n - 1:
+        m1 = out[right + 1] - out[right]
+    else:
+        m1 = 0
+    interval = 2 * bl
+    m0s = m0 * interval // 4
+    m1s = m1 * interval // 4
+    for i in range(2 * bl + 1):
+        idx = left + i
+        if idx < 0 or idx >= n:
+            continue
+        t = i / (2 * bl)
+        t2 = t * t
+        t3 = t2 * t
+        h00 = 2 * t3 - 3 * t2 + 1
+        h10 = t3 - 2 * t2 + t
+        h01 = -2 * t3 + 3 * t2
+        h11 = t3 - t2
+        interp = int(h00 * p0 + h10 * m0s + h01 * p1 + h11 * m1s)
+        out[idx] = _sat16(interp)
+
+
+@njit(cache=True)
+def c1_patch_block(x, n, out, idx_buf, was_degenerate, prev_out,
+                   slew_thr, curv_thr, energy_floor, hysteresis, degen_slew,
+                   patch_radius, sqrt_lut):
+    """SafetyEngine.apply_c1_patch for one voice block -> (is_degenerate, last_output)."""
+    cnt, is_deg_now = _detect_energy_aware(x, n, 0, slew_thr, curv_thr, energy_floor,
+                                           degen_slew, sqrt_lut, idx_buf)
+    if was_degenerate:
+        block_rms = _local_rms(x, n, n // 2, n // 2, sqrt_lut)
+        is_deg = not (block_rms > hysteresis)
+    else:
+        is_deg = is_deg_now
+    if is_deg:
+        _degenerate_hold(x, n, out, prev_out, energy_floor, sqrt_lut)
+    else:
+        for i in range(n):
+            out[i] = x[i]
+    for j in range(cnt):
+        k = idx_buf[j]
+        if k < patch_radius or k >= n - patch_radius:
+            continue
+        _hermite_bridge(out, n, k, patch_radius)
+    last = out[n - 1] if n > 0 else 0
+    return is_deg, last
+
+
+@njit(cache=True)
+def mix_sat16(acc, src, n):
+    """step_block_with_voices mixing: acc[i] = SAT16(acc[i] + src[i])."""
+    for i in range(n):
+        acc[i] = _sat16(acc[i] + src[i])
