@@ -479,3 +479,33 @@ def mix_sat16(acc, src, n):
     """step_block_with_voices mixing: acc[i] = SAT16(acc[i] + src[i])."""
     for i in range(n):
         acc[i] = _sat16(acc[i] + src[i])
+
+
+@njit(cache=True)
+def voices_declick_mix_batch(X, nrows, n, voice_of_row, was_deg, prev_out, idx_buf, work,
+                             slew_thr, curv_thr, energy_floor, hysteresis, degen_slew,
+                             patch_radius, sqrt_lut, acc_L, acc_R):
+    """Batched step_block_with_voices front end for all voices in one call.
+
+    Rows of X are the post-fade voice blocks in the pure path's processing order
+    (voice 0 L, voice 0 R, voice 1 L, ...). Each row goes through the C1 patch with the
+    per-voice hysteresis/prev-output state shared between that voice's L and R rows in
+    that order, then is mixed with saturation into acc_L (even rows) / acc_R (odd rows)
+    in voice order — exactly what the sequential pure-Python chain does.
+    """
+    for i in range(n):
+        acc_L[i] = 0
+        acc_R[i] = 0
+    for r in range(nrows):
+        v = voice_of_row[r]
+        is_deg, last = c1_patch_block(X[r], n, work, idx_buf, was_deg[v] != 0, prev_out[v],
+                                      slew_thr, curv_thr, energy_floor, hysteresis, degen_slew,
+                                      patch_radius, sqrt_lut)
+        was_deg[v] = 1 if is_deg else 0
+        prev_out[v] = last
+        if r % 2 == 0:
+            for i in range(n):
+                acc_L[i] = _sat16(acc_L[i] + work[i])
+        else:
+            for i in range(n):
+                acc_R[i] = _sat16(acc_R[i] + work[i])

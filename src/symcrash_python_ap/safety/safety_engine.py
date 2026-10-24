@@ -2172,6 +2172,52 @@ class SafetyEngine:
             self.master_ola_R = tail_R.tolist()
         return outL.tolist(), outR.tolist()
 
+    def _step_block_with_voices_jit(self, voice_blocks, params: ParamFrame) -> Tuple[List[int], List[int]]:
+        """Batched JIT front end: voice start/stop fades stay in Python (they touch at most
+        eight samples and mutate per-voice phase state in call order), then ONE kernel call
+        runs the C1 patch for every voice channel and the saturating mix, then the stereo
+        chain runs through the step_block kernel. Bit-exact with the sequential pure path."""
+        import numpy as np
+        from . import safety_tail_jit as stj
+
+        B = self.B
+        rows: List[List[int]] = []
+        voice_index: Dict[int, int] = {}
+        voice_of_row: List[int] = []
+        for voice_id, vL, vR in voice_blocks:
+            if voice_id not in voice_index:
+                voice_index[voice_id] = len(voice_index)
+            v = voice_index[voice_id]
+            # same call order as apply_declick(vL) then apply_declick(vR) with seam=False
+            xL = self.apply_voice_stop(self.apply_voice_start(vL, voice_id), voice_id)
+            xR = self.apply_voice_stop(self.apply_voice_start(vR, voice_id), voice_id)
+            rows.append(xL)
+            voice_of_row.append(v)
+            rows.append(xR)
+            voice_of_row.append(v)
+
+        nv = len(voice_index)
+        X = np.array(rows, dtype=np.int64)
+        was_deg = np.zeros(nv, dtype=np.int64)
+        prev_out = np.zeros(nv, dtype=np.int64)
+        for voice_id, v in voice_index.items():
+            was_deg[v] = 1 if self.degenerate_mode.get(voice_id, False) else 0
+            prev_out[v] = int(self.prev_output.get(voice_id, 0))
+        idx_buf = np.empty(B, dtype=np.int64)
+        work = np.empty(B, dtype=np.int64)
+        acc_L = np.empty(B, dtype=np.int64)
+        acc_R = np.empty(B, dtype=np.int64)
+
+        stj.voices_declick_mix_batch(
+            X, len(rows), B, np.asarray(voice_of_row, dtype=np.int64), was_deg, prev_out, idx_buf, work,
+            SLEW_MAX, R_CURVATURE_MAX, E_FLOOR_RMS, E_FLOOR_HYSTERESIS, J_DEGENERATE_THRESHOLD,
+            8, _SQRT_LUT_ARR, acc_L, acc_R,
+        )
+        for voice_id, v in voice_index.items():
+            self.degenerate_mode[voice_id] = bool(was_deg[v])
+            self.prev_output[voice_id] = int(prev_out[v])
+        return self.step_block(acc_L.tolist(), acc_R.tolist(), params, apply_master_ola=False)
+
     def _apply_c1_patch_jit(self, x: List[int], voice_id: int, patch_radius: int) -> List[int]:
         """apply_c1_patch via safety_tail_jit.c1_patch_block; per-voice state stays in
         self.degenerate_mode / self.prev_output exactly as in the pure-Python path."""
@@ -2202,6 +2248,10 @@ class SafetyEngine:
 
         This applies per-voice de-click, then mixes, then runs the rest of the chain.
         """
+        if _tail_jit_active() and voice_blocks and all(
+                len(vL) == self.B and len(vR) == self.B for _, vL, vR in voice_blocks):
+            return self._step_block_with_voices_jit(voice_blocks, params)
+
         # Apply per-voice de-click
         declicked_blocks = []
         for voice_id, vL, vR in voice_blocks:
