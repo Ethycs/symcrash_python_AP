@@ -44,6 +44,7 @@ from .commands import (
 )
 from .history import CommandHistory
 from .session import EditorSession
+from .validator import validate_regime_graph
 
 __all__ = [
     # Core
@@ -69,4 +70,6 @@ __all__ = [
     "SetTowerLevel",
     "ProjectToLevel",
     "ResetToSafe",
+    # Validation
+    "validate_regime_graph",
 ]

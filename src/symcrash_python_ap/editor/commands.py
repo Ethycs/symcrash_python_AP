@@ -251,8 +251,11 @@ class AddRegime(EditorCommand):
     def execute(self, ir: 'InstrumentIR') -> EditorResult:
         from ..instrument_ir import RegimeNode
 
+        # Access L2 layer correctly
+        l2 = ir.layers.L2_regimes
+
         # Check if regime already exists
-        for node in ir.l2_regimes.regime_nodes:
+        for node in l2.regime_nodes:
             if node.id == self.regime_id:
                 return EditorResult.failure(f"Regime '{self.regime_id}' already exists")
 
@@ -262,18 +265,23 @@ class AddRegime(EditorCommand):
             emit_template=self.emit_template,
             dwell_ms=self.dwell_ms
         )
-        ir.l2_regimes.regime_nodes.append(new_node)
+        l2.regime_nodes.append(new_node)
 
         return EditorResult.success(
             f"Added regime '{self.regime_id}'",
-            {"regime_id": self.regime_id}
+            {"regime_id": self.regime_id, "index": len(l2.regime_nodes) - 1}
         )
 
     def undo(self, ir: 'InstrumentIR', undo_data: Dict[str, Any]) -> EditorResult:
         regime_id = undo_data["regime_id"]
-        ir.l2_regimes.regime_nodes = [
-            n for n in ir.l2_regimes.regime_nodes if n.id != regime_id
-        ]
+        index = undo_data["index"]
+        l2 = ir.layers.L2_regimes
+        # Remove from exact position to preserve order
+        if index < len(l2.regime_nodes) and l2.regime_nodes[index].id == regime_id:
+            l2.regime_nodes.pop(index)
+        else:
+            # Fallback if position changed
+            l2.regime_nodes = [n for n in l2.regime_nodes if n.id != regime_id]
         return EditorResult.success(f"Removed regime '{regime_id}'")
 
     @property
@@ -287,48 +295,89 @@ class RemoveRegime(EditorCommand):
     REMOVE_REGIME(regime_id) - Remove a regime node from L2.
 
     Also removes all transitions involving this regime.
+    Fails if trying to remove the start regime.
     """
     regime_id: str
 
     def execute(self, ir: 'InstrumentIR') -> EditorResult:
-        # Find the regime
+        l2 = ir.layers.L2_regimes
+
+        # Find the regime and its index
         regime_node = None
-        for i, node in enumerate(ir.l2_regimes.regime_nodes):
+        regime_index = None
+        for i, node in enumerate(l2.regime_nodes):
             if node.id == self.regime_id:
                 regime_node = node
+                regime_index = i
                 break
 
         if regime_node is None:
             return EditorResult.failure(f"Regime '{self.regime_id}' not found")
 
-        # Store the regime and its transitions for undo
+        # Check if this is the start regime
+        start_regime = (l2.regime_graph_spec.start_regime 
+                       if l2.regime_graph_spec is not None 
+                       else (l2.regime_nodes[0].id if l2.regime_nodes else None))
+        
+        if self.regime_id == start_regime:
+            return EditorResult.failure(
+                f"Cannot remove start regime '{self.regime_id}'"
+            )
+
+        # Store for undo
         removed_transitions = [
-            t for t in ir.l2_regimes.transitions
+            t for t in l2.transitions
             if t.from_regime == self.regime_id or t.to == self.regime_id
         ]
+        
+        removed_edges = []
+        if l2.regime_graph_spec is not None:
+            removed_edges = [
+                e for e in l2.regime_graph_spec.edges
+                if e.src_regime == self.regime_id or e.dst_regime == self.regime_id
+                   or (e.src_regime == "any" and e.dst_regime == self.regime_id)
+            ]
+
+        # Store envelope overrides if present
+        removed_env_override = l2.envelope_overrides.pop(self.regime_id, None)
 
         # Remove regime
-        ir.l2_regimes.regime_nodes = [
-            n for n in ir.l2_regimes.regime_nodes if n.id != self.regime_id
-        ]
+        l2.regime_nodes.pop(regime_index)
 
-        # Remove associated transitions
-        ir.l2_regimes.transitions = [
-            t for t in ir.l2_regimes.transitions
+        # Remove associated legacy transitions
+        l2.transitions = [
+            t for t in l2.transitions
             if t.from_regime != self.regime_id and t.to != self.regime_id
         ]
 
+        # Remove associated typed edges
+        if l2.regime_graph_spec is not None:
+            l2.regime_graph_spec.edges = [
+                e for e in l2.regime_graph_spec.edges
+                if e.src_regime != self.regime_id and e.dst_regime != self.regime_id
+                   and not (e.src_regime == "any" and e.dst_regime == self.regime_id)
+            ]
+
         return EditorResult.success(
-            f"Removed regime '{self.regime_id}' and {len(removed_transitions)} transitions",
+            f"Removed regime '{self.regime_id}' and {len(removed_transitions) + len(removed_edges)} transitions",
             {
                 "regime_node": regime_node,
-                "removed_transitions": removed_transitions
+                "regime_index": regime_index,
+                "removed_transitions": removed_transitions,
+                "removed_edges": removed_edges,
+                "removed_env_override": removed_env_override,
             }
         )
 
     def undo(self, ir: 'InstrumentIR', undo_data: Dict[str, Any]) -> EditorResult:
-        ir.l2_regimes.regime_nodes.append(undo_data["regime_node"])
-        ir.l2_regimes.transitions.extend(undo_data["removed_transitions"])
+        l2 = ir.layers.L2_regimes
+        # Insert at original position
+        l2.regime_nodes.insert(undo_data["regime_index"], undo_data["regime_node"])
+        l2.transitions.extend(undo_data["removed_transitions"])
+        if l2.regime_graph_spec is not None:
+            l2.regime_graph_spec.edges.extend(undo_data["removed_edges"])
+        if undo_data["removed_env_override"] is not None:
+            l2.envelope_overrides[self.regime_id] = undo_data["removed_env_override"]
         return EditorResult.success(f"Restored regime '{self.regime_id}'")
 
     @property
@@ -339,49 +388,106 @@ class RemoveRegime(EditorCommand):
 @dataclass
 class AddTransition(EditorCommand):
     """
-    ADD_TRANSITION(src, dst) - Add a transition between regimes.
+    ADD_TRANSITION(src, dst, when) - Add a transition between regimes.
+    
+    Works in both legacy (transitions list) and typed (regime_graph_spec.edges) modes.
+    The src may be "any" (wildcard), but dst must always be an existing node.
     """
     src: str
     dst: str
     when: str = "true"  # Guard condition
 
     def execute(self, ir: 'InstrumentIR') -> EditorResult:
-        from ..instrument_ir import RegimeTransition
+        from ..instrument_ir import RegimeTransition, EdgeSpec
 
-        # Verify both regimes exist
-        regime_ids = {n.id for n in ir.l2_regimes.regime_nodes}
-        if self.src not in regime_ids:
+        l2 = ir.layers.L2_regimes
+        regime_ids = {n.id for n in l2.regime_nodes}
+
+        # Verify src is "any" or an existing regime
+        if self.src != "any" and self.src not in regime_ids:
             return EditorResult.failure(f"Source regime '{self.src}' not found")
+        
+        # Destination must always be an existing node
         if self.dst not in regime_ids:
             return EditorResult.failure(f"Destination regime '{self.dst}' not found")
 
-        # Check if transition already exists
-        for t in ir.l2_regimes.transitions:
-            if t.from_regime == self.src and t.to == self.dst:
-                return EditorResult.failure(
-                    f"Transition from '{self.src}' to '{self.dst}' already exists"
-                )
-
-        new_transition = RegimeTransition(
-            from_regime=self.src,
-            to=self.dst,
-            when=self.when
-        )
-        ir.l2_regimes.transitions.append(new_transition)
-
-        return EditorResult.success(
-            f"Added transition {self.src} -> {self.dst}",
-            {"src": self.src, "dst": self.dst}
-        )
+        # Determine active edge list
+        if l2.regime_graph_spec is not None:
+            # Typed-edge mode: work with EdgeSpec
+            edges = l2.regime_graph_spec.edges
+            
+            # Check for duplicates (same src, dst)
+            for edge in edges:
+                if edge.src_regime == self.src and edge.dst_regime == self.dst:
+                    return EditorResult.failure(
+                        f"Transition from '{self.src}' to '{self.dst}' already exists"
+                    )
+            
+            new_edge = EdgeSpec(
+                src_regime=self.src,
+                dst_regime=self.dst,
+                guard=self.when
+            )
+            edges.append(new_edge)
+            
+            return EditorResult.success(
+                f"Added transition {self.src} -> {self.dst}",
+                {"src": self.src, "dst": self.dst, "mode": "typed", "index": len(edges) - 1}
+            )
+        else:
+            # Legacy mode: work with RegimeTransition
+            transitions = l2.transitions
+            
+            # Check for duplicates
+            for t in transitions:
+                if t.from_regime == self.src and t.to == self.dst:
+                    return EditorResult.failure(
+                        f"Transition from '{self.src}' to '{self.dst}' already exists"
+                    )
+            
+            new_transition = RegimeTransition(
+                from_regime=self.src,
+                to=self.dst,
+                when=self.when
+            )
+            transitions.append(new_transition)
+            
+            return EditorResult.success(
+                f"Added transition {self.src} -> {self.dst}",
+                {"src": self.src, "dst": self.dst, "mode": "legacy", "index": len(transitions) - 1}
+            )
 
     def undo(self, ir: 'InstrumentIR', undo_data: Dict[str, Any]) -> EditorResult:
-        ir.l2_regimes.transitions = [
-            t for t in ir.l2_regimes.transitions
-            if not (t.from_regime == undo_data["src"] and t.to == undo_data["dst"])
-        ]
-        return EditorResult.success(
-            f"Removed transition {undo_data['src']} -> {undo_data['dst']}"
-        )
+        l2 = ir.layers.L2_regimes
+        src = undo_data["src"]
+        dst = undo_data["dst"]
+        mode = undo_data["mode"]
+        index = undo_data["index"]
+        
+        if mode == "typed":
+            # Remove from exact position
+            edges = l2.regime_graph_spec.edges
+            if index < len(edges) and edges[index].src_regime == src and edges[index].dst_regime == dst:
+                edges.pop(index)
+            else:
+                # Fallback
+                l2.regime_graph_spec.edges = [
+                    e for e in edges
+                    if not (e.src_regime == src and e.dst_regime == dst)
+                ]
+        else:
+            # Remove from exact position
+            transitions = l2.transitions
+            if index < len(transitions) and transitions[index].from_regime == src and transitions[index].to == dst:
+                transitions.pop(index)
+            else:
+                # Fallback
+                l2.transitions = [
+                    t for t in transitions
+                    if not (t.from_regime == src and t.to == dst)
+                ]
+        
+        return EditorResult.success(f"Removed transition {src} -> {dst}")
 
     @property
     def description(self) -> str:
@@ -392,38 +498,74 @@ class AddTransition(EditorCommand):
 class RemoveTransition(EditorCommand):
     """
     REMOVE_TRANSITION(src, dst) - Remove a transition between regimes.
+    
+    Works in both legacy (transitions list) and typed (regime_graph_spec.edges) modes.
     """
     src: str
     dst: str
 
     def execute(self, ir: 'InstrumentIR') -> EditorResult:
-        # Find the transition
-        transition = None
-        for t in ir.l2_regimes.transitions:
-            if t.from_regime == self.src and t.to == self.dst:
-                transition = t
-                break
+        l2 = ir.layers.L2_regimes
 
-        if transition is None:
-            return EditorResult.failure(
-                f"Transition from '{self.src}' to '{self.dst}' not found"
+        # Determine which mode we're in
+        if l2.regime_graph_spec is not None:
+            # Typed-edge mode
+            edges = l2.regime_graph_spec.edges
+            edge = None
+            edge_index = None
+            
+            for i, e in enumerate(edges):
+                if e.src_regime == self.src and e.dst_regime == self.dst:
+                    edge = e
+                    edge_index = i
+                    break
+            
+            if edge is None:
+                return EditorResult.failure(
+                    f"Transition from '{self.src}' to '{self.dst}' not found"
+                )
+            
+            edges.pop(edge_index)
+            
+            return EditorResult.success(
+                f"Removed transition {self.src} -> {self.dst}",
+                {"edge": edge, "index": edge_index, "mode": "typed"}
+            )
+        else:
+            # Legacy mode
+            transitions = l2.transitions
+            transition = None
+            trans_index = None
+            
+            for i, t in enumerate(transitions):
+                if t.from_regime == self.src and t.to == self.dst:
+                    transition = t
+                    trans_index = i
+                    break
+            
+            if transition is None:
+                return EditorResult.failure(
+                    f"Transition from '{self.src}' to '{self.dst}' not found"
+                )
+            
+            transitions.pop(trans_index)
+            
+            return EditorResult.success(
+                f"Removed transition {self.src} -> {self.dst}",
+                {"transition": transition, "index": trans_index, "mode": "legacy"}
             )
 
-        ir.l2_regimes.transitions = [
-            t for t in ir.l2_regimes.transitions
-            if not (t.from_regime == self.src and t.to == self.dst)
-        ]
-
-        return EditorResult.success(
-            f"Removed transition {self.src} -> {self.dst}",
-            {"transition": transition}
-        )
-
     def undo(self, ir: 'InstrumentIR', undo_data: Dict[str, Any]) -> EditorResult:
-        ir.l2_regimes.transitions.append(undo_data["transition"])
-        return EditorResult.success(
-            f"Restored transition {self.src} -> {self.dst}"
-        )
+        l2 = ir.layers.L2_regimes
+        mode = undo_data["mode"]
+        index = undo_data["index"]
+        
+        if mode == "typed":
+            l2.regime_graph_spec.edges.insert(index, undo_data["edge"])
+        else:
+            l2.transitions.insert(index, undo_data["transition"])
+        
+        return EditorResult.success(f"Restored transition {self.src} -> {self.dst}")
 
     @property
     def description(self) -> str:

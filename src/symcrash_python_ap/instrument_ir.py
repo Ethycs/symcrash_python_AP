@@ -2374,6 +2374,32 @@ def _parse_hysteresis(data: dict) -> Hysteresis:
     )
 
 
+def _parse_edge_spec(data: dict) -> EdgeSpec:
+    """Parse EdgeSpec from dict."""
+    hysteresis = None
+    if 'hysteresis' in data:
+        hysteresis = _parse_hysteresis(data['hysteresis'])
+    
+    return EdgeSpec(
+        src_regime=data.get('src_regime', ''),
+        dst_regime=data.get('dst_regime', ''),
+        transition_type=data.get('transition_type', 'soft'),
+        guard=data.get('guard', ''),
+        hysteresis=hysteresis,
+        min_dwell_blocks=data.get('min_dwell_blocks', 0),
+        duration_blocks=data.get('duration_blocks', 4),
+        overlay=data.get('overlay'),
+    )
+
+
+def _parse_regime_graph_spec(data: dict) -> RegimeGraphSpec:
+    """Parse RegimeGraphSpec from dict."""
+    return RegimeGraphSpec(
+        start_regime=data.get('start_regime', 'R0_IDLE'),
+        edges=[_parse_edge_spec(e) for e in data.get('edges', [])],
+    )
+
+
 def _parse_regime_node(data: dict) -> RegimeNode:
     """Parse regime node from dict."""
     return RegimeNode(
@@ -2435,9 +2461,15 @@ def _parse_l2_regimes(data: dict) -> L2Regimes:
             _parse_regime_envelope_override(o) for o in overrides
         ]
 
+    # Parse regime_graph_spec if present
+    regime_graph_spec = None
+    if 'regime_graph_spec' in data:
+        regime_graph_spec = _parse_regime_graph_spec(data['regime_graph_spec'])
+
     return L2Regimes(
         regime_nodes=[_parse_regime_node(n) for n in data.get('regime_nodes', [])],
         transitions=[_parse_regime_transition(t) for t in data.get('transitions', [])],
+        regime_graph_spec=regime_graph_spec,
         envelopes=envelopes,
         envelope_overrides=envelope_overrides,
     )

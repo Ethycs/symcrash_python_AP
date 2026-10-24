@@ -17,7 +17,7 @@ Usage:
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, List, Union, Callable, Any
+from typing import Optional, List, Union, Callable, Any, Tuple
 import copy
 
 from .commands import EditorCommand, EditorResult, EditorResultStatus
@@ -159,27 +159,169 @@ class EditorSession:
 
         return result
 
-    def execute_batch(self, commands: List[EditorCommand]) -> List[EditorResult]:
+    def execute_batch(self, commands: List[EditorCommand], atomic: bool = False) -> List[EditorResult]:
         """
         Execute multiple commands as a batch.
 
-        All commands are executed in order. Each successful command
-        is recorded individually in history.
-
         Args:
             commands: List of commands to execute
+            atomic: If True, batch is all-or-nothing with validation rollback
+
+        With atomic=False (default):
+            All commands are executed in order. Each successful command
+            is recorded individually in history. Stops on first failure.
+
+        With atomic=True:
+            All commands run in order. The batch is rolled back if:
+            - Any command fails, OR
+            - The resulting L2 has V4 errors while the L2 before had none
+            
+            On rollback, all commands are undone (most recent first), and the
+            IR, undo stack, redo stack, and is_dirty are restored exactly.
+            
+            On success, the entire batch is recorded as a single history entry,
+            so one undo() reverts the whole batch.
 
         Returns:
             List of results (one per command)
         """
+        if not atomic:
+            # Non-atomic mode: original behavior
+            results = []
+            for command in commands:
+                result = self.execute(command)
+                results.append(result)
+                # Stop on first failure
+                if not result.ok:
+                    break
+            return results
+        
+        # Atomic mode: all-or-nothing with validation
+        from .validator import validate_regime_graph
+        
+        # Snapshot state before batch
+        l2_before = copy.deepcopy(self._ir.layers.L2_regimes)
+        undo_stack_before = copy.deepcopy(self._history._undo_stack)
+        redo_stack_before = copy.deepcopy(self._history._redo_stack)
+        dirty_before = self._state.is_dirty
+        
+        # Check V4 errors before batch
+        errors_before = validate_regime_graph(l2_before)
+        had_errors_before = len(errors_before) > 0
+        
+        # Execute all commands, collecting results and undo data
         results = []
+        executed_commands = []
+        
         for command in commands:
-            result = self.execute(command)
+            result = command.execute(self._ir)
             results.append(result)
-            # Stop on first failure
-            if not result.ok:
-                break
+            
+            if result.status == EditorResultStatus.SUCCESS:
+                executed_commands.append((command, result))
+            elif not result.ok:
+                # Command failed - rollback entire batch
+                self._rollback_batch(
+                    executed_commands, 
+                    l2_before, 
+                    undo_stack_before, 
+                    redo_stack_before, 
+                    dirty_before
+                )
+                return results
+        
+        # Check V4 errors after batch
+        errors_after = validate_regime_graph(self._ir.layers.L2_regimes)
+        has_errors_after = len(errors_after) > 0
+        
+        # Rollback if validation failed (new errors introduced)
+        if has_errors_after and not had_errors_before:
+            self._rollback_batch(
+                executed_commands, 
+                l2_before, 
+                undo_stack_before, 
+                redo_stack_before, 
+                dirty_before
+            )
+            # Add failure result with validator errors
+            error_msg = "Batch rolled back due to V4 validation errors: " + "; ".join(errors_after)
+            results.append(EditorResult.failure(error_msg))
+            return results
+        
+        # Success - record as single batch entry
+        self._record_batch(executed_commands, len(commands))
+        self._state.is_dirty = True
+        self._notify_change()
+        
         return results
+    
+    def _rollback_batch(
+        self, 
+        executed_commands: List[Tuple[EditorCommand, EditorResult]], 
+        l2_before, 
+        undo_stack_before, 
+        redo_stack_before, 
+        dirty_before
+    ):
+        """Rollback a batch by undoing all executed commands in reverse order."""
+        # Undo all executed commands (most recent first)
+        for command, result in reversed(executed_commands):
+            if result.undo_data is not None:
+                command.undo(self._ir, result.undo_data)
+        
+        # Restore exact state
+        self._ir.layers.L2_regimes = l2_before
+        self._history._undo_stack = undo_stack_before
+        self._history._redo_stack = redo_stack_before
+        self._state.is_dirty = dirty_before
+    
+    def _record_batch(self, executed_commands: List[Tuple[EditorCommand, EditorResult]], count: int):
+        """Record a batch as a single history entry."""
+        from .commands import EditorCommand, EditorResult
+        
+        # Create a batch command that can undo/redo the whole batch
+        class BatchCommand(EditorCommand):
+            def __init__(self, commands_and_results, description):
+                self._commands_and_results = commands_and_results
+                self._description = description
+            
+            def execute(self, ir):
+                # Re-execute all commands
+                for command, _ in self._commands_and_results:
+                    result = command.execute(ir)
+                    if not result.ok:
+                        return result
+                return EditorResult.success("Batch re-executed")
+            
+            def undo(self, ir, undo_data):
+                # Undo all commands in reverse
+                for command, result in reversed(self._commands_and_results):
+                    if result.undo_data is not None:
+                        command.undo(ir, result.undo_data)
+                return EditorResult.success("Batch undone")
+            
+            @property
+            def description(self):
+                return self._description
+        
+        # Filter out NO_OP commands for the batch
+        non_noop_commands = [
+            (cmd, res) for cmd, res in executed_commands 
+            if res.status != EditorResultStatus.NO_OP
+        ]
+        
+        if non_noop_commands:
+            batch_cmd = BatchCommand(
+                executed_commands,  # Include all for proper undo
+                f"Batch of {count} commands"
+            )
+            batch_result = EditorResult.success(
+                f"Batch of {count} commands executed",
+                {"commands": executed_commands}
+            )
+            # Clear redo stack and record batch
+            self._history._redo_stack.clear()
+            self._history.record(batch_cmd, batch_result)
 
     # =========================================================================
     # UNDO/REDO
@@ -219,7 +361,8 @@ class EditorSession:
         result = entry.command.execute(self._ir)
 
         if result.ok:
-            self._history.record(entry.command, result)
+            # Keep the rest of the redo stack: redoing is not a new action.
+            self._history.record(entry.command, result, clear_redo=False)
             self._state.is_dirty = True
             self._notify_redo(entry.description)
 
