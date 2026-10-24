@@ -1403,6 +1403,26 @@ def is_block_safe(coeffs: List[int], audio: List[int],
     return coeff_result.is_safe and audio_result.is_safe
 
 
+def _tail_jit_active() -> bool:
+    """True when step_block should use the numba kernel (shares the VM switch)."""
+    try:
+        from ..vm.hotpath_jit import jit_enabled
+        from . import safety_tail_jit  # noqa: F401
+    except ImportError:  # pragma: no cover - numba is a project dependency
+        return False
+    return jit_enabled()
+
+
+def _tail_tables():
+    """Module LUTs/tables as int64 arrays for the kernel (built once)."""
+    import numpy as np
+    from ..primitives import _SQRT_LUT
+    return (np.array(SafetyEngine.E_TARGETS, dtype=np.int64),
+            np.array(SafetyEngine.HF_BUDGETS, dtype=np.int64),
+            np.array(_SQRT_LUT, dtype=np.int64),
+            np.array(_HANN_OLA_LUT, dtype=np.int64))
+
+
 class SafetyEngine:
     """
     Safety processing: metrics, regulation, de-click/OLA, limiting, slew control.
@@ -1700,6 +1720,9 @@ class SafetyEngine:
         Returns:
             Corrected audio samples
         """
+        if _tail_jit_active() and len(x) > 0:
+            return self._apply_c1_patch_jit(x, voice_id, patch_radius)
+
         # Energy-aware detection with hysteresis
         discontinuities, is_degenerate = self.detect_discontinuity_energy_aware(
             x, voice_id
@@ -2061,6 +2084,10 @@ class SafetyEngine:
             apply_dc_removal: Apply DC offset removal. Disable for phase-continuous
                               carrier signals that are zero-mean over full cycles.
         """
+        if _tail_jit_active() and len(L) == self.B and len(R) == self.B:
+            return self._step_block_jit(L, R, params, apply_master_ola,
+                                        apply_slew_limit, apply_dc_removal)
+
         # 1) Measure metrics
         m = self.measure_metrics(L, R)
 
@@ -2090,6 +2117,128 @@ class SafetyEngine:
 
         return Lo, Ro
 
+    def _step_block_jit(self, L: List[int], R: List[int], params: ParamFrame,
+                        apply_master_ola: bool, apply_slew_limit: bool,
+                        apply_dc_removal: bool) -> Tuple[List[int], List[int]]:
+        """step_block via the bit-exact numba kernel (safety_tail_jit.safety_tail_step).
+
+        All state is read from and written back to the same instance fields the
+        pure-Python methods use, so the two paths can be alternated block by block.
+        """
+        import numpy as np
+        from . import safety_tail_jit as stj
+
+        n = self.B
+        primed = 1 if (self.master_ola_L and len(self.master_ola_L) >= OLA_OVERLAP) else 0
+        st = np.array([
+            self.rg.E_hat, self.rg.HF_hat, self.rg.peak_hat, self.rg.dc_hat,
+            self.q_gain, self.q_hf_cut,
+            self.prev_sample_L, self.prev_sample_R,
+            self.lim_L.gain, self.lim_R.gain,
+            primed, self.alpha,
+        ], dtype=np.int64)
+        if primed:
+            tail_L = np.array(self.master_ola_L[-OLA_OVERLAP:], dtype=np.int64)
+            tail_R = np.array(self.master_ola_R[-OLA_OVERLAP:], dtype=np.int64)
+        else:
+            tail_L = np.zeros(OLA_OVERLAP, dtype=np.int64)
+            tail_R = np.zeros(OLA_OVERLAP, dtype=np.int64)
+        flags = ((stj.FLAG_MASTER_OLA if apply_master_ola else 0)
+                 | (stj.FLAG_SLEW_LIMIT if apply_slew_limit else 0)
+                 | (stj.FLAG_DC_REMOVAL if apply_dc_removal else 0))
+        outL = np.empty(n, dtype=np.int64)
+        outR = np.empty(n, dtype=np.int64)
+
+        stj.safety_tail_step(
+            np.asarray(L, dtype=np.int64), np.asarray(R, dtype=np.int64), n, st, flags,
+            int(params.K_mode), _E_TARGETS_ARR, _HF_BUDGETS_ARR, _SQRT_LUT_ARR, _HANN_OLA_ARR,
+            tail_L, tail_R,
+            self.LIMIT_THRESHOLD, self.LIMIT_CEILING, self.ATTACK_RATE, self.RELEASE_RATE,
+            SLEW_MAX, OLA_OVERLAP, outL, outR,
+        )
+
+        self.rg.E_hat = int(st[stj.ST_E_HAT])
+        self.rg.HF_hat = int(st[stj.ST_HF_HAT])
+        self.rg.peak_hat = int(st[stj.ST_PEAK_HAT])
+        self.rg.dc_hat = int(st[stj.ST_DC_HAT])
+        self.q_gain = int(st[stj.ST_Q_GAIN])
+        self.q_hf_cut = int(st[stj.ST_Q_HF_CUT])
+        self.prev_sample_L = int(st[stj.ST_PREV_L])
+        self.prev_sample_R = int(st[stj.ST_PREV_R])
+        self.lim_L.gain = int(st[stj.ST_LIM_L])
+        self.lim_R.gain = int(st[stj.ST_LIM_R])
+        if apply_master_ola:
+            self.master_ola_L = tail_L.tolist()
+            self.master_ola_R = tail_R.tolist()
+        return outL.tolist(), outR.tolist()
+
+    def _step_block_with_voices_jit(self, voice_blocks, params: ParamFrame) -> Tuple[List[int], List[int]]:
+        """Batched JIT front end: voice start/stop fades stay in Python (they touch at most
+        eight samples and mutate per-voice phase state in call order), then ONE kernel call
+        runs the C1 patch for every voice channel and the saturating mix, then the stereo
+        chain runs through the step_block kernel. Bit-exact with the sequential pure path."""
+        import numpy as np
+        from . import safety_tail_jit as stj
+
+        B = self.B
+        rows: List[List[int]] = []
+        voice_index: Dict[int, int] = {}
+        voice_of_row: List[int] = []
+        for voice_id, vL, vR in voice_blocks:
+            if voice_id not in voice_index:
+                voice_index[voice_id] = len(voice_index)
+            v = voice_index[voice_id]
+            # same call order as apply_declick(vL) then apply_declick(vR) with seam=False
+            xL = self.apply_voice_stop(self.apply_voice_start(vL, voice_id), voice_id)
+            xR = self.apply_voice_stop(self.apply_voice_start(vR, voice_id), voice_id)
+            rows.append(xL)
+            voice_of_row.append(v)
+            rows.append(xR)
+            voice_of_row.append(v)
+
+        nv = len(voice_index)
+        X = np.array(rows, dtype=np.int64)
+        was_deg = np.zeros(nv, dtype=np.int64)
+        prev_out = np.zeros(nv, dtype=np.int64)
+        for voice_id, v in voice_index.items():
+            was_deg[v] = 1 if self.degenerate_mode.get(voice_id, False) else 0
+            prev_out[v] = int(self.prev_output.get(voice_id, 0))
+        idx_buf = np.empty(B, dtype=np.int64)
+        work = np.empty(B, dtype=np.int64)
+        acc_L = np.empty(B, dtype=np.int64)
+        acc_R = np.empty(B, dtype=np.int64)
+
+        stj.voices_declick_mix_batch(
+            X, len(rows), B, np.asarray(voice_of_row, dtype=np.int64), was_deg, prev_out, idx_buf, work,
+            SLEW_MAX, R_CURVATURE_MAX, E_FLOOR_RMS, E_FLOOR_HYSTERESIS, J_DEGENERATE_THRESHOLD,
+            8, _SQRT_LUT_ARR, acc_L, acc_R,
+        )
+        for voice_id, v in voice_index.items():
+            self.degenerate_mode[voice_id] = bool(was_deg[v])
+            self.prev_output[voice_id] = int(prev_out[v])
+        return self.step_block(acc_L.tolist(), acc_R.tolist(), params, apply_master_ola=False)
+
+    def _apply_c1_patch_jit(self, x: List[int], voice_id: int, patch_radius: int) -> List[int]:
+        """apply_c1_patch via safety_tail_jit.c1_patch_block; per-voice state stays in
+        self.degenerate_mode / self.prev_output exactly as in the pure-Python path."""
+        import numpy as np
+        from . import safety_tail_jit as stj
+
+        n = len(x)
+        xa = np.asarray(x, dtype=np.int64)
+        out = np.empty(n, dtype=np.int64)
+        idx = np.empty(n, dtype=np.int64)
+        is_deg, last = stj.c1_patch_block(
+            xa, n, out, idx,
+            bool(self.degenerate_mode.get(voice_id, False)),
+            int(self.prev_output.get(voice_id, 0)),
+            SLEW_MAX, R_CURVATURE_MAX, E_FLOOR_RMS, E_FLOOR_HYSTERESIS,
+            J_DEGENERATE_THRESHOLD, patch_radius, _SQRT_LUT_ARR,
+        )
+        self.degenerate_mode[voice_id] = bool(is_deg)
+        self.prev_output[voice_id] = int(last)
+        return out.tolist()
+
     def step_block_with_voices(self, voice_blocks: List[Tuple[int, List[int], List[int]]],
                                 params: ParamFrame) -> Tuple[List[int], List[int]]:
         """
@@ -2099,6 +2248,10 @@ class SafetyEngine:
 
         This applies per-voice de-click, then mixes, then runs the rest of the chain.
         """
+        if _tail_jit_active() and voice_blocks and all(
+                len(vL) == self.B and len(vR) == self.B for _, vL, vR in voice_blocks):
+            return self._step_block_with_voices_jit(voice_blocks, params)
+
         # Apply per-voice de-click
         declicked_blocks = []
         for voice_id, vL, vR in voice_blocks:
@@ -2107,6 +2260,19 @@ class SafetyEngine:
             declicked_blocks.append((dL, dR))
 
         # Mix to stereo
+        if _tail_jit_active() and all(len(dL) >= self.B and len(dR) >= self.B
+                                      for dL, dR in declicked_blocks):
+            import numpy as np
+            from . import safety_tail_jit as stj
+            acc_L = np.zeros(self.B, dtype=np.int64)
+            acc_R = np.zeros(self.B, dtype=np.int64)
+            for dL, dR in declicked_blocks:
+                stj.mix_sat16(acc_L, np.asarray(dL[:self.B], dtype=np.int64), self.B)
+                stj.mix_sat16(acc_R, np.asarray(dR[:self.B], dtype=np.int64), self.B)
+            mix_L = acc_L.tolist()
+            mix_R = acc_R.tolist()
+            return self.step_block(mix_L, mix_R, params, apply_master_ola=False)
+
         mix_L = [0] * self.B
         mix_R = [0] * self.B
 
@@ -2127,3 +2293,7 @@ class SafetyEngine:
             dc_offset_q15=self.rg.dc_hat,
             crest_factor_q15=0
         )
+
+
+# Kernel tables (after SafetyEngine so its class constants are available).
+_E_TARGETS_ARR, _HF_BUDGETS_ARR, _SQRT_LUT_ARR, _HANN_OLA_ARR = _tail_tables()
