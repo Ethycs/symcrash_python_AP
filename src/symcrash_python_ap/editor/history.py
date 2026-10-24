@@ -52,7 +52,8 @@ class CommandHistory:
         self._redo_stack: List[HistoryEntry] = []
         self._max_history = max_history
 
-    def record(self, command: EditorCommand, result: EditorResult) -> None:
+    def record(self, command: EditorCommand, result: EditorResult,
+               clear_redo: bool = True) -> None:
         """
         Record a successfully executed command.
 
@@ -62,6 +63,10 @@ class CommandHistory:
         Args:
             command: The command that was executed
             result: The result of execution (must contain undo_data)
+            clear_redo: True for a fresh action. False when re-recording a
+                command that redo() just re-executed: the remaining redo
+                entries are still valid and must survive, otherwise only
+                the first of several redo() calls can ever take effect.
         """
         if result.status != EditorResultStatus.SUCCESS:
             return
@@ -73,7 +78,8 @@ class CommandHistory:
         self._undo_stack.append(entry)
 
         # Clear redo stack - new action invalidates redo path
-        self._redo_stack.clear()
+        if clear_redo:
+            self._redo_stack.clear()
 
         # Enforce max history limit
         if len(self._undo_stack) > self._max_history:
