@@ -20,6 +20,7 @@ import struct
 # Import Q15_ONE from primitives (single source of truth)
 from .primitives import Q15_ONE
 from .primitives import Q15_3_4, Q15_HALF, Q16_ONE
+from .tables.coefficient_tail import CoefficientTailPolicy
 
 
 @dataclass
@@ -39,6 +40,64 @@ class ParamFrame:
     filter_reso_q15: int = 0            # Resonance (Q15: 0=flat, 32767=self-osc)
     filter_mode: int = 0                # 0=LP, 1=HP, 2=BP, 3=Notch
     filter_enabled: bool = False        # True to enable SVF filter
+
+
+@dataclass
+class CMMMEventPayload:
+    """Semantic event lanes from WSE-STD-VOICE-PIPELINE section 9.
+
+    These are distinct from the frozen wire packet's eight event lanes.
+    Band selectors address operator_library.BAND_SLICES; gate/swallowtail
+    values are bitmaps, not Q15 amplitudes.
+    """
+    impulse_band: int = 0
+    impulse_strength_q15: int = 0
+    noise_band: int = 0
+    noise_amount_q15: int = 0
+    pulse_pressure_q15: int = 0
+    gate_mask: int = 0xFF
+    cusp_amount_q15: int = 0
+    swallowtail_bands: int = 0
+    fold_pressure_q15: int = 0
+    sheaf_threshold_q15: int = 0
+    active_mask: int = 0
+
+
+@dataclass(frozen=True)
+class WireCarrierHeader:
+    """Version-2 carrier header, preserved independently of VM enum values."""
+    model: int = 0
+    role: int = 1
+    archetype: int = 0
+    transition: int = 0
+    detune_cents: int = 0
+    pulse_width_q15: int = Q15_HALF
+    eta_q15: int = Q15_HALF
+    pitchbend_cents: int = 0
+
+
+@dataclass(frozen=True)
+class WireFrameData:
+    """Immutable packet buses absent from the original internal frame.
+
+    Payloads use the MSB lane-nibble layout from Wire Contract v0b. They must
+    never be interpreted as CMMM events or the UART Payload64 low-byte layout.
+    Version 2 changes lane 4 from note injection to carrier configuration.
+    """
+    version: int = 1
+    program_id: int = 0
+    frame_seq: int = 0
+    reject_code: int = 0
+    regime_id: int = 0
+    degradation_level: int = 0
+    activity_q15: int = 0
+    sendA_q15: int = 0
+    sendB_q15: int = 0
+    family_weights_q15: Tuple[int, ...] = (0,) * 8
+    event_mask: int = 0
+    event_strength_q15: Tuple[int, ...] = (0,) * 8
+    event_payload_u64: Tuple[int, ...] = (0,) * 8
+    carrier: Optional[WireCarrierHeader] = None
 
 
 @dataclass
@@ -64,6 +123,8 @@ class VoiceFrame:
     flags: int = 0
     gain_q15: int = 0x4000       # Voice gain (0.5 default)
     pan_q15: int = 0             # Pan (-1..+1 as Q1.15)
+    sendA_q15: int = 0          # Post-gain/post-pan auxiliary send levels.
+    sendB_q15: int = 0
     material_id: int = 0
     role_id: int = 0
     aux_flags: int = 0
@@ -124,6 +185,8 @@ class VoiceFrame:
     # families: Dict mapping operator name to strength (0.0-1.0)
     ops_enable: List[str] = field(default_factory=list)
     families: Dict[str, float] = field(default_factory=dict)
+    # Exact native operator weights, when supplied by the authored graph.
+    operator_strengths_q15: Optional[Dict[str, int]] = None
 
     # =========================================================================
     # CCS Oscillator Mode B Parameters (WSE-STD-210 Section 10.2)
@@ -131,6 +194,7 @@ class VoiceFrame:
 
     # Oscillator mode: 0 = Mode A (LUT), 1 = Mode B (Rotator/Harmonic Bank)
     coeff_osc_mode: int = 0
+    coeff_table_id: int = 0         # Mode A LUT identity; different enum from waveform_type
 
     # Harmonic count request (Mode B bandlimits at runtime based on pitch)
     H_request: int = 16
@@ -173,12 +237,16 @@ class VoiceFrame:
     sync_ratio_q16: int = 0         # Master/slave frequency ratio (Q16)
 
     # FM/PM parameters
-    fm_depth_q15: int = 0           # FM modulation depth (Q15)
+    fm_depth_q15: int = 0           # Q15 fraction of a full turn at full-scale mod
     fm_source: int = 0              # FM modulator source (0=off, 1=feedback, 2=lfo)
+    fm_modulator_q15: Optional[List[int]] = None  # Native L1 lane samples for source 2
+    harmonic_gains_q15: Optional[List[int]] = None  # Native Mode B, 32 unsigned gains; 32768=unity
+    harmonic_gain_bound_q15: int = 32768  # Constant maximum gain for spectral headroom
 
     # Unison parameters
     unison_voices: int = 1          # Number of unison voices (1=mono)
     unison_spread_cents: int = 0    # Unison detune spread in cents
+    osc_start_phase_q32: Optional[int] = None  # Native start phase on is_starting only
 
     # Drone/Pad mode (Phase 4 - sustained coefficients)
     drone_mode: bool = False        # When True, reduces base_mix for slow evolution
@@ -271,6 +339,18 @@ class VoiceFrame:
     cmmm_tail_mode: Optional[int] = None          # TailMode enum value
     cmmm_traction_q15: int = Q15_ONE              # Projection hardness
 
+    # Semantic CMMM events, kept separate from frozen wire event lane IDs.
+    cmmm_events: Optional[CMMMEventPayload] = None
+
+    # Compiled regime/program tail settings; None selects the runtime profile.
+    tail_policy: Optional[CoefficientTailPolicy] = None
+
+    # Frozen packet buses are separate from semantic CMMM/legacy VM events.
+    wire_data: Optional[WireFrameData] = None
+    # Authored frozen-lane commands on a native frame. Core oscillator and
+    # family buses retain their native representation; no packet conversion.
+    event_commands: Optional[WireFrameData] = None
+
     # =========================================================================
     # Filter Parameters (Material Engine SVF)
     # =========================================================================
@@ -332,13 +412,17 @@ class MaterialParams:
     cut_q15: int = 0
     
     def slew_from(self, pf: ParamFrame, rate: int = 256):
-        """Slew toward ParamFrame values."""
-        from .fixed import slew_q15
-        self.drive_q15 = slew_q15(self.drive_q15, pf.drive_q15, rate)
-        self.tone_q15 = slew_q15(self.tone_q15, pf.tone_q15, rate)
-        self.bias_q15 = slew_q15(self.bias_q15, pf.bias_q15, rate)
-        self.pressure_q15 = slew_q15(self.pressure_q15, pf.pressure_q15, rate)
-        self.cut_q15 = slew_q15(self.cut_q15, pf.cut_q15, rate)
+        """WSE-STD-MATERIAL §5.2 proportional Q0.15 slew, once per block.
+
+        This coefficient is distinct from slew_q15's maximum integer step.
+        RNE naturally leaves a small deadband near the target (64 at rate 256).
+        """
+        from .fixed import RSHIFT_RNE, sat16
+        if not isinstance(rate, int) or isinstance(rate, bool) or not 0 <= rate <= Q15_ONE:
+            raise ValueError('Material slew rate must be an unsigned Q15 integer')
+        for name in ('drive_q15', 'tone_q15', 'bias_q15', 'pressure_q15', 'cut_q15'):
+            current, target = int(getattr(self, name)), int(getattr(pf, name))
+            setattr(self, name, sat16(current + RSHIFT_RNE((target - current) * rate, 15)))
 
 
 @dataclass
@@ -564,8 +648,8 @@ class VoiceFramePacketV0b:
         """
         Deserialize from 136 bytes (big-endian per spec).
         """
-        if len(data) < VFP_PACKET_LEN:
-            raise ValueError(f"Data too short: {len(data)} < {VFP_PACKET_LEN}")
+        from .wire_frame import validate_packet_bytes
+        validate_packet_bytes(data, VFP_VERSION, VFP_PACKET_LEN)
 
         offset = 0
 
@@ -605,7 +689,7 @@ class VoiceFramePacketV0b:
         event_payload_u64 = list(struct.unpack('>8Q', data[offset:offset+64]))
         offset += 64
 
-        return cls(
+        packet = cls(
             magic=magic,
             version=version,
             packet_len=packet_len,
@@ -634,6 +718,9 @@ class VoiceFramePacketV0b:
             event_strength_q15=event_strength_q15,
             event_payload_u64=event_payload_u64,
         )
+        from .wire_frame import require_valid_core
+        require_valid_core(packet)
+        return packet
 
     def validate(self) -> Tuple[bool, Optional[str]]:
         """
@@ -641,41 +728,9 @@ class VoiceFramePacketV0b:
 
         Returns (is_valid, error_message).
         """
-        if self.magic != VFP_MAGIC:
-            return False, f"Invalid magic: 0x{self.magic:04X} != 0x{VFP_MAGIC:04X}"
+        from .wire_frame import validate_packet
+        return validate_packet(self)
 
-        if self.version != VFP_VERSION:
-            return False, f"Invalid version: {self.version} != {VFP_VERSION}"
-
-        if self.packet_len != VFP_PACKET_LEN:
-            return False, f"Invalid packet_len: {self.packet_len} != {VFP_PACKET_LEN}"
-
-        if self.hdr_pad != 0:
-            return False, f"hdr_pad must be 0: {self.hdr_pad}"
-
-        if self.pad0 != 0:
-            return False, f"pad0 must be 0: {self.pad0}"
-
-        if self.pad1 != 0:
-            return False, f"pad1 must be 0: {self.pad1}"
-
-        if self.note_u8 > 127:
-            return False, f"note_u8 out of range: {self.note_u8} > 127"
-
-        if self.regime_id > 15:
-            return False, f"regime_id out of range: {self.regime_id} > 15"
-
-        if self.tree_a_id >= NUM_TREES or self.tree_b_id >= NUM_TREES:
-            return False, f"tree_id out of range: a={self.tree_a_id}, b={self.tree_b_id}"
-
-        # Validate event payloads: lane_id in bits 63..60 must match index
-        for i, payload in enumerate(self.event_payload_u64):
-            if self.event_mask & (1 << i):
-                lane_id = (payload >> 60) & 0x0F
-                if lane_id != i:
-                    return False, f"Lane {i} payload has mismatched lane_id: {lane_id}"
-
-        return True, None
 
     @staticmethod
     def unpack_event_payload(payload_u64: int) -> dict:
@@ -726,38 +781,19 @@ class VoiceFramePacketV0b:
         """
         Convert to internal VoiceFrame format.
         """
-        return VoiceFrame(
-            voice_id=self.voice_id,
-            tree_id=self.tree_a_id,
-            flags=self.flags,
-            gain_q15=self.gain_q15,
-            pan_q15=self.pan_q15,
-            tree_a_id=self.tree_a_id,
-            tree_b_id=self.tree_b_id,
-            tree_blend_q15=self.tree_blend_q15,
-        )
+        from .wire_frame import packet_to_voice_frame
+        return packet_to_voice_frame(self)
 
     @classmethod
-    def from_voice_frame(cls, vf: VoiceFrame, program_id: int = 0,
-                         frame_seq: int = 0, regime_id: int = 0,
-                         note_u8: int = 60, cents_i16: int = 0) -> 'VoiceFramePacketV0b':
+    def from_voice_frame(cls, vf: VoiceFrame, program_id: Optional[int] = None,
+                         frame_seq: Optional[int] = None, regime_id: Optional[int] = None,
+                         note_u8: Optional[int] = None, cents_i16: Optional[int] = None) -> 'VoiceFramePacketV0b':
         """
         Convert from internal VoiceFrame format to 136-byte packet.
         """
-        return cls(
-            program_id=program_id,
-            voice_id=vf.voice_id,
-            frame_seq=frame_seq,
-            flags=vf.flags,
-            regime_id=regime_id,
-            note_u8=note_u8,
-            cents_i16=cents_i16,
-            gain_q15=vf.gain_q15,
-            pan_q15=vf.pan_q15,
-            tree_a_id=vf.tree_a_id,
-            tree_b_id=vf.tree_b_id,
-            tree_blend_q15=vf.tree_blend_q15,
-        )
+        from .wire_frame import voice_frame_to_packet
+        return voice_frame_to_packet(cls, vf, program_id=program_id, frame_seq=frame_seq,
+                                     regime_id=regime_id, note_u8=note_u8, cents_i16=cents_i16)
 
 
 # =============================================================================
@@ -939,8 +975,8 @@ class VoiceFramePacketV1:
         """
         Deserialize from 148 bytes (big-endian per spec).
         """
-        if len(data) < VFP_V1_PACKET_LEN:
-            raise ValueError(f"Data too short: {len(data)} < {VFP_V1_PACKET_LEN}")
+        from .wire_frame import validate_packet_bytes
+        validate_packet_bytes(data, VFP_V1_VERSION, VFP_V1_PACKET_LEN)
 
         offset = 0
 
@@ -986,7 +1022,7 @@ class VoiceFramePacketV1:
         event_payload_u64 = list(struct.unpack('>8Q', data[offset:offset+64]))
         offset += 64
 
-        return cls(
+        packet = cls(
             magic=magic,
             version=version,
             packet_len=packet_len,
@@ -1023,67 +1059,39 @@ class VoiceFramePacketV1:
             event_strength_q15=event_strength_q15,
             event_payload_u64=event_payload_u64,
         )
+        from .wire_frame import require_valid_core
+        require_valid_core(packet)
+        return packet
 
     def validate(self) -> Tuple[bool, Optional[str]]:
-        """
-        Validate packet structure and constraints.
+        """Validate core fields and strict per-lane event invariants."""
+        from .wire_frame import validate_packet
+        return validate_packet(self)
 
-        Returns (is_valid, error_message).
-        """
-        if self.magic != VFP_MAGIC:
-            return False, f"Invalid magic: 0x{self.magic:04X} != 0x{VFP_MAGIC:04X}"
+    def to_voice_frame(self) -> VoiceFrame:
+        from .wire_frame import packet_to_voice_frame
+        return packet_to_voice_frame(self)
 
-        if self.version != VFP_V1_VERSION:
-            return False, f"Invalid version: {self.version} != {VFP_V1_VERSION}"
-
-        if self.packet_len != VFP_V1_PACKET_LEN:
-            return False, f"Invalid packet_len: {self.packet_len} != {VFP_V1_PACKET_LEN}"
-
-        if self.hdr_pad != 0:
-            return False, f"hdr_pad must be 0: {self.hdr_pad}"
-
-        if self.pad0 != 0:
-            return False, f"pad0 must be 0: {self.pad0}"
-
-        if self.pad1 != 0:
-            return False, f"pad1 must be 0: {self.pad1}"
-
-        if self.note_u8 > 127:
-            return False, f"note_u8 out of range: {self.note_u8} > 127"
-
-        if self.regime_id > 15:
-            return False, f"regime_id out of range: {self.regime_id} > 15"
-
-        if self.tree_a_id >= NUM_TREES or self.tree_b_id >= NUM_TREES:
-            return False, f"tree_id out of range: a={self.tree_a_id}, b={self.tree_b_id}"
-
-        # Validate carrier fields
-        if self.carrier_model_u8 > 5:
-            return False, f"carrier_model_u8 out of range: {self.carrier_model_u8} > 5"
-
-        if self.carrier_role_u8 > 2:
-            return False, f"carrier_role_u8 out of range: {self.carrier_role_u8} > 2"
-
-        if self.carrier_archetype_u8 > 4:
-            return False, f"carrier_archetype_u8 out of range: {self.carrier_archetype_u8} > 4"
-
-        if self.transition_kind_u8 > 2:
-            return False, f"transition_kind_u8 out of range: {self.transition_kind_u8} > 2"
-
-        # Validate event payloads: lane_id in bits 63..60 must match index
-        for i, payload in enumerate(self.event_payload_u64):
-            if self.event_mask & (1 << i):
-                lane_id = (payload >> 60) & 0x0F
-                if lane_id != i:
-                    return False, f"Lane {i} payload has mismatched lane_id: {lane_id}"
-
-        return True, None
+    @classmethod
+    def from_voice_frame(cls, vf: VoiceFrame, **overrides) -> 'VoiceFramePacketV1':
+        from .wire_frame import voice_frame_to_packet
+        return voice_frame_to_packet(cls, vf, **overrides)
 
     @staticmethod
-    def from_v0b(v0b: VoiceFramePacketV0b) -> 'VoiceFramePacketV1':
+    def from_v0b(v0b: VoiceFramePacketV0b, *, drop_note_injection: bool = False) -> 'VoiceFramePacketV1':
         """
-        Convert a v0b packet to v1 with default carrier fields.
+        Convert to v1, explicitly discarding lane 4 only when requested.
         """
+        from .wire_frame import require_valid_core
+        require_valid_core(v0b)
+        if v0b.event_mask & (1 << 4) and not drop_note_injection:
+            raise ValueError("v0b lane 4 is note injection, v1 lane 4 is carrier configuration; "
+                             "set drop_note_injection=True to discard it explicitly")
+        strengths = list(v0b.event_strength_q15)
+        payloads = list(v0b.event_payload_u64)
+        if drop_note_injection:
+            strengths[4] = 0
+            payloads[4] = 0
         return VoiceFramePacketV1(
             program_id=v0b.program_id,
             voice_id=v0b.voice_id,
@@ -1099,7 +1107,7 @@ class VoiceFramePacketV1:
             pan_q15=v0b.pan_q15,
             sendA_q15=v0b.sendA_q15,
             sendB_q15=v0b.sendB_q15,
-            w_family_q15=v0b.w_family_q15.copy(),
+            w_family_q15=list(v0b.w_family_q15),
             tree_a_id=v0b.tree_a_id,
             tree_b_id=v0b.tree_b_id,
             tree_blend_q15=v0b.tree_blend_q15,
@@ -1108,7 +1116,7 @@ class VoiceFramePacketV1:
             carrier_role_u8=CarrierRole.AUDIBLE,
             carrier_archetype_u8=0,  # HARMONIC
             transition_kind_u8=TransitionKind.RETRIGGER,
-            event_mask=v0b.event_mask,
-            event_strength_q15=v0b.event_strength_q15.copy(),
-            event_payload_u64=v0b.event_payload_u64.copy(),
+            event_mask=v0b.event_mask & ~(1 << 4) if drop_note_injection else v0b.event_mask,
+            event_strength_q15=strengths,
+            event_payload_u64=payloads,
         )

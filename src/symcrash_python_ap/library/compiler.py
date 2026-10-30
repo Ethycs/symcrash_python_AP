@@ -523,7 +523,12 @@ class CapsuleCompiler:
 
         # Sound extras: close the capsule's documented lossiness vs the IR
         # (material ramp, FM6 post-filter, partials/PWM, LFO modulators)
-        sound_extras = self._extract_sound_extras_from_ir(ir)
+        try:
+            sound_extras = self._extract_sound_extras_from_ir(ir)
+        except (ValueError, TypeError) as exc:
+            result.errors.append(f'Invalid authored sound/event configuration: {exc}')
+            result.success = False
+            return result
 
         # Use standard compile_instrument with extracted values
         return self.compile_instrument(
@@ -763,19 +768,39 @@ class CapsuleCompiler:
         """
         from .ir_extract import (
             extract_fm6, extract_pwm_width_q15, extract_harmonics_q15,
-            lfo_to_dict,
+            lfo_to_dict, extract_fx_sends_q15,
         )
         from ..instrument_ir import (
             extract_phase_spread_q15, extract_waveform_type,
         )
 
         extras: dict = {}
+        from .native_carrier import extract_native_carrier, exact_amp_to_dict
+        mode, custom_harmonics, pwm_width, native = extract_native_carrier(ir)
+        extras['native_carrier'] = native.to_dict()
+        extras['amp_envelope'] = exact_amp_to_dict(ir)
+        from ..voice.ir_regimes import compile_ir_regimes
+        regime_program = compile_ir_regimes(ir)
+        if regime_program is not None:
+            extras['regime_program'] = regime_program.to_dict()
+        from ..voice.ir_events import compile_ir_events
+        event_program = compile_ir_events(ir)
+        if event_program is not None:
+            extras['event_program'] = event_program.to_dict()
+        from dataclasses import asdict
+        from ..instrument_ir import SafetyConfig
+        extras['safety'] = asdict(SafetyConfig.from_dict(asdict(ir.compile.safety)))
+        extras['control_config'] = asdict(ir.control) if ir.control is not None else None
+        sends = extract_fx_sends_q15(ir)
+        if sends is not None:
+            extras['fx_sends_q15'] = list(sends)
 
         # Material beta ramp (compile.material)
         mat = getattr(getattr(ir, 'compile', None), 'material', None)
-        if mat is not None and (mat.beta_start_q15 or mat.beta_target_q15
+        if mat is not None and (mat.material_id or mat.beta_start_q15 or mat.beta_target_q15
                                 or mat.beta_ramp_blocks != 1):
             extras['material'] = {
+                'material_id': mat.material_id,
                 'beta_start_q15': mat.beta_start_q15,
                 'beta_target_q15': mat.beta_target_q15,
                 'beta_ramp_blocks': mat.beta_ramp_blocks,
@@ -792,23 +817,18 @@ class CapsuleCompiler:
 
         # Resolved harmonic profile (custom partials win over the named
         # waveform's default profile) + phase spread (Mode B spectrum)
-        harmonics = extract_harmonics_q15(ir)
-        if harmonics:
-            extras['harmonic_amps_q15'] = harmonics
+        extras['harmonic_amps_q15'] = custom_harmonics
         spread = extract_phase_spread_q15(ir)
         if spread:
             extras['phase_spread_q15'] = spread
 
         # Engine osc mode + waveform id (resolves the OSC_MODE=0 ambiguity:
         # 3 = FM6 via voice params; Mode B presets are explicit here)
-        if fm6 is None:
-            extras['osc_mode'] = 1  # Mode B (harmonic bank)
-        extras['waveform_type'] = extract_waveform_type(ir)
+        extras['osc_mode'] = mode
+        extras['waveform_type'] = native.waveform_type
 
         # PWM
-        pwm_width = extract_pwm_width_q15(ir)
-        if pwm_width is not None:
-            extras['pwm'] = {'enabled': True, 'width_q15': pwm_width}
+        extras['pwm'] = {'enabled': native.pwm_enabled, 'width_q15': pwm_width}
 
         # LFO modulators
         lfos = getattr(ir, 'modulators', None) or []
@@ -817,7 +837,8 @@ class CapsuleCompiler:
 
         # Always emitted: the loader relies on osc_mode/waveform_type to
         # resolve the OSC_MODE=0 (unset vs Mode A) ambiguity. Chunk is
-        # JSON/manifest-only; binary chunks stay byte-identical.
+        # JSON is carried in the binary SOUND_EXTRAS chunk and bundle manifest;
+        # the older typed engine-parameter chunks keep their existing layout.
         return extras
 
     def _extract_regime_graph_id(self, ir: 'InstrumentIR') -> Optional[int]:
@@ -830,12 +851,11 @@ class CapsuleCompiler:
         if not regimes.regime_nodes:
             return None
 
-        # Create identity string from regime structure
-        regime_str = ""
-        for node in sorted(regimes.regime_nodes, key=lambda n: n.id):
-            regime_str += f"{node.id}:{node.kind}:{node.emit_template}|"
-        for trans in sorted(regimes.transitions, key=lambda t: (t.from_regime, t.to)):
-            regime_str += f"{trans.from_regime}->{trans.to}:{trans.when}|"
+        # Edge order is executable priority; dwell, hysteresis and typed edges
+        # are part of graph identity as well as node names and endpoints.
+        from dataclasses import asdict
+        import json
+        regime_str = json.dumps(asdict(regimes), sort_keys=True, separators=(',', ':'), allow_nan=False)
 
         # Hash to get stable ID
         hash_val = int(hashlib.sha256(regime_str.encode()).hexdigest()[:8], 16)

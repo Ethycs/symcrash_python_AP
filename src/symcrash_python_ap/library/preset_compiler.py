@@ -16,7 +16,7 @@ Usage:
     compiled = compiler.compile_file("brass_stab_v0.yaml")
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 import json
@@ -37,6 +37,10 @@ from ..primitives import K_LADDER_MASKS, TailMode as _TailMode, Q15_ONE, Q15_HAL
 
 # Import human-readable conversion helpers and shared modulators parser
 from ..instrument_ir import float_or_q15, _auto_detect_ratios, _auto_detect_levels, _parse_modulators, _parse_control_config, ControlConfig, load_instrument_from_dict
+from ..instrument_ir import SafetyConfig, _parse_material_config
+from ..voice.ir_events import CompiledEventProgram, compile_ir_events
+from ..voice.ir_regimes import CompiledRegimeProgram, compile_ir_regimes
+from .native_carrier import NativeCarrierConfig, extract_native_carrier, exact_amp_to_dict, exact_amp_from_dict
 
 # Import central registry for validation
 from .central_registry import get_central_registry
@@ -177,6 +181,7 @@ class MaterialConfig:
     beta_start_q15: int = 0         # Start blend (0 = dry)
     beta_target_q15: int = Q15_HALF    # Target blend
     beta_ramp_blocks: int = 8       # Blocks to ramp
+    material_id: int = 0           # Global post-mix Material program, separate from beta
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> 'MaterialConfig':
@@ -186,11 +191,9 @@ class MaterialConfig:
         and human-readable float keys (e.g., beta_target: 0.5).
         Float keys take priority when both are present.
         """
-        return cls(
-            beta_start_q15=float_or_q15(d, 'beta_start', 'beta_start_q15', 0),
-            beta_target_q15=float_or_q15(d, 'beta_target', 'beta_target_q15', Q15_HALF),
-            beta_ramp_blocks=d.get('beta_ramp_blocks', 8),
-        )
+        parsed = _parse_material_config(d)
+        return cls(parsed.beta_start_q15, parsed.beta_target_q15,
+                   parsed.beta_ramp_blocks, parsed.material_id)
 
 
 # =============================================================================
@@ -345,6 +348,12 @@ class CompiledPreset:
     # getattr() fallbacks in VoiceEngine.allocate_voice_from_preset().
     amp_velocity_sens: float = 1.0
     amp_key_scale_rate: float = 0.0
+    sendA_q15: int = 0
+    sendB_q15: int = 0
+    safety: SafetyConfig = field(default_factory=SafetyConfig)
+    event_program: Optional[CompiledEventProgram] = None
+    regime_program: Optional[CompiledRegimeProgram] = None
+    native_carrier: Optional[NativeCarrierConfig] = None
 
     def backbone_ops(self) -> List[str]:
         """Get list of enabled operator names."""
@@ -380,8 +389,8 @@ def compiled_preset_from_ir(ir) -> CompiledPreset:
     - modulators -> lfos
     - control -> control_config (system macro defaults)
 
-    Layered behavior (L2 regimes, L3 CMMM emission) is not interpreted here;
-    that requires the full capsule path (InstrumentIR.to_capsule()).
+    Authored L2 edges select templates through the shared graph runtime.
+    Without executable edges, L3 events follow the ADSR-phase template.
 
     Args:
         ir: InstrumentIR instance (from load_instrument / load_instrument_from_dict)
@@ -390,24 +399,20 @@ def compiled_preset_from_ir(ir) -> CompiledPreset:
         CompiledPreset ready for VoiceFrameEmitter / Simple-mode VoiceEngine
     """
     from ..envelope_scheduler import ADSRSpec
+    from copy import deepcopy
     from .ir_extract import (
         extract_amp, extract_fm6, extract_pwm_width_q15, extract_harmonics_q15,
+        extract_fx_sends_q15,
     )
 
-    amp_env = None
+    amp_env = exact_amp_from_dict(exact_amp_to_dict(ir))
     amp_velocity_sens = 1.0
     amp_key_scale_rate = 0.0
     fm6_config = None
-    osc_mode = 0
+    osc_mode, harmonic_amps, pwm_width_q15, native_carrier = extract_native_carrier(ir)
 
     amp = extract_amp(ir)
     if amp is not None:
-        amp_env = ADSRSpec(
-            attack_ms=amp.a_ms,
-            decay_ms=amp.d_ms,
-            sustain=amp.s,
-            release_ms=amp.r_ms,
-        )
         amp_velocity_sens = amp.velocity_sens
         amp_key_scale_rate = amp.key_scale_rate
 
@@ -423,20 +428,13 @@ def compiled_preset_from_ir(ir) -> CompiledPreset:
         )
         osc_mode = 3  # OSC_MODE_FM6
 
-    pwm = extract_pwm_width_q15(ir)
-    pwm_width_q15 = pwm if pwm is not None else Q15_HALF
-
-    # Custom partials win over waveform profile (extract_harmonics_q15)
-    harmonic_amps = extract_harmonics_q15(ir)
-    if harmonic_amps is None:
-        # Default saw harmonics: 1/n falloff
-        harmonic_amps = [Q15_ONE // n for n in range(1, 9)]
-
     ir_material = ir.compile.material
+    send_a, send_b = extract_fx_sends_q15(ir) or (0, 0)
     material = MaterialConfig(
         beta_start_q15=ir_material.beta_start_q15,
         beta_target_q15=ir_material.beta_target_q15,
         beta_ramp_blocks=ir_material.beta_ramp_blocks,
+        material_id=ir_material.material_id,
     )
 
     return CompiledPreset(
@@ -456,11 +454,17 @@ def compiled_preset_from_ir(ir) -> CompiledPreset:
         osc_mode=osc_mode,
         cmmm=CmmmDefaults(),
         pwm_width_q15=pwm_width_q15,
-        lfos=list(ir.modulators) if ir.modulators else [],
-        control_config=ir.control,
-        envelope_bindings=list(ir.envelopes) if ir.envelopes else None,
+        lfos=deepcopy(ir.modulators) if ir.modulators else [],
+        control_config=deepcopy(ir.control),
+        envelope_bindings=deepcopy(ir.envelopes) if ir.envelopes else None,
         amp_velocity_sens=amp_velocity_sens,
         amp_key_scale_rate=amp_key_scale_rate,
+        sendA_q15=send_a,
+        sendB_q15=send_b,
+        safety=SafetyConfig.from_dict(asdict(ir.compile.safety)),
+        event_program=compile_ir_events(ir),
+        regime_program=compile_ir_regimes(ir),
+        native_carrier=native_carrier,
     )
 
 
@@ -559,6 +563,8 @@ def compiled_preset_from_capsule(capsule) -> CompiledPreset:
             sustain=cd.get(int(ControlID.SUS_Q15), Q15_3_4) / Q15_ONE,
             release_ms=cd.get(int(ControlID.REL_BLOCKS), 64) * _MS_PER_BLOCK,
         )
+    if 'amp_envelope' in extras:
+        amp_env = exact_amp_from_dict(extras['amp_envelope'])
 
     # Amp dynamics (packet E6 chunk)
     amp_dynamics = getattr(capsule, 'amp_dynamics', None) or {}
@@ -571,6 +577,7 @@ def compiled_preset_from_capsule(capsule) -> CompiledPreset:
         beta_start_q15=int(mat.get('beta_start_q15', 0)),
         beta_target_q15=int(mat.get('beta_target_q15', 0)),
         beta_ramp_blocks=int(mat.get('beta_ramp_blocks', 1)),
+        material_id=_parse_material_config(mat).material_id,
     )
 
     # Custom partials / PWM / LFO modulators from sound extras
@@ -581,8 +588,16 @@ def compiled_preset_from_capsule(capsule) -> CompiledPreset:
     if extras.get('lfos'):
         from .ir_extract import lfo_from_dict
         lfos = [lfo_from_dict(d) for d in extras['lfos']]
+        from ..voice.lfo_clocks import lfo_clock_groups
+        lfo_clock_groups(lfos, initial=True)
 
     kwargs = {}
+    sends = extras.get('fx_sends_q15', (0, 0))
+    if (not isinstance(sends, (list, tuple)) or len(sends) != 2
+            or any(not isinstance(x, int) or isinstance(x, bool)
+                   or not 0 <= x <= Q15_ONE for x in sends)):
+        raise ValueError('Capsule FX sends must contain two unsigned Q15 integers')
+    kwargs.update(sendA_q15=sends[0], sendB_q15=sends[1])
     if harmonic_amps is not None:
         kwargs['harmonic_amps_q15'] = [int(a) for a in harmonic_amps]
     elif extras:
@@ -591,6 +606,10 @@ def compiled_preset_from_capsule(capsule) -> CompiledPreset:
         # legacy dataclass default)
         kwargs['harmonic_amps_q15'] = [Q15_ONE // n for n in range(1, 9)]
 
+    native_carrier = (NativeCarrierConfig.from_dict(extras['native_carrier'])
+                      if extras.get('native_carrier') is not None else None)
+    if native_carrier is not None:
+        native_carrier.validate_mode(osc_mode)
     return CompiledPreset(
         preset_id=capsule.identity.capsule_id,
         preset_version='v0',
@@ -611,6 +630,14 @@ def compiled_preset_from_capsule(capsule) -> CompiledPreset:
         envelope_bindings=envelope_bindings_from_capsule(capsule),
         amp_velocity_sens=amp_velocity_sens,
         amp_key_scale_rate=amp_key_scale_rate,
+        safety=SafetyConfig.from_dict(extras.get('safety', {})),
+        event_program=(CompiledEventProgram.from_dict(extras['event_program'])
+                       if extras.get('event_program') is not None else None),
+        regime_program=(CompiledRegimeProgram.from_dict(extras['regime_program'])
+                        if extras.get('regime_program') is not None else None),
+        native_carrier=native_carrier,
+        control_config=(_parse_control_config(extras['control_config'])
+                        if extras.get('control_config') is not None else None),
         **kwargs,
     )
 
@@ -652,9 +679,9 @@ class PresetCompiler:
         if 'instrument_ir_v0' in preset_dict:
             try:
                 ir = load_instrument_from_dict(preset_dict)
+                return compiled_preset_from_ir(ir)
             except (ValueError, KeyError, TypeError) as e:
                 raise PresetCompileError(f"Failed to load instrument_ir_v0 preset: {e}")
-            return compiled_preset_from_ir(ir)
 
         # Validate structure
         errors = self.validate(preset_dict)
@@ -696,6 +723,10 @@ class PresetCompiler:
 
         # Parse material
         material = MaterialConfig.from_dict(material_section)
+        try:
+            safety = SafetyConfig.from_dict(preset_dict.get('safety', {}))
+        except ValueError as exc:
+            raise PresetCompileError(str(exc)) from exc
 
         # Parse backbone
         backbone = []
@@ -763,6 +794,7 @@ class PresetCompiler:
             pwm_width_q15=pwm_width_q15,
             lfos=lfos,
             control_config=control_config,
+            safety=safety,
         )
 
     def _parse_lfos(self, preset_dict: Dict[str, Any]) -> List[LFOState]:

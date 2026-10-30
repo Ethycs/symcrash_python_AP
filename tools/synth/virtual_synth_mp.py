@@ -57,25 +57,13 @@ class VirtualSynthApp:
 
     def _start_audio(self):
         """Start audio output - callback just reads from shared memory."""
+        from symcrash_python_ap.audio.block_stream import AudioBlockReader
+        self.block_reader = AudioBlockReader(self.synth.read_block)
         def audio_callback(outdata, frames, time_info, status):
             if status:
                 print(f"Audio: {status}")
 
-            num_blocks = frames // BLOCK_SIZE
-            output_idx = 0
-
-            for _ in range(num_blocks):
-                block = self.synth.read_block()
-                if block is not None:
-                    outdata[output_idx:output_idx + BLOCK_SIZE, 0] = block
-                else:
-                    outdata[output_idx:output_idx + BLOCK_SIZE, 0] = 0.0
-                output_idx += BLOCK_SIZE
-
-            # Remainder
-            remainder = frames % BLOCK_SIZE
-            if remainder > 0:
-                outdata[output_idx:, 0] = 0.0
+            self.block_reader.fill(outdata)
 
         self.stream = sd.OutputStream(
             samplerate=SAMPLE_RATE,
@@ -106,6 +94,9 @@ class VirtualSynthApp:
 
 def main():
     """Run with ImGui controls."""
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.parse_args()  # Handle --help before allocating audio or spawning workers.
     app = VirtualSynthApp()
 
     if not app.start():

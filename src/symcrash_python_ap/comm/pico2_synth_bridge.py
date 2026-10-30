@@ -32,6 +32,7 @@ from typing import Optional, Dict
 from .pico2_receiver import Pico2Receiver, find_pico2_port
 from ..cockpit_engine import CockpitEngine
 from ..control_registry import ControlID
+from ..primitives import blocks_to_ms
 
 
 # =============================================================================
@@ -147,14 +148,11 @@ class Pico2SynthBridge:
         """
         adsr = self.cockpit.get_adsr()
 
-        # Block to ms conversion (64 samples @ 48kHz = 1.33ms per block)
-        block_to_ms = lambda b: b * 1.33
-
         return {
-            "ATK": f"{block_to_ms(adsr['attack_blocks']):.0f}ms",
-            "DCY": f"{block_to_ms(adsr['decay_blocks']):.0f}ms",
+            "ATK": f"{blocks_to_ms(adsr['attack_blocks']):.0f}ms",
+            "DCY": f"{blocks_to_ms(adsr['decay_blocks']):.0f}ms",
             "SUS": f"{100 * adsr['sustain_level_q15'] / Q15_MAX:.0f}%",
-            "REL": f"{block_to_ms(adsr['release_blocks']):.0f}ms",
+            "REL": f"{blocks_to_ms(adsr['release_blocks']):.0f}ms",
             "CUTOFF": f"{100 * self.cockpit.get_control_current(ControlID.CHAOS) / Q15_MAX:.0f}%",
             "RESO": f"{100 * self.cockpit.get_control_current(ControlID.TEXTURE) / Q15_MAX:.0f}%",
             "HARM": f"{100 * self.cockpit.get_control_current(ControlID.RESERVED_7) / Q15_MAX:.0f}%",

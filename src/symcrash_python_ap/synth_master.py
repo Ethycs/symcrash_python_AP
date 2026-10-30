@@ -25,10 +25,11 @@ Usage:
 Toggle stages for debugging:
     synth.disable("material")  # No effects
     synth.disable("safety")    # No limiting
-    synth.set_osc_mode("mode_b")  # Use harmonic bank instead of FM6
+    synth.set_osc_mode("mode_b")  # Fallback for voices without a compiled preset
 """
 
 from dataclasses import dataclass, field
+from copy import copy, deepcopy
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict, Any
 
@@ -39,14 +40,14 @@ from .cockpit_engine import CockpitEngine
 from .control_registry import ControlID
 from .library.preset_library import PresetLibraryV0, Query
 from .library.capsule import CapsuleKind
-from .material.material_engine import MaterialEngine
-from .safety.safety_engine import SafetyEngine
 from .symbol.executor_scheduling import HealthTelemetry
 from .primitives import BLOCK_SIZE
-from .voice.voice_engine import VoiceEngine
+from .voice.voice_engine import VoiceEngine, VoiceEngineOutput, RenderBatchItem
+from .safety.output_stage import StereoOutputMixin
 from .frames import ParamFrame, VoiceFrame
 from .vm.state import VMState, OSC_MODE_A, OSC_MODE_B, OSC_MODE_FM6
 from .vm.executor import vm_step_block
+from .vm.scheduling import ExecutionPolicy, ExecutionReport
 from .primitives import Q15_ONE, Q15_HALF, Q15_NEG_ONE, SAMPLE_RATE_HZ
 from .primitives import Q16_ONE
 from .paths import PRESET_BUILD_DIR
@@ -96,7 +97,7 @@ class VoiceSlot:
 # SYNTH MASTER
 # =============================================================================
 
-class SynthMaster:
+class SynthMaster(StereoOutputMixin):
     """
     Unified synthesis pipeline with VoiceEngine at the core.
 
@@ -126,6 +127,8 @@ class SynthMaster:
 
     def _init_components(self):
         """Initialize all pipeline components."""
+        from .vm.resources import prepare_oscillator_resources
+        prepare_oscillator_resources()
         # Control surface
         self.cockpit = CockpitEngine()
 
@@ -138,16 +141,7 @@ class SynthMaster:
 
         self.library = PresetLibraryV0(str(library_path))
 
-        # Post-processing (toggleable)
-        self.material = MaterialEngine(self.config.block_size)
-        self._material_id = 0  # Clean default (can be overridden by IR)
-        self._beta_target_q15 = Q15_HALF  # Default 0.5 blend (can be overridden by IR)
-        self._beta_start_q15 = 0       # Start dry
-        self._beta_ramp_blocks = 8     # Ramp over 8 blocks
-        self.safety = SafetyEngine(self.config.block_size)
-        self._safety_dc_removal = False    # Disabled for CCS path
-        self._safety_limiter_threshold = 32000
-        self._safety_slew_limit = 2000
+        self._init_output_stage(self.config.block_size)
 
         # Audio output
         output_path = Path(self.config.output_dir)
@@ -185,6 +179,9 @@ class SynthMaster:
             max_voices=self.config.n_voices,
             block_size=self.config.block_size,
         )
+        self.last_capture_marks = []
+        self.last_execution_reports = {}
+        self._last_render_frames = {}
 
         # Reserved per-voice slots (kept for API compat; the CompiledPreset
         # Simple-mode chain replaced the old VoiceEngineAdapter indirection)
@@ -213,13 +210,13 @@ class SynthMaster:
         if record is None:
             return False
 
+        # Compile outside the block loop so cockpit notes use the same sound
+        # as the direct note API from the first rendered block onward.
+        from .library.preset_compiler import compiled_preset_from_capsule
+        preset = compiled_preset_from_capsule(record.capsule)
+        self.load_compiled_preset(preset)
         self._current_preset = record.capsule
         self._preset_name = record.capsule.identity.name
-        self._compiled_preset = None  # recompiled lazily from the capsule
-        self._voice_adapters = [None] * self.config.n_voices
-
-        # Extract parameters from capsule
-        self._extract_preset_params(record.capsule)
 
         return True
 
@@ -237,7 +234,6 @@ class SynthMaster:
             from .instrument_ir import load_instrument
             from .library.preset_compiler import compiled_preset_from_ir
             ir = load_instrument(yaml_path)
-            self._extract_params_from_ir(ir)
             # Documented chain: IR -> CompiledPreset -> Simple-mode
             # VoiceEngine (step_voice_simple owns frame building)
             self.load_compiled_preset(compiled_preset_from_ir(ir))
@@ -248,13 +244,15 @@ class SynthMaster:
             return False
 
     def _extract_preset_params(self, capsule):
-        """Extract parameters from capsule."""
-        # For now, use defaults. Full implementation would parse capsule.program
-        pass
+        """Compatibility entry point; use the same defaults as compiled loading."""
+        from .library.preset_compiler import compiled_preset_from_capsule
+        self._apply_preset_output(compiled_preset_from_capsule(capsule))
 
     def _extract_params_from_ir(self, ir):
         """Extract parameters from InstrumentIR."""
         from .primitives import ms_to_blocks
+        from .library.preset_compiler import compiled_preset_from_ir
+        self._apply_preset_output(compiled_preset_from_ir(ir))
 
         # Extract envelope and synthesis params from L0 graph
         for node in ir.layers.L0_graph.nodes:
@@ -301,13 +299,7 @@ class SynthMaster:
             self._beta_start_q15 = mat_cfg.beta_start_q15
             self._beta_ramp_blocks = mat_cfg.beta_ramp_blocks
 
-        # Extract Safety config from IR
-        if hasattr(ir, 'compile') and hasattr(ir.compile, 'safety'):
-            safety_cfg = ir.compile.safety
-            self._enable_safety = safety_cfg.enabled
-            self._safety_dc_removal = safety_cfg.dc_removal
-            self._safety_limiter_threshold = safety_cfg.limiter_threshold_q15
-            self._safety_slew_limit = safety_cfg.slew_limit_q15
+
 
     # =========================================================================
     # VOICE LIFECYCLE
@@ -324,60 +316,20 @@ class SynthMaster:
         Returns:
             Voice ID if successful, None if no voices available
         """
-        velocity_q15 = (velocity * Q15_ONE) // 127
-
-        # Find free voice slot
-        voice_id = None
-        for i, slot in enumerate(self._voice_slots):
-            if not slot.active:
-                voice_id = i
-                break
-
-        if voice_id is None:
+        from .control_frame import ControlFrame
+        note = max(0, min(127, int(note)))
+        velocity = max(0, min(127, int(velocity)))
+        if velocity == 0:
+            self.note_off(note=note)
             return None
-
-        slot = self._voice_slots[voice_id]
-
-        # Documented chain: CompiledPreset -> Simple-mode VoiceEngine
-        # (step_voice_simple owns frame building, single-owner rule).
-        preset = self._get_compiled_preset()
-        if preset is not None:
-            self.voice_engine.allocate_voice_from_preset(preset, voice_id)
-            self.voice_engine.note_on_simple(
-                voice_id, note=note, velocity_q15=velocity_q15)
-        else:
-            # Fallback: no preset loaded - engine default program (CMMM)
-            self.voice_engine.note_on(voice_id, velocity_q15=velocity_q15)
-
-        # Update slot state
-        slot.note = note
-        slot.velocity_q15 = velocity_q15
-        slot.active = True
-
-        # Create VM state for audio generation
-        slot.vm_state = VMState.create(voice_id=voice_id)
-        slot.vm_state.reset_for_note_on(note=note)
-
-        return voice_id
+        frame = ControlFrame(mode_L=self.voice_engine.control_mode_L)
+        frame.add_note_on(note, (velocity * Q15_ONE) // 127)
+        self.voice_engine.consume_control_frame(frame)
+        return self.voice_engine._find_voice_by_note(note)
 
     def _get_compiled_preset(self) -> Optional['CompiledPreset']:
-        """
-        Get the CompiledPreset for the loaded preset (documented chain:
-        capsule/IR -> CompiledPreset -> Simple-mode VoiceEngine).
-        """
-        if getattr(self, '_compiled_preset', None) is not None:
-            return self._compiled_preset
-
-        if self._current_preset is not None:
-            try:
-                from .library.preset_compiler import compiled_preset_from_capsule
-                self._compiled_preset = compiled_preset_from_capsule(
-                    self._current_preset)
-                return self._compiled_preset
-            except Exception as e:
-                print(f"Failed to compile capsule preset: {e}")
-
-        return None
+        """Return the selected sound, including changes from ControlFrame."""
+        return self.voice_engine.selected_preset
 
     def load_compiled_preset(self, preset: 'CompiledPreset') -> None:
         """
@@ -386,10 +338,18 @@ class SynthMaster:
         Args:
             preset: CompiledPreset instance
         """
+        self._apply_preset_output(preset)
         self._compiled_preset = preset
+        self.voice_engine.select_compiled_preset(preset)
+        self._preset_name = preset.preset_id
 
         # Clear existing adapters so they get recreated with new preset
         self._voice_adapters = [None] * self.config.n_voices
+
+    def register_control_preset(self, preset_id: int, preset: 'CompiledPreset',
+                                preset_hash32: int = 0) -> None:
+        """Register a compiled sound for cockpit PRESET_LOAD commands."""
+        self.voice_engine.register_control_preset(preset_id, preset, preset_hash32)
 
     def note_off(self, note: int = None, voice_id: int = None) -> None:
         """
@@ -399,23 +359,30 @@ class SynthMaster:
             note: MIDI note number (finds first matching voice)
             voice_id: Specific voice ID to release
         """
+        from .control_frame import ControlFrame
+        frame = ControlFrame(mode_L=self.voice_engine.control_mode_L)
         if voice_id is not None:
-            # Release specific voice
-            self.voice_engine.note_off(voice_id)
+            state = self.voice_engine.voices.get(voice_id)
+            if state is None:
+                return
+            frame.add_note_off(state.note_u8, state.channel)
+            frame.events[-1].voice_id = voice_id
         elif note is not None:
-            # Find voice playing this note
-            for i, slot in enumerate(self._voice_slots):
-                if slot.active and slot.note == note:
-                    self.voice_engine.note_off(i)
-                    break
+            frame.add_note_off(max(0, min(127, int(note))))
+        self.voice_engine.consume_control_frame(frame)
 
     # =========================================================================
     # RENDER
     # =========================================================================
 
-    def render_block(self) -> Tuple[List[int], List[int], Optional[HealthTelemetry]]:
+    def render_block(self, *, schedule=None, voice_budget=None) -> Tuple[List[int], List[int], Optional[HealthTelemetry]]:
         """
         Render one audio block through VoiceEngine.
+
+        schedule: optional host BlockScheduler result, computed before this block.
+        voice_budget: optional RegimeBudget applied to each serviced VM voice.
+        These use distinct units; execution reports never feed an uncalibrated
+        coefficient tick count back into global compute/memory health bars.
 
         Returns:
             (L_samples, R_samples, health_telemetry)
@@ -423,13 +390,15 @@ class SynthMaster:
         # 1. Tick cockpit (if enabled) - produces ControlFrame
         control_frame = None
         if self._enable_cockpit:
-            control_frame = self.cockpit.tick()
+            control_frame = self.cockpit.tick(voice_ids=range(self.voice_engine.max_voices))
 
-        return self._render_block_voice_engine(control_frame)
+        return self._render_block_voice_engine(control_frame, schedule=schedule,
+                                               voice_budget=voice_budget)
 
     def _render_block_voice_engine(
         self,
-        control_frame: Optional['ControlFrame'] = None
+        control_frame: Optional['ControlFrame'] = None,
+        *, schedule=None, voice_budget=None,
     ) -> Tuple[List[int], List[int], Optional[HealthTelemetry]]:
         """
         Render using VoiceEngine (CMMM) for voice management.
@@ -441,13 +410,59 @@ class SynthMaster:
         Args:
             control_frame: Optional ControlFrame from CockpitEngine
         """
-        block_size = self.config.block_size
-        L = [0] * block_size
-        R = [0] * block_size
-
         # Step VoiceEngine with ControlFrame - this is the canonical API
         # VoiceEngine handles: events, lifecycle, scheduling, CMMM stepping
-        engine_output = self.voice_engine.step_block(control_frame)
+        engine_output = self.voice_engine.step_block(control_frame, schedule=schedule)
+        return self._render_output(engine_output, scheduled=schedule is not None,
+                                   voice_budget=voice_budget, apply_fallbacks=True)
+
+
+    def render_frames(self, frames, *, params=None, schedule=None, voice_budget=None):
+        """Render externally emitted VoiceFrames through the shared output path.
+
+        Frozen packets can be supplied after to_voice_frame(). This advances
+        the VM and output effects, not the native VoiceEngine's musical clock.
+        The caller supplies current frames for every sounding or held slot.
+        """
+        frames = list(frames)
+        if any(not isinstance(frame, VoiceFrame) for frame in frames):
+            raise TypeError('Rendering requires VoiceFrame instances')
+        if params is not None and not isinstance(params, ParamFrame):
+            raise TypeError('Output parameters must be a ParamFrame')
+        ids = [frame.voice_id for frame in frames]
+        if (any(not isinstance(vid, int) or isinstance(vid, bool)
+                or not 0 <= vid < self.config.n_voices for vid in ids)
+                or len(set(ids)) != len(ids)):
+            raise ValueError('Frames must address unique, valid voice slots')
+        selected = None
+        if schedule is not None:
+            selected = {info.voice_id: info for info in schedule.serviced}
+            if len(selected) != len(schedule.serviced) or any(vid not in ids for vid in selected):
+                raise ValueError('Scheduled voices must be unique and have a supplied frame')
+        batch = []
+        for frame in sorted(frames, key=lambda f: f.voice_id):
+            info = selected.get(frame.voice_id) if selected is not None else None
+            serviced = selected is None or info is not None
+            batch.append(RenderBatchItem(frame.voice_id, frame,
+                mid_due=info.mid_due if info is not None else serviced,
+                top_due=info.top_due if info is not None else serviced,
+                serviced=serviced,
+                degrade_level=schedule.degrade_state if schedule is not None else 0))
+        output = VoiceEngineOutput(render_batch=batch, param_frame=params or self._param_frame,
+                                   telemetry=schedule.telemetry if schedule is not None else None)
+        return self._render_output(output, scheduled=schedule is not None,
+                                   voice_budget=voice_budget, apply_fallbacks=False)
+
+    def _render_output(self, engine_output, *, scheduled=False, voice_budget=None,
+                       apply_fallbacks=False):
+        selected = self.voice_engine.selected_preset
+        if selected is not None and selected is not self._output_preset:
+            self._apply_preset_output(selected)
+        rendered_audio = []
+        consumer_events = []
+        rendered_frames = []
+        self.last_capture_marks = engine_output.capture_marks
+        self.last_execution_reports = {}
 
         # Use ParamFrame from VoiceEngine (derived from ControlFrame.globals)
         param_frame = engine_output.param_frame
@@ -457,84 +472,71 @@ class SynthMaster:
             voice_id = item.voice_id
             frame = item.frame
 
+            # The VM owns frozen-packet acceptance and retrigger semantics.
+            # A held frame also holds its pan, sends, and post-filter controls.
+            wire = frame.wire_data
+            if wire is not None and wire.reject_code:
+                self.last_execution_reports[voice_id] = ExecutionReport()
+                continue
+            if not item.serviced:
+                frame = self._last_render_frames.get(voice_id)
+                if frame is None:
+                    continue
+
             # Ensure slot tracking is in sync
             if voice_id < len(self._voice_slots):
                 slot = self._voice_slots[voice_id]
-                slot.active = True
-                slot.gain_q15 = frame.gain_q15
-                slot.note = getattr(frame, 'note', 60)
-
                 # Ensure VM state exists
-                if slot.vm_state is None:
-                    slot.vm_state = VMState.create(voice_id=voice_id)
-                    slot.vm_state.reset_for_note_on(note=slot.note)
+                if slot.vm_state is None or (item.serviced and frame.is_starting and frame.wire_data is None):
+                    if slot.vm_state is None:
+                        slot.vm_state = VMState.create(voice_id=voice_id)
+                    slot.vm_state.reset_for_note_on(note=frame.note)
 
-                # Compat shim for frames the preset does not fully own:
-                # CompiledPreset.osc_mode uses 0 both for "unset" and
-                # Mode A, so Mode B presets rely on this default (gap
-                # tracked for the capsule-lossiness step); the other two
-                # only fire on the no-preset fallback path.
-                if not frame.partial_amps_q15:
-                    frame.partial_amps_q15 = self._harmonic_amps
-                if frame.beta_target_q15 == 0:
-                    frame.beta_target_q15 = self._beta_target_q15
-                if frame.coeff_osc_mode == 0:
-                    frame.coeff_osc_mode = self._osc_mode
+                # Compiled voices own every emitted value, including Mode A,
+                # an empty named-waveform spectrum and a zero blend/ramp start.
+                # Old notes retain their own preset after a program change.
+                # Only a serviced, unowned native frame receives legacy defaults;
+                # leave the VoiceEngine's cached frame and held output intact.
+                if apply_fallbacks and item.serviced and frame.wire_data is None:
+                    owner = self.voice_engine.voices.get(voice_id)
+                    if owner is None or owner.compiled_preset is None:
+                        frame = copy(frame)
+                        if not frame.partial_amps_q15:
+                            frame.partial_amps_q15 = list(self._harmonic_amps)
+                        if frame.beta_target_q15 == 0:
+                            frame.beta_target_q15 = self._beta_target_q15
+                        if frame.coeff_osc_mode == 0:
+                            frame.coeff_osc_mode = self._osc_mode
 
                 # Run VM (Stage 3-6: Symbol Engine)
-                slot.vm_state, output = vm_step_block(slot.vm_state, frame)
+                policy = (ExecutionPolicy(item.serviced, item.mid_due, item.top_due, voice_budget)
+                          if scheduled or voice_budget is not None else None)
+                report = ExecutionReport() if policy is not None or frame.wire_data is not None else None
+                slot.vm_state, output = vm_step_block(slot.vm_state, frame, policy=policy, report=report)
+                if report is not None:
+                    self.last_execution_reports[voice_id] = report
+                    if item.serviced and not report.serviced:
+                        slot.active = False
+                        continue  # Rejected/stale packet: no audio or consumer events.
+                    consumer_events.extend((voice_id, event) for event in report.consumer_events)
+                slot.active = True
+                slot.gain_q15 = frame.gain_q15
+                slot.note = frame.note
+                if item.serviced:
+                    self._last_render_frames[voice_id] = deepcopy(frame)
+                rendered_frames.append(frame)
 
-                # Mix into output (Stage 8: Voice Mix)
-                for j in range(block_size):
-                    L[j] += output[j]
-                    R[j] += output[j]
+                # VM scratch output may be reused for the next voice. Retain
+                # this voice's samples before deferring the shared stereo mix.
+                rendered_audio.append((frame, output.copy()))
 
         # Mark inactive voices (not in render batch)
-        active_ids = {item.voice_id for item in engine_output.render_batch}
+        active_ids = {frame.voice_id for frame in rendered_frames}
         for i, slot in enumerate(self._voice_slots):
             if i not in active_ids:
                 slot.active = False
 
-        # Clip to int16 range
-        L = [max(Q15_NEG_ONE, min(Q15_ONE, s)) for s in L]
-        R = [max(Q15_NEG_ONE, min(Q15_ONE, s)) for s in R]
-
-        # Aggregate filter parameters from active voices
-        # Use minimum cutoff (darkest voice wins) for musical coherence
-        filter_cutoff_q15 = Q15_ONE
-        filter_reso_q15 = 0
-        filter_mode = 0
-        filter_enabled = False
-
-        for item in engine_output.render_batch:
-            frame = item.frame
-            if frame is not None:
-                fc = getattr(frame, 'filter_cutoff_q15', Q15_ONE)
-                fr = getattr(frame, 'filter_reso_q15', 0)
-                fm = getattr(frame, 'filter_mode', 0)
-                # Use minimum cutoff (darkest voice)
-                if fc < filter_cutoff_q15:
-                    filter_cutoff_q15 = fc
-                    filter_mode = fm
-                # Use maximum resonance
-                if fr > filter_reso_q15:
-                    filter_reso_q15 = fr
-                # Enable filter if any voice has cutoff below max
-                if fc < Q15_ONE:
-                    filter_enabled = True
-
-        # Apply post-processing if enabled (Stages 9-10)
-        if self._enable_material:
-            # Use material_id=9 (SVF filter) if filter is enabled, otherwise use configured material
-            material_id = 9 if filter_enabled else self._material_id
-            L, R = self.material.step_block(
-                L, R, param_frame, material_id, 0,
-                filter_cutoff_q15=filter_cutoff_q15,
-                filter_reso_q15=filter_reso_q15,
-                filter_mode=filter_mode
-            )
-        if self._enable_safety:
-            L, R = self.safety.step_block(L, R, param_frame)
+        L, R = self._mix_output(rendered_audio, param_frame, consumer_events)
 
         # Use telemetry from VoiceEngine
         telemetry = engine_output.telemetry
@@ -546,6 +548,7 @@ class SynthMaster:
         self._audio_R.extend(R)
 
         return L, R, telemetry
+
 
     def render(self, duration_sec: float) -> Tuple[List[int], List[int]]:
         """
@@ -612,60 +615,8 @@ class SynthMaster:
     # =========================================================================
 
     def _apply_control_frame(self, control_frame: 'ControlFrame') -> None:
-        """
-        Apply ControlFrame to VoiceEngine.
-
-        This bridges the Cockpit → VoiceEngine control plane per
-        WSE-STD-070 InstrumentIR Tower Organization Plan.
-
-        The ControlFrame contains:
-        - Global controls (master_gain, pan, tempo)
-        - Voice patches (per-voice control updates)
-        - Events (note on/off, preset load, mode set)
-
-        Args:
-            control_frame: ControlFrame from CockpitEngine
-        """
-        # Apply global controls
-        if control_frame.globals.master_gain_q15 is not None:
-            # Could route to master gain processing if needed
-            pass
-
-        # Process events
-        for event in control_frame.events:
-            from .control_frame import EventType
-
-            if event.type == EventType.NOTE_ON:
-                note = event.a & 0x7F
-                velocity_q15 = (event.a >> 8) & 0xFFFF
-                # Note: note_on should be called via public API
-                # This is for events queued in cockpit
-                pass
-
-            elif event.type == EventType.NOTE_OFF:
-                note = event.a & 0x7F
-                # Note: note_off should be called via public API
-                pass
-
-            elif event.type == EventType.MODE_SET:
-                # Mode change (Tower level)
-                mode_L = event.a
-                # Could update VoiceEngine tower level
-                pass
-
-        # Apply voice patches (sparse control updates)
-        for patch in control_frame.voice_patches:
-            voice_id = patch.voice_id
-            if voice_id < len(self._voice_slots):
-                slot = self._voice_slots[voice_id]
-                if slot.active:
-                    for item in patch.items:
-                        # Apply control updates to VoiceEngine state
-                        # The item.control_id maps to ControlID from control_registry
-                        pass
-
-        # Clear events after processing (consumed once)
-        control_frame.clear_events()
+        """Compatibility entry point; the VoiceEngine owns control dispatch."""
+        self.voice_engine.consume_control_frame(control_frame)
 
     # =========================================================================
     # TOGGLE API
@@ -680,10 +631,8 @@ class SynthMaster:
         """
         if stage == "cockpit":
             self._enable_cockpit = False
-        elif stage == "material":
-            self._enable_material = False
-        elif stage == "safety":
-            self._enable_safety = False
+        elif stage in ("material", "safety"):
+            self.disable_output_stage(stage)
         elif stage == "macro":
             self._enable_macro = False
         else:
@@ -698,10 +647,8 @@ class SynthMaster:
         """
         if stage == "cockpit":
             self._enable_cockpit = True
-        elif stage == "material":
-            self._enable_material = True
-        elif stage == "safety":
-            self._enable_safety = True
+        elif stage in ("material", "safety"):
+            self.enable_output_stage(stage)
         elif stage == "macro":
             self._enable_macro = True
         else:
@@ -709,7 +656,10 @@ class SynthMaster:
 
     def set_osc_mode(self, mode: str) -> None:
         """
-        Set oscillator mode.
+        Set the fallback oscillator mode for voices without a compiled preset.
+
+        Compiled voices use their emitted mode. A scheduled hold retains its
+        last rendered frame until the voice is serviced again.
 
         Args:
             mode: One of "mode_a", "mode_b", "fm6"
@@ -718,14 +668,6 @@ class SynthMaster:
             raise ValueError(f"Unknown mode: {mode}. Choose from: {list(OSC_MODES.keys())}")
         self._osc_mode = OSC_MODES[mode]
 
-    def set_material(self, material_id: int) -> None:
-        """
-        Set material effect.
-
-        Args:
-            material_id: Material ID (0=clean, 1=tape, 2=rank, 3=tropical, 4=catastrophe)
-        """
-        self._material_id = material_id
 
     # =========================================================================
     # CONTROL API
@@ -799,10 +741,12 @@ class SynthMaster:
 
     def get_active_voice_count(self) -> int:
         """Get count of currently active voices."""
-        return sum(1 for slot in self._voice_slots if slot.active)
+        return self.voice_engine.get_active_voice_count()
 
     def get_preset_name(self) -> Optional[str]:
         """Get name of currently loaded preset."""
+        if self.voice_engine.selected_preset_id is not None:
+            return self.voice_engine.selected_preset.preset_id
         return self._preset_name
 
     def get_stage_status(self) -> Dict[str, bool]:

@@ -8,8 +8,12 @@ A deterministic, real-time audio synthesis engine with hardware control support.
 # Install dependencies
 pixi install
 
+# Prepare exact Mode A/B coefficients before audio startup (one-time builds)
+pixi run python tools/prepare_mode_a_tables.py
+pixi run python tools/prepare_mode_b_basis.py
+
 # Run tests
-pixi run pytest pipeline_tests/ -q
+pixi run pytest tests/ -q
 
 # Start virtual synth with GUI controls
 pixi run virtual-synth
@@ -17,6 +21,20 @@ pixi run virtual-synth
 # Start live synth with hardware (Pico2)
 pixi run live-synth
 ```
+
+Mode B uses a validated, read-only basis image under `presets/.build/resources/`.
+It occupies about 288 MiB; the current local build took 11 seconds. Hosts also
+prepare it automatically during initialization if absent. Preparation must
+finish before starting audio callbacks. Subsequent startups validate and map
+the existing image; pitch changes do not run forward wavelet transforms.
+The [resource profile](symcrash_docs/05%20-%20Standards/06%20-%20CCS/WSE-IMPL-BASIS-RESOURCE-v1.md)
+describes custom locations, regeneration and remaining device-timing limits.
+
+Mode A also uses a prepared image: 643 native and legacy tables in about
+21 MB, built in 9.38 seconds locally. Hosts prepare both images before playback.
+Mode A cache misses only create views of immutable data. Its
+[resource profile](symcrash_docs/05%20-%20Standards/06%20-%20CCS/WSE-IMPL-MODE-A-RESOURCE-v1.md)
+records the preserved nominal-note tuning and fixed-harmonic limitations.
 
 ## Project Structure
 
@@ -26,11 +44,10 @@ symcrash_python_AP/
 │   ├── symcrash_python_ap/       # Core synthesis engine
 │   ├── symcrash_imgui_controls/  # GUI control interface
 │   └── symcrash_pico2_controls/  # Hardware control (C/CMake)
-├── pipeline_tests/               # Pipeline validation tests
-├── audio_generation_tests/       # Audio output tests & analysis
+├── tests/                        # Unit, integration, conformance, audio tests
 ├── tools/                        # Development and demo scripts
 ├── presets/                      # Preset YAML source + ignored .build library
-├── docs/                         # Architecture documentation (WSE-STD-*)
+├── symcrash_docs/                 # Documentation submodule (WSE-STD-*)
 └── audio_out/                    # Generated audio files
 ```
 
@@ -40,18 +57,18 @@ folders; compiled capsules, indexes, caches, and previews are regenerated in
 
 ## Test Organization
 
-### Pipeline Tests (`pipeline_tests/`)
+### Pipeline Tests (`tests/`)
 
 Core pipeline validation - run frequently during development:
 
 ```bash
 # Run all pipeline tests
-pixi run pytest pipeline_tests/ -q
+pixi run pytest tests/ -q
 
 # Run specific test category
-pixi run pytest pipeline_tests/unit/ -v
-pixi run pytest pipeline_tests/integration/ -v
-pixi run pytest pipeline_tests/conformance/ -v
+pixi run pytest tests/unit/ -v
+pixi run pytest tests/integration/ -v
+pixi run pytest tests/conformance/ -v
 ```
 
 | Directory | Purpose |
@@ -61,32 +78,18 @@ pixi run pytest pipeline_tests/conformance/ -v
 | `conformance/` | Standards compliance (WSE-STD-030, UART protocol) |
 | `artifacts/` | Golden trace regression tests |
 
-### Audio Generation Tests (`audio_generation_tests/`)
-
-Tests that produce audio files for listening and analysis:
+### Audio quality and preset rendering
 
 ```bash
-# Run audio tests (generates WAV files)
-pixi run pytest audio_generation_tests/ -v
+# Check audio quality and spectral behavior
+pixi run pytest tests/quality/ -v
+pixi run pytest tests/spectral/ -v
 
-# Run specific category
-pixi run pytest audio_generation_tests/unit/carrier/ -v
-pixi run pytest audio_generation_tests/integration/pipeline/ -v
+# Render a preset for listening
+pixi run python tools/render/render_preset.py presets/instruments/dx_marimba_v0.yaml --note 60 --duration 2.5
 ```
 
-| Directory | Purpose |
-|-----------|---------|
-| `unit/carrier/` | Carrier wave generation and lifting |
-| `unit/wavelet/` | Wavelet packet tree synthesis |
-| `unit/waveform/` | Basic waveform generation |
-| `unit/safety/` | Click prevention and OLA |
-| `unit/presets/` | Preset rendering |
-| `integration/pipeline/` | Full synthesis pipeline |
-| `integration/wet_path/` | Effect/material path |
-| `demos/` | Demo scripts (Fur Elise, electronic, etc.) |
-| `analysis/` | Audio analysis tools |
-
-Output files go to `audio_generation_tests/audio_out/` or `audio_out/`.
+Generated audio goes under the ignored `audio_out/` directory.
 
 ## Audio I/O
 
@@ -97,11 +100,12 @@ from symcrash_python_ap.audio_io import write_audio
 import numpy as np
 
 # Generate some audio
-L = np.sin(np.linspace(0, 440 * 2 * np.pi, 48000)).astype(np.int16) * 16384
+L = np.rint(16384 * np.sin(2 * np.pi * 440 * np.arange(48000) / 48000)).astype(np.int16)
 R = L.copy()
 
 # Write with automatic timestamp
-path = write_audio("my_sound", L, R)
+metadata = write_audio("my_sound", L, R)
+print(metadata.filepath)
 # → audio_out/my_sound-20251219-114532.wav
 
 # Write to subdirectory
@@ -116,7 +120,7 @@ The `write_audio` function:
 - Automatically creates output directories
 - Adds timestamps to filenames (configurable)
 - Handles stereo/mono automatically
-- Returns the output path for reference
+- Returns metadata including the output filepath
 
 ## GUI and Hardware Controls
 
@@ -127,23 +131,23 @@ The `write_audio` function:
 | `live-synth` | `pixi run live-synth` | Hardware control via Pico2 pots (console) |
 | `live-synth-imgui` | `pixi run live-synth-imgui` | Hardware + ImGui visual feedback |
 | `virtual-synth` | `pixi run virtual-synth` | No hardware, ImGui knobs for control |
-| `virtual-synth-mp` | `pixi run virtual-synth-mp` | Multiprocess synth (lower latency) |
+| `virtual-synth-mp` | `pixi run virtual-synth-mp` | Multiprocess synth with ImGui controls |
 | `imgui-controls` | `pixi run imgui-controls` | Standalone ImGui panel (UART to hardware) |
 
 ### Command Line Options
 
 ```bash
 # Virtual synth with GUI (no hardware needed)
-python tools/pico2_live_synth.py --no-hardware --imgui
+python tools/synth/pico2_live_synth.py --no-hardware --imgui
 
 # Hardware synth with specific port
-python tools/pico2_live_synth.py COM3
+python tools/synth/pico2_live_synth.py COM3
 
 # Hardware synth with GUI overlay
-python tools/pico2_live_synth.py --imgui
+python tools/synth/pico2_live_synth.py --imgui
 
 # Start at different note
-python tools/pico2_live_synth.py --no-hardware --imgui --note 48
+python tools/synth/pico2_live_synth.py --no-hardware --imgui --note 48
 ```
 
 ### Hardware Controls (Pico2)
@@ -152,14 +156,14 @@ When connected to Pico2 hardware:
 
 | Pot | Parameter | Range | Control |
 |-----|-----------|-------|---------|
-| 0 | Attack | 0-665ms | ATK_BLOCKS |
-| 1 | Decay | 0-1333ms | DCY_BLOCKS |
+| 0 | Attack | 1.33-667ms | ATK_BLOCKS |
+| 1 | Decay | 1.33-1333ms | DCY_BLOCKS |
 | 2 | Sustain | 0-100% | SUS_Q15 |
-| 3 | Release | 0-2000ms | REL_BLOCKS |
-| 4 | Cutoff | 0-100% | CHAOS |
-| 5 | Resonance | 0-100% | TEXTURE |
-| 6 | Harmonics | 0-100% | RESERVED_7 |
-| 7 | Eta | 0-100% (dry/wet) | MORPH |
+| 3 | Release | 1.33-2000ms | REL_BLOCKS |
+| 4 | Chaos family control | 0-100% | CHAOS |
+| 5 | Local texture family control | 0-100% | TEXTURE |
+| 6 | Reserved (inactive) | — | RESERVED_7 |
+| 7 | Tree morph | 0-100% (A/B blend) | MORPH |
 | 8 | Detune | ±2 octaves | DETUNE |
 | 9 | Gain | 0-100% | MASTER_GAIN |
 
@@ -187,11 +191,11 @@ Development and analysis scripts in `tools/`:
 
 | Category | Examples |
 |----------|----------|
-| Live Synth | `pico2_live_synth.py`, `virtual_synth_mp.py` |
-| Analysis | `analyze_spectrum.py`, `check_carrier_purity.py` |
-| Debugging | `debug_crossfade.py`, `trace_carrier_path.py` |
-| Benchmarks | `bench_idwpt.py`, `bench_vm.py` |
-| Testing | `check_discontinuity.py`, `compare_wet_dry.py` |
+| Live Synth | `synth/pico2_live_synth.py`, `synth/virtual_synth_mp.py` |
+| Presets | `lint_presets.py`, `render/compile_presets.py` |
+| Rendering | `render/render_preset.py`, `render/render_all_presets.py` |
+| Benchmarks | `benchmarks/bench_vm.py`, `benchmarks/bench_osc_modes.py` |
+| Audio comparison | `gym/timbre_distance.py`, `gym/dexed_reference.py` |
 
 ## Architecture Overview
 
@@ -203,11 +207,13 @@ The synthesis pipeline consists of five main engines:
 4. **Material Engine** - Nonlinear processing, effects
 5. **Safety Engine** - Click prevention, limiting, OLA windowing
 
-All processing uses Q15 fixed-point arithmetic for determinism.
+The synthesis audio paths use fixed-point arithmetic. Preset authoring and some control-rate conversions use floating point. Material chorus and SVF playback use frozen integer lookup tables; extended material programs have frozen output-hash tests.
 
 ## Documentation
 
-Technical standards in `docs/`:
+Current verification and remaining gaps: [conformance report](symcrash_docs/07%20-%20Status%20Reports/CONFORMANCE-2026-10-30.md).
+
+Technical standards in `symcrash_docs/05 - Standards/`:
 
 | Document | Topic |
 |----------|-------|
@@ -222,7 +228,7 @@ Technical standards in `docs/`:
 
 ## Dependencies
 
-- Python >= 3.11
+- Python >= 3.11 (the Pixi environment pins Python 3.14)
 - numpy >= 2.3
 - sounddevice >= 0.5
 - imgui-bundle >= 1.92
@@ -238,4 +244,4 @@ pixi install
 
 ## License
 
-[Add license information]
+[MIT](LICENSE)

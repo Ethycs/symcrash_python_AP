@@ -49,7 +49,7 @@ def _restore_jit_flag():
 
 
 def _render_sine_carrier(level_q15: int, num_blocks: int = NUM_BLOCKS) -> np.ndarray:
-    """Render a pure sine carrier (algorithm 1, modulators silent)."""
+    """Render a pure sine carrier (DX7 algorithm 16, modulators silent)."""
     state = VMState.create(voice_id=0)
     state.reset_for_note_on(note=NOTE, cents=0)
     out = []
@@ -60,7 +60,7 @@ def _render_sine_carrier(level_q15: int, num_blocks: int = NUM_BLOCKS) -> np.nda
             f0_hz=F0,
             coeff_osc_mode=3,  # OSC_MODE_FM6
             gain_q15=32767,
-            fm_algorithm_id=1,  # single carrier (Op1)
+            fm_algorithm_id=16,  # DX7 single carrier (Op1); algorithm 1 has two
             fm_op_ratios=[65536] * 6,
             fm_op_levels=[level_q15, 0, 0, 0, 0, 0],
             fm_feedback_depth=0,
@@ -105,7 +105,7 @@ class TestGatewayMath:
         assert overrides[0] <= FM6_CARRIER_SUM_MAX_Q15
 
     def test_proportional_scaling_and_modulator_exemption(self):
-        # Algorithm 22: carriers Op1-4 (idx 0-3); Op5/Op6 modulators
+        # Use the canonical DX7 topology: algorithm 22 has carriers 1,3,4,5.
         state = create_fm6_state(algorithm_id=22)
         levels = [32767, 16384, 16384, 8192, 30000, 25000]
         for i, lvl in enumerate(levels):
@@ -126,7 +126,7 @@ class TestGatewayMath:
             assert overrides[c] == (levels[c] * FM6_CARRIER_SUM_MAX_Q15) // carrier_sum
 
         # Modulators: untouched
-        for m in (4, 5):
+        for m in set(range(6)) - set(carriers):
             assert overrides[m] == levels[m]
 
 

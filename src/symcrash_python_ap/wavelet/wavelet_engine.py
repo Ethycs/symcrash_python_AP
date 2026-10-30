@@ -29,6 +29,7 @@ from ..fixed import (
     Q15_ONE, Q15_SHIFT, Q15_HALF
 )
 from ..primitives import Q15_SCALE
+from ..tables.sine_quarter import SINE_QUARTER_Q15
 from ..frames import VoiceFrame
 from .wavelet_packet_trees import PacketTreeSet, BLOCK_SIZE, LEAF_COUNT, NODE_SIZE
 
@@ -58,10 +59,7 @@ MICROFADE_LEN = 32        # Samples for allocation microfade (fade-in from 0)
 # Precomputed leaf envelope for coefficient expansion
 # sin((coeff_idx + 0.5) / NODE_SIZE * pi) for NODE_SIZE=4
 # This avoids 256 math.sin calls per block per voice
-_LEAF_ENVELOPE_Q15 = [
-    int(round(math.sin((i + 0.5) / 4 * math.pi) * Q15_ONE))
-    for i in range(4)  # NODE_SIZE = 4
-]
+_LEAF_ENVELOPE_Q15 = tuple(SINE_QUARTER_Q15[i] for i in (256, 768, 768, 256))
 
 
 def _build_cosine_bridge_lut(n: int) -> List[int]:

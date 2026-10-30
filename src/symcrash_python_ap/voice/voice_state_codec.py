@@ -1,369 +1,189 @@
+"""Integer VM payloads: complete v1 by default, explicit frozen legacy v0.
+
+The 644-byte v0 payload remains readable but omits modern state and resources.
+The complete v1 schema is implemented separately in vm_binary_codec.
 """
-Voice State Codec (WSE-STD-VOICEENGINEREGISTRY v0 §7)
-======================================================
-
-Binary serialization/deserialization for VMState.
-
-Enables:
-- Snapshot/checkpoint creation
-- Bit-identical resume
-- Deterministic replay
-- State persistence
-
-Format: Little-endian, integer-only, fixed-length arrays
-"""
-
+import operator
 import struct
+
 import numpy as np
-from typing import Tuple
 
 from ..vm.state import VMState, EnvelopeState, EnvelopePhase
 from ..vm.coeff_lut_streaming import CCSState
 from ..vm.tables import COEFF_LEN
+from ..primitives import Q15_ONE, Q15_NEG_ONE
 
 
-# =============================================================================
-# CONSTANTS
-# =============================================================================
+VMSTATE_VERSION = 1
+LEGACY_VMSTATE_VERSION = 0
+ENVELOPE_SIZE = 24
+VMSTATE_HEADER_SIZE = 4
+V0_COEFF_COUNT = 256
+COEFF_ARRAY_SIZE = V0_COEFF_COUNT * 2
+VMSTATE_SIZE = 644
 
-VMSTATE_VERSION = 0
-ENVELOPE_SIZE = 24  # bytes: BBHIhHII (20) + hH (4) = 24
-VMSTATE_HEADER_SIZE = 4  # version + voice_id
-COEFF_ARRAY_SIZE = COEFF_LEN * 2  # 256 * 2 = 512 bytes
+
+def _bytes(data):
+    if not isinstance(data, (bytes, bytearray, memoryview)):
+        raise ValueError('Binary snapshot requires a bytes-like value')
+    return bytes(data)
 
 
-# =============================================================================
-# ENVELOPE STATE CODEC
-# =============================================================================
+def _integer(value, minimum, maximum, name):
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f'{name} must be an integer, not a boolean')
+    try:
+        value = operator.index(value)
+    except TypeError as exc:
+        raise ValueError(f'{name} must be an integer') from exc
+    if not minimum <= value <= maximum:
+        raise ValueError(f'{name} is outside {minimum}..{maximum}')
+    return value
+
+
+def _pack(fmt, *values):
+    try:
+        if any(isinstance(v, (bool, np.bool_)) for v in values):
+            raise ValueError('Boolean supplied for an integer payload field')
+        return struct.pack(fmt, *(operator.index(v) for v in values))
+    except (TypeError, struct.error) as exc:
+        raise ValueError(f'Invalid integer snapshot field ({fmt})') from exc
+
+
+def _flag(value):
+    if isinstance(value, (bool, np.bool_)):
+        return int(value)
+    return _integer(value, 0, 1, 'Snapshot flag')
+
 
 def envelope_to_bytes(env: EnvelopeState) -> bytes:
-    """
-    Serialize EnvelopeState to 24 bytes.
+    """Pack the legacy envelope subset: phase/count/level, A/D and sustain.
 
-    Format (little-endian):
-        u8  phase           (1)
-        u8  padding         (1)
-        u16 padding         (2)
-        u32 phase_sample    (4)
-        i16 level_q15       (2)
-        u16 padding         (2)
-        u32 attack_samples  (4)
-        u32 decay_samples   (4)  = 20 bytes
-        i16 sustain_level   (2)
-        u16 padding         (2)  = 4 bytes
-        Total: 24 bytes
+    Layout: BBHIhHIIhH. Reserved fields are zero. Release duration/level are
+    absent from v0 and cannot be recovered from these bytes.
     """
-    return struct.pack(
-        '<BBHIhHII',
-        int(env.phase),
-        0,  # padding
-        0,  # padding
-        env.phase_sample,
-        env.level_q15,
-        0,  # padding
-        env.attack_samples,
-        env.decay_samples,
-    ) + struct.pack('<hH', env.sustain_level_q15, 0)  # sustain + padding
+    phase = _integer(env.phase, 0, 4, 'Envelope phase')
+    return _pack('<BBHIhHIIhH', phase, 0, 0, env.phase_sample,
+                 env.level_q15, 0, env.attack_samples, env.decay_samples,
+                 env.sustain_level_q15, 0)
 
 
 def envelope_from_bytes(data: bytes) -> EnvelopeState:
-    """Deserialize EnvelopeState from 24 bytes."""
-    # First 20 bytes: BBHIhHII = 1+1+2+4+2+2+4+4 = 20 bytes
-    v1 = struct.unpack('<BBHIhHII', data[:20])
-    # Last 4 bytes: hH = 2+2 = 4 bytes
-    v2 = struct.unpack('<hH', data[20:24])
-
-    return EnvelopeState(
-        phase=EnvelopePhase(v1[0]),
-        phase_sample=v1[3],
-        level_q15=v1[4],
-        attack_samples=v1[6],
-        decay_samples=v1[7],
-        sustain_level_q15=v2[0],
-        release_samples=0,  # Not serialized (reconstructed on note-on)
-    )
+    data = _bytes(data)
+    if len(data) != ENVELOPE_SIZE:
+        raise ValueError('Legacy envelope payload must contain exactly 24 bytes')
+    phase, pad1, pad2, count, level, pad3, attack, decay, sustain, pad4 = struct.unpack('<BBHIhHIIhH', data)
+    if pad1 or pad2 or pad3 or pad4:
+        raise ValueError('Nonzero reserved envelope field')
+    return EnvelopeState(phase=EnvelopePhase(phase), phase_sample=count,
+        level_q15=level, attack_samples=attack, decay_samples=decay,
+        sustain_level_q15=sustain, release_samples=0)
 
 
-# =============================================================================
-# VMSTATE CODEC
-# =============================================================================
+def _vmstate_to_bytes_v0(state: VMState) -> bytes:
+    """Encode the frozen v0 subset without truncation or narrowing overflow.
 
-def vmstate_to_bytes(state: VMState) -> bytes:
+    Offsets: header 0, carrier 4, harmonics 24, envelope 56, DC 80,
+    coefficients 84, PRNG 596, trees 600, latency 604, previous values 610,
+    flags 614, seam 618, CCS 620. All integers are explicitly little-endian.
     """
-    Serialize VMState to binary format.
-
-    Format (little-endian):
-        u16 version
-        u16 voice_id
-
-        # Carrier oscillator (20 bytes)
-        u32 phase
-        u32 phase_inc
-        u32 target_phase_inc
-        u32 pitch_slew_rate
-        i8  last_note
-        i8  padding
-        i16 last_cents
-
-        # Harmonics (32 bytes)
-        i16 harmonic_amps_q15[16]
-
-        # Envelope (24 bytes)
-        EnvelopeState (packed)
-
-        # DC block filter (4 bytes)
-        i16 dc_block_x1
-        i16 dc_block_y1
-
-        # Coefficient state (512 bytes)
-        i16 coeff_state[256]
-
-        # PRNG (4 bytes)
-        u32 prng_state
-
-        # Tree state (4 bytes)
-        u8  tree_a_id
-        u8  tree_b_id
-        u16 padding
-
-        # Latency tracking (8 bytes)
-        u32 blocks_since_start
-        u8  wet_ready
-        u8  padding
-        u16 padding
-
-        # Previous values (4 bytes)
-        i16 eta_prev_q15
-        i16 gain_prev_q15
-
-        # Wet path state flags (4 bytes)
-        u8  mask_state_initialized
-        u8  wet_seam_initialized
-        u8  wet_ola_initialized
-        u8  use_coeff_osc
-
-        # Wet seam tracking (2 bytes)
-        i16 wet_prev_end
-
-        # CCS State (will be added separately if needed)
-        # Mode B State (will be added separately if needed)
-
-    Total size (excluding CCS/ModeB): ~620 bytes
-    """
-    parts = []
-
-    # Header
-    parts.append(struct.pack('<HH', VMSTATE_VERSION, state.voice_id))
-
-    # Carrier oscillator
-    parts.append(struct.pack(
-        '<IIIIbbh',
-        state.phase & 0xFFFFFFFF,  # Ensure 32-bit
-        state.phase_inc & 0xFFFFFFFF,
-        state.target_phase_inc & 0xFFFFFFFF,
-        state.pitch_slew_rate & 0xFFFFFFFF,
-        state.last_note,
-        0,  # padding
-        state.last_cents,
-    ))
-
-    # Harmonics
-    harmonics_bytes = struct.pack('<16h', *state.harmonic_amps_q15[:16])
-    parts.append(harmonics_bytes)
-
-    # Envelope
-    parts.append(envelope_to_bytes(state.envelope))
-
-    # DC block filter
-    parts.append(struct.pack('<hh', state.dc_block_x1, state.dc_block_y1))
-
-    # Coefficient state (256 i16 values)
-    coeff_bytes = state.coeff_state.astype(np.int16).tobytes()
-    parts.append(coeff_bytes)
-
-    # PRNG
-    parts.append(struct.pack('<I', state.prng_state & 0xFFFFFFFF))
-
-    # Tree state
-    parts.append(struct.pack('<BBH', state.tree_a_id, state.tree_b_id, 0))
-
-    # Latency tracking
-    parts.append(struct.pack('<IBB', state.blocks_since_start, int(state.wet_ready), 0))
-
-    # Previous values
-    parts.append(struct.pack('<hh', state.eta_prev_q15, state.gain_prev_q15))
-
-    # Wet path flags
-    parts.append(struct.pack(
-        '<BBBB',
-        int(state.mask_state_initialized),
-        int(state.wet_seam_initialized),
-        int(state.wet_ola_initialized),
-        int(state.use_coeff_osc),
-    ))
-
-    # Wet seam
-    parts.append(struct.pack('<h', state.wet_prev_end))
-
-    # CCS state (24 bytes)
-    # Format: u32 wave_id, u32 note, i32 phase, i32 phase_inc, i32 target_phase_inc, i32 phase_slew_rate
-    parts.append(struct.pack(
-        '<IIiiii',
-        state.ccs_state.wave_id,
-        state.ccs_state.note,
-        state.ccs_state.phase,
-        state.ccs_state.phase_inc,
-        state.ccs_state.target_phase_inc,
-        state.ccs_state.phase_slew_rate,
-    ))
-
+    if COEFF_LEN != V0_COEFF_COUNT:
+        raise ValueError('Legacy VM core requires the 256-coefficient runtime layout')
+    voice_id = _integer(state.voice_id, 0, 0xFFFE, 'Voice ID')
+    _integer(state.last_note, -1, 127, 'Last MIDI note')
+    if len(state.harmonic_amps_q15) != 16:
+        raise ValueError('Legacy harmonic vector must contain exactly 16 values')
+    coeffs = np.asarray(state.coeff_state)
+    if (coeffs.shape != (V0_COEFF_COUNT,) or coeffs.dtype.kind not in 'iu'
+            or np.any(coeffs < Q15_NEG_ONE) or np.any(coeffs > Q15_ONE)):
+        raise ValueError('Legacy coefficient vector must contain 256 signed-int16 values')
+    parts = [
+        _pack('<HH', LEGACY_VMSTATE_VERSION, voice_id),
+        _pack('<IIIIbbh', state.phase, state.phase_inc, state.target_phase_inc,
+              state.pitch_slew_rate, state.last_note, 0, state.last_cents),
+        _pack('<16h', *state.harmonic_amps_q15),
+        envelope_to_bytes(state.envelope),
+        _pack('<hh', state.dc_block_x1, state.dc_block_y1),
+        coeffs.astype('<i2', copy=False).tobytes(),
+        _pack('<I', state.prng_state),
+        _pack('<BBH', state.tree_a_id, state.tree_b_id, 0),
+        _pack('<IBB', state.blocks_since_start, _flag(state.wet_ready), 0),
+        _pack('<hh', state.eta_prev_q15, state.gain_prev_q15),
+        _pack('<BBBB', _flag(state.mask_state_initialized), _flag(state.wet_seam_initialized),
+              _flag(state.wet_ola_initialized), _flag(state.use_coeff_osc)),
+        _pack('<h', state.wet_prev_end),
+        # CCS phases are modulo-2^32 accumulators, including their upper half.
+        _pack('<6I', state.ccs_state.wave_id, state.ccs_state.note, state.ccs_state.phase,
+              state.ccs_state.phase_inc, state.ccs_state.target_phase_inc,
+              state.ccs_state.phase_slew_rate),
+    ]
     return b''.join(parts)
 
 
+def _vmstate_from_bytes_v0(data: bytes) -> VMState:
+    """Read exactly one v0 core payload, retaining legacy defaults for omissions."""
+    data = _bytes(data)
+    if COEFF_LEN != V0_COEFF_COUNT:
+        raise ValueError('Legacy VM core requires the 256-coefficient runtime layout')
+    if len(data) != VMSTATE_SIZE:
+        raise ValueError('Legacy VM core payload must contain exactly 644 bytes')
+    version, voice_id = struct.unpack_from('<HH', data, 0)
+    if version != LEGACY_VMSTATE_VERSION:
+        raise ValueError(f'Unsupported VMState version: {version}')
+    _integer(voice_id, 0, 0xFFFE, 'Voice ID')
+    phase, inc, target, slew, note, pad1, cents = struct.unpack_from('<IIIIbbh', data, 4)
+    _integer(note, -1, 127, 'Last MIDI note')
+    tree_a, tree_b, pad2 = struct.unpack_from('<BBH', data, 600)
+    count, ready, pad3 = struct.unpack_from('<IBB', data, 604)
+    flags = struct.unpack_from('<4B', data, 614)
+    if pad1 or pad2 or pad3:
+        raise ValueError('Nonzero reserved VM core field')
+    if ready not in (0, 1) or any(flag not in (0, 1) for flag in flags):
+        raise ValueError('Invalid boolean VM core field')
+    dc_x, dc_y = struct.unpack_from('<hh', data, 80)
+    eta, gain = struct.unpack_from('<hh', data, 610)
+    wave, ccs_note, ccs_phase, ccs_inc, ccs_target, ccs_slew = struct.unpack_from('<6I', data, 620)
+    return VMState(voice_id=voice_id, phase=phase, phase_inc=inc,
+        target_phase_inc=target, pitch_slew_rate=slew, last_note=note, last_cents=cents,
+        harmonic_amps_q15=list(struct.unpack_from('<16h', data, 24)),
+        envelope=envelope_from_bytes(data[56:80]), dc_block_x1=dc_x, dc_block_y1=dc_y,
+        coeff_state=np.frombuffer(data[84:596], dtype='<i2').astype(np.int16, copy=True),
+        prng_state=struct.unpack_from('<I', data, 596)[0], tree_a_id=tree_a, tree_b_id=tree_b,
+        blocks_since_start=count, wet_ready=bool(ready), eta_prev_q15=eta, gain_prev_q15=gain,
+        mask_state_initialized=bool(flags[0]), wet_seam_initialized=bool(flags[1]),
+        wet_ola_initialized=bool(flags[2]), use_coeff_osc=bool(flags[3]),
+        wet_prev_end=struct.unpack_from('<h', data, 618)[0],
+        ccs_state=CCSState(wave_id=wave, note=ccs_note, phase=ccs_phase,
+            phase_inc=ccs_inc, target_phase_inc=ccs_target, phase_slew_rate=ccs_slew))
+
+
+def vmstate_to_bytes(state: VMState, *, version: int = VMSTATE_VERSION) -> bytes:
+    """Encode complete v1 state, or the lossy v0 subset when explicitly requested."""
+    version = _integer(version, 0, VMSTATE_VERSION, 'VMState version')
+    if version == LEGACY_VMSTATE_VERSION:
+        return _vmstate_to_bytes_v0(state)
+    from .vm_binary_codec import encode
+    return encode(state)
+
+
 def vmstate_from_bytes(data: bytes) -> VMState:
-    """
-    Deserialize VMState from binary format.
-
-    Args:
-        data: Binary data (should be ~620 bytes minimum)
-
-    Returns:
-        VMState instance
-
-    Raises:
-        struct.error if data is malformed
-    """
-    offset = 0
-
-    # Header
-    version, voice_id = struct.unpack_from('<HH', data, offset)
-    offset += 4
-
-    if version != VMSTATE_VERSION:
-        raise ValueError(f"Unsupported VMState version: {version}")
-
-    # Carrier oscillator
-    phase, phase_inc, target_phase_inc, pitch_slew_rate, last_note, _, last_cents = struct.unpack_from(
-        '<IIIIbbh', data, offset
-    )
-    offset += 20
-
-    # Harmonics
-    harmonic_amps = list(struct.unpack_from('<16h', data, offset))
-    offset += 32
-
-    # Envelope
-    envelope_data = data[offset:offset + ENVELOPE_SIZE]
-    envelope = envelope_from_bytes(envelope_data)
-    offset += ENVELOPE_SIZE
-
-    # DC block filter
-    dc_block_x1, dc_block_y1 = struct.unpack_from('<hh', data, offset)
-    offset += 4
-
-    # Coefficient state
-    coeff_bytes = data[offset:offset + COEFF_ARRAY_SIZE]
-    coeff_state = np.frombuffer(coeff_bytes, dtype=np.int16).copy()
-    offset += COEFF_ARRAY_SIZE
-
-    # PRNG
-    prng_state, = struct.unpack_from('<I', data, offset)
-    offset += 4
-
-    # Tree state
-    tree_a_id, tree_b_id, _ = struct.unpack_from('<BBH', data, offset)
-    offset += 4
-
-    # Latency tracking
-    blocks_since_start, wet_ready_int, _ = struct.unpack_from('<IBB', data, offset)
-    wet_ready = bool(wet_ready_int)
-    offset += 6
-
-    # Previous values
-    eta_prev_q15, gain_prev_q15 = struct.unpack_from('<hh', data, offset)
-    offset += 4
-
-    # Wet path flags
-    mask_init, seam_init, ola_init, use_coeff = struct.unpack_from('<BBBB', data, offset)
-    offset += 4
-
-    # Wet seam
-    wet_prev_end, = struct.unpack_from('<h', data, offset)
-    offset += 2
-
-    # CCS state (24 bytes)
-    ccs_wave_id, ccs_note, ccs_phase, ccs_phase_inc, ccs_target_phase_inc, ccs_phase_slew_rate = struct.unpack_from(
-        '<IIiiii', data, offset
-    )
-    offset += 24
-    ccs_state = CCSState(
-        wave_id=ccs_wave_id,
-        note=ccs_note,
-        phase=ccs_phase,
-        phase_inc=ccs_phase_inc,
-        target_phase_inc=ccs_target_phase_inc,
-        phase_slew_rate=ccs_phase_slew_rate,
-    )
-
-    # Construct VMState
-    return VMState(
-        voice_id=voice_id,
-        phase=phase,
-        phase_inc=phase_inc,
-        target_phase_inc=target_phase_inc,
-        pitch_slew_rate=pitch_slew_rate,
-        last_note=last_note,
-        last_cents=last_cents,
-        harmonic_amps_q15=harmonic_amps,
-        envelope=envelope,
-        dc_block_x1=dc_block_x1,
-        dc_block_y1=dc_block_y1,
-        coeff_state=coeff_state,
-        prng_state=prng_state,
-        tree_a_id=tree_a_id,
-        tree_b_id=tree_b_id,
-        blocks_since_start=blocks_since_start,
-        wet_ready=wet_ready,
-        eta_prev_q15=eta_prev_q15,
-        gain_prev_q15=gain_prev_q15,
-        mask_state_initialized=bool(mask_init),
-        wet_seam_initialized=bool(seam_init),
-        wet_ola_initialized=bool(ola_init),
-        use_coeff_osc=bool(use_coeff),
-        wet_prev_end=wet_prev_end,
-        ccs_state=ccs_state,
-    )
+    """Dispatch by payload version; require exact consumption of either format."""
+    data = _bytes(data)
+    if len(data) < VMSTATE_HEADER_SIZE:
+        raise ValueError('Truncated VM core header')
+    version = struct.unpack_from('<H', data)[0]
+    if version == LEGACY_VMSTATE_VERSION:
+        return _vmstate_from_bytes_v0(data)
+    if version == VMSTATE_VERSION:
+        from .vm_binary_codec import decode
+        return decode(data)
+    raise ValueError(f'Unsupported VMState version: {version}')
 
 
 def get_vmstate_size() -> int:
-    """
-    Get size of serialized VMState.
-
-    Includes all core fields plus CCS state.
-    Mode B state is not yet serialized (future work).
-    """
-    return (
-        4 +    # Header
-        20 +   # Carrier oscillator
-        32 +   # Harmonics
-        24 +   # Envelope (ENVELOPE_SIZE)
-        4 +    # DC block
-        512 +  # Coefficients
-        4 +    # PRNG
-        4 +    # Tree
-        6 +    # Latency
-        4 +    # Previous values
-        4 +    # Flags
-        2 +    # Wet seam
-        24     # CCS state
-    )  # = 644 bytes
+    """Size of the frozen v0 core subset, independent of current VM layout."""
+    return VMSTATE_SIZE
 
 
-__all__ = [
-    'vmstate_to_bytes',
-    'vmstate_from_bytes',
-    'get_vmstate_size',
-    'envelope_to_bytes',
-    'envelope_from_bytes',
-    'VMSTATE_VERSION',
-]
+__all__ = ['vmstate_to_bytes', 'vmstate_from_bytes', 'get_vmstate_size',
+           'envelope_to_bytes', 'envelope_from_bytes', 'VMSTATE_VERSION']

@@ -10,11 +10,12 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import List, Optional
 import numpy as np
+from .wire_events import WireExecutionState
 
 from .tables import COEFF_LEN, BLOCK_SAMPLES
 from ..fixed import midi_to_phase_inc_fixed
 from .coeff_lut_streaming import CCSState, midi_to_hz, SAMPLE_RATE
-from ..primitives import Q15_ONE, Q15_HALF, SymbolMode, TimbralMode
+from ..primitives import Q15_ONE, Q15_NEG_ONE, Q15_HALF, SymbolMode, TimbralMode
 from ..primitives import Q15_3_4
 
 # Defer import to avoid circular dependency - ModeBState imported when needed
@@ -190,6 +191,10 @@ class ExecutorLatch:
             tail_mode: New tail mode (0=FULL, 1=MID, 2=MIN, 3=EMERGENCY)
             traction_q15: Projection hardness (0-32767)
         """
+        if isinstance(tail_mode, bool) or not isinstance(tail_mode, int) or tail_mode not in range(4):
+            raise ValueError("tail_mode must be an integer in 0..3")
+        if type(traction_q15) is not int or not 0 <= traction_q15 <= Q15_ONE:
+            raise ValueError("traction_q15 must be an integer in 0..32767")
         self.tail_mode = tail_mode
         self.traction_q15 = traction_q15
 
@@ -323,6 +328,10 @@ class VMState:
     coeff_state: np.ndarray = field(
         default_factory=lambda: np.zeros(COEFF_LEN, dtype=np.int16)
     )
+    tail_previous_coeffs: np.ndarray = field(
+        default_factory=lambda: np.zeros(COEFF_LEN, dtype=np.int16)
+    )
+    wire_state: WireExecutionState = field(default_factory=WireExecutionState)
 
     # -------------------------------------------------------------------------
     # PRNG state
@@ -522,6 +531,12 @@ class VMState:
         """Set noise exciter state."""
         self._noise_state = value
 
+    def __post_init__(self):
+        # Allocation/restoration boundary for low-level VM clients. Hosts that
+        # allocate voices in callbacks prepare once during their own startup.
+        from .resources import prepare_oscillator_resources
+        prepare_oscillator_resources()
+
     @property
     def mode_b_state(self) -> 'ModeBState':
         """Get or create Mode B state (lazy init to avoid circular import)."""
@@ -617,6 +632,8 @@ class VMState:
 
         # Reset coefficients
         self.coeff_state.fill(0)
+        self.tail_previous_coeffs.fill(0)
+        self.wire_state = WireExecutionState()
 
         # Reset latency tracking
         self.blocks_since_start = 0
@@ -676,24 +693,38 @@ class VMState:
 
     def snapshot(self) -> dict:
         """
-        Create a snapshot of the state for deterministic replay.
+        Create a detached, JSON-compatible v1 checkpoint for deterministic replay.
+
+        Loaded oscillator resources are embedded. This is an off-render-path
+        operation; it does not include host effects or the VoiceEngine clock.
 
         Returns:
-            Dictionary with all state values
+            Dictionary with all VM state values and initialized oscillators
         """
+        from dataclasses import asdict
+        from .snapshot_codec import encode_oscillators
         return {
+            'snapshot_version': 1,
             'voice_id': self.voice_id,
             'phase': self.phase,
             'phase_inc': self.phase_inc,
             'target_phase_inc': self.target_phase_inc,
             'pitch_slew_rate': self.pitch_slew_rate,
+            'last_note': self.last_note,
+            'last_cents': self.last_cents,
+            'osc_mode': self.osc_mode,
+            'oscillators': encode_oscillators(self),
             'harmonic_amps_q15': list(self.harmonic_amps_q15),
             'envelope_phase': int(self.envelope.phase),
             'envelope_sample': self.envelope.phase_sample,
             'envelope_level': self.envelope.level_q15,
+            'envelope_config': {name: getattr(self.envelope, name) for name in
+                                ('attack_samples', 'decay_samples', 'sustain_level_q15', 'release_samples')},
             'dc_block_x1': self.dc_block_x1,
             'dc_block_y1': self.dc_block_y1,
             'coeff_state': self.coeff_state.tolist(),
+            'tail_previous_coeffs': self.tail_previous_coeffs.tolist(),
+            'wire_state': asdict(self.wire_state),
             'prng_state': self.prng_state,
             'tree_a_id': self.tree_a_id,
             'tree_b_id': self.tree_b_id,
@@ -726,11 +757,14 @@ class VMState:
             # CMMM Enrichment: Symbol mode and timbral mode
             'executor_latch_symbol_mode': self.executor_latch.symbol_mode,
             'executor_latch_mode_dwell': self.executor_latch.mode_dwell_blocks,
+            'executor_latch_phrase_pending': self.executor_latch.phrase_quantize_pending,
             'executor_latch_timbral_mode': self.executor_latch.timbral_mode,
             'executor_latch_timbral_target': self.executor_latch.timbral_target,
             'executor_latch_timbral_ramp': self.executor_latch.timbral_ramp_blocks,
             # CMMM Memory (CMMM Enrichment Gap G2)
             'cmmm_memory': self.cmmm_memory.to_dict(),
+            'cmmm_memory_rates': {name: getattr(self.cmmm_memory, name) for name in
+                                  ('TENSION_DECAY', 'FATIGUE_DECAY', 'HARMONIC_DECAY')},
             # Noise exciter filter state (Packet E4) - None when unused
             'noise_state': (self._noise_state.to_dict()
                             if self._noise_state is not None else None),
@@ -739,7 +773,10 @@ class VMState:
     @classmethod
     def restore(cls, snapshot: dict) -> 'VMState':
         """
-        Restore state from a snapshot.
+        Restore a v1 checkpoint, or load an unversioned legacy snapshot.
+
+        Legacy snapshots retain their historical defaults for omitted state;
+        they cannot recover oscillator resources that were never serialized.
 
         Args:
             snapshot: Dictionary from snapshot()
@@ -747,18 +784,39 @@ class VMState:
         Returns:
             Restored VMState
         """
+        version = snapshot.get('snapshot_version', 0)
+        if type(version) is not int or version not in (0, 1):
+            raise ValueError(f'Unsupported VM snapshot version: {version!r}')
         state = cls(voice_id=snapshot['voice_id'])
+        if version == 1:
+            from .snapshot_codec import decode_oscillators
+            state.last_note, state.last_cents = snapshot['last_note'], snapshot['last_cents']
+            state.osc_mode = snapshot['osc_mode']
+            for name, oscillator in decode_oscillators(snapshot['oscillators']).items():
+                setattr(state, name, oscillator)
+            for name in ('attack_samples', 'decay_samples', 'sustain_level_q15', 'release_samples'):
+                setattr(state.envelope, name, snapshot['envelope_config'][name])
+            state.executor_latch.phrase_quantize_pending = snapshot['executor_latch_phrase_pending']
         state.phase = snapshot['phase']
         state.phase_inc = snapshot['phase_inc']
         state.target_phase_inc = snapshot['target_phase_inc']
         state.pitch_slew_rate = snapshot['pitch_slew_rate']
-        state.harmonic_amps_q15 = snapshot['harmonic_amps_q15']
+        state.harmonic_amps_q15 = list(snapshot['harmonic_amps_q15'])
         state.envelope.phase = EnvelopePhase(snapshot['envelope_phase'])
         state.envelope.phase_sample = snapshot['envelope_sample']
         state.envelope.level_q15 = snapshot['envelope_level']
         state.dc_block_x1 = snapshot['dc_block_x1']
         state.dc_block_y1 = snapshot['dc_block_y1']
         state.coeff_state = np.array(snapshot['coeff_state'], dtype=np.int16)
+        # Older snapshots predate the tail history; their last coefficients
+        # are the best available previous output, avoiding an artificial reset.
+        state.tail_previous_coeffs = np.array(
+            snapshot.get('tail_previous_coeffs', snapshot['coeff_state']), dtype=np.int16)
+        if 'wire_state' in snapshot:
+            from ..wire_frame import WireEvent
+            wire_snapshot = dict(snapshot['wire_state'])
+            wire_snapshot['events'] = tuple(WireEvent(**event) for event in wire_snapshot['events'])
+            state.wire_state = WireExecutionState(**wire_snapshot)
         state.prng_state = snapshot['prng_state']
         state.tree_a_id = snapshot['tree_a_id']
         state.tree_b_id = snapshot['tree_b_id']
@@ -787,7 +845,14 @@ class VMState:
         state.use_coeff_osc = snapshot.get('use_coeff_osc', True)
         # Restore FM feedback buffer (Phase 3)
         if 'prev_fm_mod_buffer' in snapshot:
-            state.prev_fm_mod_buffer = np.array(snapshot['prev_fm_mod_buffer'], dtype=np.int16)
+            feedback = snapshot['prev_fm_mod_buffer']
+            if (type(feedback) is not list or len(feedback) not in (4, 8)
+                    or any(type(value) is not int or not Q15_NEG_ONE <= value <= Q15_ONE for value in feedback)):
+                raise ValueError('Invalid FM feedback checkpoint buffer')
+            # Older live feedback replaced the reserved eight-slot buffer
+            # with four lanes. Retain its samples and restore the fixed layout.
+            state.prev_fm_mod_buffer = np.zeros(8, dtype=np.int16)
+            state.prev_fm_mod_buffer[:len(feedback)] = feedback
         # Restore CMMM Executor Latch (WSE-STD-070)
         if 'executor_latch_node_mask' in snapshot:
             state.executor_latch.node_mask_u32 = snapshot['executor_latch_node_mask']
@@ -802,6 +867,9 @@ class VMState:
         # Restore CMMM Memory (CMMM Enrichment Gap G2)
         if 'cmmm_memory' in snapshot:
             state.cmmm_memory = CMMMemory.from_dict(snapshot['cmmm_memory'])
+        if version == 1:
+            for name in ('TENSION_DECAY', 'FATIGUE_DECAY', 'HARMONIC_DECAY'):
+                setattr(state.cmmm_memory, name, snapshot['cmmm_memory_rates'][name])
         # Restore noise exciter filter state (Packet E4)
         if snapshot.get('noise_state') is not None:
             from .noise_exciter import NoiseExciterState

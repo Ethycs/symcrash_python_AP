@@ -1,92 +1,44 @@
 #!/usr/bin/env python3
-"""
-Simple Standalone Synthesis Test - Pre-renders then plays.
-No threading, just renders a note and plays it.
-"""
-
+"""Render example notes through the complete live output path, then play them."""
 import sys
-sys.path.insert(0, str(__file__).rsplit('tools', 1)[0] + 'src')
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'src'))
 
 import numpy as np
-import sounddevice as sd
-from symcrash_python_ap.voice import VoiceEngine, GestureBasis
-from symcrash_python_ap.safety.unified_renderer import UnifiedOutputStage
-from symcrash_python_ap.frames import VoiceFrame
+from symcrash_python_ap.audio.live_renderer import LiveSynthRenderer
+from symcrash_python_ap.primitives import SAMPLE_RATE_HZ, BLOCK_SIZE
 
-SAMPLE_RATE = 44100
-BLOCK_SIZE = 64
-Q15_ONE = 32767
-
-# Use device 4 (Realtek Digital Output - the one that works)
-sd.default.device = 4
-print(f"Using device 4: {sd.query_devices(4)['name']}")
-
-engine = VoiceEngine(max_voices=4)
-stage = UnifiedOutputStage(block_size=BLOCK_SIZE)
 
 def render_note(note: int, duration_sec: float) -> np.ndarray:
-    """Render a note for the given duration."""
-    voice_id = engine.allocate_voice(program_id=1001)
-    gesture = GestureBasis(gate=True, pressure_q15=Q15_ONE // 2)
-    engine.note_on(voice_id, gesture=gesture)
-    stage.voice_on(voice_id, note)
-
-    total_blocks = int(duration_sec * SAMPLE_RATE / BLOCK_SIZE)
-    samples = []
-
-    f0_hz = 440.0 * (2.0 ** ((note - 69) / 12.0))
-
-    for _ in range(total_blocks):
-        voice_frames = engine.step_all()
-        active_frame = None
-        for vf in voice_frames:
-            if vf.is_active:
-                active_frame = vf
-                break
-
-        if active_frame:
-            frame = VoiceFrame(
-                voice_id=active_frame.voice_id,
-                note=note,
-                f0_hz=f0_hz,
-                gain_q15=active_frame.gain_q15,
-                is_active=True,
-            )
-            left, right = stage.render_block(frame)
-            left_float = np.array(left, dtype=np.float32) / Q15_ONE
-            samples.extend(left_float)
-        else:
-            samples.extend([0.0] * BLOCK_SIZE)
-
-    engine.note_off(voice_id)
-    stage.voice_off(voice_id)
-
-    return np.array(samples, dtype=np.float32)
+    """Render a held note plus its release, using the canonical 48 kHz rate."""
+    if not np.isfinite(duration_sec) or duration_sec <= 0:
+        raise ValueError('Duration must be positive and finite')
+    renderer = LiveSynthRenderer()
+    renderer.note_on(note)
+    blocks = [renderer.render_mono_float()
+              for _ in range(max(1, int(duration_sec * SAMPLE_RATE_HZ / BLOCK_SIZE)))]
+    renderer.note_off(note)
+    for _ in range(2 * SAMPLE_RATE_HZ // BLOCK_SIZE):
+        block = renderer.render_mono_float()
+        blocks.append(block)
+        if not renderer.engine.active_voices() and not np.any(block):
+            break
+    return np.concatenate(blocks)
 
 
-print("Rendering note 60 (Middle C) for 2 seconds...")
-audio = render_note(60, 2.0)
-print(f"Rendered {len(audio)} samples, range: {audio.min():.3f} to {audio.max():.3f}")
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--duration', type=float, default=2.0)
+    args = parser.parse_args()
+    import sounddevice as sd
+    for note in (60,72,48):
+        print(f'Rendering note {note}...')
+        audio = render_note(note, args.duration)
+        sd.play(audio, SAMPLE_RATE_HZ)
+        sd.wait()
 
-print("Playing...")
-sd.play(audio, SAMPLE_RATE)
-sd.wait()
-print("Done!")
 
-print("\nRendering note 72 (C5) for 2 seconds...")
-audio = render_note(72, 2.0)
-print(f"Rendered {len(audio)} samples")
-
-print("Playing...")
-sd.play(audio, SAMPLE_RATE)
-sd.wait()
-print("Done!")
-
-print("\nRendering note 48 (C3) for 2 seconds...")
-audio = render_note(48, 2.0)
-print(f"Rendered {len(audio)} samples")
-
-print("Playing...")
-sd.play(audio, SAMPLE_RATE)
-sd.wait()
-print("Done!")
+if __name__ == '__main__':
+    main()

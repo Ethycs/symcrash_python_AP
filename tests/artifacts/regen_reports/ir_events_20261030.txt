@@ -1,0 +1,47 @@
+Authored InstrumentIR event execution audit - 2026-10-30
+
+Fixture: dx_marimba with authored attack impulse, periodic stable noise and release Material hit.
+24 real VM blocks; note-off before block 16; each return copied before scratch reuse.
+Baseline: identical native frames with only event_commands removed (previous dropped-event behavior).
+Capsule route includes binary capsule encode/decode, not an in-memory shortcut.
+This audits voice command execution; final Material output is covered by the integration tests.
+No existing audio golden regenerated.
+
+direct / reference
+  changed samples: 332 / 1536
+  active command blocks: [0, 3, 6, 9, 12, 15, 16]
+  post-mix consumer deliveries: [(16, 5)]
+  authored audio SHA-256: a434c5239ecf61938e1c0c04446b9c8521175a9331725c8ff60b444e736b6d3b
+  dropped-event audio SHA-256: 0df779957e82c226e0c7df5852574e8641534c00f1708abee74239ad6994c480
+  command stream SHA-256: 356192806b057228eadc99f215d5b853e5dfff25cff4eff7e436eabe5e99c178
+
+capsule / reference
+  changed samples: 332 / 1536
+  active command blocks: [0, 3, 6, 9, 12, 15, 16]
+  post-mix consumer deliveries: [(16, 5)]
+  authored audio SHA-256: a434c5239ecf61938e1c0c04446b9c8521175a9331725c8ff60b444e736b6d3b
+  dropped-event audio SHA-256: 0df779957e82c226e0c7df5852574e8641534c00f1708abee74239ad6994c480
+  command stream SHA-256: 356192806b057228eadc99f215d5b853e5dfff25cff4eff7e436eabe5e99c178
+
+direct / JIT
+  changed samples: 332 / 1536
+  active command blocks: [0, 3, 6, 9, 12, 15, 16]
+  post-mix consumer deliveries: [(16, 5)]
+  authored audio SHA-256: a434c5239ecf61938e1c0c04446b9c8521175a9331725c8ff60b444e736b6d3b
+  dropped-event audio SHA-256: 0df779957e82c226e0c7df5852574e8641534c00f1708abee74239ad6994c480
+  command stream SHA-256: 356192806b057228eadc99f215d5b853e5dfff25cff4eff7e436eabe5e99c178
+
+capsule / JIT
+  changed samples: 332 / 1536
+  active command blocks: [0, 3, 6, 9, 12, 15, 16]
+  post-mix consumer deliveries: [(16, 5)]
+  authored audio SHA-256: a434c5239ecf61938e1c0c04446b9c8521175a9331725c8ff60b444e736b6d3b
+  dropped-event audio SHA-256: 0df779957e82c226e0c7df5852574e8641534c00f1708abee74239ad6994c480
+  command stream SHA-256: 356192806b057228eadc99f215d5b853e5dfff25cff4eff7e436eabe5e99c178
+
+Direct/capsule and reference/JIT: exact audio and command-stream agreement.
+
+Validation: 109 new event-compiler tests; final focused selection 409 passed in 18.90 seconds.
+Full suite: 4286 passed, 16 skipped, 102 warnings in 207.16 seconds.
+Two final gate-alias regressions and their correction followed that full run;
+both are included in the final 409 passing focused checks.

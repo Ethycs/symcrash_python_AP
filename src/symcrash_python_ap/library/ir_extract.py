@@ -14,7 +14,7 @@ Dependency-light on purpose: imports only instrument_ir helpers and
 primitives (no library/ internals) to stay cycle-free.
 """
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, fields
 from typing import Dict, List, Optional
 
 from ..primitives import Q15_ONE, Q15_HALF
@@ -113,6 +113,23 @@ def extract_pwm_width_q15(ir) -> Optional[int]:
     return None
 
 
+def extract_fx_sends_q15(ir) -> Optional[tuple[int, int]]:
+    """First FXSend node, using the Python profile's unsigned Q15 levels.
+
+    Like the other Simple-mode extractors, this does not execute arbitrary
+    L0 graph topology. Levels are finite fractions in [0, 1], rounded to even.
+    """
+    import math
+    for node in ir.layers.L0_graph.nodes:
+        if node.type == 'FXSend':
+            levels = (node.params.send_a, node.params.send_b)
+            if any(not isinstance(x, (int, float)) or isinstance(x, bool)
+                   or not math.isfinite(x) or not 0 <= x <= 1 for x in levels):
+                raise ValueError('FXSend levels must be finite numbers in [0, 1]')
+            return tuple(round(x * Q15_ONE) for x in levels)
+    return None
+
+
 def extract_harmonics_q15(ir) -> Optional[List[int]]:
     """
     Q15 harmonic profile for the Mode B harmonic bank, or None.
@@ -140,7 +157,13 @@ def extract_harmonics_q15(ir) -> Optional[List[int]]:
 def lfo_to_dict(lfo) -> Dict:
     """Serialize an LFOState modulator to a JSON-friendly dict."""
     from ..primitives import SAMPLE_RATE_HZ
+    raw = asdict(lfo)
+    if set(vars(lfo)) != set(raw):
+        raise ValueError('Undeclared LFO attributes cannot be serialized')
+    _lfo_from_raw(raw)
     return {
+        'raw_state_version': 1,
+        'raw_state': raw,
         'id': lfo.id,
         'waveform': int(lfo.waveform),
         'sync_mode': int(lfo.sync_mode),
@@ -158,6 +181,10 @@ def lfo_to_dict(lfo) -> Dict:
 
 def lfo_from_dict(d: Dict):
     """Rebuild an LFOState modulator from lfo_to_dict output."""
+    if 'raw_state' in d or 'raw_state_version' in d:
+        if type(d.get('raw_state_version')) is not int or d.get('raw_state_version') != 1:
+            raise ValueError('Unsupported LFO raw-state version')
+        return _lfo_from_raw(d.get('raw_state'))
     from ..vm.harmonic_bank import (
         LFOState, LFORouting, LFOWaveform, LFOSyncMode, LFOTarget,
     )
@@ -185,6 +212,42 @@ def lfo_from_dict(d: Dict):
         arc_slot=lfo.arc_slot,
     )
     return lfo
+
+
+def _lfo_from_raw(raw):
+    """Restore all declared LFO fields, including disabled and authored phase state."""
+    import math
+    from ..vm.harmonic_bank import LFOState, LFORouting, LFOWaveform, LFOSyncMode, LFOTarget
+    if type(raw) is not dict or set(raw) != {item.name for item in fields(LFOState)}:
+        raise ValueError('Incomplete or unknown LFO raw-state fields')
+    defaults = LFOState()
+    data = dict(raw)
+    for name, value in data.items():
+        if name in ('waveform', 'sync_mode', 'routings'):
+            continue
+        default = getattr(defaults, name)
+        if type(default) is float:
+            valid = type(value) in (int, float) and math.isfinite(value)
+        else:
+            valid = type(value) is type(default)
+        if not valid:
+            raise ValueError(f'Invalid LFO raw-state type: {name}')
+    if type(data['routings']) is not list:
+        raise ValueError('Invalid LFO routing list')
+    routes = []
+    for route in data['routings']:
+        if (type(route) is not dict or set(route) != {'target', 'amount_q15'}
+                or type(route['amount_q15']) is not int or type(route['target']) not in (int, LFOTarget)):
+            raise ValueError('Invalid LFO routing record')
+        routes.append(LFORouting(LFOTarget(route['target']), route['amount_q15']))
+    if type(data['waveform']) not in (int, LFOWaveform) or type(data['sync_mode']) not in (int, LFOSyncMode):
+        raise ValueError('Invalid LFO mode')
+    data.update(waveform=LFOWaveform(data['waveform']), sync_mode=LFOSyncMode(data['sync_mode']), routings=routes)
+    if (not 0 <= data['phase'] <= 0xffffffff or not 0 <= data['phase_inc'] <= 0xffffffff
+            or min(data['delay_samples'], data['ramp_samples'], data['elapsed_samples']) < 0
+            or not 0 <= data['current_depth_scale'] <= Q15_ONE or not 0 <= data['arc_slot'] < 8):
+        raise ValueError('Invalid LFO phase, clock or arc slot')
+    return LFOState(**data)
 
 
 __all__ = [

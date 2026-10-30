@@ -1,38 +1,15 @@
-"""
-UnifiedOutputStage - The Closure Layer for Click-Free Audio
-============================================================
+"""VM voice rendering followed by the shared stereo or mono output stage.
 
-WSE-STD-0xx: Render Hygiene & Transitions
-
-This module is the SINGLE AUTHORITY for ensuring no discontinuities reach
-the audio output. It implements the v2 Carrier + Lift architecture:
-
-    Carrier (Baby Fourier) -> AntiClick -> Safety -> Output
-           |-> IDWPT Lift -|
-
-Key Responsibilities:
-1. **note-off / steal never pops** - AntiClickOperator handles all transitions
-2. **wet appears exactly after L blocks and fades in smoothly** - FIFO + beta ramp
-3. **param jumps are mediated** - no zipper noise from abrupt changes
-
-Architecture:
-- Carrier (Baby Fourier) owns pitch + phase continuity (immediate response)
-- IDWPT becomes a "lift" that shapes timbre (5-block latency)
-- AntiClickOperator is the single source of truth for click prevention:
-  * Latency alignment (5-block FIFO for wet/carrier sync)
-  * Carrier/wet mixing (equal-power crossfade with beta ramp)
-  * OLA seam smoothing
-
-The old dual-render crossfade approach (UnifiedRenderer) is deprecated.
-In v2 architecture, the carrier is always continuous, and wet blooms in
-gradually - no need for dual-render.
+Each output block renders all supplied voices, then runs pan/mix, Material,
+auxiliary returns, master gain and Safety once, including during silence.
+The default output profile matches SynthMaster's CCS settings. Legacy carrier,
+wavelet and AntiClick objects remain available for compatibility; the VM owns
+actual voice synthesis and StereoOutputMixin owns final output processing.
 """
 
-from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Any, Tuple
-import numpy as np
+from typing import List, Dict, Tuple
 
-from ..primitives import Q15_ONE, Q15_HALF, Q15_SCALE, BLOCK_SIZE
+from ..primitives import Q15_ONE, Q15_HALF, BLOCK_SIZE
 
 
 # =============================================================================
@@ -47,45 +24,30 @@ from ..wavelet.backends import (
 )
 from ..primitives import Q15_3_4
 
-# Use sine_core for bit-exact trig (no math.sin/cos in hot paths)
-from ..wavelet.sine_core import sine_q15, cosine_q15, PHASE_MASK
-
-# Fixed-point math for Q15 multiplication without float truncation
-from ..fixed import mul_q15_sat
-
 # VM Executor (WSE-STD-VM-HYBRID v0)
-from ..vm import vm_step_block, VMState, DecodedPlan, Tables
+from ..vm import vm_step_block, VMState, Tables
+from ..vm.scheduling import ExecutionReport
+from .output_stage import StereoOutputMixin
 
 
 # =============================================================================
-# UNIFIED OUTPUT STAGE (v2 Architecture)
+# UNIFIED OUTPUT STAGE
 # =============================================================================
 # (The deprecated RenderFrame dataclass and UnifiedRenderer stub were
 # removed 2026-07-02; frames.VoiceFrame and UnifiedOutputStage are the
 # single owners.)
 
-class UnifiedOutputStage:
+class UnifiedOutputStage(StereoOutputMixin):
     """
-    Unified Output Stage - The Closure Layer for Click-Free Audio.
+    Render complete output blocks using the same output DSP as SynthMaster.
 
-    This implements the v2 architecture where:
-    - Carrier (Baby Fourier) owns pitch + phase continuity
-    - IDWPT becomes a "lift" that shapes timbre, not an oscillator
-    - Beta (β) is an audio-domain dry/wet blend with latency handling
+    Use render_frames for polyphony and render_mono_frames for a mono device.
+    Native lifecycle flags and accepted wire packets own VM note resets.
+    Explicit voice_on/voice_off methods retain the legacy allocation API;
+    native emitters provide their own envelope gain and release frames.
 
-    The carrier provides immediate pitch response while the wavelet
-    "blooms in" over ~5 blocks of latency for rich timbral shaping.
-
-    Key invariants:
-    1. Pitch identity lives in carrier - wavelet never determines pitch
-    2. Master leaf space fixed - D=6, 64 leaves, forever
-    3. Trees = slow global tunings (1-5s morph), not per-voice swaps
-    4. All discrete changes -> continuous morph (slew/crossfade everything)
-
-    AntiClickOperator is the single source of truth for click prevention:
-    - Aligns latency (5-block FIFO for wet/carrier sync)
-    - Mixes carrier/wet with equal-power crossfade
-    - Applies optional OLA seam smoothing
+    render_voice is a raw mono VM diagnostic/composition API. It does not
+    process the final output or advance the shared output/tuning clock.
 
     Usage:
         stage = UnifiedOutputStage()
@@ -99,7 +61,6 @@ class UnifiedOutputStage:
     """
 
     def __init__(self, block_size: int = BLOCK_SIZE):
-        from .safety_engine import SafetyEngine
         from ..frames import ParamFrame, VoiceFrame
         from ..wavelet.carrier import CarrierOscillator
         from ..wavelet.carrier_lift import (
@@ -117,15 +78,18 @@ class UnifiedOutputStage:
         # Core components
         self.carrier = CarrierOscillator()
         self.leaf_gen = LeafGenerator()
+        from ..vm.resources import prepare_oscillator_resources
+        prepare_oscillator_resources()
         self.tuning = TuningMorpher()
-        self.safety = SafetyEngine(block_size=block_size)
+        self._init_output_stage(block_size)
         self.params = ParamFrame()
         self.block_size = block_size
+        self.last_execution_reports = {}
 
         # Wavelet backend for IDWPT lift
         self.wavelet_backend = WaveletBackend(block_size=block_size)
 
-        # AntiClick operator (single source of truth for click prevention)
+        # Retained for legacy callers; the VM and shared Safety process audio.
         self.anticlick = AntiClickOperator(AntiClickConfig(
             block_size=block_size,
             sample_rate=48000,
@@ -218,7 +182,10 @@ class UnifiedOutputStage:
 
     def render_voice(self, frame: 'VoiceFrame') -> List[int]:
         """
-        Render one block for a voice using Carrier + Lift architecture.
+        Render raw mono VM audio for analysis/composition, without output DSP.
+
+        Device playback must use render_frames/render_block/render_mono_frames.
+        This method does not advance the shared output/tuning clock.
 
         Args:
             frame: VoiceFrame containing all voice parameters
@@ -227,6 +194,10 @@ class UnifiedOutputStage:
             List of Q15 audio samples
         """
         voice_id = frame.voice_id
+        report = ExecutionReport()
+        self.last_execution_reports[voice_id] = report
+        if frame.wire_data is not None and frame.wire_data.reject_code:
+            return [0] * self.block_size
 
         # Ensure voice is allocated
         if voice_id not in self.voice_states:
@@ -243,14 +214,13 @@ class UnifiedOutputStage:
 
         # Execute one block through VM
         vm_state = self.vm_states[voice_id]
-        vm_state, output_block = vm_step_block(vm_state, frame, self.vm_tables)
+        if frame.is_starting and frame.wire_data is None:
+            vm_state.reset_for_note_on(note=frame.note, cents=frame.cents)
+        vm_state, output_block = vm_step_block(vm_state, frame, self.vm_tables, report=report)
         self.vm_states[voice_id] = vm_state
 
         # VM output is int16 numpy array, convert to list
         output = output_block.tolist()
-
-        # Advance tuning morph (still needed for global state)
-        self.tuning.advance_block()
 
         # Mark first block done
         state = self.voice_states[voice_id]
@@ -259,52 +229,43 @@ class UnifiedOutputStage:
 
         return output
 
-    def render_block(self, frame: 'VoiceFrame') -> Tuple[List[int], List[int]]:
+    def render_frames(self, frames, params=None, *, mono=False):
+        """Render all supplied voices and process their mix once per block.
+
+        An empty collection still advances output effects and Safety. Rejected
+        or stale packets cannot enter the mix or replay global consumer events.
         """
-        Render one block through the full pipeline with safety.
+        frames = list(frames)
+        if any(not isinstance(frame, self.VoiceFrame) for frame in frames):
+            raise TypeError('Rendering requires VoiceFrame instances')
+        ids = [frame.voice_id for frame in frames]
+        if (any(isinstance(vid, bool) or not isinstance(vid, int) or vid < 0 for vid in ids)
+                or len(set(ids)) != len(ids)):
+            raise ValueError('Frames must address unique nonnegative voice IDs')
+        params = self.params if params is None else params
+        from ..frames import ParamFrame
+        if not isinstance(params, ParamFrame):
+            raise TypeError('Output parameters must be a ParamFrame')
+        self.last_execution_reports = {}
+        rendered, events = [], []
+        for frame in sorted(frames, key=lambda f: f.voice_id):
+            samples = self.render_voice(frame)
+            report = self.last_execution_reports[frame.voice_id]
+            if not report.serviced:
+                continue
+            rendered.append((frame, samples))
+            events.extend((frame.voice_id, event) for event in report.consumer_events)
+        output = self._mix_output(rendered, params, events, mono=mono)
+        self.tuning.advance_block()
+        return output
 
-        Args:
-            frame: VoiceFrame containing all parameters
+    def render_block(self, frame: 'VoiceFrame', params=None) -> Tuple[List[int], List[int]]:
+        """Single-voice compatibility wrapper around the complete stereo output."""
+        return self.render_frames([frame], params)
 
-        Returns:
-            (L, R) stereo sample lists
-        """
-        samples = self.render_voice(frame)
-
-        # Convert to stereo using sine_core for bit-exact pan law
-        # pan_q15 range: -32768 (full left) to +32767 (full right)
-        # Map to phase [0, pi/2] for equal-power panning
-        # All integer math to avoid floating-point jitter
-        pan_q15 = frame.pan_q15
-        # Map pan_q15 from [-32768, 32767] to [0, 65535] (Q16 unsigned)
-        pan_u16 = pan_q15 + Q15_SCALE
-        # Scale to phase [0, 0x40000000]: phase = pan_u16 * 0x40000000 / 65536
-        # = (pan_u16 << 14) since 0x40000000 / 65536 = 0x4000 = 16384 = 2^14
-        pan_phase = (pan_u16 << 14) & PHASE_MASK
-        # left = cos(phase), right = sin(phase) for equal-power pan
-        left_q15 = cosine_q15(pan_phase)
-        right_q15 = sine_q15(pan_phase)
-
-        # Apply pan gains in Q15 (no float truncation)
-        L = [mul_q15_sat(s, left_q15) for s in samples]
-        R = [mul_q15_sat(s, right_q15) for s in samples]
-
-        # Apply SafetyEngine processing
-        # NOTE: OLA is now applied in lane_idwpt_render to the wet path ONLY.
-        # The carrier is phase-continuous and applying OLA to it corrupts the signal.
-        # Master OLA is disabled here since wet path OLA is handled at the correct layer.
-        #
-        # DC removal is DISABLED for VM/CCS path:
-        # - CCS path produces phase-continuous sine waves with zero inherent DC
-        # - Block-based "DC offset" is just incomplete cycles, not true DC
-        # - Removing it causes block boundary discontinuities
-        L, R = self.safety.step_block(
-            L, R, self.params,
-            apply_master_ola=False,  # OLA handled in VM lane_idwpt_render
-            apply_dc_removal=False   # CCS path is phase-continuous with zero DC
-        )
-
-        return L, R
+    def render_mono_frames(self, frames, params=None):
+        """Render a mono device block; downmix before the final Safety stage."""
+        return self.render_frames(frames, params, mono=True)[0]
 
     def render_block_simple(
         self,

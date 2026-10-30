@@ -13,8 +13,8 @@ from .state import (
     VMState, OSC_MODE_A, OSC_MODE_B, OSC_MODE_SAMPLE, OSC_MODE_FM6, OSC_MODE_WAVETABLE,
     OSC_MODE_GRANULAR, PAYLOAD_TYPE_NODEMASK_SET, PAYLOAD_TYPE_TAILMODE_SET,
 )
-from ..primitives import Q16_ONE
-from .decode import DecodedPlan, decode_frame, FM_SOURCE_FEEDBACK
+from ..primitives import Q16_ONE, TailMode
+from .decode import DecodedPlan, decode_frame, FM_SOURCE_FEEDBACK, FM_SOURCE_LFO
 from .tables import Tables, DEFAULT_TABLES, BLOCK_SAMPLES, VM_K
 from .lanes import (
     lane_inject,
@@ -28,6 +28,8 @@ from ..primitives import Q15_ONE, Q15_HALF, Q15_NEG_ONE, DRONE_MODE_CARRIER_MIX
 
 # JIT hot-path kernels (bit-exact, switchable; see vm/hotpath_jit.py)
 from . import hotpath_jit as _hot
+from .wire_events import begin_wire_block, apply_wire_controls, apply_wire_injections
+from .scheduling import ExecutionPolicy, ExecutionReport, prepare_execution
 
 if TYPE_CHECKING:
     from ..frames import VoiceFrame
@@ -159,30 +161,9 @@ def _mix_noise_exciter(state: VMState, cfg: DecodedPlan,
 # =============================================================================
 
 def _setup_mode_b_harmonic_weights(mb_state, params) -> None:
-    """
-    Set up Mode B harmonic weights based on params.
-
-    Priority order: OEIS sequence > custom_harmonics > waveform_type
-
-    Args:
-        mb_state: ModeBState instance
-        params: Oscillator params with weight configuration
-    """
-    oeis_id = getattr(params, 'oeis_sequence_id', -1)
-    if oeis_id >= 0:
-        rolloff = getattr(params, 'oeis_rolloff_db', -3.0)
-        mb_state.weights.set_oeis(oeis_id, mb_state.H_active, rolloff)
-    elif params.custom_harmonics:
-        spread = getattr(params, 'phase_spread_q15', 0)
-        mb_state.weights.set_custom(params.custom_harmonics, spread)
-        mb_state.H_active = min(len(params.custom_harmonics), mb_state.H_bandlimit)
-        # Latch for per-block spectral motion detection
-        mb_state.last_custom_harmonics = (list(params.custom_harmonics), spread)
-    else:
-        waveform_type = getattr(params, 'waveform_type', 0)
-        mb_state.weights.set_from_waveform_type(
-            waveform_type, mb_state.H_active, params.pwm_width_q15
-        )
+    """Refresh the complete spectrum while retaining oscillator phase."""
+    from .carrier_spectrum import apply_spectrum
+    apply_spectrum(mb_state, params)
 
 
 # =============================================================================
@@ -321,8 +302,12 @@ def _run_coeff_tail(
     extract_fm_mod: capture the modulator signal after operators for the
         next block's z^-1 FM feedback (WSE-STD-210 section 8.3).
     """
+    backbone_instrs = prepare_execution(cfg, backbone_instrs)
+
     # Step 1: LANE_INJECT (events modify seeded coeff_state)
     lane_inject(state, cfg)
+    if cfg.wire_version:
+        apply_wire_injections(state, cfg, before_backbone=True)
 
     evolution_rate = Q15_ONE
     if evolution:
@@ -332,7 +317,7 @@ def _run_coeff_tail(
 
     # Steps 2-5: Backbone lanes (mask-aware dispatch, WSE-STD-070)
     for instr in backbone_instrs:
-        dispatch_coeff_op_crossfade(state, instr)
+        dispatch_coeff_op_crossfade(state, instr, cfg.mask_u32)
 
     # CMMM evolution-rate scaling (Gap G1): EVOLVE=100%, HOLD~3%, FREEZE=0%
     if evolution and evolution_rate < Q15_ONE:
@@ -350,12 +335,18 @@ def _run_coeff_tail(
                     old_val + scaled_delta, Q15_NEG_ONE, Q15_ONE
                 )
 
+    if cfg.wire_version:
+        apply_wire_injections(state, cfg, before_backbone=False)
     # FM modulator extraction for NEXT block's z^-1 feedback loop
     if extract_fm_mod:
         from .harmonic_bank import extract_modulator_signal
-        state.prev_fm_mod_buffer = extract_modulator_signal(
+        modulation = extract_modulator_signal(
             state.coeff_state, method=0
         )
+        # The persisted VM owner reserves eight samples; the current Mode B
+        # kernel uses four lanes. Preserve that layout and zero unused slots.
+        state.prev_fm_mod_buffer = np.zeros(8, dtype=np.int16)
+        state.prev_fm_mod_buffer[:len(modulation)] = modulation
 
     # Step 6: LANE_TAIL (safety constraints)
     lane_tail(state, cfg)
@@ -384,6 +375,9 @@ def vm_step_block(
     state: VMState,
     frame: 'VoiceFrame',
     tables: Tables = DEFAULT_TABLES,
+    *,
+    policy: Optional[ExecutionPolicy] = None,
+    report: Optional[ExecutionReport] = None,
 ) -> Tuple[VMState, np.ndarray]:
     """
     Execute one block for one voice.
@@ -404,6 +398,49 @@ def vm_step_block(
     # -------------------------------------------------------------------------
     # Step 0: Process CMMM events (before decode)
     # -------------------------------------------------------------------------
+    if report is not None:
+        report.reset()
+    wire = getattr(frame, 'wire_data', None)
+    if wire is not None and wire.reject_code:
+        return state, np.zeros(BLOCK_SAMPLES, dtype=np.int16)
+    if policy is not None and not policy.serviced:
+        # Scheduler Spec §3: synthesis continues from the last legal vector.
+        # Do not decode new commands or advance any VM/oscillator/RNG state.
+        output = lane_ccs_render(state, DecodedPlan()).copy()
+        gain = state.gain_prev_q15
+        if gain != Q15_ONE:
+            _apply_block_gain(output, gain, gain)
+        return state, output
+    # Reject malformed native spectral commands before musical memory/latches
+    # advance. Held voices deliberately do not inspect newly submitted frames.
+    from ..primitives import _pitch_cent_index
+    pitch_cents = getattr(frame, 'cents', 0)
+    if wire is not None and wire.carrier is not None:
+        pitch_cents += wire.carrier.detune_cents + wire.carrier.pitchbend_cents
+    _pitch_cent_index(getattr(frame, 'note', 60), pitch_cents)
+    from .spectral_modulation import validate_harmonic_gains
+    from ..primitives import Q15_SCALE
+    gains = getattr(frame, 'harmonic_gains_q15', None)
+    validate_harmonic_gains(gains, getattr(frame, 'harmonic_gain_bound_q15', Q15_SCALE))
+    if gains is not None and getattr(frame, 'coeff_osc_mode', 0) != OSC_MODE_B:
+        raise ValueError('Native harmonic modulation requires Mode B')
+    if getattr(frame, 'coeff_osc_mode', 0) == OSC_MODE_B:
+        from .carrier_spectrum import validate_spectrum
+        validate_spectrum(frame)
+    wire_carrier = wire.carrier if wire is not None else None
+    if wire_carrier is None and (getattr(frame, 'coeff_osc_mode', 0) or 0) == OSC_MODE_A:
+        from .mode_a_resource import prepared_mode_a_atlas, note_address
+        table_id = getattr(frame, 'coeff_table_id', 0)
+        note_address(0 if table_id is None else table_id, getattr(frame, 'note', 60))
+        prepared_mode_a_atlas()
+    if (getattr(frame, 'coeff_osc_mode', 0) == OSC_MODE_B or
+            wire_carrier is not None and wire_carrier.role != 0 and wire_carrier.model < 5):
+        # Resource failure must precede latch, PRNG, phase and envelope changes.
+        # This is a read-only availability check, never resource preparation.
+        from .basis_resource import prepared_basis_atlas
+        prepared_basis_atlas()
+    if not begin_wire_block(state, frame):
+        return state, np.zeros(BLOCK_SAMPLES, dtype=np.int16)
     _process_cmmm_events(state, frame)
 
     # -------------------------------------------------------------------------
@@ -415,6 +452,24 @@ def vm_step_block(
         prev_eta_q15=state.eta_prev_q15,
         prev_gain_q15=state.gain_prev_q15,
     )
+    cfg.execution_policy = policy
+    cfg.execution_report = report
+
+    # The node-mask latch applies to injections as well as backbone operators.
+    # Explicit legacy mask/pattern fields still override the decoder default.
+    if getattr(frame, 'node_mask', None) is None and getattr(frame, 'pattern_id', None) is None:
+        cfg.mask_u32 = state.executor_latch.node_mask_u32
+        cfg.K = state.executor_latch.get_effective_k()
+
+    if getattr(frame, 'tail_mode', None) is None:
+        cfg.tail_mode = TailMode(state.executor_latch.tail_mode)
+        cfg.tail_ops = tables.get_tail_ops(cfg.tail_mode)
+    cfg.traction_q15 = state.executor_latch.traction_q15
+    if cfg.wire_version:
+        apply_wire_controls(state, cfg)
+    if report is not None:
+        report.serviced = True
+        report.consumer_events = tuple(e for e in cfg.wire_events if e.lane in (3, 5, 6))
 
     # Track blocks since start (for latency model)
     state.blocks_since_start += 1
@@ -449,14 +504,40 @@ def vm_step_block(
     # Get oscillator params
     params = cfg.coeff_osc_params
     osc_mode = params.osc_mode
+    start_phase = params.osc_start_phase_q32 if getattr(frame, 'is_starting', False) else None
+
+    wire = getattr(frame, 'wire_data', None)
+    carrier = wire.carrier if wire is not None else None
+    if carrier is not None:
+        previous_role = state.wire_state.carrier_role
+        state.wire_state.carrier_role = carrier.role
+        if carrier.role == 0 or carrier.model == 5:
+            if carrier.role == 0:
+                if previous_role != 0:
+                    state.coeff_state.fill(0)
+                if frame.coeff_q15:
+                    if len(frame.coeff_q15) != COEFF_LEN:
+                        raise ValueError(f"Wire carrier OFF requires {COEFF_LEN} authored coefficients")
+                    state.coeff_state[:] = np.clip(frame.coeff_q15, Q15_NEG_ONE, Q15_ONE)
+            else:
+                from .state import prng_step
+                from ..primitives import Q15_SCALE
+                for index in range(COEFF_LEN):
+                    sample = (prng_step(state) & 0xFFFF) - Q15_SCALE
+                    # Broadband coefficients sum during synthesis: reserve
+                    # reconstruction headroom instead of clipping white noise.
+                    state.coeff_state[index] = RSHIFT_RNE(sample * (Q15_SCALE // 32), 15)
+            output = _run_coeff_tail(state, cfg, cfg.backbone_instrs)
+            return state, output
 
     # Update state if pitch changed
     pitch_changed = state.last_note != params.note or state.last_cents != params.cents
     if pitch_changed:
         state.ccs_state.note = params.note
-        state.ccs_state.wave_id = params.table_id
         state.last_note = params.note
         state.last_cents = params.cents
+    # Table identity is independent of pitch, including same-note preset changes.
+    state.ccs_state.wave_id = params.table_id
 
     # Update Mode B state if using rotator (always check for first-time init)
     if osc_mode == OSC_MODE_B:
@@ -467,11 +548,6 @@ def vm_step_block(
         if first_time_init:
             # First-time initialization: always do full reset
             mb_state.reset(note=params.note, phase_inc=params.phase_inc)
-            mb_state.pwm_width_q15 = params.pwm_width_q15
-            mb_state.pwm_enabled = params.pwm_enabled
-            mb_state.H_active = min(params.H_request, mb_state.H_bandlimit)
-            # Set harmonic weights using helper
-            _setup_mode_b_harmonic_weights(mb_state, params)
         elif pitch_changed or mb_state.note != params.note:
             # Pitch changed: use legato_mode to decide how to handle.
             # A cents-only change (same note) is vibrato or pitch bend, not a
@@ -482,31 +558,28 @@ def vm_step_block(
             if params.legato_mode or cents_only:
                 # Legato: preserve phase for smooth transition
                 mb_state.set_pitch_legato(note=params.note, phase_inc=params.phase_inc)
-                mb_state.H_active = min(params.H_request, mb_state.H_bandlimit)
             else:
                 # Non-legato: full reset (may cause click, but musically intentional)
                 mb_state.reset(note=params.note, phase_inc=params.phase_inc)
-                mb_state.pwm_width_q15 = params.pwm_width_q15
-                mb_state.pwm_enabled = params.pwm_enabled
-                mb_state.H_active = min(params.H_request, mb_state.H_bandlimit)
-                # Set harmonic weights using helper
-                _setup_mode_b_harmonic_weights(mb_state, params)
 
-        # Per-block spectral motion: re-latch custom harmonics when the
-        # frame's partials (or phase spread) change mid-note. Weights-only —
-        # the phase accumulator is untouched, so this is phase-continuous.
-        if params.custom_harmonics:
-            spread = getattr(params, 'phase_spread_q15', 0)
-            latch = (params.custom_harmonics, spread)
-            prev = getattr(mb_state, 'last_custom_harmonics', None)
-            if prev is None or list(prev[0]) != list(latch[0]) or prev[1] != latch[1]:
-                mb_state.weights.set_custom(params.custom_harmonics, spread)
-                mb_state.H_active = min(len(params.custom_harmonics), mb_state.H_bandlimit)
-                mb_state.last_custom_harmonics = (list(params.custom_harmonics), spread)
+        # All selectors, removals, widths, limits and cents changes resolve
+        # together. The derived immutable cache is independent of voice time.
+        _setup_mode_b_harmonic_weights(mb_state, params)
+        mb_state.cents = params.cents
+        if carrier is not None:
+            state.wire_state.carrier_model = carrier.model
+            state.wire_state.pulse_width_q15 = carrier.pulse_width_q15
 
-        # Update FM depth from VoiceFrame (modulator signal comes from fm_mod_buffer)
-        # Phase 3 FM/PM will provide the modulator via operator graph
-        mb_state.fm_depth_q15 = params.fm_depth_q15
+        # Source OFF is an actual bypass, including oscillator path selection.
+        has_modulator = (params.fm_source == FM_SOURCE_FEEDBACK or
+                         (params.fm_source == FM_SOURCE_LFO and params.fm_modulator_q15 is not None))
+        mb_state.fm_depth_q15 = params.fm_depth_q15 if has_modulator else 0
+        mb_state.fm_mod_buffer = None
+        if mb_state.fm_depth_q15:
+            if params.fm_source == FM_SOURCE_FEEDBACK:
+                mb_state.fm_mod_buffer = state.prev_fm_mod_buffer
+            elif params.fm_source == FM_SOURCE_LFO and params.fm_modulator_q15 is not None:
+                mb_state.fm_mod_buffer = np.array(params.fm_modulator_q15, dtype=np.int16)
 
     if state.ccs_state.phase_inc != params.phase_inc:
         state.ccs_state.set_pitch(params.phase_inc, slew_blocks=8)
@@ -521,51 +594,20 @@ def vm_step_block(
         # MODE B: Coefficient synthesis
         # -----------------------------------------------------------------
         from .harmonic_bank import (
-            mode_b_generate_coeffs, mode_b_generate_coeffs_vectorized,
-            mode_b_generate_coeffs_matrix, get_basis_for_note
+            mode_b_generate_coeffs_vectorized, get_basis_for_pitch
         )
-        from .waveform_matrix import WaveformType
+        if start_phase is not None:
+            state.mode_b_state.phase = start_phase
 
-        # Determine which synthesis method to use:
-        # - Matrix method: PL waveforms (SQUARE, SAW, TRIANGLE) without FM/PWM
-        # - Harmonic bank: SINE, custom/OEIS harmonics, PWM/FM-modulated signals
-        #
-        # The matrix LUT is keyed only by waveform_type and never reads
-        # mb_state.weights, so custom harmonics and OEIS selections must
-        # force the harmonic-bank path or they are silently ignored.
-        waveform_type = getattr(params, 'waveform_type', WaveformType.SINE)
-        use_matrix_method = (
-            waveform_type in (WaveformType.SQUARE, WaveformType.SAW,
-                              WaveformType.SAW_DOWN, WaveformType.TRIANGLE)
-            and not params.pwm_enabled
-            and params.fm_depth_q15 == 0
-            and not params.custom_harmonics
-            and getattr(params, 'oeis_sequence_id', -1) < 0
-        )
-
-        if use_matrix_method:
-            # Matrix method: precomputed coefficient LUT (no runtime FWPT)
-            mode_b_generate_coeffs_matrix(
-                state.mode_b_state, waveform_type, carrier_512
-            )
-        else:
-            # Harmonic bank: basis frames + runtime sin/cos modulation
-            basis = get_basis_for_note(params.note)
-
-            # Update PWM if enabled
-            if params.pwm_enabled:
-                state.mode_b_state.set_pwm_weights(params.pwm_width_q15)
-
-            # === FM MODULATOR WIRING (Phase 3 - WSE-STD-210 Section 8.3) ===
-            # Wire previous block's modulator feedback to carrier.
-            # z⁻¹ block delay ensures deterministic, bounded-runtime feedback.
-            if params.fm_depth_q15 != 0 and params.fm_source == FM_SOURCE_FEEDBACK:
-                state.mode_b_state.fm_mod_buffer = state.prev_fm_mod_buffer
-            else:
-                state.mode_b_state.fm_mod_buffer = None
-
-            # Generate coefficients using harmonic bank (with FM if active)
+        # Mode B2 consistently honors the selected spectrum and harmonic cap.
+        # The legacy PL matrix helper does not consume either, so remains a
+        # standalone experimental API rather than an implicit runtime switch.
+        basis = get_basis_for_pitch(params.note, params.phase_inc, state.mode_b_state.H_active)
+        if params.harmonic_gains_q15 is None:
             mode_b_generate_coeffs_vectorized(state.mode_b_state, basis, carrier_512)
+        else:
+            mode_b_generate_coeffs_vectorized(state.mode_b_state, basis, carrier_512,
+                params.harmonic_gains_q15, params.harmonic_gain_bound_q15)
 
         # Advance Mode B phase for next block
         state.mode_b_state.advance_block()
@@ -611,8 +653,7 @@ def vm_step_block(
         fm_topo_blend_q15 = getattr(frame, 'fm_topo_blend_q15', 0)
         use_morphing = (
             fm_topo_a_id is not None and
-            fm_topo_b_id is not None and
-            (fm_topo_a_id != fm_topo_b_id or fm_topo_blend_q15 > 0)
+            fm_topo_b_id is not None
         )
 
         # Configure FM6 from VoiceFrame parameters if provided
@@ -626,7 +667,7 @@ def vm_step_block(
             # -----------------------------------------------------------------
             # FM6 MORPHING PATH: Blend between two topologies
             # -----------------------------------------------------------------
-            from .fm6_morph_engine import fm6_generate_block_morphed
+            from .fm6_morph_engine import fm6_generate_block_morphed_full
 
             # Get FM6 morph state (lazy-initialized via property)
             fm6_morph_state = state.fm6_morph_state
@@ -644,7 +685,10 @@ def vm_step_block(
 
             # FM6 morphed audio generation
             base_phase_inc = params.phase_inc
-            fm6_audio = fm6_generate_block_morphed(fm6_morph_state, base_phase_inc)
+            if start_phase is not None:
+                for operator in fm6_morph_state.operators:
+                    operator.phase = ((start_phase * operator.ratio_q16) >> 16) & 0xffffffff
+            fm6_audio = fm6_generate_block_morphed_full(fm6_morph_state, base_phase_inc)
         else:
             # -----------------------------------------------------------------
             # FM6 DIRECT PATH: Single topology (no morphing)
@@ -694,6 +738,9 @@ def vm_step_block(
             # No-op (None) when carriers already sum <= 0.5.
             base_phase_inc = params.phase_inc
             level_overrides = fm6_gateway_level_overrides(fm6_state)
+            if start_phase is not None:
+                for operator in fm6_state.operators:
+                    operator.phase = ((start_phase * operator.ratio_q16) >> 16) & 0xffffffff
             fm6_audio = fm6_generate_block_full(fm6_state, base_phase_inc,
                                                 level_overrides)
 
@@ -831,6 +878,9 @@ def vm_step_block(
         # MODE A: LUT-based (existing path)
         # -----------------------------------------------------------------
         from .coeff_lut_streaming import ccs_generate_coeffs_polyphase
+        if start_phase is not None:
+            state.ccs_state.phase = start_phase
+            state.ccs_state.set_pitch(params.phase_inc, slew_blocks=0)
         ccs_generate_coeffs_polyphase(state.ccs_state, carrier_512)
 
     # PERSISTENT EVOLUTION per WSE-STD-120 section 4.1:
@@ -873,8 +923,9 @@ def vm_step_block(
     output = _run_coeff_tail(
         state, cfg, backbone_instrs,
         evolution=True,
-        extract_fm_mod=(osc_mode == OSC_MODE_B
-                        and params.fm_source == FM_SOURCE_FEEDBACK),
+        # Retain the immediately preceding operator block even while the
+        # feedback source is bypassed; enabling it must not reuse stale history.
+        extract_fm_mod=True,
     )
 
     # Advance CCS phase for next block (Mode A only - Mode B advances in generate)
@@ -903,6 +954,8 @@ class VMExecutor:
             max_voices: Maximum number of simultaneous voices
             tables: Tables instance (default: DEFAULT_TABLES)
         """
+        from .resources import prepare_oscillator_resources
+        prepare_oscillator_resources()
         self.max_voices = max_voices
         self.tables = tables or DEFAULT_TABLES
         self.states: dict[int, VMState] = {}
@@ -951,9 +1004,28 @@ class VMExecutor:
         """Snapshot all voice states for deterministic replay."""
         return {vid: state.snapshot() for vid, state in self.states.items()}
 
-    def restore_all(self, snapshots: dict[int, dict]) -> None:
-        """Restore all voice states from snapshots."""
-        self.states = {vid: VMState.restore(snap) for vid, snap in snapshots.items()}
+    def snapshot_binary(self, voice_ids=None) -> bytes:
+        """Complete integer VM checkpoint in a validated WSES container."""
+        from ..voice.snapshot_bundle import SnapshotBundle
+        return SnapshotBundle.from_executor(self, voice_ids).to_bytes()
+
+    def restore_binary(self, data: bytes, voice_ids=None) -> None:
+        """Replace all VM states, or merge selected voices, after full validation."""
+        from ..voice.snapshot_bundle import SnapshotBundle
+        SnapshotBundle.from_bytes(data).restore_executor(self, voice_ids)
+
+    def restore_all(self, snapshots: dict[int | str, dict]) -> None:
+        """Restore atomically, accepting JSON's stringified integer keys."""
+        restored = {}
+        for key, snapshot in snapshots.items():
+            voice_id = snapshot['voice_id']
+            if (type(voice_id) is not int or voice_id < 0
+                    or type(key) not in (int, str)
+                    or key not in (voice_id, str(voice_id))
+                    or voice_id in restored):
+                raise ValueError('Invalid or duplicate voice ID in VM snapshot bundle')
+            restored[voice_id] = VMState.restore(snapshot)
+        self.states = restored
 
 
 __all__ = [

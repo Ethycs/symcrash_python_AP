@@ -54,8 +54,10 @@ def _assert_lossless(from_ir, from_capsule, name):
     assert list(from_capsule.harmonic_amps_q15) == list(from_ir.harmonic_amps_q15), name
 
     # osc mode (Mode B presets must not decay to "unset")
-    if from_ir.osc_mode != 0:
-        assert from_capsule.osc_mode == from_ir.osc_mode, name
+    assert from_capsule.osc_mode == from_ir.osc_mode, name
+    assert from_capsule.amp_env == from_ir.amp_env, name
+    assert from_capsule.control_config == from_ir.control_config, name
+    assert from_capsule.native_carrier == from_ir.native_carrier, name
 
     # PWM width
     assert from_capsule.pwm_width_q15 == from_ir.pwm_width_q15, name

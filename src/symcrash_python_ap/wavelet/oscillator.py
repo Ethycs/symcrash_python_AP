@@ -28,6 +28,7 @@ import math
 from ..prng import PCG32, VoicePRNG
 from ..primitives import Q15_ONE, Q15_HALF, Q15_SCALE, BLOCK_SIZE, SAMPLE_RATE_HZ
 from ..primitives import Q15_3_4, Q15_QUARTER
+from ..fixed_rom import BLEP_KERNEL_Q15
 
 
 # =============================================================================
@@ -175,8 +176,12 @@ def generate_blep_kernel(size: int = BLEP_KERNEL_SIZE) -> List[int]:
     This is a precomputed integrated sinc function that removes
     aliasing from hard edges (saw/pulse transitions).
 
-    Returns Q15 samples.
+    Returns Q15 samples. The standard 64-sample kernel is a frozen ROM.
+    Other sizes retain the legacy offline NON-BIT-EXACT design helper and
+    require separate qualification; they are never generated on import.
     """
+    if size == BLEP_KERNEL_SIZE:
+        return list(BLEP_KERNEL_Q15)
     kernel = []
     half = size // 2
 
@@ -213,18 +218,14 @@ def generate_blep_table(oversampling: int = BLEP_OVERSAMPLING) -> List[List[int]
     """
     table = []
     for phase in range(oversampling):
-        # Offset the kernel by fractional phase
-        offset = phase / oversampling
         kernel = []
         for i in range(BLEP_KERNEL_SIZE):
-            # Linear interpolation between base kernel samples
-            pos = i + offset
-            idx = int(pos)
-            frac = pos - idx
-            if idx + 1 < len(BLEP_KERNEL):
-                value = int(BLEP_KERNEL[idx] * (1 - frac) + BLEP_KERNEL[idx + 1] * frac)
+            # Integer weighted mean, with the legacy table's truncation rule.
+            if i + 1 < len(BLEP_KERNEL):
+                value = (BLEP_KERNEL[i] * (oversampling - phase) +
+                         BLEP_KERNEL[i + 1] * phase) // oversampling
             else:
-                value = BLEP_KERNEL[idx] if idx < len(BLEP_KERNEL) else Q15_ONE
+                value = BLEP_KERNEL[i] if i < len(BLEP_KERNEL) else Q15_ONE
             kernel.append(value)
         table.append(kernel)
     return table

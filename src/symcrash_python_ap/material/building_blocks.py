@@ -484,24 +484,16 @@ def catastrophe_cusp_sample(
     Returns:
         Shaped output (Q15)
     """
-    fast = x >> 2
-    s = state.s
-
-    # Cusp dynamics
+    s = int(state.s)
     s_sq = mul_q15_sat(s, s)
     s_cu = mul_q15_sat(s_sq, s)
+    pressure_s = mul_q15_sat(int(pressure_q15), s)
 
-    # Gradient: -4s³ - 2as - b
-    grad = -mul_q15_sat(s_cu, 4 * Q15_ONE >> 15)
-    grad = sat16(grad - mul_q15_sat(pressure_q15, s << 1))
-    grad = sat16(grad - bias_q15)
-
-    # Drive with input
-    rate = Q15_HALF
-    delta = mul_q15_sat(rate, sat16(grad + fast))
-
-    state.s = sat16(s + (delta >> 2))
-
+    # Integer coefficients 4 and 2 must not be treated as Q1.15 fractions.
+    # Accumulate the force in wide precision, saturate before integration,
+    # then apply the specified rate=0.5 with no additional rate division.
+    force = sat16(-4 * s_cu - 2 * pressure_s - int(bias_q15) + (int(x) >> 2))
+    state.s = sat16(s + mul_q15_sat(Q15_HALF, force))
     return soft_clip_q15(state.s)
 
 

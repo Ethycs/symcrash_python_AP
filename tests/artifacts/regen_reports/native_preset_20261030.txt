@@ -1,0 +1,77 @@
+Native preset/capsule transport audit, 2026-10-30
+
+Before data was captured from the unmodified phase-26 loaders in _preset-routes-27-before.json.
+Previously differing factory configurations: 51 / 52
+Fields differing across routes: {'amp_env': 50, 'osc_mode': 27, 'control_config': 7}
+
+Corrected factory configurations: 52/52 match on every playback field.
+Capsule identity/version/description are intentionally excluded from that comparison.
+
+dx_marimba_v0:
+  samples: 2304
+  former direct/capsule differences: 0
+  direct changes: 0
+  capsule changes: 0
+  former direct SHA-256: 93e1ab555606bb61cf4f0e7d329822300036fa6b77bedfe6b1b5f4e42df3b667
+  former capsule SHA-256: 93e1ab555606bb61cf4f0e7d329822300036fa6b77bedfe6b1b5f4e42df3b667
+  corrected shared SHA-256: 93e1ab555606bb61cf4f0e7d329822300036fa6b77bedfe6b1b5f4e42df3b667
+  Corrected direct/capsule frames/audio and Python/JIT frames/audio match exactly.
+
+glitch_lead_v0:
+  samples: 2304
+  former direct/capsule differences: 2233
+  direct changes: 2230
+  capsule changes: 2239
+  former direct SHA-256: 5a20148d8ca2600d90106872a7e4f06c5cd61e5da04105f0021ebafc69c79260
+  former capsule SHA-256: 73ce02e6c3bf386ac231c381bd271d98b456e7fa359a41ffd9bcea75e6dd17c3
+  corrected shared SHA-256: 8d3b25441e88af0a6e8dcde4047986618f67dbfe7e4adb8dfbe8e0313f4d7871
+  Corrected direct/capsule frames/audio and Python/JIT frames/audio match exactly.
+
+pwm_pad_v0:
+  samples: 2304
+  former direct/capsule differences: 2239
+  direct changes: 2238
+  capsule changes: 2238
+  former direct SHA-256: 278cb46673a2a12fc9309757771de00a12b104f434569a8f017d8f76f8271f93
+  former capsule SHA-256: 25e650b7f49e04b50ddae5599294d18615d79f1615a3ea6af43c8dcc216ea25c
+  corrected shared SHA-256: 20b946685160e064093d2aa03fa9855f2bee8f15e45db57ae379da2466c44b87
+  Corrected direct/capsule frames/audio and Python/JIT frames/audio match exactly.
+
+saw_lead_v0:
+  samples: 2304
+  former direct/capsule differences: 2239
+  direct changes: 2239
+  capsule changes: 2239
+  former direct SHA-256: 7ad74a41eda2bedbc9ace34fc0fb0cfc6961c38ffb0750f64ebee632c237e1a7
+  former capsule SHA-256: b49ee1a3aca23d7e66615886103c509cc61b25206a59cfa08a87f7ccab787ca9
+  corrected shared SHA-256: cd3198089c38f99cd648e65f6532e1481616eddc50184c8d3f9f6ad235827ac3
+  Corrected direct/capsule frames/audio and Python/JIT frames/audio match exactly.
+
+violin_ir_v1:
+  samples: 2304
+  former direct/capsule differences: 2238
+  direct changes: 2238
+  capsule changes: 162
+  former direct SHA-256: e86e14379f7d38598b5c39e45775049c8e2eb088d239f3e70c986ad82f3a4a99
+  former capsule SHA-256: c2cd18ebb40f402413bc361d0e5ac996e67ccdfb8642919d885f0798934583bb
+  corrected shared SHA-256: 822c5b1ace298f0250070713a99ffac5fecb6a378a8d4383c5046c306b16c1d2
+  Corrected direct/capsule frames/audio and Python/JIT frames/audio match exactly.
+
+Existing audio goldens were not regenerated.
+Exact authored ADSR and controls are transported separately from quantized control defaults.
+Native waveform/Mode-A LUT selection, custom partials, phase, OEIS, PWM, noise, detune,
+static FM topology and filter controls now reach their declared consumers.
+Missing oscillator mode selects Mode B; an explicit zero selects Mode A.
+Historical capsules/snapshots without new fields retain their old fallback behavior.
+Full L0 topology, host unison, hard-sync, advanced L1 resource loaders and modulation
+bindings remain separate incomplete work; transport is not proof of those features.
+
+Validation:
+  Full root suite: 4741 passed, 16 skipped, 102 existing warnings in 247.27s.
+  Command: pixi run python -m pytest -q --tb=short
+  This run preceded the final named-waveform compatibility correction and added test.
+  Final focused suite: 371 passed in 38.04s, including all 181 native transport checks.
+  Command: pixi run python -m pytest -q tests/conformance/test_native_preset_transport.py tests/test_capsule_sound_extras.py tests/conformance/test_ir_persistence.py --tb=short
+  The final audit was rerun after that correction; all comparisons above still pass.
+  Named waveforms override legacy serialized default numeric zero; numeric-only selection remains supported.
+  Ten native transport cases compare actual SynthMaster stereo output for five presets in Python/JIT.

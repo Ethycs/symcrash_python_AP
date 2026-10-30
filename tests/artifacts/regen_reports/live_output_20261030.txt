@@ -1,0 +1,41 @@
+Shared live output audit, 2026-10-30
+48 stereo VM carrier blocks per note; K=3; default Material identity.
+Old UnifiedOutputStage loaded from the pre-change tracked source (HEAD).
+All other DSP stays at the current version for this routing comparison.
+Old and new Python/JIT traces agree within their respective profiles.
+All four existing phase-18 SynthMaster traces remain bit-identical after extraction.
+The new UnifiedOutputStage traces also match those SynthMaster traces exactly.
+Corrected host profile: peak <=32000, slew <=2000, DC/OLA off for CCS.
+No existing VM, Workbench or Material audio golden was regenerated.
+Separate conformance tests cover polyphony, actual effects/tails, all-on Safety,
+accepted consumer events, callback segments and a spawned shared-memory worker.
+Device audition, deadline/underrun handling and hardware parity remain open.
+
+Note 24:
+  peak_max: 23168 -> 23168
+  slew_max: 195 -> 195
+  mean_max: 23065.78125 -> 23065.78125
+  changed blocks 0/48
+  old block-digest SHA256 8363600be4a3e10972a63580dfec98cff8b0a068f1f9392c0623adacdf874364
+  new block-digest SHA256 8363600be4a3e10972a63580dfec98cff8b0a068f1f9392c0623adacdf874364
+Note 48:
+  peak_max: 23168 -> 23168
+  slew_max: 506 -> 506
+  mean_max: 22022.53125 -> 22022.53125
+  changed blocks 0/48
+  old block-digest SHA256 89487ad4a86c73b14be32281c028ccd534df8d60b5418cce6d423b3d6a5d7c7f
+  new block-digest SHA256 89487ad4a86c73b14be32281c028ccd534df8d60b5418cce6d423b3d6a5d7c7f
+Note 69:
+  peak_max: 23168 -> 23168
+  slew_max: 1349 -> 1349
+  mean_max: 12101.625 -> 12101.625
+  changed blocks 0/48
+  old block-digest SHA256 77e01d95873da058909a1f30b9d7790bf572d363416e67841113912641e82126
+  new block-digest SHA256 77e01d95873da058909a1f30b9d7790bf572d363416e67841113912641e82126
+Note 96:
+  peak_max: 23168 -> 13379
+  slew_max: 8192 -> 2000
+  mean_max: 1531.671875 -> 1845.078125
+  changed blocks 48/48
+  old block-digest SHA256 e44e2e2017bfb86c79e12ec08922c993dc42764f6402eb1c1a87fb7e8442203e
+  new block-digest SHA256 54e672267d22c02bf9b5f2f920bef0bedea1ffc7327b17a7ec6509ad7c4a92ec

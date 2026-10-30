@@ -2,7 +2,8 @@
 WSE-STD-121 — Streaming CoeffLUT (True Subband Time-Series)
 ===========================================================
 
-Implements the CORRECT coefficient-domain carrier architecture per WSE-STD-120.
+Implements the nominal-note Mode A table path. The desktop resource profile
+documents its scope and remaining WSE-STD-120 qualification limits.
 
 Key insight from CCS-ARCHITECTURE-GAP.md:
     Wavelet coefficients are NOT spectral snapshots.
@@ -14,17 +15,18 @@ Structure:
 Where:
     - w: waveform ID (sine=0, saw=1, square=2, etc.)
     - l: leaf/subband index [0..L-1], L=64 for 64-sample blocks
-    - k: time samples WITHIN the subband [0..K-1], K=8 default
+    - k: time samples WITHIN the subband [0..K-1], K=4 current profile
     - p: phase step [0..P-1], P=64 default (fractional lerp gives more)
 
 The K dimension is critical: each leaf has K time samples that represent
 a STREAMING subband signal, not a single coefficient value.
 
 Offline Generation:
-    1. Generate long bandlimited waveform (C samples, e.g. 8192)
-    2. Run analysis filterbank (polyphase FWPT) to get subband streams
-    3. Record subband signals as phase-indexed tables
-    4. Apply normalization per WSE-STD-122
+    The desktop resource builder preserves the historical nominal-note recipe:
+    64-sample waveform blocks at 64 phase bins and four sample offsets, scaled
+    by Q15_HALF/Q15_ONE, then transformed with FWPT. Five native waveforms at
+    128 MIDI notes and three distinct legacy C4 tables are prepared at startup.
+    The offline generate_* methods below remain available for diagnostics.
 
 Runtime:
     1. Maintain phase accumulator (continuous)
@@ -35,6 +37,7 @@ Runtime:
 """
 
 from dataclasses import dataclass, field
+from collections import OrderedDict
 import numpy as np
 from typing import Dict, Optional, Tuple
 import logging
@@ -50,9 +53,9 @@ logger = logging.getLogger(__name__)
 # Constants (derived from primitives)
 DEFAULT_K = TABLES_VM_K # K = polyphase slots (4 or 8), from tables.py
 DEFAULT_P = 64          # P = 64 phase steps per cycle (was 1024, reduced for memory)
-                        # With cubic interpolation, P=64 gives excellent quality
-                        # Table size: 64 leaves × 8 k-slots × 64 phases × 2 bytes = 64 KB/table
-                        # vs P=1024: 1 MB/table (16× reduction)
+                        # Interpolation supplies positions between phase bins.
+                        # Current table: 64 leaves × 4 slots × 64 phases × 2 bytes = 32 KiB
+                        # vs P=1024: 512 KiB/table (16× reduction)
 CYCLE_LENGTH = 8192     # C = 8192 samples for one complete waveform cycle
 TARGET_RMS_Q15 = Q15_HALF  # Target RMS (-6 dBFS)
 SAMPLE_RATE = SAMPLE_RATE_HZ
@@ -65,7 +68,8 @@ DEFAULT_INTERP_MODE = INTERP_LINEAR
 # =============================================================================
 # WAVEFORM IDs
 # =============================================================================
-# Each waveform is band-limited via additive synthesis to avoid aliasing.
+# The historical recipes have a fixed harmonic cap, not a pitch-dependent
+# Nyquist cap. Resource preparation preserves this spectral limitation.
 # Waveforms are generated at Q15 amplitude and normalized for consistent levels.
 
 WAVE_SINE = 0       # Pure sine wave (fundamental only)
@@ -74,7 +78,7 @@ WAVE_SQUARE = 2     # Square wave - odd harmonics only: 1/h amplitude series
 WAVE_TRIANGLE = 3   # Triangle wave - odd harmonics only: 1/h² amplitude series
 WAVE_PULSE = 4      # Pulse wave - all harmonics with alternating signs
 
-# Maximum harmonics to include (prevents aliasing at high notes)
+# Historical maximum harmonic count (does not prevent high-note aliasing).
 MAX_HARMONICS = 32
 
 
@@ -105,7 +109,7 @@ class StreamingCoeffLUT:
 
     # Parameters
     num_leaves: int = NUM_LEAVES  # L = 64
-    K: int = DEFAULT_K            # K = 8 time samples per subband
+    K: int = DEFAULT_K            # K = 4 in the current prepared profile
     P: int = DEFAULT_P            # P = 64 phase steps
 
     # Target frequency this table is generated for
@@ -234,17 +238,16 @@ class StreamingCoeffLUT:
 
         Q32 PHASE-ALIGNED LUT GENERATION:
         ==================================
-        Uses the SAME phase model as runtime to eliminate phase mismatch.
+        Uses nominal-frequency Q32 increments truncated toward zero. Runtime
+        pitch uses the shared rounded ROM; cents do not select a new table.
 
         For each phase bin p and polyphase slot k:
             phase_p = p * 2^32 / P  (exact phase for bin p)
             block[n] = waveform(phase_p + (k + n) * phase_inc)
             coeff[:, k, p] = FWPT(block)
 
-        This ensures perfect alignment with runtime's Q32 phase accumulator
-        and coefficient-space interpolation between bins.
-
-        No cycle_len or round() - phase is continuous and matches runtime exactly.
+        This preserves the original table arithmetic. It is an offline
+        reference constructor, not a playback resource accessor.
         """
         logger.info(
             f"Generating StreamingCoeffLUT for {name} at {target_freq_hz:.2f} Hz (K={K}, P={P})"
@@ -252,13 +255,13 @@ class StreamingCoeffLUT:
 
         L = NUM_LEAVES
 
-        # Phase increment per sample - SAME as runtime uses
+        # Historical nominal-note increment; preserve truncation for compatibility.
         phase_inc = int((target_freq_hz / SAMPLE_RATE) * (1 << 32))
 
         logger.debug(f"  phase_inc={phase_inc} (Q32)")
 
         # Build LUT using Q32 phase model
-        # No cycle_len, no round() - uses exact same phase math as runtime
+        # No rounded cycle length; use the historical Q32 recipe.
         data = np.zeros((L, K, P), dtype=np.int16)
 
         # Compute shift for this P (must be power of 2)
@@ -512,21 +515,21 @@ _STREAMING_LUT_LIBRARY: Optional[Dict[int, StreamingCoeffLUT]] = None
 
 
 def _init_streaming_library() -> Dict[int, StreamingCoeffLUT]:
-    """Initialize the streaming CoeffLUT library."""
-    logger.info("Initializing StreamingCoeffLUT library...")
-    return {
-        0: StreamingCoeffLUT.generate_sine(),
-        1: StreamingCoeffLUT.generate_saw(),
-        2: StreamingCoeffLUT.generate_square(),
-    }
+    """Create views of the three prepared legacy tables; never generate them."""
+    from .mode_a_resource import prepared_mode_a_atlas, NOTE_TABLES
+    atlas = prepared_mode_a_atlas()
+    return {wave: atlas.table(NOTE_TABLES + wave) for wave in range(3)}
 
 
 def get_streaming_lut(wave_id: int) -> StreamingCoeffLUT:
-    """Get StreamingCoeffLUT by wave ID (lazy initialization)."""
+    """Playback-only legacy lookup; resources must already be prepared."""
+    from .mode_a_resource import prepared_mode_a_atlas, legacy_address, NOTE_TABLES
+    prepared_mode_a_atlas()
+    key = legacy_address(wave_id) - NOTE_TABLES
     global _STREAMING_LUT_LIBRARY
     if _STREAMING_LUT_LIBRARY is None:
         _STREAMING_LUT_LIBRARY = _init_streaming_library()
-    return _STREAMING_LUT_LIBRARY.get(wave_id, _STREAMING_LUT_LIBRARY[0])
+    return _STREAMING_LUT_LIBRARY[key]
 
 
 # =============================================================================
@@ -647,15 +650,24 @@ def get_waveform_generator(wave_id: int):
 # Per-Note LUT Cache (for frequency-specific tables)
 # =============================================================================
 
-_NOTE_LUT_CACHE: Dict[Tuple[int, int], StreamingCoeffLUT] = {}
+_NOTE_LUT_CACHE: Dict[Tuple[int, int], StreamingCoeffLUT] = OrderedDict()
+MAX_MODE_A_VIEWS = 128
+
+
+def clear_mode_a_views() -> None:
+    """Discard small lookup views while retaining the immutable resource."""
+    global _STREAMING_LUT_LIBRARY
+    _NOTE_LUT_CACHE.clear()
+    _STREAMING_LUT_LIBRARY = None
 
 
 def get_lut_for_note(wave_id: int, midi_note: int) -> StreamingCoeffLUT:
     """
     Get StreamingCoeffLUT for a specific MIDI note.
 
-    Tables are generated and cached on first access. Each note gets its own
-    table because the frequency is baked into the FWPT coefficients.
+    The frequency is baked into each prepared table. Cache misses create
+    read-only mapped views; they perform no generation, transforms or file I/O.
+    The note address follows the shared pitch law's MIDI 0..127 clamp.
 
     Args:
         wave_id: Waveform ID (WAVE_SINE=0, WAVE_SAW=1, WAVE_SQUARE=2, WAVE_TRIANGLE=3, WAVE_PULSE=4)
@@ -664,22 +676,18 @@ def get_lut_for_note(wave_id: int, midi_note: int) -> StreamingCoeffLUT:
     Returns:
         StreamingCoeffLUT for this note/waveform combination
     """
-    cache_key = (wave_id, midi_note)
-    if cache_key not in _NOTE_LUT_CACHE:
-        freq_hz = midi_to_hz(midi_note)
-        logger.debug(f"Generating LUT for wave={wave_id}, note={midi_note} ({freq_hz:.1f} Hz)")
-
-        # Get waveform generator from centralized function
-        gen_fn, name = get_waveform_generator(wave_id)
-
-        _NOTE_LUT_CACHE[cache_key] = StreamingCoeffLUT.generate_for_frequency(
-            wave_id=wave_id,
-            name=f"{name}_{midi_note}",
-            target_freq_hz=freq_hz,
-            generate_sample_fn=gen_fn,
-        )
-
-    return _NOTE_LUT_CACHE[cache_key]
+    from .mode_a_resource import prepared_mode_a_atlas, note_address
+    atlas = prepared_mode_a_atlas()
+    wave, note, table_key = note_address(wave_id, midi_note)
+    cache_key = (wave, note)
+    if cache_key in _NOTE_LUT_CACHE:
+        result = _NOTE_LUT_CACHE.pop(cache_key)
+    else:
+        result = atlas.table(table_key, wave_id=wave)
+    _NOTE_LUT_CACHE[cache_key] = result
+    if len(_NOTE_LUT_CACHE) > MAX_MODE_A_VIEWS:
+        _NOTE_LUT_CACHE.popitem(last=False)
+    return result
 
 
 # =============================================================================
@@ -787,7 +795,7 @@ def ccs_generate_coeffs_polyphase(
     output_coeffs: np.ndarray,
 ) -> None:
     """
-    Generate polyphase coefficients: 64 leaves × K time slots = 512 values.
+    Generate polyphase coefficients: 64 leaves × K slots (currently 256 values).
 
     TRUE POLYPHASE INJECTION per WSE-STD-120:
     - Each k-slot represents a polyphase sample offset within the block
@@ -797,8 +805,8 @@ def ccs_generate_coeffs_polyphase(
 
     Args:
         ccs_state: CCS oscillator state
-        output_coeffs: np.ndarray[512] int16 output buffer (modified in place)
-                       Layout: [leaf0_k0..k7, leaf1_k0..k7, ..., leaf63_k0..k7]
+        output_coeffs: np.ndarray[64 * K] int16 output buffer (modified in place)
+                       Layout: leaf-major, with K consecutive slots per leaf.
     """
     # Get LUT for this note
     lut = get_lut_for_note(ccs_state.wave_id, ccs_state.note)
@@ -807,8 +815,7 @@ def ccs_generate_coeffs_polyphase(
     subband_output = np.zeros((NUM_LEAVES, lut.K), dtype=np.int16)
     lut.get_subband_samples(ccs_state.phase, subband_output)
 
-    # Direct 1:1 mapping - VM_K == LUT K == 8
-    # Inject into 512-element state: [64 leaves × 8 k-slots]
+    # Direct 1:1 mapping: VM_K == LUT K, currently four slots per leaf.
     # subband_output is [NUM_LEAVES, K] row-major, so this is exactly a
     # C-order ravel (bit-exact replacement for the per-element loop).
     output_coeffs[:NUM_LEAVES * VM_K] = subband_output[:, :VM_K].reshape(NUM_LEAVES * VM_K)

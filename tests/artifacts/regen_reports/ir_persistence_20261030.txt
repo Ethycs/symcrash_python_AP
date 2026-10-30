@@ -1,0 +1,74 @@
+InstrumentIR save/reload audit - 2026-10-30
+
+Before: actual pre-fix save_instrument/load_instrument results for all 52 shipped presets.
+After: actual YAML and JSON files, reloaded through the public API.
+Audio baseline reconstructs exactly the old metadata/I/O-only document.
+24 serviced blocks, release before block 16; real VM output copied each block.
+No existing audio golden regenerated.
+
+yaml: 52/52 exact model and compiled-preset round trips
+  nodes: source=107, old reload=0, corrected reload=107
+  envelopes: source=55, old reload=0, corrected reload=55
+  lfos: source=17, old reload=0, corrected reload=17
+  templates: source=184, old reload=0, corrected reload=184
+json: 52/52 exact model and compiled-preset round trips
+  nodes: source=107, old reload=0, corrected reload=107
+  envelopes: source=55, old reload=0, corrected reload=55
+  lfos: source=17, old reload=0, corrected reload=17
+  templates: source=184, old reload=0, corrected reload=184
+
+dx_marimba_v0 / reference
+  old reload differing samples: 1535 / 1536
+  corrected YAML/JSON differing samples: 0
+  original/corrected audio SHA-256: 0df779957e82c226e0c7df5852574e8641534c00f1708abee74239ad6994c480
+  old reload audio SHA-256: 12737ae4bc256c0da60a91d368c1c2283531fa93511574df7b6951500f69d77d
+
+pwm_pad_v0 / reference
+  old reload differing samples: 1471 / 1536
+  corrected YAML/JSON differing samples: 0
+  original/corrected audio SHA-256: 6d452c3b106fff3727cbd8cef8cea8086726347330d4d0be36aeb05c63a034ad
+  old reload audio SHA-256: 12737ae4bc256c0da60a91d368c1c2283531fa93511574df7b6951500f69d77d
+
+saw_lead_v0 / reference
+  old reload differing samples: 1471 / 1536
+  corrected YAML/JSON differing samples: 0
+  original/corrected audio SHA-256: bb826b4d9a5ee26eca8fd566b49d2c1b710487e22d2f82a8e8c20e323bdcc672
+  old reload audio SHA-256: 12737ae4bc256c0da60a91d368c1c2283531fa93511574df7b6951500f69d77d
+
+authored_events / reference
+  old reload differing samples: 1535 / 1536
+  corrected YAML/JSON differing samples: 0
+  original/corrected audio SHA-256: a434c5239ecf61938e1c0c04446b9c8521175a9331725c8ff60b444e736b6d3b
+  old reload audio SHA-256: 12737ae4bc256c0da60a91d368c1c2283531fa93511574df7b6951500f69d77d
+
+dx_marimba_v0 / JIT
+  old reload differing samples: 1535 / 1536
+  corrected YAML/JSON differing samples: 0
+  original/corrected audio SHA-256: 0df779957e82c226e0c7df5852574e8641534c00f1708abee74239ad6994c480
+  old reload audio SHA-256: 12737ae4bc256c0da60a91d368c1c2283531fa93511574df7b6951500f69d77d
+
+pwm_pad_v0 / JIT
+  old reload differing samples: 1471 / 1536
+  corrected YAML/JSON differing samples: 0
+  original/corrected audio SHA-256: 6d452c3b106fff3727cbd8cef8cea8086726347330d4d0be36aeb05c63a034ad
+  old reload audio SHA-256: 12737ae4bc256c0da60a91d368c1c2283531fa93511574df7b6951500f69d77d
+
+saw_lead_v0 / JIT
+  old reload differing samples: 1471 / 1536
+  corrected YAML/JSON differing samples: 0
+  original/corrected audio SHA-256: bb826b4d9a5ee26eca8fd566b49d2c1b710487e22d2f82a8e8c20e323bdcc672
+  old reload audio SHA-256: 12737ae4bc256c0da60a91d368c1c2283531fa93511574df7b6951500f69d77d
+
+authored_events / JIT
+  old reload differing samples: 1535 / 1536
+  corrected YAML/JSON differing samples: 0
+  original/corrected audio SHA-256: a434c5239ecf61938e1c0c04446b9c8521175a9331725c8ff60b444e736b6d3b
+  old reload audio SHA-256: 12737ae4bc256c0da60a91d368c1c2283531fa93511574df7b6951500f69d77d
+
+Reference/JIT outputs agree exactly. Source objects and original audio remain unchanged.
+
+Validation: 131 new persistence checks; broader focused selection 318 passed, 1 skipped.
+Full suite: 4419 passed, 16 skipped, 102 warnings in 214.87 seconds.
+Final persistence selection: 131 passed in 13.23 seconds after the requested-extension correction.
+Missing YAML support was separately verified to leave existing bytes intact and create no temporary file.
+Physical symlink integration could not run: Windows link creation returned privilege error 1314.

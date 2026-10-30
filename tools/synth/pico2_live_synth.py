@@ -217,6 +217,7 @@ class Pico2LiveSynth:
         self.stage = UnifiedOutputStage(
             block_size=BLOCK_SIZE,
         )
+        self.stage.configure_preset(preset)
 
         # Hardware bridge (or virtual mode bridge)
         self.bridge = create_bridge(self.cockpit, port=port, virtual_mode=virtual_mode)
@@ -297,31 +298,28 @@ class Pico2LiveSynth:
         """Start audio output stream."""
         output_device = self._find_output_device()
 
-        # Pre-allocate conversion buffers (reused each callback to avoid allocation)
-        left_f32 = np.zeros(BLOCK_SIZE, dtype=np.float32)
-        right_f32 = np.zeros(BLOCK_SIZE, dtype=np.float32)
-        q15_scale = np.float32(1.0 / Q15_ONE)
+        from symcrash_python_ap.audio.block_stream import AudioBlockReader
+        # Reuse storage only after the reader has consumed the complete block.
+        stereo_f32 = np.zeros((BLOCK_SIZE, 2), dtype=np.float32)
+        q15_scale = np.float32(1.0 / (1 << 15))
+
+        def read_audio_block():
+            try:
+                left, right = self.audio_queue.get_nowait()
+            except queue.Empty:
+                return None
+            np.multiply(left, q15_scale, out=stereo_f32[:, 0], casting='unsafe')
+            np.multiply(right, q15_scale, out=stereo_f32[:, 1], casting='unsafe')
+            return stereo_f32
+
+        self.block_reader = AudioBlockReader(read_audio_block, channels=2)
 
         def audio_callback(outdata, frames, time_info, status):
             if status:
                 print(f"Audio status: {status}")
 
-            try:
-                # Get pre-rendered audio block
-                left, right = self.audio_queue.get_nowait()
-
-                # Convert Q15 int16 arrays to float32 (vectorized, in-place)
-                np.multiply(left, q15_scale, out=left_f32, casting='unsafe')
-                np.multiply(right, q15_scale, out=right_f32, casting='unsafe')
-
-                # Write to output
-                outdata[:, 0] = left_f32
-                outdata[:, 1] = right_f32
-
-            except queue.Empty:
-                # Buffer underrun - output silence
-                outdata.fill(0)
-                self.buffer_underruns += 1
+            self.block_reader.fill(outdata)
+            self.buffer_underruns = self.block_reader.underruns
 
         self.stream = sd.OutputStream(
             samplerate=SAMPLE_RATE,
@@ -365,7 +363,8 @@ class Pico2LiveSynth:
 
         # Always emit VoiceFrame (emitter handles inactive state with gain=0)
         # This ensures all required fields (ops_enable, families, partial_amps_q15) are populated
-        frame = self.emitter.emit_frame()
+        frame, params = self.emitter.emit_output_block()
+        self.stage.configure_preset(self.emitter.output_preset)
 
         # Debug: log first few blocks and then occasionally
         if self.blocks_rendered < 5 or self.blocks_rendered % 3000 == 0:
@@ -375,7 +374,7 @@ class Pico2LiveSynth:
                   f"beta={frame.beta_target_q15}")
 
         # Render through the synthesis pipeline
-        left, right = self.stage.render_block(frame)
+        left, right = self.stage.render_block(frame, params)
 
         # Queue for audio output (no lock needed - blocks_rendered is only for stats)
         try:
@@ -396,13 +395,8 @@ class Pico2LiveSynth:
         # Send note-on via cockpit (will be in next ControlFrame)
         self.cockpit.midi_note_on(note, velocity)
 
-        # Tell the emitter to start the note (this activates the voice)
-        velocity_q15 = int((velocity / 127) * Q15_ONE)
-        self.emitter.note_on(note, velocity_q15)
-
-        # Tell the synthesis stage about the voice
+        # The render thread consumes the event and owns voice/VM state changes.
         freq = 440.0 * (2 ** ((note - 69) / 12))
-        self.stage.voice_on(0, note)  # Single voice (voice_id=0)
 
         print(f"Note ON: {note} ({freq:.1f}Hz, velocity={velocity})")
 
@@ -410,12 +404,6 @@ class Pico2LiveSynth:
         """Release the current note."""
         # Send note-off via cockpit
         self.cockpit.midi_note_off(self.current_note)
-
-        # Tell the emitter to release the note
-        self.emitter.note_off()
-
-        # Tell the synthesis stage
-        self.stage.voice_off(0)  # Single voice (voice_id=0)
 
         print(f"Note OFF: {self.current_note}")
 

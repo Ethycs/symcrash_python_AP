@@ -235,6 +235,20 @@ def fm6_generate_block_morphed(state: FM6MorphState, base_phase_inc: int) -> np.
     return np.clip(output_k, Q15_NEG_ONE, Q15_ONE).astype(np.int16)
 
 
+def fm6_generate_block_morphed_full(state: FM6MorphState, base_phase_inc: int) -> np.ndarray:
+    """Render 64 sample-rate values for the VM's audio-to-coefficient gateway.
+
+    The existing morph kernel evaluates K consecutive phase increments and
+    retains a K-sample feedback delay. Run enough groups to fill an audio
+    block; passing a single K-sample group to the 64-sample FWPT is invalid.
+    This leaves the public lane-rate helpers and their state layout intact.
+    """
+    if 64 % VM_K:
+        raise ValueError('FM morph group size must divide the 64-sample audio block')
+    return np.concatenate([fm6_generate_block_morphed(state, base_phase_inc)
+                           for _ in range(64 // VM_K)])
+
+
 def fm6_morph_to_coefficients(output_k: np.ndarray) -> np.ndarray:
     """
     Convert lane-rate FM output to CCS coefficient format.
@@ -313,6 +327,7 @@ def create_fm6_morph_state(topo_a: int = 0, topo_b: int = 0,
 __all__ = [
     'FM6MorphState',
     'fm6_generate_block_morphed',
+    'fm6_generate_block_morphed_full',
     'fm6_morph_to_coefficients',
     'fm6_morph_generate_coeffs',
     'fm6_morph_generate_audio',

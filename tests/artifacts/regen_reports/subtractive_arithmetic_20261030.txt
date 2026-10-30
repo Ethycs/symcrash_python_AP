@@ -1,0 +1,20 @@
+Subtractive golden arithmetic audit, 2026-10-30
+
+Replacing only RNE with the former half-up reductions reproduces every old frozen block hash.
+The corrected render equals a replacement generator using independent Fraction arithmetic.
+Python and JIT produce identical corrected audio.
+Trace samples: 3072; changed samples: 10; maximum absolute change: 4
+Former trace SHA-256: 190cb6fb48f7edd88393ca0f6d71f5f121106a3e6be694220c5e122aae12330a
+Corrected trace SHA-256: 33d4e9b078e409ddcde396f6161b109950b2504ada8c08151fa370a50e433e01
+
+Changed blocks (zero-based):
+{"block": 34, "before": "dc599cbefa2ccf437ca410529ec7c4d77916494a00e0551758628adef7b634ec", "after": "7113d39fa9678d8f3afaef560d8a98289dbbff3a772138005e1c09fb94cd2f0d", "changed": 10, "maximum": 4}
+
+Only the independently verified changed block hashes and final subtractive trace hash should be updated.
+No test thresholds, frozen frame sequence or other existing golden hashes are changed.
+
+Block 34 and the final trace hash were updated after the independent comparison above.
+The first full run had only this golden mismatch (4949 passed, 16 skipped, 102 warnings).
+Final clock/arithmetic/subtractive-golden selection: 135 passed in 16.95 seconds.
+Final root suite: 4965 passed, 16 skipped, 102 existing warnings in 378.11 seconds.
+Command: pixi run python -m pytest -q --tb=short

@@ -1,0 +1,65 @@
+CMMM transition guard/probability audit - 2026-10-30
+
+Baseline reproduces the reviewed former live selection branch: structured guards were not
+delivered and missing transition memory made probabilistic edges unconditional.
+Other DSP is unchanged. Each trace renders 24 serviced blocks; return buffers are copied.
+gate_fall releases at block 10; the two probability traces hold the gate throughout.
+No existing audio golden regenerated.
+
+gate_fall / reference
+  former regimes: [6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6]
+  corrected regimes: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6]
+  changed samples: 189 / 1536
+  former audio SHA-256: 50824bab7aafe7c5b7f7d400ada96ca5c2b517477f3eae3e7a6d7d1da94792cb
+  corrected audio SHA-256: 80d1f59fc2957249d562007eda898fe52a2c802f2e63c37ec3b69b953eea4d0d
+  final RNG: former=12345678, corrected=12345678
+
+probability_zero / reference
+  former regimes: [4, 1, 4, 1, 4, 1, 4, 1, 4, 1, 4, 1, 4, 1, 4, 1, 4, 1, 4, 1, 4, 1, 4, 1]
+  corrected regimes: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+  changed samples: 1477 / 1536
+  former audio SHA-256: cd47b27ab7f7153a48b108d88d77a3fef9f191e86ebb26bf04ac1677fbdd33a0
+  corrected audio SHA-256: 97b2dcebc4bc7087beef8f2d88ad175856f1bf0982d1bf60628165a065447cc6
+  final RNG: former=12345678, corrected=cf4ba921
+
+probability_12345 / reference
+  former regimes: [4, 1, 4, 1, 4, 1, 4, 1, 4, 1, 4, 1, 4, 1, 4, 1, 4, 1, 4, 1, 4, 1, 4, 1]
+  corrected regimes: [1, 4, 4, 1, 4, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1, 4, 4, 1, 4, 4, 4, 4, 1, 4]
+  changed samples: 1486 / 1536
+  former audio SHA-256: cd47b27ab7f7153a48b108d88d77a3fef9f191e86ebb26bf04ac1677fbdd33a0
+  corrected audio SHA-256: d7be25985b43f89d3985b9e038d972fecdba6cee5a48bfe3486914bdc8779829
+  final RNG: former=12345678, corrected=cf4ba921
+
+gate_fall / JIT
+  former regimes: [6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6]
+  corrected regimes: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6]
+  changed samples: 189 / 1536
+  former audio SHA-256: 50824bab7aafe7c5b7f7d400ada96ca5c2b517477f3eae3e7a6d7d1da94792cb
+  corrected audio SHA-256: 80d1f59fc2957249d562007eda898fe52a2c802f2e63c37ec3b69b953eea4d0d
+  final RNG: former=12345678, corrected=12345678
+
+probability_zero / JIT
+  former regimes: [4, 1, 4, 1, 4, 1, 4, 1, 4, 1, 4, 1, 4, 1, 4, 1, 4, 1, 4, 1, 4, 1, 4, 1]
+  corrected regimes: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+  changed samples: 1477 / 1536
+  former audio SHA-256: cd47b27ab7f7153a48b108d88d77a3fef9f191e86ebb26bf04ac1677fbdd33a0
+  corrected audio SHA-256: 97b2dcebc4bc7087beef8f2d88ad175856f1bf0982d1bf60628165a065447cc6
+  final RNG: former=12345678, corrected=cf4ba921
+
+probability_12345 / JIT
+  former regimes: [4, 1, 4, 1, 4, 1, 4, 1, 4, 1, 4, 1, 4, 1, 4, 1, 4, 1, 4, 1, 4, 1, 4, 1]
+  corrected regimes: [1, 4, 4, 1, 4, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1, 4, 4, 1, 4, 4, 4, 4, 1, 4]
+  changed samples: 1486 / 1536
+  former audio SHA-256: cd47b27ab7f7153a48b108d88d77a3fef9f191e86ebb26bf04ac1677fbdd33a0
+  corrected audio SHA-256: d7be25985b43f89d3985b9e038d972fecdba6cee5a48bfe3486914bdc8779829
+  final RNG: former=12345678, corrected=cf4ba921
+
+Reference/JIT audio, regimes and RNG agree exactly for both former and corrected traces.
+
+Validation:
+  New transition runtime checks: 60 passed.
+  Transition/event/snapshot/persistence/voice selection: 491 passed in 25.13s.
+  Advanced L1 persistence follow-up: all 137 persistence checks pass.
+  Full suite: 4485 passed, 16 skipped, 102 warnings in 217.48s.
+  Command: pixi run python -m pytest -q --tb=short
+  No existing audio golden was regenerated.

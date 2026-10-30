@@ -128,6 +128,7 @@ from typing import List, Tuple, Dict, Optional
 from dataclasses import dataclass, field
 from enum import IntEnum
 import math
+import operator
 
 from ..fixed import (
     sat16, mul_q15_sat, shift_round, slew_q15, slew_q15_asym,
@@ -137,7 +138,10 @@ from ..fixed import (
 from ..frames import ParamFrame, Metrics
 
 # Import from primitives (single source of truth)
-from ..primitives import NUM_LEAVES, Q15_NEG_ONE
+from ..primitives import NUM_LEAVES, Q15_NEG_ONE, Q15_SCALE
+from ..fixed_rom import HANN_HALF_Q15
+from .rms import rms_from_energy
+from .output_projection import dc_excess_offset, output_feasible, project_output
 
 
 # =============================================================================
@@ -153,9 +157,7 @@ FINE_BAND_SET = {60, 61, 62, 63}  # Default: last 4 leaves (updated for 64 leave
 COARSE_BAND_SET = set(range(0, 60))  # Everything else
 
 # Energy caps (Q30 for squared values before normalization)
-E_LEAF_MAX = 0x40000000       # Per-leaf energy cap (Q30)
-E_FINE_MAX = 0x30000000       # Fine-band total energy cap (Q30)
-E_GLOBAL_MAX = 0x7FFFFFFF     # Global energy cap (max s32)
+from ..tables.coefficient_tail import E_LEAF_MAX, E_FINE_MAX, E_GLOBAL_MAX
 
 # Spectral tilt bounds (fine/coarse ratio limits)
 TILT_R_MIN = 0x0100           # Minimum fine/coarse ratio (avoid all-bass)
@@ -228,31 +230,45 @@ VOICE_STOPPING = 3
 # HANN WINDOW LUT (precomputed for FPGA compatibility)
 # =============================================================================
 
+def _hann_from_rom(position: int, length: int) -> int:
+    """Clamped Hann half-window with exact-ratio, nearest-even interpolation."""
+    position, length = int(position), int(length)
+    if length <= 0:
+        raise ValueError('Hann fade length must be positive')
+    if position <= 0:
+        return 0
+    if position >= length:
+        return Q15_ONE
+    index, fraction = divmod(position * (len(HANN_HALF_Q15) - 1), length)
+    lower, upper = HANN_HALF_Q15[index:index + 2]
+    quotient, remainder = divmod((upper - lower) * fraction, length)
+    if 2 * remainder > length or (2 * remainder == length and quotient & 1):
+        quotient += 1
+    return lower + quotient
+
+
 def _build_hann_lut(n: int) -> List[int]:
-    """Build Hann half-window LUT: 0.5 * (1 - cos(pi * i / n))"""
-    lut = []
-    for i in range(n + 1):
-        # Raised cosine: 0 at i=0, 1 at i=n
-        val = 0.5 * (1.0 - math.cos(math.pi * i / n))
-        lut.append(int(round(val * Q15_ONE)))
-    return lut
+    """Resample the frozen half-window with integer arithmetic."""
+    if n <= 0:
+        raise ValueError('Hann fade length must be positive')
+    return [_hann_from_rom(i, n) for i in range(n + 1)]
 
 # Precomputed Hann window for FADE_LEN samples
-_HANN_FADE_LUT = _build_hann_lut(FADE_LEN)
-_HANN_OLA_LUT = _build_hann_lut(OLA_OVERLAP)
+_HANN_FADE_LUT = tuple(_build_hann_lut(FADE_LEN))
+_HANN_OLA_LUT = tuple(_build_hann_lut(OLA_OVERLAP))
 
 
 def hann_fade_in(n: int, fade_len: int = FADE_LEN) -> int:
     """Returns Q1.15 gain for sample n of fade-in (0..fade_len)."""
+    if fade_len <= 0:
+        raise ValueError('Hann fade length must be positive')
     if n <= 0:
         return 0
     if n >= fade_len:
         return Q15_ONE
     if fade_len == FADE_LEN:
         return _HANN_FADE_LUT[n]
-    # Fallback for non-standard lengths
-    val = 0.5 * (1.0 - math.cos(math.pi * n / fade_len))
-    return int(round(val * Q15_ONE))
+    return _hann_from_rom(n, fade_len)
 
 
 def hann_fade_out(n: int, fade_len: int = FADE_LEN) -> int:
@@ -522,25 +538,25 @@ def compute_local_rms(samples: List[int], center: int, window: int = 16) -> int:
     Returns:
         RMS energy in Q15 scale
     """
-    if not samples:
+    if len(samples) == 0:
         return 0
 
+    if window < 0:
+        raise ValueError('RMS window half-width must be nonnegative')
     start = max(0, center - window)
     end = min(len(samples), center + window)
     n = end - start
 
-    if n == 0:
+    if n <= 0:
         return 0
 
-    # Sum of squares (avoiding overflow)
+    # Preserve all energy bits, including quiet samples. Widen NumPy scalars
+    # before multiplying; signed int16 squares do not fit in int16.
     energy = 0
     for i in range(start, end):
-        s = samples[i]
-        energy += (s * s) >> 16  # Scale down to prevent overflow
-
-    # RMS = sqrt(energy / n), scaled to Q15
-    avg_energy = energy // n
-    return sqrt_q15(min(Q15_ONE, avg_energy))
+        s = int(samples[i])
+        energy += s * s
+    return rms_from_energy(energy, n)
 
 
 def detect_discontinuities_energy_aware(
@@ -572,7 +588,7 @@ def detect_discontinuities_energy_aware(
         return [], False
 
     # Compute block-level RMS
-    block_rms = compute_local_rms(samples, len(samples) // 2, len(samples) // 2)
+    block_rms = compute_local_rms(samples, len(samples) // 2, (len(samples) + 1) // 2)
     is_degenerate = block_rms < energy_floor
 
     discontinuities = []
@@ -720,7 +736,7 @@ def apply_degenerate_hold(
     Returns:
         Processed samples (held/faded if degenerate)
     """
-    block_rms = compute_local_rms(samples, len(samples) // 2, len(samples) // 2)
+    block_rms = compute_local_rms(samples, len(samples) // 2, (len(samples) + 1) // 2)
 
     if block_rms >= energy_floor:
         # Normal energy - pass through
@@ -1345,7 +1361,9 @@ def check_coeff_safe(coeffs: List[int], symbol_tail: SymbolTail = None) -> Coeff
     return symbol_tail.check_invariants(coeffs)
 
 
-def check_audio_safe(audio: List[int], prev_sample: int = 0) -> AudioInvariantResult:
+def check_audio_safe(audio: List[int], prev_sample: int = 0, *,
+                     peak_max: int = PEAK_MAX, slew_max: int = SLEW_MAX,
+                     dc_max: int = DC_MAX) -> AudioInvariantResult:
     """
     Check if audio block satisfies all invariants A1-A3.
 
@@ -1357,26 +1375,28 @@ def check_audio_safe(audio: List[int], prev_sample: int = 0) -> AudioInvariantRe
     """
     result = AudioInvariantResult()
 
-    if not audio:
+    if len(audio) == 0:
         return result
 
     # A1: Peak bound
-    result.peak = max(abs(s) for s in audio)
-    result.a1_peak_ok = result.peak <= PEAK_MAX
+    result.peak = max(abs(int(s)) for s in audio)
+    result.a1_peak_ok = result.peak <= peak_max
 
     # A2: Slew bound (max sample-to-sample change)
     result.max_slew = 0
-    prev = prev_sample
+    prev = int(prev_sample)
     for s in audio:
+        s = int(s)
         slew = abs(s - prev)
         if slew > result.max_slew:
             result.max_slew = slew
         prev = s
-    result.a2_slew_ok = result.max_slew <= SLEW_MAX
+    result.a2_slew_ok = result.max_slew <= slew_max
 
     # A3: DC bound
-    result.dc_offset = sum(audio) // len(audio) if audio else 0
-    result.a3_dc_ok = abs(result.dc_offset) <= DC_MAX
+    total = sum(int(s) for s in audio)
+    result.dc_offset = total // len(audio)  # Diagnostic only; do not round the predicate.
+    result.a3_dc_ok = abs(total) <= len(audio) * dc_max
 
     return result
 
@@ -1430,7 +1450,7 @@ class SafetyEngine:
     This is the audio-space safety layer (Safety Tail).
 
     Processing chain:
-        Input -> Metrics -> RG -> Q -> De-click/OLA -> Slew limit -> Limiter -> DC removal -> Output
+        Input -> Metrics -> RG -> Q -> DC -> Lookahead/soft clip -> Slew -> Safety OLA -> Output
 
     Audio Invariants Enforced:
         A1: Peak bound - max_n |x[n]| ≤ P_max
@@ -1460,7 +1480,9 @@ class SafetyEngine:
             block_size: Samples per block (default 64)
             normalize_curve: Normalization curve for SymbolTail ("pink", "white", "brown")
         """
-        self.B = block_size
+        if isinstance(block_size, bool) or operator.index(block_size) <= 0:
+            raise ValueError('Safety block size must be a positive integer')
+        self.B = operator.index(block_size)
 
         # Regulation state (smoothed)
         self.rg = RGState()
@@ -1468,6 +1490,7 @@ class SafetyEngine:
         # Limiter state
         self.lim_L = LimiterState()
         self.lim_R = LimiterState()
+        self.max_slew = SLEW_MAX
 
         # Q state (slewed gains)
         self.q_gain = Q15_ONE
@@ -1487,6 +1510,8 @@ class SafetyEngine:
         # Slew state (A2 invariant)
         self.prev_sample_L: int = 0
         self.prev_sample_R: int = 0
+        self._last_block_prev_L: int = 0
+        self._last_block_prev_R: int = 0
 
         # Symbol Tail for coefficient-space safety
         self.symbol_tail = SymbolTail(normalize_curve=normalize_curve)
@@ -1685,7 +1710,7 @@ class SafetyEngine:
         # Apply hysteresis
         if was_degenerate:
             # Already in degenerate mode - need higher energy to exit
-            block_rms = compute_local_rms(x, len(x) // 2, len(x) // 2)
+            block_rms = compute_local_rms(x, len(x) // 2, (len(x) + 1) // 2)
             if block_rms > E_FLOOR_HYSTERESIS:
                 is_degenerate = False
             else:
@@ -1777,9 +1802,13 @@ class SafetyEngine:
     # =========================================================================
 
     def apply_master_ola(self, L: List[int], R: List[int]) -> Tuple[List[int], List[int]]:
-        """Apply OLA to mixed stereo output (block boundary smoothing)."""
-        if not self.master_ola_L or len(self.master_ola_L) < OLA_OVERLAP:
-            # First block - just save tail
+        """Blend from the last emitted sample, with exact complementary weights.
+
+        The complete Safety window in step_block jointly constrains this candidate
+        and saves its emitted tail. Replaying an old eight-sample tail would create
+        a new boundary discontinuity.
+        """
+        if not self.master_ola_L:
             self.master_ola_L = list(L[-OLA_OVERLAP:])
             self.master_ola_R = list(R[-OLA_OVERLAP:])
             return L, R
@@ -1788,23 +1817,17 @@ class SafetyEngine:
         outR = list(R)
 
         # Crossfade at block start
-        for i in range(OLA_OVERLAP):
-            fade_out_gain = hann_fade_out(i, OLA_OVERLAP)
-            fade_in_gain = hann_fade_in(i, OLA_OVERLAP)
-
-            # Left channel
-            prev_L = mul_q15_sat(self.master_ola_L[i], fade_out_gain)
-            curr_L = mul_q15_sat(L[i], fade_in_gain)
-            outL[i] = sat16(prev_L + curr_L)
-
-            # Right channel
-            prev_R = mul_q15_sat(self.master_ola_R[i], fade_out_gain)
-            curr_R = mul_q15_sat(R[i], fade_in_gain)
-            outR[i] = sat16(prev_R + curr_R)
+        overlap = min(OLA_OVERLAP, len(L))
+        for i in range(overlap):
+            weight = hann_fade_in(i, overlap)
+            outL[i] = shift_round(int(self.master_ola_L[-1]) * (Q15_SCALE - weight)
+                                 + int(L[i]) * weight, Q15_SHIFT)
+            outR[i] = shift_round(int(self.master_ola_R[-1]) * (Q15_SCALE - weight)
+                                 + int(R[i]) * weight, Q15_SHIFT)
 
         # Save tail for next block
-        self.master_ola_L = list(L[-OLA_OVERLAP:])
-        self.master_ola_R = list(R[-OLA_OVERLAP:])
+        self.master_ola_L = list(outL[-OLA_OVERLAP:])
+        self.master_ola_R = list(outR[-OLA_OVERLAP:])
 
         return outL, outR
 
@@ -1817,24 +1840,26 @@ class SafetyEngine:
         # Peak
         peak = 0
         for i in range(self.B):
-            peak = max(peak, abs(L[i]), abs(R[i]))
+            peak = max(peak, abs(int(L[i])), abs(int(R[i])))
+        peak = min(Q15_ONE, peak)
 
-        # RMS energy (sum of squares, scaled)
+        # Stereo RMS includes both channels once, without pre-shifting squares.
         energy = 0
         for i in range(self.B):
-            energy += (L[i] * L[i] + R[i] * R[i]) >> 16
-        rms = sqrt_q15(min(Q15_ONE, energy // (2 * self.B)))
+            left, right = int(L[i]), int(R[i])
+            energy += left * left + right * right
+        rms = rms_from_energy(energy, 2 * self.B)
 
         # HF energy (simple: sum of sample differences)
         hf = 0
         for i in range(1, self.B):
-            dL = L[i] - L[i-1]
-            dR = R[i] - R[i-1]
+            dL = int(L[i]) - int(L[i-1])
+            dR = int(R[i]) - int(R[i-1])
             hf += (dL * dL + dR * dR) >> 18
         hf_energy = min(Q15_ONE, hf // self.B)
 
         # DC offset (average)
-        dc = sum(L) + sum(R)
+        dc = sum(int(x) for x in L) + sum(int(x) for x in R)
         dc_offset = sat16(dc // (2 * self.B))
 
         # Crest factor (peak / rms)
@@ -1942,39 +1967,28 @@ class SafetyEngine:
     # =========================================================================
 
     def apply_limiter(self, L: List[int], R: List[int]) -> Tuple[List[int], List[int]]:
-        """Apply brick-wall limiter with attack/release."""
+        """Linked block lookahead, gain envelope, then soft anti-clip saturation."""
         outL = []
         outR = []
-
+        ceiling = min(PEAK_MAX, self.LIMIT_CEILING)
+        threshold = min(ceiling, self.LIMIT_THRESHOLD)
+        peak = max(max(abs(int(s)) for s in L), max(abs(int(s)) for s in R))
+        target_gain = min(Q15_ONE, (ceiling << 15) // max(1, peak))
         for i in range(self.B):
-            # Find peak
-            peak = max(abs(L[i]), abs(R[i]))
-
-            # Compute target gain
-            if peak > self.LIMIT_THRESHOLD:
-                # Gain to bring peak to ceiling
-                target_gain = (self.LIMIT_CEILING << 15) // max(1, peak)
-                target_gain = min(Q15_ONE, target_gain)
-            else:
-                target_gain = Q15_ONE
-
-            # Asymmetric slew (fast attack, slow release) - independent per channel
+            # Falling gain is attack, rising gain is release. The lookahead cap
+            # applies immediately, even while the envelope approaches its target.
             self.lim_L.gain = slew_q15_asym(
                 self.lim_L.gain, target_gain,
-                self.ATTACK_RATE, self.RELEASE_RATE
+                self.RELEASE_RATE, self.ATTACK_RATE
             )
             self.lim_R.gain = slew_q15_asym(
                 self.lim_R.gain, target_gain,
-                self.ATTACK_RATE, self.RELEASE_RATE
+                self.RELEASE_RATE, self.ATTACK_RATE
             )
-
-            # Apply gain - use per-channel limiter gain
-            yL = mul_q15_sat(L[i], self.lim_L.gain)
-            yR = mul_q15_sat(R[i], self.lim_R.gain)
-
-            # Final hard clip (should rarely trigger)
-            yL = sat16(yL)
-            yR = sat16(yR)
+            yL = soft_clip_q15(mul_q15_sat(int(L[i]), min(self.lim_L.gain, target_gain)), threshold)
+            yR = soft_clip_q15(mul_q15_sat(int(R[i]), min(self.lim_R.gain, target_gain)), threshold)
+            yL = max(-ceiling, min(ceiling, yL))
+            yR = max(-ceiling, min(ceiling, yR))
 
             outL.append(yL)
             outR.append(yR)
@@ -1982,15 +1996,13 @@ class SafetyEngine:
         return outL, outR
 
     def remove_dc(self, L: List[int], R: List[int]) -> Tuple[List[int], List[int]]:
-        """Remove DC offset."""
-        if abs(self.rg.dc_hat) < 100:
-            return L, R
+        """Remove excess block mean independently per channel before lookahead.
 
-        dc = self.rg.dc_hat
-        outL = [sat16(x - dc) for x in L]
-        outR = [sat16(x - dc) for x in R]
-
-        return outL, outR
+        Keep wide intermediate samples: the next stage scales the entire block
+        into range. The final Safety window rechecks DC after nonlinear stages.
+        """
+        dcL, dcR = dc_excess_offset(L, DC_MAX), dc_excess_offset(R, DC_MAX)
+        return [int(x) - dcL for x in L], [int(x) - dcR for x in R]
 
     # =========================================================================
     # SLEW LIMITER (A2 invariant enforcement)
@@ -2042,12 +2054,13 @@ class SafetyEngine:
 
     def check_audio_safety(self, L: List[int], R: List[int]) -> Tuple[AudioInvariantResult, AudioInvariantResult]:
         """
-        Check audio invariants A1-A3 for both channels.
+        Check the most recently processed block against its preceding output.
 
         Returns: (left_result, right_result)
         """
-        result_L = check_audio_safe(L, self.prev_sample_L if hasattr(self, 'prev_sample_L') else 0)
-        result_R = check_audio_safe(R, self.prev_sample_R if hasattr(self, 'prev_sample_R') else 0)
+        limits = dict(peak_max=min(PEAK_MAX, self.LIMIT_CEILING), slew_max=self.max_slew)
+        result_L = check_audio_safe(L, self._last_block_prev_L, **limits)
+        result_R = check_audio_safe(R, self._last_block_prev_R, **limits)
         return result_L, result_R
 
     # =========================================================================
@@ -2062,7 +2075,7 @@ class SafetyEngine:
         """
         Full safety processing chain (Safety Tail).
 
-        Chain: Metrics -> RG -> Q -> Master OLA -> Slew Limit -> Limiter -> DC removal
+        Chain: Metrics -> RG -> Q -> DC -> Lookahead/soft clip -> Slew -> Safety OLA
 
         IMPORTANT: Safety Tail handles BLOCK BOUNDARY artifacts only.
         Musical transitions (note changes, coefficient morphing) are handled
@@ -2084,7 +2097,30 @@ class SafetyEngine:
             apply_dc_removal: Apply DC offset removal. Disable for phase-continuous
                               carrier signals that are zero-mean over full cycles.
         """
-        if _tail_jit_active() and len(L) == self.B and len(R) == self.B:
+        # Validate before any regulator/history mutation, including short blocks
+        # whose previous output makes simultaneous slew/DC constraints impossible.
+        if len(L) != self.B or len(R) != self.B:
+            raise ValueError('Safety requires two complete blocks of the configured size')
+        L = [operator.index(s) for s in L]
+        R = [operator.index(s) for s in R]
+        if any(s < Q15_NEG_ONE or s > Q15_ONE for s in L + R):
+            raise ValueError('Safety input must contain int16 audio samples')
+        if not 0 <= operator.index(params.K_mode) <= 3:
+            raise ValueError('Safety K_mode must be in 0..3')
+        ceiling = min(PEAK_MAX, self.LIMIT_CEILING)
+        if not 0 <= self.LIMIT_THRESHOLD <= Q15_ONE or not 0 < ceiling <= PEAK_MAX:
+            raise ValueError('Invalid Safety limiter threshold/ceiling')
+        if (isinstance(self.max_slew, bool) or not isinstance(self.max_slew, int)
+                or not 0 <= self.max_slew <= SLEW_MAX):
+            raise ValueError('Safety maximum slew must be an integer within the normative bound')
+        slew = self.max_slew if apply_slew_limit else -1
+        dc = DC_MAX if apply_dc_removal else -1
+        anchor = bool(apply_master_ola and self.master_ola_L)
+        if not all(output_feasible(p, self.B, ceiling, slew, dc, anchor)
+                   for p in (self.prev_sample_L, self.prev_sample_R)):
+            raise ValueError('Safety output constraints are infeasible for this block/history')
+        self._last_block_prev_L, self._last_block_prev_R = self.prev_sample_L, self.prev_sample_R
+        if _tail_jit_active():
             return self._step_block_jit(L, R, params, apply_master_ola,
                                         apply_slew_limit, apply_dc_removal)
 
@@ -2097,24 +2133,23 @@ class SafetyEngine:
         # 3) Apply Q (gain + HF control)
         Lq, Rq = self.apply_q(L, R, params.K_mode)
 
-        # 4) Apply master OLA (block boundary smoothing on mixed output)
+        # Normative audio-tail order: DC, lookahead + soft clip, slew, Safety OLA.
+        if apply_dc_removal:
+            Lq, Rq = self.remove_dc(Lq, Rq)
+        Lq, Rq = self.apply_limiter(Lq, Rq)
+        if apply_slew_limit:
+            Lq, Rq, _, _ = self.apply_slew_limit(
+                Lq, Rq, self.prev_sample_L, self.prev_sample_R, self.max_slew
+            )
         if apply_master_ola:
             Lq, Rq = self.apply_master_ola(Lq, Rq)
-
-        # 5) Apply slew limit (A2 invariant - final safety net after all processing)
-        if apply_slew_limit:
-            Lq, Rq, self.prev_sample_L, self.prev_sample_R = self.apply_slew_limit(
-                Lq, Rq, self.prev_sample_L, self.prev_sample_R
-            )
-
-        # 6) Apply limiter (A1 invariant)
-        Lo, Ro = self.apply_limiter(Lq, Rq)
-
-        # 7) Remove DC (A3 invariant)
-        # Skip for phase-continuous signals (sine waves have zero-mean over full cycles)
-        if apply_dc_removal:
-            Lo, Ro = self.remove_dc(Lo, Ro)
-
+        # Joint projection is part of the final window: it retains the anchored
+        # first sample and cannot undo peak, slew, or DC safety. Nothing follows.
+        Lo = project_output(Lq, self.prev_sample_L, ceiling, slew, dc, anchor).tolist()
+        Ro = project_output(Rq, self.prev_sample_R, ceiling, slew, dc, anchor).tolist()
+        self.prev_sample_L, self.prev_sample_R = Lo[-1], Ro[-1]
+        self.master_ola_L = Lo[-OLA_OVERLAP:]
+        self.master_ola_R = Ro[-OLA_OVERLAP:]
         return Lo, Ro
 
     def _step_block_jit(self, L: List[int], R: List[int], params: ParamFrame,
@@ -2129,7 +2164,8 @@ class SafetyEngine:
         from . import safety_tail_jit as stj
 
         n = self.B
-        primed = 1 if (self.master_ola_L and len(self.master_ola_L) >= OLA_OVERLAP) else 0
+        overlap = min(OLA_OVERLAP, n)
+        primed = int(bool(self.master_ola_L))
         st = np.array([
             self.rg.E_hat, self.rg.HF_hat, self.rg.peak_hat, self.rg.dc_hat,
             self.q_gain, self.q_hf_cut,
@@ -2138,11 +2174,11 @@ class SafetyEngine:
             primed, self.alpha,
         ], dtype=np.int64)
         if primed:
-            tail_L = np.array(self.master_ola_L[-OLA_OVERLAP:], dtype=np.int64)
-            tail_R = np.array(self.master_ola_R[-OLA_OVERLAP:], dtype=np.int64)
+            tail_L = np.array(self.master_ola_L[-overlap:], dtype=np.int64)
+            tail_R = np.array(self.master_ola_R[-overlap:], dtype=np.int64)
         else:
-            tail_L = np.zeros(OLA_OVERLAP, dtype=np.int64)
-            tail_R = np.zeros(OLA_OVERLAP, dtype=np.int64)
+            tail_L = np.zeros(overlap, dtype=np.int64)
+            tail_R = np.zeros(overlap, dtype=np.int64)
         flags = ((stj.FLAG_MASTER_OLA if apply_master_ola else 0)
                  | (stj.FLAG_SLEW_LIMIT if apply_slew_limit else 0)
                  | (stj.FLAG_DC_REMOVAL if apply_dc_removal else 0))
@@ -2151,10 +2187,11 @@ class SafetyEngine:
 
         stj.safety_tail_step(
             np.asarray(L, dtype=np.int64), np.asarray(R, dtype=np.int64), n, st, flags,
-            int(params.K_mode), _E_TARGETS_ARR, _HF_BUDGETS_ARR, _SQRT_LUT_ARR, _HANN_OLA_ARR,
+            int(params.K_mode), _E_TARGETS_ARR, _HF_BUDGETS_ARR, _SQRT_LUT_ARR,
+            _HANN_OLA_ARR if overlap == OLA_OVERLAP else np.array(_build_hann_lut(overlap), dtype=np.int64),
             tail_L, tail_R,
-            self.LIMIT_THRESHOLD, self.LIMIT_CEILING, self.ATTACK_RATE, self.RELEASE_RATE,
-            SLEW_MAX, OLA_OVERLAP, outL, outR,
+            self.LIMIT_THRESHOLD, min(PEAK_MAX, self.LIMIT_CEILING), self.ATTACK_RATE, self.RELEASE_RATE,
+            self.max_slew, DC_MAX, overlap, outL, outR,
         )
 
         self.rg.E_hat = int(st[stj.ST_E_HAT])
@@ -2167,9 +2204,8 @@ class SafetyEngine:
         self.prev_sample_R = int(st[stj.ST_PREV_R])
         self.lim_L.gain = int(st[stj.ST_LIM_L])
         self.lim_R.gain = int(st[stj.ST_LIM_R])
-        if apply_master_ola:
-            self.master_ola_L = tail_L.tolist()
-            self.master_ola_R = tail_R.tolist()
+        self.master_ola_L = tail_L.tolist()
+        self.master_ola_R = tail_R.tolist()
         return outL.tolist(), outR.tolist()
 
     def _step_block_with_voices_jit(self, voice_blocks, params: ParamFrame) -> Tuple[List[int], List[int]]:

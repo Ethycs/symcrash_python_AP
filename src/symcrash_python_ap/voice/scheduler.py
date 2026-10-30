@@ -174,7 +174,7 @@ class VoiceSelector:
         budget = min(b_compute, b_mem)
         if C_TAIL_VOICE <= 0:
             return self.v_max
-        return min(budget // C_TAIL_VOICE, self.v_max)
+        return max(0, min(budget // C_TAIL_VOICE, self.v_max))
 
     def select_voices(
         self,
@@ -208,6 +208,10 @@ class VoiceSelector:
             scanned += 1
             pos = (pos + 1) % self.v_max
 
+        # The count-only scan must not move the selection cursor; otherwise
+        # it wraps a full ring and starves the voices beyond the service cap.
+        self.cursor_fg = pos
+
         # Count remaining eligible voices we didn't get to
         while scanned < self.v_max:
             frame = frames[pos] if pos < len(frames) else None
@@ -215,9 +219,6 @@ class VoiceSelector:
                 eligible_count += 1
             scanned += 1
             pos = (pos + 1) % self.v_max
-
-        # Update cursor to next position after last scanned
-        self.cursor_fg = pos
 
         return serviced, eligible_count
 

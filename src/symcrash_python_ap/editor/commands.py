@@ -329,14 +329,19 @@ class RemoveRegime(EditorCommand):
             t for t in l2.transitions
             if t.from_regime == self.regime_id or t.to == self.regime_id
         ]
+        transition_indices = [i for i, t in enumerate(l2.transitions)
+                              if t.from_regime == self.regime_id or t.to == self.regime_id]
         
         removed_edges = []
+        edge_indices = []
         if l2.regime_graph_spec is not None:
             removed_edges = [
                 e for e in l2.regime_graph_spec.edges
                 if e.src_regime == self.regime_id or e.dst_regime == self.regime_id
                    or (e.src_regime == "any" and e.dst_regime == self.regime_id)
             ]
+            edge_indices = [i for i, e in enumerate(l2.regime_graph_spec.edges)
+                            if e.src_regime == self.regime_id or e.dst_regime == self.regime_id]
 
         # Store envelope overrides if present
         removed_env_override = l2.envelope_overrides.pop(self.regime_id, None)
@@ -364,7 +369,9 @@ class RemoveRegime(EditorCommand):
                 "regime_node": regime_node,
                 "regime_index": regime_index,
                 "removed_transitions": removed_transitions,
+                "transition_indices": transition_indices,
                 "removed_edges": removed_edges,
+                "edge_indices": edge_indices,
                 "removed_env_override": removed_env_override,
             }
         )
@@ -373,9 +380,11 @@ class RemoveRegime(EditorCommand):
         l2 = ir.layers.L2_regimes
         # Insert at original position
         l2.regime_nodes.insert(undo_data["regime_index"], undo_data["regime_node"])
-        l2.transitions.extend(undo_data["removed_transitions"])
+        for index, transition in zip(undo_data["transition_indices"], undo_data["removed_transitions"]):
+            l2.transitions.insert(index, transition)
         if l2.regime_graph_spec is not None:
-            l2.regime_graph_spec.edges.extend(undo_data["removed_edges"])
+            for index, edge in zip(undo_data["edge_indices"], undo_data["removed_edges"]):
+                l2.regime_graph_spec.edges.insert(index, edge)
         if undo_data["removed_env_override"] is not None:
             l2.envelope_overrides[self.regime_id] = undo_data["removed_env_override"]
         return EditorResult.success(f"Restored regime '{self.regime_id}'")

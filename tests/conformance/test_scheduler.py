@@ -153,8 +153,8 @@ class TestVoiceSelector:
 
         selector.select_voices(frames, 1)
 
-        # After scanning all 128 voices, cursor wraps to starting position
-        assert selector.cursor_fg == 0
+        # Eligibility telemetry must not undo the selection cursor advance.
+        assert selector.cursor_fg == 1
 
     def test_v_serviced_limit(self):
         """Should respect V_serviced limit."""

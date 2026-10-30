@@ -46,6 +46,7 @@ from symcrash_python_ap.primitives import (
     SAMPLE_RATE_HZ as FS,
     BLOCK_SIZE,
     BLOCK_RATE_HZ as BLOCKS_PER_SEC,
+    Q15_ONE,
     ms_to_blocks,
 )
 
@@ -149,8 +150,8 @@ def _render_voice(
     """
     # One shared frame builder (voice/frame_builder.py) owns all
     # per-block frame construction; this function keeps only the offline
-    # timeline (total blocks), the L2 regime/risk state machine, and the
-    # VM stepping loop.
+    # timeline (total blocks), risk inputs and the VM stepping loop. The
+    # builder executes the same authored L2 graph as native preset playback.
     builder = IRFrameBuilder(
         ir, note, velocity_q15,
         cents_offset=cents_offset, noise_seed_xor=noise_seed_xor,
@@ -165,8 +166,6 @@ def _render_voice(
 
     # Regime info
     regimes = get_regime_info(ir)
-    current_regime = "R2_STABLE"  # Start in stable after attack
-    regime_dwell = 0
 
     # Create VM state
     state = VMState.create(voice_id=0)
@@ -201,54 +200,7 @@ def _render_voice(
                 if block_idx >= ridx:
                     risk_value = rval
 
-        # L2 regime machine drives emission when present; otherwise the
-        # builder maps the ADSR phase to an emit template (simple form).
-        ops_enable = None
-        families = None
-        if regimes:
-            ops_enable = []
-            families = {}
-
-            # Simple state machine: STABLE <-> GLITCH based on risk
-            if risk_value > 0.7 and "GLITCH" not in current_regime:
-                current_regime = "R3_GLITCH"
-                regime_dwell = 0
-                print(f"  Block {block_idx}: -> GLITCH (risk={risk_value:.2f})")
-            elif current_regime == "R3_GLITCH":
-                regime_dwell += 1
-                # Find dwell time for glitch
-                glitch_dwell_ms = 80
-                for r_id, r_kind, r_template, r_dwell in regimes:
-                    if "GLITCH" in r_id and r_dwell:
-                        glitch_dwell_ms = r_dwell
-                if regime_dwell > ms_to_blocks(glitch_dwell_ms):
-                    current_regime = "R4_RECOVERY"
-                    regime_dwell = 0
-                    print(f"  Block {block_idx}: -> RECOVERY")
-            elif current_regime == "R4_RECOVERY":
-                regime_dwell += 1
-                recovery_dwell_ms = 60
-                for r_id, r_kind, r_template, r_dwell in regimes:
-                    if "RECOVERY" in r_id and r_dwell:
-                        recovery_dwell_ms = r_dwell
-                if regime_dwell > ms_to_blocks(recovery_dwell_ms):
-                    current_regime = "R2_STABLE"
-                    regime_dwell = 0
-                    print(f"  Block {block_idx}: -> STABLE")
-
-            # Get template for current regime
-            template_name = None
-            for r_id, r_kind, r_template, r_dwell in regimes:
-                if r_id == current_regime or r_kind.upper() in current_regime.upper():
-                    template_name = r_template
-                    break
-
-            if template_name:
-                template = get_emit_template(ir, template_name)
-                ops_enable = template['ops_enable']
-                families = template['families']
-
-        frame = builder.build(clock, ops_enable=ops_enable, families=families)
+        frame = builder.build(clock, event_inputs={'risk': round(risk_value * Q15_ONE)})
         if frame_transform is not None:
             frame = frame_transform(frame)
 

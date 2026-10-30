@@ -163,14 +163,15 @@ class ControlRegistry:
 
 def slew_nblock(current: int, target: int, n: int) -> int:
     """
-    Linear ramp over n blocks.
+    One integer step of a linear ramp with n blocks remaining.
 
-    Guaranteed to reach target in exactly n blocks (worst case).
+    The caller decrements n after each step and resets it on a new target.
+    Reusing a constant n would instead produce an exponential approach.
 
     Args:
         current: Current value
         target: Target value
-        n: Number of blocks to ramp over
+        n: Number of blocks remaining (positive)
 
     Returns:
         Next value

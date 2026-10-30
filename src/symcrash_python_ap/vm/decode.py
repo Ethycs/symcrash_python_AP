@@ -14,10 +14,11 @@ from .tables import (
     get_tail_ops, get_pattern_for_k, popcount32,
     BLOCK_SAMPLES,
 )
-from ..primitives import Q15_HALF, Q15_ONE
+from ..primitives import Q15_HALF, Q15_ONE, Q15_SCALE
 
 if TYPE_CHECKING:
-    from ..frames import VoiceFrame
+    from ..frames import CMMMEventPayload, VoiceFrame
+    from ..tables.coefficient_tail import CoefficientTailPolicy
 
 
 # =============================================================================
@@ -98,8 +99,12 @@ class CoeffOscParams:
     sync_enabled: bool = False    # Enable hard sync
     fm_depth_q15: int = 0         # FM modulation depth (Q15)
     fm_source: int = 0            # FM modulator source (0=off, 1=feedback, 2=lfo)
+    fm_modulator_q15: Optional[List[int]] = None
+    harmonic_gains_q15: Optional[List[int]] = None
+    harmonic_gain_bound_q15: int = Q15_SCALE
     unison_voices: int = 1        # Number of unison voices (1=mono)
     unison_spread_cents: int = 0  # Unison detune spread in cents
+    osc_start_phase_q32: Optional[int] = None
     drone_mode: bool = False      # Drone/Pad mode (reduces base_mix for slow evolution)
     legato_mode: bool = False     # Legato mode (preserve phase/coefficients on pitch change)
     custom_harmonics: list = None # Custom harmonic amplitudes (Q15) - overrides waveform_type
@@ -111,7 +116,7 @@ class CoeffOscParams:
 # FM modulator source constants (Phase 3)
 FM_SOURCE_OFF = 0       # No FM modulation
 FM_SOURCE_FEEDBACK = 1  # Operator feedback (DX-style)
-FM_SOURCE_LFO = 2       # LFO (future)
+FM_SOURCE_LFO = 2       # Voice-owned LFO lane samples
 
 
 # =============================================================================
@@ -132,6 +137,8 @@ class DecodedPlan:
     # Tail operators
     tail_mode: TailMode = TailMode.FULL
     tail_ops: List[int] = field(default_factory=lambda: [2, 11, 23])
+    tail_policy: Optional['CoefficientTailPolicy'] = None
+    traction_q15: int = Q15_ONE
 
     # Tree parameters
     tree_a: int = 0
@@ -159,6 +166,14 @@ class DecodedPlan:
 
     # Event instructions (active event lanes)
     event_instrs: List[EventEntry] = field(default_factory=list)
+    cmmm_events: Optional['CMMMEventPayload'] = None
+    wire_events: tuple = ()
+    wire_version: int = 0
+    wire_frame_seq: int = 0
+    wire_tail_ops: list = field(default_factory=list)
+    wire_family_weights_q15: tuple = ()
+    execution_policy: object = None
+    execution_report: object = None
 
     # IDWPT enable
     idwpt_enable: bool = True
@@ -242,6 +257,7 @@ def decode_frame(
     else:
         plan.tail_mode = TailMode.FULL
     plan.tail_ops = tables.get_tail_ops(plan.tail_mode)
+    plan.tail_policy = getattr(frame, 'tail_policy', None)
 
     # -------------------------------------------------------------------------
     # Tree parameters
@@ -258,6 +274,15 @@ def decode_frame(
 
     note = getattr(frame, 'note', 60)
     cents = getattr(frame, 'cents', 0)
+    wire = getattr(frame, 'wire_data', None)
+    if wire is not None:
+        plan.wire_version = wire.version
+        plan.wire_family_weights_q15 = wire.family_weights_q15
+        if wire.carrier is not None:
+            cents += wire.carrier.detune_cents + wire.carrier.pitchbend_cents
+    elif getattr(frame, 'event_commands', None) is not None:
+        plan.wire_version = frame.event_commands.version
+        plan.wire_family_weights_q15 = (Q15_ONE,) * 8
     phase_inc = midi_to_phase_inc_fixed(note, cents)
 
     # Keep f0_hz for compatibility/display (but don't use for phase_inc)
@@ -303,15 +328,40 @@ def decode_frame(
 
     # Extract Mode B parameters from VoiceFrame (WSE-STD-210 Section 10.2)
     osc_mode = getattr(frame, 'coeff_osc_mode', 0) or 0
-    H_request = getattr(frame, 'H_request', 16) or 16
+    H_request = getattr(frame, 'H_request', 16)
+    if osc_mode == 1:
+        from .carrier_spectrum import validate_spectrum
+        validate_spectrum(frame)
     waveform_type = getattr(frame, 'waveform_type', 0) or 0
-    pwm_width_q15 = getattr(frame, 'pwm_width_q15', Q15_HALF) or Q15_HALF
+    pwm_width_q15 = getattr(frame, 'pwm_width_q15', Q15_HALF)
+    if pwm_width_q15 is None:
+        pwm_width_q15 = Q15_HALF
     pwm_enabled = getattr(frame, 'pwm_enabled', False)
     sync_enabled = getattr(frame, 'sync_enabled', False)
-    fm_depth_q15 = getattr(frame, 'fm_depth_q15', 0) or 0
-    fm_source = getattr(frame, 'fm_source', 0) or 0
+    fm_depth_q15 = getattr(frame, 'fm_depth_q15', 0)
+    fm_source = getattr(frame, 'fm_source', 0)
+    if type(fm_depth_q15) is not int or not 0 <= fm_depth_q15 <= Q15_ONE:
+        raise ValueError('FM depth must be an integer Q15 fraction of a turn')
+    if type(fm_source) is not int or fm_source not in (FM_SOURCE_OFF, FM_SOURCE_FEEDBACK, FM_SOURCE_LFO):
+        raise ValueError('Unknown FM modulation source')
+    fm_modulator = getattr(frame, 'fm_modulator_q15', None)
+    if fm_modulator is not None:
+        from .phase_modulation import modulation_lanes_q15
+        from .tables import VM_K
+        fm_modulator = modulation_lanes_q15(fm_modulator, VM_K).tolist()
     unison_voices = getattr(frame, 'unison_voices', 1) or 1
     unison_spread_cents = getattr(frame, 'unison_spread_cents', 0) or 0
+    osc_start_phase = getattr(frame, 'osc_start_phase_q32', None)
+    harmonic_gains = getattr(frame, 'harmonic_gains_q15', None)
+    harmonic_bound = getattr(frame, 'harmonic_gain_bound_q15', Q15_SCALE)
+    from .spectral_modulation import validate_harmonic_gains
+    validate_harmonic_gains(harmonic_gains, harmonic_bound)
+    if harmonic_gains is not None and osc_mode != 1:
+        raise ValueError('Native harmonic modulation requires Mode B')
+    if osc_start_phase is not None and (type(osc_start_phase) is not int or not 0 <= osc_start_phase <= 0xffffffff):
+        raise ValueError('Oscillator start phase must be unsigned Q32')
+    if osc_start_phase is not None and osc_mode not in (0, 1, 3):
+        raise ValueError('Native oscillator start phase supports Mode A, Mode B and FM6')
     drone_mode = getattr(frame, 'drone_mode', False)
     legato_mode = getattr(frame, 'legato_mode', False)
 
@@ -341,8 +391,12 @@ def decode_frame(
         sync_enabled=sync_enabled,
         fm_depth_q15=fm_depth_q15,
         fm_source=fm_source,
+        fm_modulator_q15=fm_modulator,
+        harmonic_gains_q15=None if harmonic_gains is None else list(harmonic_gains),
+        harmonic_gain_bound_q15=harmonic_bound,
         unison_voices=unison_voices,
         unison_spread_cents=unison_spread_cents,
+        osc_start_phase_q32=osc_start_phase,
         drone_mode=drone_mode,
         legato_mode=legato_mode,
         custom_harmonics=custom_harmonics,
@@ -350,6 +404,22 @@ def decode_frame(
         oeis_sequence_id=oeis_sequence_id,
         oeis_rolloff_db=oeis_rolloff_db,
     )
+
+    if wire is not None and wire.carrier is not None:
+        from .waveform_matrix import WaveformType
+        c = wire.carrier
+        # Wire and oscillator waveform enum values are deliberately different.
+        model_map = {0: WaveformType.SINE, 1: WaveformType.SAW,
+                     2: WaveformType.PULSE, 3: WaveformType.TRIANGLE}
+        if c.model in model_map:
+            plan.coeff_osc_params.osc_mode = 1
+            plan.coeff_osc_params.waveform_type = model_map[c.model]
+            plan.coeff_osc_params.custom_harmonics = None
+            plan.coeff_osc_params.pwm_enabled = c.model == 2
+            plan.coeff_osc_params.pwm_width_q15 = c.pulse_width_q15
+        elif c.model == 4:
+            plan.coeff_osc_params.osc_mode = 1
+        plan.coeff_osc_params.legato_mode = c.transition in (1, 2) or legato_mode
 
     # Check if we should use CCS path (using fast on-demand table generation)
     plan.use_coeff_osc = getattr(frame, 'use_coeff_osc', True)
@@ -365,6 +435,10 @@ def decode_frame(
         plan.carrier_role = CarrierRole.AUDIBLE  # Carrier-only, but still audible
     else:
         plan.carrier_role = CarrierRole.AUDIBLE
+
+    if wire is not None and wire.carrier is not None:
+        plan.carrier_role = {0: CarrierRole.OFF, 1: CarrierRole.AUDIBLE,
+                             2: CarrierRole.EXCITER_ONLY}[wire.carrier.role]
 
     # -------------------------------------------------------------------------
     # Eta (dry/wet) ramping
@@ -390,7 +464,13 @@ def decode_frame(
             # Get operator ID from name
             op_id = _op_name_to_id(op_name)
             if op_id is not None:
-                strength = int(max(0.0, min(1.0, _op_strength(op_name, families))) * Q15_ONE)
+                strength = (wire_op_strength(op_id, wire.family_weights_q15) if wire is not None
+                            else int(max(0.0, min(1.0, _op_strength(op_name, families))) * Q15_ONE))
+                exact = getattr(frame, 'operator_strengths_q15', None)
+                if wire is None and exact is not None:
+                    strength = exact[op_name]
+                    if type(strength) is not int or not 0 <= strength <= Q15_ONE:
+                        raise ValueError('Native operator strength must be Q15')
                 plan.backbone_instrs.append(BackboneEntry(
                     op_id=op_id,
                     strength_q15=strength,
@@ -399,11 +479,13 @@ def decode_frame(
     # Alternative: backbone_ops as list of IDs
     if hasattr(frame, 'backbone_ops') and frame.backbone_ops:
         for op_id in frame.backbone_ops:
-            plan.backbone_instrs.append(BackboneEntry(op_id=op_id))
+            strength = wire_op_strength(op_id, wire.family_weights_q15) if wire is not None else Q15_ONE
+            plan.backbone_instrs.append(BackboneEntry(op_id=op_id, strength_q15=strength))
 
     # -------------------------------------------------------------------------
     # Event instructions
     # -------------------------------------------------------------------------
+    plan.cmmm_events = getattr(frame, 'cmmm_events', None)
     if hasattr(frame, 'event_mask') and frame.event_mask:
         event_mask = frame.event_mask
         event_strengths = getattr(frame, 'event_strength_q15', [Q15_ONE] * 8) or [Q15_ONE] * 8
@@ -522,6 +604,29 @@ _OP_FAMILY_SLOT = {
 }
 
 
+_OP_ID_CANONICAL = {_op_name_to_id(name): name for name in _OP_FAMILY_SLOT}
+
+
+def _canonical_op_name(op_name: str) -> str:
+    return _OP_ID_CANONICAL.get(_op_name_to_id(op_name), op_name)
+
+
+def scale_operator_families(ops, families, scales):
+    """Multiply enabled operators by explicit VM family-slot Q15 controls.
+
+    Preserve authored per-operator weights and leave safety/TAIL ops alone.
+    The returned mapping belongs to this frame, never to the preset.
+    """
+    result = dict(families) if isinstance(families, dict) else {}
+    for name in ops:
+        slot = _OP_FAMILY_SLOT.get(_canonical_op_name(name))
+        strength = _op_strength(name, families)
+        if slot in scales:
+            strength *= scales[slot] / 32767.0
+        result[name] = strength
+    return result
+
+
 def _op_strength(op_name: str, families) -> float:
     """
     Resolve an enabled operator's strength from the frame's family weights.
@@ -535,7 +640,12 @@ def _op_strength(op_name: str, families) -> float:
     if isinstance(families, dict):
         if op_name in families:
             return float(families[op_name])  # direct per-op override
-        slot = _OP_FAMILY_SLOT.get(op_name)
+        op_id = _op_name_to_id(op_name)
+        if op_id is not None:
+            for name, weight in families.items():
+                if isinstance(name, str) and _op_name_to_id(name) == op_id:
+                    return float(weight)
+        slot = _OP_FAMILY_SLOT.get(_canonical_op_name(op_name))
         if slot is not None:
             total = None
             for name, weight in families.items():
@@ -545,7 +655,7 @@ def _op_strength(op_name: str, families) -> float:
                 return min(1.0, total)
         return 1.0
     if isinstance(families, (list, tuple)) and families:
-        slot = _OP_FAMILY_SLOT.get(op_name)
+        slot = _OP_FAMILY_SLOT.get(_canonical_op_name(op_name))
         if slot is not None and slot < len(families):
             value = families[slot]
             if isinstance(value, int) and value > 1:
@@ -553,6 +663,14 @@ def _op_strength(op_name: str, families) -> float:
             return float(value)
         return 1.0
     return 1.0
+
+
+def wire_op_strength(op_id: int, weights: tuple) -> int:
+    """Keep the packet's family bus integer-exact, including 0 and 1."""
+    from ..primitives import OPERATOR_TABLE
+    name = OPERATOR_TABLE[op_id].name
+    slot = _OP_FAMILY_SLOT.get(name)
+    return weights[slot] if slot is not None else Q15_ONE
 
 
 __all__ = [

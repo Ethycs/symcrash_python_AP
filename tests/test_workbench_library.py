@@ -29,12 +29,17 @@ from symcrash_python_ap.paths import PRESET_INSTRUMENTS_DIR  # noqa: E402
 
 PRESET_DIR = PRESET_INSTRUMENTS_DIR
 
-# Pre-change golden SHA256 of 0.5 s mono streams (note 60, fresh session).
-# Captured on the legacy mono path BEFORE the noise/unison/stereo work:
-# proves the mono path is still bit-exact after it.
+# Golden SHA256 of 0.5 s mono streams (note 60, fresh session).
+# String pad refreshed 2026-10-30 for corrected IntraMix/GluePair arithmetic.
+# The old kernels reproduce its former hash; corrected Python and JIT agree.
+# Audit: artifacts/regen_reports/operator_math_20261030.txt. FM is unchanged.
+# String pad refreshed again 2026-10-30 for consistent capped Mode B2 synthesis.
+# The former matrix generator reproduces the old hash; independent weight laws
+# and Fraction coefficients reproduce the new Python/JIT stream. See
+# artifacts/regen_reports/carrier_spectrum_20261030.txt. FM remains unchanged.
 GOLDEN_MONO = {
     "string_pad_v0":
-        "7fb3844585025cea84e0ef3eb1c214a8f0dd8a33121100f9d258ccf52f099a5d",
+        "e9364a814acab013b10ab1715402231b664ab4ae76fb12d5b754dee2a281c268",
     "dx_marimba_v0":
         "7a549167a0fb5bb7f461aa265ff624a375dd551921c3715c8b11d2b724b59eac",
 }
@@ -62,8 +67,7 @@ def make_session(tmp_path):
 
 @pytest.mark.parametrize("name", sorted(GOLDEN_MONO))
 def test_mono_stream_bit_exact(make_session, name):
-    """Mono presets (no noise, no unison) render bit-exactly as before
-    the noise/unison work: 1-D output, golden hash match."""
+    """Mono presets retain 1-D output and the reviewed numeric baseline."""
     voice = StreamingVoice(make_session(name))
     voice.note_on(60)
     audio = voice.render_seconds(0.5)

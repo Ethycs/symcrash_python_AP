@@ -1,0 +1,33 @@
+Preset Safety routing audit, 2026-10-30
+48 blocks per note; stereo native VM carrier; K=3; host Material bypassed.
+Baseline reproduced by restoring the captured host output method and its prior limits.
+Corrected host Python/JIT audio and measured limits match exactly.
+Default host profile: peak <=32000, slew <=2000, DC/OLA off for CCS.
+A block mean exceeding 2048 is expected when DC correction is disabled.
+Independent routing tests cover authored all-on constraints and every SynthMaster loading path.
+No existing VM/Workbench/Material audio golden was regenerated.
+
+Note 24:
+  max abs mean 2048.0 -> 23065.78125
+  max slew 1225 -> 195
+  changed blocks 48/48
+  old SHA256 33f364dc14c6b9ff9c2896f5865613d29cac2054996cbc1339ba6d68a6a1c5a4
+  new SHA256 8363600be4a3e10972a63580dfec98cff8b0a068f1f9392c0623adacdf874364
+Note 48:
+  max abs mean 2047.984375 -> 22022.53125
+  max slew 5281 -> 506
+  changed blocks 48/48
+  old SHA256 39fc0fae2c0e4e4505f1ee6d901eb4fdb26a42cd82c207de85ca24507020b43c
+  new SHA256 89487ad4a86c73b14be32281c028ccd534df8d60b5418cce6d423b3d6a5d7c7f
+Note 69:
+  max abs mean 2047.953125 -> 12101.625
+  max slew 2537 -> 1349
+  changed blocks 48/48
+  old SHA256 924595f60e6809ee02e5ab3e0f9fd941f402d2b2daa681ccd6e5e84bae371cfb
+  new SHA256 77e01d95873da058909a1f30b9d7790bf572d363416e67841113912641e82126
+Note 96:
+  max abs mean 618.28125 -> 1845.078125
+  max slew 8192 -> 2000
+  changed blocks 48/48
+  old SHA256 7c80afab80c14c6bf39ee0f0dd4349710f8112c7f1fbd8138053965887593de9
+  new SHA256 54e672267d22c02bf9b5f2f920bef0bedea1ffc7327b17a7ec6509ad7c4a92ec

@@ -898,7 +898,9 @@ class SeparatedWaveletProcessor:
         Returns:
             64 leaf coefficients (int16 range)
         """
-        for i in range(min(len(samples), self.block_size)):
+        if len(samples) != self.block_size:
+            raise ValueError('FWPT requires exactly one complete input block')
+        for i in range(self.block_size):
             self._input_buf[i] = samples[i]
 
         _fwpt_jit_core(
@@ -964,6 +966,8 @@ def fwpt_jit(samples: List[int], headroom_bits: int = 1) -> List[int]:
     Returns:
         64 leaf coefficients (int16 range)
     """
+    if len(samples) != 64:
+        raise ValueError('FWPT requires exactly 64 input samples')
     if NUMBA_AVAILABLE:
         return _get_separated_processor().fwpt(samples, headroom_bits)
     else:

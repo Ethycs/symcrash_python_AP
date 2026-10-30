@@ -27,6 +27,11 @@ from ..primitives import Q15_ONE, Q15_HALF, clamp_q15, iter_active_nodes
 
 # JIT hot-path kernels (bit-exact, switchable; see vm/hotpath_jit.py)
 from . import hotpath_jit as _hot
+from .pressure import PRESSURE_NODE_DELTAS_Q15, FOLD_NODE_DELTAS_Q15
+from .coefficient_tail import apply_coefficient_tail
+from ..tables.coefficient_tail import CCS_MAX_RMS_Q15
+from ..tables.sine_quarter import SINE_QUARTER_Q15
+from ..fixed_rom import WET_OLA_IN_Q15, WET_OLA_OUT_Q15
 
 
 # =============================================================================
@@ -142,9 +147,8 @@ def _init_qw_table() -> np.ndarray:
     """Initialize quarter-wave sine table (lazy)."""
     global _QW_TABLE
     if _QW_TABLE is None:
-        # Generate quarter-wave sine [0, pi/2]
-        angles = np.linspace(0, np.pi / 2, _QW_SIZE + 1)
-        _QW_TABLE = (np.sin(angles) * Q15_ONE).astype(np.int32)
+        _QW_TABLE = np.array(SINE_QUARTER_Q15, dtype=np.int32)
+        _QW_TABLE.flags.writeable = False
     return _QW_TABLE
 
 
@@ -163,35 +167,19 @@ def _sincos_batch_q15(phases: np.ndarray) -> tuple:
     """
     table = _init_qw_table()
 
-    # Scale phases to table indices with 12-bit fraction
-    # phases are in [0, 0x40000000] (30-bit), scale to [0, 1024.0] with 12-bit frac
-    # scaled = phase * (1024 << 12) / 0x40000000 = phase >> 8
-    scaled = phases >> 8  # 22-bit value: 10-bit index + 12-bit frac
+    # Quantize phase before mirroring, exactly as scalar sine_core does.
+    scaled = np.clip(np.asarray(phases, dtype=np.int64), 0, 0x40000000) >> 8
+    maximum = _QW_SIZE << 12
 
-    indices = (scaled >> 12).astype(np.int32)
-    fracs = (scaled & 0xFFF).astype(np.int32)
+    def lookup(position):
+        indices = np.minimum(position >> 12, _QW_SIZE - 1).astype(np.int32)
+        fracs = (position & 0xFFF).astype(np.int32)
+        product = (table[indices + 1] - table[indices]) * fracs
+        quotient, remainder = product >> 12, product & 0xFFF
+        quotient += (remainder > 2048) | ((remainder == 2048) & ((quotient & 1) != 0))
+        return np.where(position == maximum, Q15_ONE, table[indices] + quotient).astype(np.int32)
 
-    # Clamp indices to valid range
-    indices = np.clip(indices, 0, _QW_SIZE - 1)
-
-    # Linear interpolation for sine: y = y0 + (y1 - y0) * frac / 4096
-    y0 = table[indices]
-    y1 = table[np.minimum(indices + 1, _QW_SIZE)]
-    sin_vals = y0 + ((y1 - y0) * fracs >> 12)
-
-    # Cosine = sin(90° - θ) = table[1024 - index] with reversed interpolation
-    # At index=0: cos = table[1024] = peak
-    # At index=1024: cos = table[0] = 0
-    cos_indices = _QW_SIZE - indices
-    cos_indices = np.clip(cos_indices, 1, _QW_SIZE)  # 1 to 1024
-
-    # For descending lookup, we interpolate from higher to lower index
-    # As frac increases, cosine should DECREASE (move toward lower table index)
-    cy0 = table[cos_indices]
-    cy1 = table[cos_indices - 1]
-    cos_vals = cy0 - ((cy0 - cy1) * fracs >> 12)
-
-    return cos_vals, sin_vals
+    return lookup(maximum - scaled), lookup(scaled)
 
 
 # =============================================================================
@@ -204,15 +192,8 @@ def _sincos_batch_q15(phases: np.ndarray) -> tuple:
 WET_OLA_SIZE = 8  # Overlap samples (must match state.py)
 
 # Precomputed Hann window for OLA (fade-out and fade-in)
-_WET_OLA_FADE_OUT = np.array([
-    (np.cos(np.pi * i / WET_OLA_SIZE) + 1) * Q15_HALF  # Q15 Hann fade-out
-    for i in range(WET_OLA_SIZE)
-], dtype=np.int32)
-
-_WET_OLA_FADE_IN = np.array([
-    (1 - np.cos(np.pi * i / WET_OLA_SIZE)) * Q15_HALF  # Q15 Hann fade-in
-    for i in range(WET_OLA_SIZE)
-], dtype=np.int32)
+_WET_OLA_FADE_OUT = np.array(WET_OLA_OUT_Q15, dtype=np.int32)
+_WET_OLA_FADE_IN = np.array(WET_OLA_IN_Q15, dtype=np.int32)
 
 
 def apply_wet_ola(state: VMState, wet_buf: np.ndarray) -> np.ndarray:
@@ -401,6 +382,10 @@ def lane_inject(state: VMState, cfg: DecodedPlan) -> None:
         elif op_id == 16:  # GateMask
             _inject_gate_mask(state, cfg.mask_u32, strength)
 
+    if cfg.cmmm_events is not None:
+        from .cmmm_events import apply_cmmm_events
+        apply_cmmm_events(state, cfg.cmmm_events, cfg.mask_u32)
+
 
 def _inject_impulse(state: VMState, mask: int, strength: int, payload: int) -> None:
     """Inject sparse impulse into coefficients."""
@@ -466,7 +451,7 @@ def _inject_cusp(state: VMState, mask: int, strength: int) -> None:
         coeff_idx = node * NODE_LEN
         if coeff_idx < COEFF_LEN:
             state.coeff_state[coeff_idx] = clamp_q15(
-                state.coeff_state[coeff_idx] + sign * (strength >> 2)
+                int(state.coeff_state[coeff_idx]) + sign * RSHIFT_RNE(strength, 2)
             )
 
 
@@ -488,7 +473,7 @@ def _inject_gate_mask(state: VMState, mask: int, strength: int) -> None:
             # Gate is closed - attenuate
             coeff_idx = node * NODE_LEN
             for i in range(coeff_idx, min(coeff_idx + NODE_LEN, COEFF_LEN)):
-                state.coeff_state[i] = (state.coeff_state[i] * (Q15_ONE - strength)) >> 15
+                state.coeff_state[i] = (int(state.coeff_state[i]) * (Q15_ONE - strength)) >> 15
 
 
 # =============================================================================
@@ -532,6 +517,7 @@ def dispatch_coeff_op(state: VMState, instr: BackboneEntry, mask: int) -> None:
 def dispatch_coeff_op_crossfade(
     state: VMState,
     instr: BackboneEntry,
+    mask: Optional[int] = None,
 ) -> None:
     """
     Dispatch a backbone operator using the current node mask.
@@ -544,7 +530,8 @@ def dispatch_coeff_op_crossfade(
         state: VM state (modified in place)
         instr: Backbone instruction
     """
-    dispatch_coeff_op(state, instr, state.executor_latch.node_mask_u32)
+    dispatch_coeff_op(state, instr,
+                      state.executor_latch.node_mask_u32 if mask is None else mask)
 
 
 def lane_diag(state: VMState, instr: BackboneEntry, mask: int) -> None:
@@ -572,19 +559,16 @@ def lane_diag(state: VMState, instr: BackboneEntry, mask: int) -> None:
                 state.coeff_state[i] = clamp_q15((val * tilt_factor) >> 15)
 
     elif op_id in (15, 20):  # PressureRamp, FoldPressure
-        # Catastrophe regime pressure
+        deltas = PRESSURE_NODE_DELTAS_Q15 if op_id == 15 else FOLD_NODE_DELTAS_Q15
         for node in range(L_TOTAL_NODES):
             if not (mask & (1 << node)):
                 continue
 
+            delta_gain = RSHIFT_RNE(deltas[node] * strength, 15)
             coeff_idx = node * NODE_LEN
             for i in range(coeff_idx, min(coeff_idx + NODE_LEN, COEFF_LEN)):
-                # Soft saturation (use Python int to avoid overflow)
                 x = int(state.coeff_state[i])
-                if abs(x) > Q15_HALF:
-                    sign = 1 if x > 0 else -1
-                    x = sign * (Q15_HALF + ((abs(x) - Q15_HALF) * strength) // Q15_ONE)
-                    state.coeff_state[i] = clamp_q15(x)
+                state.coeff_state[i] = clamp_q15(x + RSHIFT_RNE(x * delta_gain, 15))
 
     elif op_id == 16:  # GateMask
         _inject_gate_mask(state, mask, strength)
@@ -624,7 +608,7 @@ def lane_banded(state: VMState, instr: BackboneEntry, mask: int) -> None:
                 # [0.25, 0.5, 0.25] kernel (use Python int to avoid overflow)
                 mixed = (int(tmp[i-1]) + 2 * int(tmp[i]) + int(tmp[i+1])) >> 2
                 base = int(tmp[i])
-                state.coeff_state[i] = base + ((mixed - base) * strength) >> 15
+                state.coeff_state[i] = base + (((mixed - base) * strength) >> 15)
 
     elif op_id == 4:  # DiffuseUp
         # Energy transport: fine → coarse
@@ -785,10 +769,10 @@ def lane_proj(state: VMState, instr: BackboneEntry, mask: int) -> None:
                 val_b = int(state.coeff_state[idx_b])
                 avg = (val_a + val_b) >> 1
                 state.coeff_state[idx_a] = clamp_q15(
-                    val_a + ((avg - val_a) * strength) >> 15
+                    val_a + (((avg - val_a) * strength) >> 15)
                 )
                 state.coeff_state[idx_b] = clamp_q15(
-                    val_b + ((avg - val_b) * strength) >> 15
+                    val_b + (((avg - val_b) * strength) >> 15)
                 )
 
 
@@ -802,19 +786,16 @@ def lane_tail(state: VMState, cfg: DecodedPlan) -> None:
 
     Tail enforces "legal/pleasant" bounds on coefficients.
 
-    For CCS mode, uses a simple soft energy limiter instead of NODE-based
-    operators (which assume a different layout).
+    CCS uses the leaf/temporal-slot tail profile. Legacy nodes retain their
+    historical operators; both paths execute the selected tail mode.
 
     Args:
         state: VM state (modified in place)
         cfg: Decoded plan
     """
-    # CCS mode: use soft energy limiter instead of NODE-based operators
+    # CCS coefficients need leaf-major projections, not legacy boundaries.
     if cfg.use_coeff_osc:
-        if _hot.jit_enabled():
-            _hot.tail_ccs_soft_limit(state.coeff_state)
-        else:
-            _tail_ccs_soft_limit(state)
+        apply_coefficient_tail(state, cfg)
         return
 
     # Legacy mode: use NODE-based operators
@@ -831,7 +812,7 @@ def lane_tail(state: VMState, cfg: DecodedPlan) -> None:
 
 # Maximum RMS energy target for CCS coefficients (Q15)
 # Allows ~0.7 peak amplitude before limiting kicks in
-_CCS_MAX_RMS_Q15 = 23170  # sqrt(0.5) * 32767
+_CCS_MAX_RMS_Q15 = CCS_MAX_RMS_Q15  # Compatibility for legacy direct callers.
 
 
 def _tail_ccs_soft_limit(state: VMState) -> None:

@@ -30,11 +30,12 @@ import numpy as np
 from ..fixed import RSHIFT_RNE, SAT16, Q15_ONE
 from ..wavelet.sine_core import sin_cos_q15, freq_to_phase_inc, PHASE_MASK
 from .tables import COEFF_LEN, VM_K
-from ..primitives import BLOCK_SIZE, NUM_LEAVES, SAMPLE_RATE_HZ
+from ..primitives import BLOCK_SIZE, NUM_LEAVES, SAMPLE_RATE_HZ, Q15_SCALE
 
 # JIT hot-path kernels (bit-exact, switchable; see vm/hotpath_jit.py)
 from . import hotpath_jit as _hot
 from ..primitives import Q15_HALF, Q15_NEG_ONE
+from .phase_modulation import phase_modulation_q32, modulation_lanes_q15
 
 # =============================================================================
 # CONSTANTS (WSE-STD-210 Section 1)
@@ -257,6 +258,8 @@ class HarmonicWeights:
             self.set_pwm(duty_q15, H)
         elif wave_type == WaveformType.SAW or wave_type == WaveformType.SAW_DOWN:
             self.set_saw(H)
+            if wave_type == WaveformType.SAW_DOWN:
+                self.a_h_q15[:] = -self.a_h_q15
         elif wave_type == WaveformType.TRIANGLE:
             self.set_triangle(H)
         else:
@@ -293,7 +296,7 @@ class HarmonicWeights:
             sequence_id: OEISSequenceID value (0-7)
             H: Maximum harmonic count
             rolloff_db_per_octave: Amplitude rolloff per octave (default -3dB)
-            base_amplitude_q15: Amplitude for lowest active partial
+            base_amplitude_q15: Fundamental reference amplitude (even if H1 is excluded)
         """
         from .oeis_tables import OEISSequenceID, get_partial_amplitudes
 
@@ -359,6 +362,7 @@ class LFOTarget(IntEnum):
     # Mode B harmonic bank (cheap)
     PWM_WIDTH = 10      # → pwm_width_q15
     TILT = 11           # → tilt_env_q15 (brightness)
+    PHASE = 12          # → Mode B lane-rate phase modulator (fm_source=2)
 
     # Filter (Material Engine SVF) - block rate, cheap
     FILTER_CUTOFF = 15  # → filter_cutoff_q15 (log scale)
@@ -650,6 +654,7 @@ class LFOState(VibratoState):
             arc_phase_q16[self.arc_slot] = 0
             self.elapsed_samples = 0
             self.current_depth_scale = 0
+        self.phase = arc_phase_q16[self.arc_slot]
 
     def get_waveform_value(self, phase: Optional[int] = None) -> int:
         """
@@ -760,6 +765,7 @@ class LFOState(VibratoState):
         # Advance LFO phase in arc storage
         current_phase = arc_phase_q16[self.arc_slot]
         arc_phase_q16[self.arc_slot] = (current_phase + self.phase_inc * block_samples) & PHASE_MASK
+        self.phase = arc_phase_q16[self.arc_slot]
 
     def configure_lfo(
         self,
@@ -833,6 +839,9 @@ class ModeBState:
 
     # Harmonic weights (set by waveform type or PWM)
     weights: HarmonicWeights = field(default_factory=HarmonicWeights)
+    # The executor's cache is runtime state too: preserve custom phase spread
+    # and avoid reconfiguring restored weights on the next identical frame.
+    last_custom_harmonics: Optional[tuple] = None
 
     # PWM state
     pwm_width_q15: int = Q15_HALF  # 50% duty cycle
@@ -870,13 +879,13 @@ class ModeBState:
         self.phase_slew_rate = 0
         self.phase = self.phase_offset_q32 & 0xFFFFFFFF
 
-        # Compute bandlimit based on pitch
-        freq_hz = 440.0 * (2.0 ** ((note - 69) / 12.0))
-        nyquist = SAMPLE_RATE // 2
-        self.H_bandlimit = max(1, int(0.9 * nyquist / max(1, freq_hz)))
+        # Include cents/detuning in the physical harmonic cap.
+        from .carrier_spectrum import harmonic_limit
+        self.H_bandlimit = harmonic_limit(phase_inc)
 
         # Default to sine wave weights
         self.weights.set_sine()
+        self.last_custom_harmonics = None
 
     def set_pitch_legato(self, note: int, phase_inc: int) -> None:
         """
@@ -895,10 +904,8 @@ class ModeBState:
         self.target_phase_inc = phase_inc
         # Note: We do NOT reset self.phase - this is the key to legato!
 
-        # Update bandlimit for new pitch
-        freq_hz = 440.0 * (2.0 ** ((note - 69) / 12.0))
-        nyquist = SAMPLE_RATE // 2
-        self.H_bandlimit = max(1, int(0.9 * nyquist / max(1, freq_hz)))
+        from .carrier_spectrum import harmonic_limit
+        self.H_bandlimit = harmonic_limit(phase_inc)
         # Note: We do NOT reset weights - preserve current waveform
 
     def advance_block(self) -> None:
@@ -924,6 +931,8 @@ def generate_basis_frames(
     H_max: int = DEFAULT_H_MAX,
     sample_rate: int = SAMPLE_RATE,
     k_stride: int = K_STRIDE,
+    *,
+    phase_inc: Optional[int] = None,
 ) -> HarmonicBasisFrames:
     """
     Generate Mode B2 basis frames for a pitch anchor.
@@ -932,23 +941,15 @@ def generate_basis_frames(
     - Generate time-domain reference blocks using Q32 phase stepping
     - Produce basis frames via FWPT
 
-    K=4 Polyphase Strategy (Consecutive Blocks):
-    --------------------------------------------
-    Each slot k handles samples [k*16 : (k+1)*16] of the output block.
-    The basis for slot k is generated starting at sample position k*16,
-    which corresponds to a phase offset of k * 16 * phase_inc.
-
-    This matches the IDWPT polyphase reconstruction that takes:
-        out[0:16]  = idwpt(slot_0)[0:16]
-        out[16:32] = idwpt(slot_1)[16:32]
-        out[32:48] = idwpt(slot_2)[32:48]
-        out[48:64] = idwpt(slot_3)[48:64]
+    Offline/reference API. Runtime Mode B uses prepared basis resources.
+    K=4 interleaved reconstruction uses a one-sample offset per slot:
+    basis slot k starts at sample k, with phase k * phase_inc.
 
     Args:
         anchor_note: MIDI note for this anchor
         H_max: Maximum harmonic count
         sample_rate: Sample rate in Hz
-        k_stride: Sample offset per slot (16 for K=4 consecutive blocks)
+        k_stride: Sample offset per slot (1 for K=4 interleaved reconstruction)
 
     Returns:
         HarmonicBasisFrames with DC_frame, Ucos_h, Usin_h
@@ -956,7 +957,12 @@ def generate_basis_frames(
     from ..wavelet.fast_lifting import fwpt_jit
 
     freq_hz = 440.0 * (2.0 ** ((anchor_note - 69) / 12.0))
-    phase_inc = freq_to_phase_inc(freq_hz, sample_rate)
+    if phase_inc is None:
+        phase_inc = freq_to_phase_inc(freq_hz, sample_rate)
+    else:
+        if type(phase_inc) is not int or not 0 <= phase_inc <= PHASE_MASK:
+            raise ValueError('Basis phase increment must be unsigned Q32')
+        freq_hz = phase_inc * sample_rate / (1 << 32)
 
     # Allocate arrays
     DC_frame = np.zeros((NUM_LEAVES, VM_K), dtype=np.int16)
@@ -964,7 +970,7 @@ def generate_basis_frames(
     Usin_h = np.zeros((H_max, NUM_LEAVES, VM_K), dtype=np.int16)
 
     # Generate basis frames for each k-slot
-    # Slot k handles samples [k*16 : (k+1)*16], so basis starts at sample k*16
+    # Slot k begins at sample k for the interleaved reconstruction.
     #
     # NOTE: headroom_bits=2 is critical for Mode B accuracy.
     # The int16 quantization in FWPT causes the trigonometric modulation identity
@@ -980,7 +986,7 @@ def generate_basis_frames(
         DC_frame[:, k] = dc_coeffs
 
         # Starting phase for this k-slot
-        # Phase offset = k * k_stride * phase_inc (k_stride=16 for K=4)
+        # Phase offset = k * k_stride * phase_inc (k_stride=1 for K=4)
         k_phase_offset = (k * k_stride * phase_inc) & PHASE_MASK
 
         # Harmonic bases - generate full 64-sample block starting at k_phase_offset
@@ -1045,7 +1051,7 @@ class BasisFrameAtlas:
             HarmonicBasisFrames for the exact target pitch
         """
         # Clamp to valid range
-        midi_note = max(21, min(108, midi_note))
+        midi_note = max(0, min(127, midi_note))
 
         # Generate per-note (like Mode A's get_lut_for_note)
         if midi_note not in self.frames:
@@ -1067,9 +1073,10 @@ def get_basis_atlas() -> BasisFrameAtlas:
 
 
 def clear_basis_atlas() -> None:
-    """Clear the cached basis frames (useful after algorithm changes)."""
+    """Clear derived views; prepared immutable resource storage remains loaded."""
     global _BASIS_ATLAS
     _BASIS_ATLAS = None
+    get_basis_for_pitch.cache_clear()
 
 
 def get_basis_for_note(midi_note: int) -> HarmonicBasisFrames:
@@ -1085,6 +1092,20 @@ def get_basis_for_note(midi_note: int) -> HarmonicBasisFrames:
         HarmonicBasisFrames for the nearest pitch anchor
     """
     return get_basis_atlas().get_frames(midi_note)
+
+
+from functools import lru_cache
+
+
+@lru_cache(maxsize=128)
+def get_basis_for_pitch(note: int, phase_inc: int, harmonics: int) -> HarmonicBasisFrames:
+    """Bounded immutable views; cache misses never generate basis coefficients.
+
+    Hosts must call prepare_basis_resources before playback. VM allocation and
+    restoration also prepare resources for callers of the low-level API.
+    """
+    from .basis_resource import prepared_basis_atlas
+    return prepared_basis_atlas().basis(note, phase_inc, harmonics)
 
 
 # =============================================================================
@@ -1220,6 +1241,8 @@ def mode_b_generate_coeffs(
     state: ModeBState,
     basis: HarmonicBasisFrames,
     output_coeffs: np.ndarray,
+    harmonic_gains_q15=None,
+    harmonic_gain_bound_q15=Q15_SCALE,
 ) -> None:
     """
     Generate coefficient frame using Mode B2 harmonic bank.
@@ -1271,8 +1294,16 @@ def mode_b_generate_coeffs(
     # Base phase for this block
     base_phi = state.phase
 
+    modulated = None
+    if harmonic_gains_q15 is not None:
+        from .spectral_modulation import modulated_weights
+        modulated = modulated_weights(weights, H, harmonic_gains_q15, harmonic_gain_bound_q15)
+
     # FM/PM modulation: get modulator samples if available
     fm_active = state.fm_depth_q15 != 0 and state.fm_mod_buffer is not None
+
+    fm_lanes = modulation_lanes_q15(state.fm_mod_buffer, VM_K) if fm_active else None
+    accumulators = [0] * (NUM_LEAVES * VM_K)
 
     for k in range(VM_K):
         # Compute phase for this k-slot with optional FM modulation
@@ -1283,30 +1314,15 @@ def mode_b_generate_coeffs(
         if fm_active:
             # Get modulator sample for this k-slot
             # fm_mod_buffer is [K] samples, one per k-slot (lane-rate)
-            mod_sample = int(state.fm_mod_buffer[k]) if k < len(state.fm_mod_buffer) else 0
-
-            # Phase modulation: scale modulator by depth
-            # fm_depth_q15 = modulation index in Q15 (32767 ≈ 1.0 radian max)
-            # mod_sample = modulator signal (Q15: ±32767 = ±1.0)
-            #
-            # FM synthesis: phase_mod = β × mod, where β is modulation index
-            # In Q32 phase: 1 radian = 2^32 / (2π) ≈ 683,565,275
-            #
-            # Calculation:
-            # depth × mod = Q30 (max ~1.07×10^9)
-            # We want depth=32767, mod=32767 → ~683M (1 radian)
-            # So: Q30 >> 1 ≈ 535M, close enough for moderate FM
-            #
-            # For typical FM synth (DX-style), modulation index 0.5-3 is common.
-            # fm_depth_q15=16384 (50%) → ~0.5 radians = classic FM bell territory
-            phase_mod = RSHIFT_RNE(state.fm_depth_q15 * mod_sample, 1)  # Q30 >> 1 ≈ Q29
+            mod_sample = int(fm_lanes[k])
+            phase_mod = phase_modulation_q32(mod_sample, state.fm_depth_q15)
             phi = (phi + phase_mod) & PHASE_MASK
 
         # Start with DC contribution
         for leaf in range(NUM_LEAVES):
             idx = leaf * VM_K + k
             dc_contrib = RSHIFT_RNE(dc_q15 * int(basis.DC_frame[leaf, k]), 15)
-            output_coeffs[idx] = SAT16(dc_contrib)
+            accumulators[idx] = dc_contrib
 
         # Add harmonic contributions
         for h in range(1, H + 1):
@@ -1320,6 +1336,8 @@ def mode_b_generate_coeffs(
             # Apply scale_shift to prevent overflow when summing harmonics
             a_h = int(weights.a_h_q15[h - 1]) >> scale_shift
             b_h = int(weights.b_h_q15[h - 1]) >> scale_shift
+            if modulated is not None:
+                a_h, b_h = modulated[0][h - 1], modulated[1][h - 1]
 
             # For a_h * sin(hθ + hφ):
             #   = a_h * (sin(hθ)cos(hφ) + cos(hθ)sin(hφ))
@@ -1342,7 +1360,11 @@ def mode_b_generate_coeffs(
                 idx = leaf * VM_K + k
                 sin_contrib = RSHIFT_RNE(w_sin * int(basis.Usin_h[h - 1, leaf, k]), 15)
                 cos_contrib = RSHIFT_RNE(w_cos * int(basis.Ucos_h[h - 1, leaf, k]), 15)
-                output_coeffs[idx] = SAT16(int(output_coeffs[idx]) + sin_contrib + cos_contrib)
+                accumulators[idx] += sin_contrib + cos_contrib
+
+    # Preserve cancellation between harmonics; saturate only the final sum.
+    for idx, value in enumerate(accumulators):
+        output_coeffs[idx] = SAT16(value)
 
 
 def mode_b_generate_coeffs_matrix(
@@ -1600,22 +1622,19 @@ def extract_modulator_signal(
     """
     Extract lane-rate modulator signal from coefficient state.
 
-    This function downsamples the coefficient state to K=8 modulator samples
-    for use as FM feedback in the next block.
-
-    Per WSE-STD-210 Section 8.3:
-    - z⁻¹ block delay: modulator extracted after operators, used next block
-    - Lane-rate: one modulator sample per k-slot
+    Compatibility feedback source: one coefficient-derived Q15 signal per
+    active Mode B lane (currently K=4), not a sample-rate audio reconstruction.
+    The VM captures it after operators and uses it with a one-block delay.
 
     Args:
-        coeff_state: [512] Q15 coefficients (64 leaves × 8 k-slots)
+        coeff_state: Q15 coefficients (64 leaves × active k-slots)
         method: Extraction method:
             0 = Average first 8 leaves (low-frequency content)
             1 = DC bin only (leaf 0)
             2 = Energy proxy (sum of squares)
 
     Returns:
-        fm_mod_buffer: [8] Q15 modulator samples (one per k-slot)
+        fm_mod_buffer: [VM_K] Q15 modulator samples (one per k-slot)
     """
     fm_mod = np.zeros(VM_K, dtype=np.int16)
 
@@ -1705,16 +1724,20 @@ def mode_b_generate_coeffs_hw(
     K = HW_K
     H = HW_H_MAX
     L = NUM_LEAVES
+    total_weight = sum(max(abs(int(a_h_q15[h])) if h < len(a_h_q15) else 0,
+                           abs(int(b_h_q15[h])) if h < len(b_h_q15) else 0) for h in range(H))
+    scale_shift = 0
+    while (total_weight >> scale_shift) > Q15_ONE:
+        scale_shift += 1
 
     # Phase 1: Compute K phases (parallel on FPGA)
     # phi_k = base_phase + k * phase_inc + fm_mod
     phi_k = np.zeros(K, dtype=np.int64)
+    fm_lanes = modulation_lanes_q15(fm_mod_buffer, K) if fm_mod_buffer is not None and fm_depth_q15 else None
     for k in range(K):
         phi_k[k] = phase
-        if fm_mod_buffer is not None and fm_depth_q15 != 0:
-            # FM: phase_mod = depth * mod >> 1 (Q30 -> Q29)
-            mod_sample = int(fm_mod_buffer[k]) if k < len(fm_mod_buffer) else 0
-            phase_mod = (fm_depth_q15 * mod_sample) >> 1
+        if fm_lanes is not None:
+            phase_mod = phase_modulation_q32(int(fm_lanes[k]), fm_depth_q15)
             phi_k[k] = (phi_k[k] + phase_mod) & PHASE_MASK
 
     # Phase 2: Compute sin/cos for all harmonics and k-slots
@@ -1732,8 +1755,8 @@ def mode_b_generate_coeffs_hw(
     w_sin = np.zeros((H, K), dtype=np.int32)
     w_cos = np.zeros((H, K), dtype=np.int32)
     for h in range(H):
-        a_h = int(a_h_q15[h]) if h < len(a_h_q15) else 0
-        b_h = int(b_h_q15[h]) if h < len(b_h_q15) else 0
+        a_h = (int(a_h_q15[h]) >> scale_shift) if h < len(a_h_q15) else 0
+        b_h = (int(b_h_q15[h]) >> scale_shift) if h < len(b_h_q15) else 0
         for k in range(K):
             # Q15 × Q15 >> 15 = Q15
             w_sin[h, k] = RSHIFT_RNE(a_h * cos_hphi[h, k] - b_h * sin_hphi[h, k], 15)
@@ -1757,38 +1780,42 @@ def mode_b_generate_coeffs_hw(
             output_coeffs[idx] = SAT16(acc)
 
 
+def _rshift_rne_array(values, shift):
+    """Signed ties-to-even reduction on widened integer products."""
+    values = np.asarray(values, dtype=np.int64)
+    quotient = values >> shift
+    remainder = values - (quotient << shift)
+    half = 1 << (shift - 1)
+    return quotient + ((remainder > half) | ((remainder == half) & ((quotient & 1) != 0)))
+
+
 def mode_b_generate_coeffs_vectorized(
     state: 'ModeBState',
     basis: 'HarmonicBasisFrames',
     output_coeffs: np.ndarray,
+    harmonic_gains_q15=None,
+    harmonic_gain_bound_q15=Q15_SCALE,
 ) -> None:
     """
-    NumPy-vectorized Mode B coefficient generator for Python performance.
+    Mode B generator with shared headroom and optional spectral modulation.
 
-    Eliminates Python loops by using matrix operations:
-    1. Batch sin/cos computation for all H×K
-    2. Matrix multiply for weight rotation
-    3. Einstein summation for basis frame accumulation
-
-    ~10-20x faster than scalar mode_b_generate_coeffs in Python.
+    The JIT path fuses weight rotation and rounded basis accumulation. The
+    NumPy reference below performs the same signed RNE operations and final
+    saturation; both retain the scalar generator's coefficient arithmetic.
 
     Args:
         state: ModeBState with phase, weights, fm_depth_q15, fm_mod_buffer
         basis: HarmonicBasisFrames for current pitch anchor
-        output_coeffs: Output array [512] to fill with coefficients
+        output_coeffs: Output array; fills the first NUM_LEAVES * VM_K slots
     """
     weights = state.weights
     H = min(state.H_active, state.H_bandlimit, basis.H_max)
     K = VM_K
     L = NUM_LEAVES
 
-    if H == 0:
-        output_coeffs.fill(0)
-        return
-
     # Get weights as numpy arrays
-    a_h = weights.a_h_q15[:H].astype(np.int32)
-    b_h = weights.b_h_q15[:H].astype(np.int32)
+    a_h = weights.a_h_q15[:H].astype(np.int64)
+    b_h = weights.b_h_q15[:H].astype(np.int64)
     dc = int(weights.dc_q15)
 
     # Compute scale shift for normalization
@@ -1802,15 +1829,26 @@ def mode_b_generate_coeffs_vectorized(
         a_h = a_h >> scale_shift
         b_h = b_h >> scale_shift
 
+    if harmonic_gains_q15 is not None:
+        from .spectral_modulation import modulated_weights
+        a, b = modulated_weights(weights, H, harmonic_gains_q15, harmonic_gain_bound_q15)
+        a_h, b_h = np.asarray(a, dtype=np.int64), np.asarray(b, dtype=np.int64)
+
     # Phase computation for K slots
     base_phi = state.phase
     fm_active = state.fm_depth_q15 != 0 and state.fm_mod_buffer is not None
 
     phi_k = np.full(K, base_phi, dtype=np.int64)
     if fm_active:
-        fm_mod = np.array(state.fm_mod_buffer[:K], dtype=np.int64)
-        phase_mod = (state.fm_depth_q15 * fm_mod) >> 1
+        fm_mod = modulation_lanes_q15(state.fm_mod_buffer, K).astype(np.int64)
+        phase_mod = int(state.fm_depth_q15) * fm_mod * 4
         phi_k = (phi_k + phase_mod) & PHASE_MASK
+
+    if _hot.jit_enabled():
+        _hot.mode_b_coefficients(
+            _hot._get_sine_lut_np(), a_h, b_h, dc, phi_k,
+            basis.DC_frame, basis.Usin_h, basis.Ucos_h, output_coeffs)
+        return
 
     # Compute sin(hφ), cos(hφ) for all H harmonics and K slots
     # Shape: [H, K]
@@ -1820,21 +1858,17 @@ def mode_b_generate_coeffs_vectorized(
     # Vectorized sin/cos (use LUT or numpy)
     sin_hphi = np.zeros((H, K), dtype=np.int32)
     cos_hphi = np.zeros((H, K), dtype=np.int32)
-    if _hot.jit_enabled():
-        # Bit-exact jitted port of sin_cos_q15 (same quarter-wave LUT)
-        _hot.sincos_hk(_hot._get_sine_lut_np(), h_phases, sin_hphi, cos_hphi)
-    else:
-        for h in range(H):
-            for k in range(K):
-                sin_hphi[h, k], cos_hphi[h, k] = sin_cos_q15(int(h_phases[h, k]))
+    for h in range(H):
+        for k in range(K):
+            sin_hphi[h, k], cos_hphi[h, k] = sin_cos_q15(int(h_phases[h, k]))
 
     # Compute rotation weights: w_sin[h,k], w_cos[h,k]
     # w_sin = a_h*cos - b_h*sin, w_cos = a_h*sin + b_h*cos
     a_h_2d = a_h.reshape(-1, 1)  # [H, 1]
     b_h_2d = b_h.reshape(-1, 1)  # [H, 1]
 
-    w_sin = ((a_h_2d * cos_hphi - b_h_2d * sin_hphi) + (1 << 14)) >> 15
-    w_cos = ((a_h_2d * sin_hphi + b_h_2d * cos_hphi) + (1 << 14)) >> 15
+    w_sin = _rshift_rne_array(a_h_2d * cos_hphi - b_h_2d * sin_hphi, 15)
+    w_cos = _rshift_rne_array(a_h_2d * sin_hphi + b_h_2d * cos_hphi, 15)
 
     # Basis frames: Usin_h[H, L, K], Ucos_h[H, L, K]
     Usin = basis.Usin_h[:H, :, :K].astype(np.int32)
@@ -1844,8 +1878,8 @@ def mode_b_generate_coeffs_vectorized(
     # Using einsum for efficiency
 
     # DC contribution: [L, K]
-    DC = basis.DC_frame[:, :K].astype(np.int32)
-    result = ((dc * DC) + (1 << 14)) >> 15
+    DC = basis.DC_frame[:, :K].astype(np.int64)
+    result = _rshift_rne_array(dc * DC, 15)
 
     # Harmonic contributions using broadcasting
     # w_sin[h, k] * Usin[h, l, k] -> sum over h -> [l, k]
@@ -1853,8 +1887,8 @@ def mode_b_generate_coeffs_vectorized(
     w_sin_3d = w_sin.reshape(H, 1, K)
     w_cos_3d = w_cos.reshape(H, 1, K)
 
-    sin_contrib = ((w_sin_3d * Usin) + (1 << 14)) >> 15
-    cos_contrib = ((w_cos_3d * Ucos) + (1 << 14)) >> 15
+    sin_contrib = _rshift_rne_array(w_sin_3d * Usin, 15)
+    cos_contrib = _rshift_rne_array(w_cos_3d * Ucos, 15)
 
     # Sum over harmonics
     result += sin_contrib.sum(axis=0) + cos_contrib.sum(axis=0)

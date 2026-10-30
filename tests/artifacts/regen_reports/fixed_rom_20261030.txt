@@ -1,0 +1,24 @@
+Fixed approximation ROM audit, 2026-10-30
+All 256 tanh and sqrt entries match the pre-change import-generated values.
+All 65,536 int16 tanh/sqrt outputs match the pre-change hashes.
+Default 8-sample Safety fade and OLA tables match exactly.
+All 64 legacy BLEP samples and all 512 fractional-offset entries match exactly.
+All 65,536 scalar fast-sine outputs and both VM wet-OLA windows match exactly.
+Vectorized sine now matches scalar RNE: 33,096 phases change by exactly one LSB.
+Interpolated tanh matches independent Fraction/RNE arithmetic at every int16 input.
+No existing audio golden hashes were regenerated.
+
+TANH_Q15 little-endian int16 SHA-256: e22d99115ec057abe6e92ed55e25c7112c0a74b9a2797a111b2c7b692b3e0e13
+SQRT_Q15 little-endian int16 SHA-256: 7aef402968958d46cda18ac668c4a3db1221f1a6ae6e11888ce5a16203ed8ea9
+HANN_HALF_Q15 little-endian int16 SHA-256: 6609d7163d476ba1c2085b795c86b9ca6b19b8ce2c6b0f711ea15e206222dfe9
+BLEP_KERNEL_Q15 little-endian int16 SHA-256: 34f344c8dc6e5907d5faeaebd30efa4580f53ee9568751e1a2679e835c30f733
+tanh output SHA-256: 1cc2e59ba38c06c6fc4a6ca417cb2020c2a776db9e36bbc0b503832b756ac759
+high-resolution sine quarter ROM SHA-256: edddfa577120c90d6160e221c4424fbac417818ff3215a35d750de89a3dd3e34
+scalar/full new sine SHA-256: e0313f89310605acaa740fa67cf9fb157e363c9bd4af10fea66d8846735c5a50
+old vector sine SHA-256: 623f206258ab9558b8f62a64d42ebadb0a73c799e3dcdd77dae7c2dfa0142310
+BLEP fractional-offset table SHA-256: 583e13413e1ba72c1fc491085e54ed261f196bc8f993effda245ce0ba8adeaf3
+sqrt output SHA-256: 5c5a0ae5f7d86442a810515f3da21f031c9a3f100e4f01e34f09beacae4aba48
+old interpolated tanh SHA-256: 09809821b52a5cf1990798b37d3913a175431ac8b6537f1fec767f51c38dd3c6
+new interpolated tanh SHA-256: be4ca699244bb958c5ae417e65ddad016dd92c60b774bca70d1eae37b1b4261f
+old interpolation at 32511/32512/32767/32768: [32743, 32742, 32743, 32742]
+new interpolation at 32511/32512/32767/32768: [32744, 32744, 32744, 32744]

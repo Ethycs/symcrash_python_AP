@@ -25,14 +25,12 @@ The wrapper maintains full API compatibility while delegating all work
 to VoiceEngine's Simple mode implementation.
 """
 
-import warnings
-from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Tuple
+from dataclasses import dataclass, field, replace
+from typing import Optional, List
 
 from .library.preset_compiler import CompiledPreset, Q15_ONE
 from .frames import VoiceFrame
 from .control_frame import ControlFrame, EventType
-from .control_registry import ControlID
 
 
 # =============================================================================
@@ -90,23 +88,6 @@ class VoiceFrameEmitter:
     # Block counter (exposed for backward compatibility)
     block_index: int = 0
 
-    # Control modifiers from ControlFrame (for backward compatibility)
-    _pitch_offset_cents: int = 0
-    _gain_scale_q15: int = Q15_ONE
-    _tree_blend_q15: int = 0
-    _family_scale_q15: List[int] = field(default_factory=lambda: [Q15_ONE] * 8)
-    _master_gain_q15: int = Q15_ONE
-
-    # ADSR overrides from ControlFrame
-    _attack_blocks: Optional[int] = None
-    _decay_blocks: Optional[int] = None
-    _sustain_level_q15: Optional[int] = None
-    _release_blocks: Optional[int] = None
-
-    # Manual overrides (for set_eta, set_detune)
-    _eta_override: Optional[int] = None
-    _detune_override: Optional[int] = None
-
     # Internal: wrapped VoiceEngine in Simple mode
     _engine: 'VoiceEngine' = field(init=False, repr=False)
     _voice_id_internal: int = field(init=False, repr=False)
@@ -145,12 +126,11 @@ class VoiceFrameEmitter:
         self._is_note_on = True
 
         # Delegate to VoiceEngine
-        self._engine.note_on_simple(
-            self._voice_id_internal,
-            note=note,
-            velocity_q15=velocity_q15,
-            cents=cents
-        )
+        frame = ControlFrame()
+        frame.add_note_on(note, velocity_q15)
+        frame.events[-1].voice_id = self._voice_id_internal
+        self._engine.consume_control_frame(frame)
+        self.voice_state.cents_i16 = cents
 
     def note_off(self) -> None:
         """Trigger note-off event (start release phase)."""
@@ -160,68 +140,19 @@ class VoiceFrameEmitter:
         self._engine.note_off_simple(self._voice_id_internal)
 
     def consume_control_frame(self, frame: ControlFrame) -> None:
-        """
-        Consume a ControlFrame and update emitter state.
+        """Route this emitter's external voice ID to its internal slot."""
+        events = [replace(event, voice_id=0) if event.type in (EventType.NOTE_ON, EventType.NOTE_OFF)
+                  else replace(event) for event in frame.events
+                  if event.voice_id in (0xFFFF, self.voice_id)]
+        patches = [replace(patch, voice_id=0) for patch in frame.voice_patches
+                   if patch.voice_id == self.voice_id]
+        self._engine.consume_control_frame(replace(frame, events=events, voice_patches=patches))
+        frame.events[:] = [event for event in frame.events
+                           if event.voice_id not in (0xFFFF, self.voice_id)]
+        state = self.voice_state
+        self.note, self.cents, self.velocity_q15 = state.note_u8, state.cents_i16, state.velocity_q15
 
-        Note: In Simple mode, control frame consumption is handled locally
-        since VoiceEngine doesn't expose gesture updates for Simple mode.
-        The control modifiers are applied during emit_frame().
-
-        Args:
-            frame: ControlFrame from CockpitEngine
-        """
-        # Process events
-        for event in frame.events:
-            if event.type == EventType.NOTE_ON and (event.voice_id == 0xFFFF or event.voice_id == self.voice_id):
-                note = event.a & 0x7F
-                velocity_q15 = (event.a >> 8) & 0xFFFF
-                self.note_on(note, velocity_q15)
-            elif event.type == EventType.NOTE_OFF and (event.voice_id == 0xFFFF or event.voice_id == self.voice_id):
-                note = event.a & 0x7F
-                if note == self.note:
-                    self.note_off()
-
-        # Process voice patches
-        for patch in frame.voice_patches:
-            if patch.voice_id != 0 and patch.voice_id != self.voice_id:
-                continue  # Not for this voice
-
-            for item in patch.items:
-                # Apply control modifiers
-                if item.control_id == ControlID.DYNAMICS:
-                    self._gain_scale_q15 = item.value
-                elif item.control_id == ControlID.MORPH:
-                    self._tree_blend_q15 = item.value
-                elif item.control_id == ControlID.DETUNE:
-                    self._pitch_offset_cents = item.value
-                elif item.control_id == ControlID.PITCH_BEND:
-                    self._pitch_offset_cents += item.value  # Cumulative
-                elif item.control_id == ControlID.TIMBRE:
-                    self._family_scale_q15[0] = item.value  # FamilyID.COLOR
-                elif item.control_id == ControlID.TEXTURE:
-                    self._family_scale_q15[1] = item.value  # FamilyID.LOCAL
-                elif item.control_id == ControlID.CHAOS:
-                    self._family_scale_q15[5] = item.value  # FamilyID.CATASTROPHE
-                # ADSR overrides
-                elif item.control_id == ControlID.ATK_BLOCKS:
-                    self._attack_blocks = item.value
-                elif item.control_id == ControlID.DCY_BLOCKS:
-                    self._decay_blocks = item.value
-                elif item.control_id == ControlID.SUS_Q15:
-                    self._sustain_level_q15 = item.value
-                elif item.control_id == ControlID.REL_BLOCKS:
-                    self._release_blocks = item.value
-
-        # Update global controls
-        if frame.globals.master_gain_q15 is not None:
-            self._master_gain_q15 = frame.globals.master_gain_q15
-
-        # Update VoiceState with pitch offset
-        state = self._engine.voices.get(self._voice_id_internal)
-        if state:
-            state.pitch_offset_cents = self._pitch_offset_cents
-
-    def emit_frame(self) -> VoiceFrame:
+    def emit_frame(self, *, apply_master_gain: bool = True) -> VoiceFrame:
         """
         Emit next VoiceFrame for this block.
 
@@ -246,20 +177,11 @@ class VoiceFrameEmitter:
                 is_active=False,
             )
         else:
-            # Apply control frame modifiers that VoiceEngine doesn't handle
-            # Apply DYNAMICS control (gain_scale_q15)
-            frame.gain_q15 = (frame.gain_q15 * self._gain_scale_q15) >> 15
-
-            # Apply master gain
-            frame.gain_q15 = (frame.gain_q15 * self._master_gain_q15) >> 15
-
-            # Apply MORPH control if set
-            if self._tree_blend_q15 != 0:
-                frame.tree_blend_q15 = self._tree_blend_q15
-
-            # Apply eta override if set
-            if self._eta_override is not None:
-                frame.beta_target_q15 = self._eta_override
+            # This compatibility API has no ParamFrame output, so apply the
+            # latched master gain here. The canonical block API applies it
+            # once downstream through ParamFrame.gate_q15.
+            if apply_master_gain:
+                frame.gain_q15 = (frame.gain_q15 * self._engine.master_gain_q15) >> 15
 
             # Update voice_id to match emitter's ID
             frame.voice_id = self.voice_id
@@ -268,6 +190,19 @@ class VoiceFrameEmitter:
         self.block_index += 1
 
         return frame
+
+    def emit_output_block(self):
+        """Emit one voice block and globals for a renderer with post-FX gain.
+
+        The legacy emit_frame() API keeps its gain-folding behavior. New live
+        output applies ParamFrame.gate_q15 once after all voices/effect returns.
+        """
+        return self.emit_frame(apply_master_gain=False), self._engine._extract_param_frame(None)
+
+    @property
+    def output_preset(self):
+        """Selected global output defaults, including cockpit preset changes."""
+        return self._engine.selected_preset or self.preset
 
     @property
     def is_active(self) -> bool:
@@ -290,72 +225,26 @@ class VoiceFrameEmitter:
         return False
 
     def reset(self) -> None:
-        """Reset emitter to initial state."""
+        """Reset voice, globals and all manual/control overrides."""
         self.block_index = 0
         self._is_note_on = False
-        self._pitch_offset_cents = 0
-        self._gain_scale_q15 = Q15_ONE
-        self._tree_blend_q15 = 0
-        self._family_scale_q15 = [Q15_ONE] * 8
-        self._master_gain_q15 = Q15_ONE
-        self._attack_blocks = None
-        self._decay_blocks = None
-        self._sustain_level_q15 = None
-        self._release_blocks = None
-        self._eta_override = None
-        self._detune_override = None
-
-        # Re-allocate voice from preset to reset VoiceEngine state
-        self._voice_id_internal = self._engine.allocate_voice_from_preset(
-            self.preset,
-            voice_id=0
-        )
+        self.__post_init__()
 
     def set_eta(self, eta_q15: Optional[int]) -> None:
-        """
-        Override the beta (eta) value for dry/wet mixing.
-
-        Args:
-            eta_q15: Beta value in Q15 format (0-32767), or None to use preset default
-        """
-        self._eta_override = eta_q15
-        # Update VoiceState
-        state = self._engine.voices.get(self._voice_id_internal)
-        if state and eta_q15 is not None:
-            state.beta_current_q15 = eta_q15
-            state.beta_target_q15 = eta_q15
+        """Override dry/wet mix, or restore the running preset ramp with None."""
+        self.voice_state.controls.eta_override = (
+            None if eta_q15 is None else max(0, min(Q15_ONE, int(eta_q15))))
 
     def set_detune(self, detune_cents: Optional[int]) -> None:
-        """
-        Override the detune in cents.
-
-        Args:
-            detune_cents: Detune in cents, or None to use preset default
-        """
-        self._detune_override = detune_cents
-        self._pitch_offset_cents = detune_cents if detune_cents is not None else 0
-        # Update VoiceState
-        state = self._engine.voices.get(self._voice_id_internal)
-        if state:
-            state.pitch_offset_cents = self._pitch_offset_cents
+        """Override detune independently of pitch bend; None restores controls."""
+        self.voice_state.controls.detune_override = (
+            None if detune_cents is None else max(-2400, min(2400, int(detune_cents))))
 
     def get_eta(self) -> Optional[int]:
-        """
-        Get the current eta (beta) override value.
-
-        Returns:
-            Current eta override in Q15 format, or None if using preset default
-        """
-        return self._eta_override
+        return self.voice_state.controls.eta_override
 
     def get_detune(self) -> Optional[int]:
-        """
-        Get the current detune override value.
-
-        Returns:
-            Current detune override in cents, or None if using preset default
-        """
-        return self._detune_override
+        return self.voice_state.controls.detune_override
 
     # Legacy property for backward compatibility
     @property
@@ -399,10 +288,6 @@ class MultiVoiceEmitter:
     # Voice pool (now uses VoiceEngine internally)
     _engine: 'VoiceEngine' = field(init=False, repr=False)
     _voice_ids: List[int] = field(default_factory=list, repr=False)
-    _note_to_voice: Dict[int, int] = field(default_factory=dict, repr=False)
-
-    # Control modifiers (shared across all voices)
-    _master_gain_q15: int = Q15_ONE
 
     def __post_init__(self):
         """Initialize voice pool using VoiceEngine."""
@@ -419,56 +304,27 @@ class MultiVoiceEmitter:
                 self._voice_ids.append(voice_id)
 
     def consume_control_frame(self, frame: ControlFrame) -> None:
-        """
-        Consume a ControlFrame and update all voices.
-
-        Args:
-            frame: ControlFrame from CockpitEngine
-        """
-        # Process note-on/note-off events
-        for event in frame.events:
-            if event.type == EventType.NOTE_ON:
-                note = event.a & 0x7F
-                velocity_q15 = (event.a >> 8) & 0xFFFF
-                self.note_on(note, velocity_q15)
-            elif event.type == EventType.NOTE_OFF:
-                note = event.a & 0x7F
-                self.note_off(note)
-
-        # Update global controls
-        if frame.globals.master_gain_q15 is not None:
-            self._master_gain_q15 = frame.globals.master_gain_q15
+        """Apply sparse per-voice patches and channel-aware note events."""
+        self._engine.consume_control_frame(frame)
 
     def note_on(self, note: int, velocity_q15: int = Q15_ONE, cents: int = 0) -> int:
-        """
-        Trigger note-on, allocating a voice.
-
-        Returns:
-            Voice ID that was allocated, or -1 if no voice available
-        """
-        from .voice.voice_engine import VoicePhase
-
-        # Find free voice (prefer inactive, then oldest releasing)
-        voice_id = self._find_free_voice()
+        """Trigger or retrigger a note on channel zero, returning its slot."""
+        frame = ControlFrame()
+        frame.add_note_on(note, velocity_q15)
+        self._engine.consume_control_frame(frame)
+        voice_id = self._engine._find_voice_by_note(note, channel=0)
         if voice_id is None:
             return -1
-
-        # Note-on on the voice
-        self._engine.note_on_simple(voice_id, note, velocity_q15, cents)
-
-        # Track note-to-voice mapping
-        self._note_to_voice[note] = voice_id
-
+        from .voice.unison import group_slots
+        for vid in group_slots(self._engine, voice_id):
+            self._engine.voices[vid].cents_i16 = cents
         return voice_id
 
     def note_off(self, note: int) -> None:
-        """
-        Trigger note-off for voices playing this note.
-        """
-        if note in self._note_to_voice:
-            voice_id = self._note_to_voice[note]
-            self._engine.note_off_simple(voice_id)
-            del self._note_to_voice[note]
+        """Release channel-zero voices playing this note."""
+        frame = ControlFrame()
+        frame.add_note_off(note)
+        self._engine.consume_control_frame(frame)
 
     def emit_frames(self) -> List[VoiceFrame]:
         """
@@ -486,28 +342,9 @@ class MultiVoiceEmitter:
                 frame = self._engine.step_voice_simple(voice_id)
                 if frame:
                     # Apply master gain
-                    frame.gain_q15 = (frame.gain_q15 * self._master_gain_q15) >> 15
+                    frame.gain_q15 = (frame.gain_q15 * self._engine.master_gain_q15) >> 15
                     frames.append(frame)
         return frames
-
-    def _find_free_voice(self) -> Optional[int]:
-        """Find a free voice for allocation."""
-        from .voice.voice_engine import VoicePhase
-
-        # First pass: find inactive voice
-        for voice_id in self._voice_ids:
-            state = self._engine.voices.get(voice_id)
-            if state and state.phase == VoicePhase.FREE:
-                return voice_id
-
-        # Second pass: find releasing voice (voice stealing)
-        for voice_id in self._voice_ids:
-            state = self._engine.voices.get(voice_id)
-            if state and state.phase == VoicePhase.RELEASE:
-                return voice_id
-
-        # No voice available
-        return None
 
     @property
     def active_voice_count(self) -> int:
@@ -522,11 +359,8 @@ class MultiVoiceEmitter:
         return count
 
     def reset(self) -> None:
-        """Reset all voices."""
-        self._note_to_voice.clear()
-        # Re-allocate all voices
-        for i, voice_id in enumerate(self._voice_ids):
-            self._engine.allocate_voice_from_preset(self.preset, voice_id=voice_id)
+        """Reset the complete voice pool, globals and control latches."""
+        self.__post_init__()
 
 
 # =============================================================================

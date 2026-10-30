@@ -1,0 +1,18 @@
+Voice time checkpoint and LFO ownership audit, 2026-10-30
+Fixture: compiled FM marimba, two delayed/ramped LFOs, matrix envelopes,
+amplitude velocity sensitivity and note-dependent envelope key scaling.
+Former allocation reproduced by assigning list(preset.lfos) to each voice.
+48 blocks; voice 0 note 79; voice 1 note 48, retriggered at block 12 to note 84.
+Single-voice old/new audio and pitch traces are unchanged.
+With two voices, corrected voice-0 pitch equals the isolated single-voice trace.
+Old/new Python and JIT audio and pitch traces agree within each version.
+Changed two-voice audio blocks: 47/48
+Changed voice-0 pitch blocks: 18/48
+Old block-digest SHA256: 444f80c6fd6ef95ba88b4f28bbf44272a975889f3ee61b2913caa4c621a93e60
+New block-digest SHA256: 5153c04b68e8720fa3d6fd39d1bc3aaa94b7645067fc0161dd2209251e08cfb1
+Legacy Simple restore after 12 blocks: next Simple frame is None (mode/preset omitted).
+Version-1 JSON restore: next 48 Simple frames exactly match uninterrupted execution.
+Conformance tests independently compare all runtime fields, seven lifecycle checkpoints,
+future VM audio, all 52 shipped presets and a fresh process without preset files.
+No existing VM, Workbench or Material audio golden was regenerated.
+CMMM program resources, engine-global/output checkpoints and WSES binary parity remain open.

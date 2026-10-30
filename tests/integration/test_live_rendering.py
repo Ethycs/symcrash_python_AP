@@ -90,14 +90,27 @@ class TestLivePatternContinuity:
     """Test live rendering pattern creates continuous output."""
 
     def test_live_pattern_no_spikes(self):
-        """Live pattern (new frame each block) should have no spikes."""
+        """Steady-state rendering should not introduce audible block clicks.
+
+        The first block intentionally ramps gain from zero. Its slope change
+        is an attack, so exclude that join from this steady-state detector.
+        Five sigma avoids classifying rare fixed-point quantization excursions
+        as clicks over 96,000 samples; injected clicks are checked separately.
+        """
         L, R = render_live_pattern(duration_sec=2.0)
-        result = detect_spikes(L)
+        result = detect_spikes(L[2 * BLOCK_SIZE:], threshold_sigma=5)
 
         assert result["spike_count"] == 0, (
             f"Found {result['spike_count']} spikes. "
             f"Max d2={result['max_d2']}, indices={result['spike_indices']}"
         )
+
+    def test_spike_detector_catches_inserted_block_click(self):
+        signal = np.rint(12000 * np.sin(2 * np.pi * 261.63 * np.arange(4096) / SAMPLE_RATE))
+        signal[32 * BLOCK_SIZE] += 1000
+        result = detect_spikes(signal, threshold_sigma=5)
+        assert result["spike_count"] > 0
+        assert any(abs(i - 32 * BLOCK_SIZE) <= 2 for i in result["spike_indices"])
 
     def test_stereo_channels_match(self):
         """For center pan, L and R should be identical."""

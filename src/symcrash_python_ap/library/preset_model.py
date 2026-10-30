@@ -21,11 +21,13 @@ Architecture:
 - L5 (Lab): New ops/trees, AST - must compile down
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Dict, List, Optional, Any, Set, Tuple, Union
 from enum import Enum, IntEnum
+from copy import deepcopy
 import struct
 import zlib
+import math
 
 
 # =============================================================================
@@ -169,9 +171,11 @@ class PresetHeader:
         if len(data) < cls.HEADER_SIZE:
             raise ValueError(f"Header too short: {len(data)} < {cls.HEADER_SIZE}")
 
-        preset_id, preset_version, tower_level, _, tree_id, flags = struct.unpack(
+        preset_id, preset_version, tower_level, padding, tree_id, flags = struct.unpack(
             '>IHBBHH', data[:12]
         )
+        if padding != 0:
+            raise ValueError('Preset header padding must be zero')
         crc32 = struct.unpack('>I', data[12:16])[0]
 
         return cls(
@@ -310,6 +314,10 @@ class PresetBody:
     L3_cockpit: Optional[L3CockpitLayer] = None
     L4_forge: Optional[L4ForgeLayer] = None
     L5_lab: Optional[L5LabLayer] = None
+    # (generated object, pristine copy). Identity detects replacement with an
+    # equal value; equality detects in-place edits of nested lists/maps/sets.
+    _completed_layers: Dict[TowerLevel, Tuple[Any, Any]] = field(
+        default_factory=dict, init=False, repr=False, compare=False)
 
     def get_layer(self, level: TowerLevel) -> Optional[Any]:
         """Get layer by tower level."""
@@ -325,6 +333,8 @@ class PresetBody:
 
     def set_layer(self, level: TowerLevel, layer: Any) -> None:
         """Set layer by tower level."""
+        level = TowerLevel(level)
+        self._completed_layers.pop(level, None)
         if level == TowerLevel.L0_PATCH:
             self.L0_patch = layer
         elif level == TowerLevel.L1_FAMILY:
@@ -338,6 +348,22 @@ class PresetBody:
         elif level == TowerLevel.L5_LAB:
             self.L5_lab = layer
 
+    def set_completed_layer(self, level: TowerLevel, layer: Any) -> None:
+        """Install a generated default without making it authored data."""
+        self.set_layer(level, layer)
+        self._completed_layers[level] = (layer, deepcopy(layer))
+
+    def mark_explicit(self, level: TowerLevel) -> None:
+        """Record an explicit edit even when its value equals the default."""
+        self._completed_layers.pop(level, None)
+
+    def is_explicit(self, level: TowerLevel) -> bool:
+        layer = self.get_layer(level)
+        if layer is None:
+            return False
+        generated = self._completed_layers.get(level)
+        return generated is None or layer is not generated[0] or layer != generated[1]
+
     def has_layer(self, level: TowerLevel) -> bool:
         """Check if layer is present."""
         return self.get_layer(level) is not None
@@ -345,7 +371,7 @@ class PresetBody:
     def highest_explicit_level(self) -> TowerLevel:
         """Get highest explicitly authored level."""
         for level in reversed(TowerLevel):
-            if self.has_layer(level):
+            if self.is_explicit(level):
                 return level
         return TowerLevel.L0_PATCH
 
@@ -398,6 +424,8 @@ class EditorOp:
 
     def _validate(self) -> None:
         """Validate operation arguments."""
+        if not isinstance(self.op_type, EditorOpType) or not isinstance(self.args, dict):
+            raise ValueError('Invalid editor operation')
         required_args = {
             EditorOpType.SET_TREE_ID: ['tree_id'],
             EditorOpType.ADD_REGIME: ['regime_id'],
@@ -418,6 +446,28 @@ class EditorOp:
         for arg in required_args.get(self.op_type, []):
             if arg not in self.args:
                 raise ValueError(f"Missing required argument '{arg}' for {self.op_type}")
+        for name in ('path', 'op_id', 'regime_id', 'src', 'dst'):
+            if name in self.args and (not isinstance(self.args[name], str) or not self.args[name]):
+                raise ValueError(f'{name} must be a nonempty string')
+        for name in ('delta', 'min', 'max', 'weight'):
+            if name in self.args:
+                value = self.args[name]
+                if type(value) not in (int, float) or not math.isfinite(value):
+                    raise ValueError(f'{name} must be finite numeric data')
+        if self.op_type == EditorOpType.SET_BOUND and self.args['min'] > self.args['max']:
+            raise ValueError('Minimum bound exceeds maximum')
+        if self.op_type == EditorOpType.SET_TREE_ID:
+            if type(self.args['tree_id']) is not int or not 0 <= self.args['tree_id'] <= 0xFFFF:
+                raise ValueError('tree_id must be a u16')
+        if self.op_type == EditorOpType.SET_OPERATOR_ALLOWED and type(self.args['allowed']) is not bool:
+            raise ValueError('allowed must be a boolean')
+        if self.op_type == EditorOpType.SET_OPERATOR_WEIGHT and not 0 <= self.args['weight'] <= 1:
+            raise ValueError('Operator weight must be in [0, 1]')
+        if self.op_type == EditorOpType.SET_BUDGET:
+            if type(self.args['limit']) is not int or self.args['limit'] <= 0:
+                raise ValueError('Budget must be a positive integer')
+        if self.op_type in (EditorOpType.SET_TOWER_LEVEL, EditorOpType.PROJECT_TO_LEVEL):
+            self.args['level'] = TowerLevel(self.args['level'])
 
 
 # Editor operation factory functions
@@ -453,7 +503,7 @@ def set_param(path: str, value: Any) -> EditorOp:
 
 def delta_param(path: str, delta: float) -> EditorOp:
     """Create DELTA_PARAM operation."""
-    return EditorOp(EditorOpType.DELTA_PARAM, {'path': delta, 'delta': delta})
+    return EditorOp(EditorOpType.DELTA_PARAM, {'path': path, 'delta': delta})
 
 
 def set_bound(path: str, min_val: float, max_val: float) -> EditorOp:
@@ -481,12 +531,12 @@ def set_tower_level(level: TowerLevel) -> EditorOp:
     return EditorOp(EditorOpType.SET_TOWER_LEVEL, {'level': level})
 
 
-def project_to_level(level: TowerLevel) -> EditorOp:
+def project_to_level_op(level: TowerLevel) -> EditorOp:
     """Create PROJECT_TO_LEVEL operation."""
     return EditorOp(EditorOpType.PROJECT_TO_LEVEL, {'level': level})
 
 
-def reset_to_safe() -> EditorOp:
+def reset_to_safe_op() -> EditorOp:
     """Create RESET_TO_SAFE operation."""
     return EditorOp(EditorOpType.RESET_TO_SAFE, {})
 
@@ -612,8 +662,8 @@ def complete_tower(preset: 'Preset', target_level: TowerLevel = TowerLevel.L5_LA
     }
 
     # Always ensure L0 exists
-    if not preset.body.L0_patch:
-        preset.body.L0_patch = L0PatchLayer()
+    if not preset.body.is_explicit(TowerLevel.L0_PATCH):
+        preset.body.set_completed_layer(TowerLevel.L0_PATCH, L0PatchLayer())
 
     # Complete upward from L1 to target_level
     for level in TowerLevel:
@@ -621,10 +671,10 @@ def complete_tower(preset: 'Preset', target_level: TowerLevel = TowerLevel.L5_LA
             continue
         if level > target_level:
             break
-        if not preset.body.has_layer(level):
+        if not preset.body.is_explicit(level):
             func = completion_funcs.get(level)
             if func:
-                preset.body.set_layer(level, func(preset))
+                preset.body.set_completed_layer(level, func(preset))
 
 
 # =============================================================================
@@ -735,6 +785,7 @@ def reset_to_safe(preset: 'Preset') -> None:
             'sustain': 0.8,
             'release': 0.3,
         }
+    preset.body.mark_explicit(TowerLevel.L2_INSTRUMENT)
 
 
 # =============================================================================
@@ -756,7 +807,24 @@ class Preset:
 
     def apply_op(self, op: EditorOp) -> None:
         """Apply an editor operation to this preset."""
-        self.edit_history.append(op)
+        # Work on our own copy: subsequent caller changes must not alter the
+        # preset or its recorded edit stream.
+        op = deepcopy(op)
+        op._validate()
+        edited_level = {
+            EditorOpType.ADD_REGIME: TowerLevel.L1_FAMILY,
+            EditorOpType.REMOVE_REGIME: TowerLevel.L1_FAMILY,
+            EditorOpType.SET_PARAM: TowerLevel.L2_INSTRUMENT,
+            EditorOpType.DELTA_PARAM: TowerLevel.L2_INSTRUMENT,
+            EditorOpType.SET_BOUND: TowerLevel.L2_INSTRUMENT,
+            EditorOpType.SET_OPERATOR_ALLOWED: TowerLevel.L2_INSTRUMENT,
+            EditorOpType.SET_OPERATOR_WEIGHT: TowerLevel.L3_COCKPIT,
+            EditorOpType.SET_BUDGET: TowerLevel.L3_COCKPIT,
+            EditorOpType.ADD_TRANSITION: TowerLevel.L4_FORGE,
+            EditorOpType.REMOVE_TRANSITION: TowerLevel.L4_FORGE,
+        }.get(op.op_type)
+        if edited_level is not None:
+            self.complete(max(self.header.tower_level, edited_level))
 
         if op.op_type == EditorOpType.SET_TREE_ID:
             self.header.tree_id = op.args['tree_id']
@@ -767,7 +835,13 @@ class Preset:
 
         elif op.op_type == EditorOpType.REMOVE_REGIME:
             if self.body.L1_family:
-                self.body.L1_family.regimes.discard(op.args['regime_id'])
+                family = self.body.L1_family
+                regime = op.args['regime_id']
+                if family.regimes == {regime}:
+                    raise ValueError('Cannot remove the final regime')
+                family.regimes.discard(regime)
+                if family.initial_regime == regime:
+                    family.initial_regime = sorted(family.regimes)[0]
 
         elif op.op_type == EditorOpType.ADD_TRANSITION:
             if self.body.L4_forge:
@@ -806,6 +880,8 @@ class Preset:
                 if op.args['allowed']:
                     self.body.L2_instrument.allowed_operators.add(op_id)
                 else:
+                    if self.body.L2_instrument.allowed_operators == {op_id}:
+                        raise ValueError('Cannot remove the final allowed operator')
                     self.body.L2_instrument.allowed_operators.discard(op_id)
 
         elif op.op_type == EditorOpType.SET_OPERATOR_WEIGHT:
@@ -818,13 +894,28 @@ class Preset:
                 self.body.L3_cockpit.memory_budget = op.args['limit']
 
         elif op.op_type == EditorOpType.SET_TOWER_LEVEL:
-            self.header.tower_level = op.args['level']
+            level = TowerLevel(op.args['level'])
+            if level < self.body.highest_explicit_level():
+                self.project(level)
+            else:
+                self.complete(level)
+            self.body.mark_explicit(level)
+            self.header.tower_level = level
 
         elif op.op_type == EditorOpType.PROJECT_TO_LEVEL:
             project_to_level(self, op.args['level'])
 
         elif op.op_type == EditorOpType.RESET_TO_SAFE:
             reset_to_safe(self)
+
+        if edited_level is not None:
+            self.body.mark_explicit(edited_level)
+            self.header.tower_level = self.body.highest_explicit_level()
+        # Recompute derived family/graph defaults after structural edits. This
+        # preserves authored layers and never promotes a default to authored.
+        present = [level for level in TowerLevel if self.body.has_layer(level)]
+        self.complete(max(present, default=self.header.tower_level))
+        self.edit_history.append(deepcopy(op))
 
     def complete(self, target_level: Optional[TowerLevel] = None) -> None:
         """Complete missing layers up to target level."""
@@ -875,20 +966,23 @@ def load_preset(data: bytes) -> Preset:
     if len(data) < PresetHeader.HEADER_SIZE:
         raise ValueError("Data too short for preset")
 
-    # Parse header
-    header = PresetHeader.from_bytes(data[:PresetHeader.HEADER_SIZE])
-
     # Verify CRC (over body only)
     body_data = data[PresetHeader.HEADER_SIZE:]
     expected_crc = compute_crc32(body_data)
-    if header.crc32 != 0 and header.crc32 != expected_crc:
-        raise ValueError(f"CRC mismatch: expected {expected_crc}, got {header.crc32}")
+    stored_crc = struct.unpack('>I', data[12:16])[0]
+    if stored_crc != expected_crc:
+        raise ValueError(f"CRC mismatch: expected {expected_crc}, got {stored_crc}")
+
+    header = PresetHeader.from_bytes(data[:PresetHeader.HEADER_SIZE])
 
     # Create preset with header
     preset = Preset(header=header)
 
-    # TODO: Deserialize body layers from body_data
-    # For now, just complete missing layers
+    # Old files contained only the header. They remain readable when their
+    # empty-body CRC is valid, but every new save uses the versioned codec.
+    if body_data:
+        from .tower_codec import decode_body
+        preset.body = decode_body(body_data, header.tower_level)
     preset.complete()
 
     return preset
@@ -902,14 +996,13 @@ def save_preset(preset: Preset) -> bytes:
     - Record tower_level accordingly
     - Never serialize completed defaults unless explicitly edited
     """
-    # TODO: Serialize body layers
-    body_data = b''
+    from .tower_codec import encode_body
 
-    # Compute CRC over body
-    preset.header.crc32 = compute_crc32(body_data)
-
-    # Serialize header
-    header_data = preset.header.to_bytes()
+    body_data, highest = encode_body(preset.body)
+    header = replace(preset.header, tower_level=highest, crc32=compute_crc32(body_data))
+    header_data = header.to_bytes()
+    preset.header.tower_level = header.tower_level
+    preset.header.crc32 = header.crc32
 
     return header_data + body_data
 
@@ -945,18 +1038,15 @@ def validate_determinism(
 
     Same preset + same ops => same result.
     """
-    # Apply ops to both presets
+    # Validation must not edit its inputs. Compare complete authored content,
+    # not just tree ID/tower level (which missed all parameter differences).
+    preset1, preset2 = deepcopy(preset1), deepcopy(preset2)
     for op in ops1:
         preset1.apply_op(op)
     for op in ops2:
         preset2.apply_op(op)
 
-    # Compare results
-    # (Simplified - full implementation would compare all fields)
-    return (
-        preset1.header.tree_id == preset2.header.tree_id and
-        preset1.header.tower_level == preset2.header.tower_level
-    )
+    return save_preset(preset1) == save_preset(preset2) and preset1.body == preset2.body
 
 
 # =============================================================================
@@ -998,6 +1088,8 @@ __all__ = [
     'set_operator_weight',
     'set_budget',
     'set_tower_level',
+    'project_to_level_op',
+    'reset_to_safe_op',
     'project_to_level',
     'reset_to_safe',
     # Completion

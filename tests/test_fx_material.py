@@ -12,7 +12,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from symcrash_python_ap.material.material_engine import MaterialEngine, DelayState, ChorusState
-from symcrash_python_ap.frames import ParamFrame
+from symcrash_python_ap.frames import MaterialParams, ParamFrame
 
 SAMPLE_RATE = 48000
 
@@ -49,10 +49,9 @@ def test_delay_basic():
         pressure_q15=16384,  # 50% wet (so we see both dry and wet)
     )
 
-    # Warm up parameters first (slewing takes time)
-    silence = [0] * 64
-    for _ in range(20):
-        engine.step_block(silence, silence, params, material_id=6)
+    # Isolate fixed-delay timing from the separately tested proportional slew.
+    # Twenty blocks do not settle its exponential response.
+    engine.params = MaterialParams(drive_q15=16384, tone_q15=16384, pressure_q15=16384)
 
     # Process multiple blocks to catch the delayed impulse
     all_out_L = []

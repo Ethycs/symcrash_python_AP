@@ -16,9 +16,13 @@ from dataclasses import dataclass
 from ..fixed import (
     sat16, mul_q15_sat, shift_round, slew_q15, slew_q15_asym,
     tanh_q15, soft_clip_q15,
-    Q15_ONE, Q15_SHIFT, Q15_HALF, mac_q15
+    Q15_ONE, Q15_SCALE, Q15_SHIFT, Q15_HALF, mac_q15
 )
 from ..frames import ParamFrame, MaterialParams
+from ..prng import PCG32
+from ..wavelet.sine_core import sine_q15
+from .svf import coefficients as svf_coefficients, process_sample as svf_sample, div_rne
+from .building_blocks import catastrophe_cusp_sample
 
 
 @dataclass
@@ -54,13 +58,13 @@ class SVFState:
     giving excellent frequency response and stability at all frequencies.
 
     State variables:
-    - ic1eq: First integrator state (Q15)
-    - ic2eq: Second integrator state (Q15)
+    - ic1eq: First integrator state (signed 32-bit, 27 fractional bits)
+    - ic2eq: Second integrator state (signed 32-bit, 27 fractional bits)
 
     Reference: Vadim Zavalishin, "The Art of VA Filter Design"
     """
-    ic1eq: int = 0  # First integrator state (Q15)
-    ic2eq: int = 0  # Second integrator state (Q15)
+    ic1eq: int = 0
+    ic2eq: int = 0
 
     def reset(self):
         """Reset filter state."""
@@ -208,15 +212,19 @@ MaterialStrategy = Callable[['MaterialEngine', List[int], List[int]], Tuple[List
 class MaterialEngine:
     """
     Applies material programs to stereo audio blocks.
-    All processing is bit-accurate Q1.15.
+    Audio I/O is Q1.15; SVF state uses extended fixed-point precision.
+    The seed selects the deterministic Karplus-Strong excitation stream.
     """
     
-    def __init__(self, block_size: int = 64):
+    def __init__(self, block_size: int = 64, *, seed: int = 0):
         self.B = block_size
+        self._exciter_prng = PCG32(state=seed)
 
         # Stereo state pairs using StereoState wrapper
         self.tape = StereoState.create(TapeState)
-        self.cat = StereoState.create(CatastropheState)
+        self.fold = StereoState.create(CatastropheState)
+        self.cusp = StereoState.create(CatastropheState)
+        self.cat = self.fold  # Legacy inspection alias for the Fold program.
         self.rank = StereoState.create(RankState)
         self.delay = StereoState.create(DelayState)       # material_id=6
         self.chorus = StereoState.create(ChorusState)     # material_id=7
@@ -227,6 +235,7 @@ class MaterialEngine:
         # Backward compatibility aliases (for existing code that uses _L/_R)
         self.tape_L, self.tape_R = self.tape.left, self.tape.right
         self.cat_L, self.cat_R = self.cat.left, self.cat.right
+        self.cusp_L, self.cusp_R = self.cusp.left, self.cusp.right
         self.rank_L, self.rank_R = self.rank.left, self.rank.right
         self.delay_L, self.delay_R = self.delay.left, self.delay.right
         self.chorus_L, self.chorus_R = self.chorus.left, self.chorus.right
@@ -270,7 +279,7 @@ class MaterialEngine:
             2 = rank grit
             3 = tropical cut
             4 = catastrophe snap (fold)
-            5 = catastrophe A4 (cusp)
+            5 = catastrophe cusp (A3)
             6 = delay line
             7 = chorus/flanger
             8 = reverb
@@ -376,19 +385,21 @@ class MaterialEngine:
         """
         Rank statistics filter (median or trimmed mean).
         """
-        # Add to circular buffer
-        state.buffer[state.idx] = x
-        state.idx = (state.idx + 1) % window
+        # Keep all 17 samples, including while the active window is nine.
+        # This preserves chronological history when drive changes the window.
+        state.buffer[state.idx] = int(x)
+        state.idx = (state.idx + 1) % len(state.buffer)
         
         # Get sorted window
-        window_vals = state.buffer[:window]
+        window_vals = [state.buffer[(state.idx - window + i) % len(state.buffer)]
+                       for i in range(window)]
         sorted_vals = sorted(window_vals)
         
         # Trimmed mean (drop top/bottom 2)
         trim = 2
         if window > 2 * trim:
             trimmed = sorted_vals[trim:-trim]
-            result = sum(trimmed) // len(trimmed)
+            result = div_rne(sum(trimmed), len(trimmed))
         else:
             # Median fallback
             result = sorted_vals[window // 2]
@@ -496,33 +507,8 @@ class MaterialEngine:
         return outL, outR
     
     def _cat_cusp_sample(self, x: int, state: CatastropheState) -> int:
-        """
-        Cusp catastrophe (A3): V(x) = x⁴ + ax² + bx
-        
-        Two control parameters: pressure (a) and bias (b).
-        """
-        pressure = self.params.pressure_q15
-        bias = self.params.bias_q15
-        
-        fast = x >> 2
-        s = state.s
-        
-        # Cusp dynamics
-        s_sq = mul_q15_sat(s, s)
-        s_cu = mul_q15_sat(s_sq, s)
-        
-        # Gradient: -4s³ - 2as - b
-        grad = -mul_q15_sat(s_cu, 4 * Q15_ONE >> 15)
-        grad = sat16(grad - mul_q15_sat(pressure, s << 1))
-        grad = sat16(grad - bias)
-        
-        # Drive
-        rate = Q15_HALF
-        delta = mul_q15_sat(rate, sat16(grad + fast))
-        
-        state.s = sat16(s + (delta >> 2))
-        
-        return soft_clip_q15(state.s)
+        """Shared fixed-point Cusp recurrence from WSE-STD-MATERIAL §8.3."""
+        return catastrophe_cusp_sample(x, state, self.params.pressure_q15, self.params.bias_q15)
     
     def _cat_cusp(self, L: List[int], R: List[int]) -> Tuple[List[int], List[int]]:
         """Cusp catastrophe processing."""
@@ -530,8 +516,8 @@ class MaterialEngine:
         outR = []
         
         for i in range(self.B):
-            yL = self._cat_cusp_sample(L[i], self.cat_L)
-            yR = self._cat_cusp_sample(R[i], self.cat_R)
+            yL = self._cat_cusp_sample(L[i], self.cusp_L)
+            yR = self._cat_cusp_sample(R[i], self.cusp_R)
             
             outL.append(yL)
             outR.append(yR)
@@ -655,19 +641,11 @@ class MaterialEngine:
         Returns:
             Output sample (Q15)
         """
-        import math
-
         # Advance LFO phase
         state.lfo_phase = (state.lfo_phase + lfo_inc) & 0xFFFFFFFF
 
-        # Convert LFO phase to sine (-1 to +1 as delay offset)
-        # phase_normalized = state.lfo_phase / 2^32 -> [0, 1)
-        # sin_val = sin(2*pi*phase_normalized) -> [-1, +1]
-        phase_float = state.lfo_phase / (1 << 32)
-        lfo_val = math.sin(2 * math.pi * phase_float)  # -1 to +1
-
-        # Modulated delay time
-        delay_samples = base_delay + int(lfo_val * depth)
+        # Shared frozen sine ROM, with RNE for the integer delay offset.
+        delay_samples = base_delay + shift_round(sine_q15(state.lfo_phase) * depth, Q15_SHIFT)
         delay_samples = max(1, min(delay_samples, state.max_samples - 1))
 
         # Read from delay line
@@ -695,8 +673,6 @@ class MaterialEngine:
         Uses pressure_q15 as wet/dry mix
         Uses bias_q15 as stereo offset (L/R phase difference)
         """
-        import math
-
         outL = []
         outR = []
 
@@ -707,8 +683,8 @@ class MaterialEngine:
         # drive: LFO rate (0.1 Hz to 5 Hz)
         # LFO freq = 0.1 + (drive/32767) * 4.9 Hz
         # phase_inc per sample = freq / sample_rate * 2^32
-        rate_hz = 0.1 + (self.params.drive_q15 / Q15_ONE) * 4.9
-        lfo_inc = int(rate_hz / 48000 * (1 << 32))
+        lfo_inc = div_rne((Q15_ONE + 49 * self.params.drive_q15) << 32,
+                          10 * Q15_ONE * 48000)
 
         # tone: modulation depth (0-480 samples = 0-10ms)
         depth = (self.params.tone_q15 * 480) >> 15
@@ -718,8 +694,7 @@ class MaterialEngine:
 
         # Stereo offset: fixed phase difference between L and R
         # bias_q15 = 16384 (0.5) gives 90 degree offset = pi/2
-        # Map to radians: stereo_phase_offset = bias_q15 / 32767 * pi
-        stereo_phase_offset = (self.params.bias_q15 / Q15_ONE) * math.pi
+        stereo_phase_offset = div_rne(self.params.bias_q15 << 31, Q15_ONE)
 
         for i in range(self.B):
             # Process L channel
@@ -727,7 +702,7 @@ class MaterialEngine:
 
             # Process R channel with fixed phase offset
             # Temporarily apply offset to R LFO
-            r_phase_with_offset = int(self.chorus_R.lfo_phase + stereo_phase_offset / (2 * math.pi) * (1 << 32)) & 0xFFFFFFFF
+            r_phase_with_offset = (self.chorus_R.lfo_phase + stereo_phase_offset) & 0xFFFFFFFF
             old_r_phase = self.chorus_R.lfo_phase
             self.chorus_R.lfo_phase = r_phase_with_offset
             yR = self._chorus_sample(R[i], self.chorus_R, base_delay, depth, lfo_inc, mix_q15)
@@ -914,113 +889,14 @@ class MaterialEngine:
     # - Can be pipelined for high throughput
 
     def _svf_coefficients(self, cutoff_q15: int, reso_q15: int, sample_rate: int = 48000):
-        """
-        Compute TPT SVF coefficients from cutoff and resonance.
+        """Compute integer TPT coefficients for the normative 48 kHz engine."""
+        if sample_rate != 48000:
+            raise ValueError("Material SVF requires a 48000 Hz sample rate")
+        return svf_coefficients(cutoff_q15, reso_q15)
 
-        Args:
-            cutoff_q15: Cutoff frequency (Q15: 0=20Hz, 32767=20kHz log scale)
-            reso_q15: Resonance (Q15: 0=flat, 32767=near self-oscillation)
-            sample_rate: Sample rate in Hz
-
-        Returns:
-            (g, k) where:
-            - g: Frequency coefficient (tan(pi * fc / fs))
-            - k: Damping coefficient (2 - 2*Q, where Q = 0.5 to 25)
-        """
-        import math
-
-        # Map cutoff_q15 to frequency (log scale: 20Hz to 20kHz)
-        # log2(20) ≈ 4.32, log2(20000) ≈ 14.29
-        # Range: ~10 octaves
-        log_min = math.log2(20)
-        log_max = math.log2(20000)
-        log_freq = log_min + (cutoff_q15 / Q15_ONE) * (log_max - log_min)
-        fc = 2 ** log_freq
-
-        # Clamp to valid range
-        fc = max(20, min(fc, sample_rate * 0.49))
-
-        # TPT coefficient: g = tan(pi * fc / fs)
-        g = math.tan(math.pi * fc / sample_rate)
-
-        # Map resonance to Q factor
-        # reso_q15 = 0 -> Q = 0.5 (no resonance)
-        # reso_q15 = 32767 -> Q = 25 (near self-oscillation)
-        # k = 2 - 2*Q = 2 - 1/Q (damping)
-        # Q = 0.5 + (reso/32767) * 24.5
-        Q = 0.5 + (reso_q15 / Q15_ONE) * 24.5
-        k = 2.0 - 1.0 / Q
-
-        # Clamp k to prevent instability (k must be > 0 for stability)
-        k = max(0.01, k)
-
-        return g, k
-
-    def _svf_sample(self, x: int, state: SVFState, g: float, k: float,
-                    mode: int) -> int:
-        """
-        Process single sample through TPT SVF.
-
-        TPT SVF equations:
-            v1 = (x - ic2eq) * g / (1 + g*(g + k))
-            v2 = ic2eq + g * v1
-
-            lp = v2 + ic2eq
-            bp = v1 + ic1eq
-            hp = x - k*bp - lp
-
-            ic1eq = 2*v1 - ic1eq
-            ic2eq = 2*v2 - ic2eq
-
-        Args:
-            x: Input sample (Q15)
-            state: SVFState with integrator states
-            g: Frequency coefficient
-            k: Damping coefficient
-            mode: 0=LP, 1=HP, 2=BP, 3=Notch
-
-        Returns:
-            Filtered output (Q15)
-        """
-        # Convert input to float for processing
-        x_f = x / 32767.0
-
-        # Convert state to float
-        ic1eq = state.ic1eq / 32767.0
-        ic2eq = state.ic2eq / 32767.0
-
-        # TPT SVF core
-        # v1 = g * (x - ic2eq) / (1 + g*(g + k))
-        denom = 1.0 + g * (g + k)
-        v1 = g * (x_f - ic2eq) / denom
-        v2 = ic2eq + g * v1
-
-        # Compute outputs
-        lp = v2 + ic2eq
-        bp = v1 + ic1eq
-        hp = x_f - k * bp - lp
-        notch = lp + hp  # Notch = LP + HP
-
-        # Update state
-        state.ic1eq = int((2.0 * v1 - ic1eq) * Q15_ONE)
-        state.ic2eq = int((2.0 * v2 - ic2eq) * Q15_ONE)
-
-        # Clamp state to prevent runaway
-        state.ic1eq = max(-Q15_ONE, min(Q15_ONE, state.ic1eq))
-        state.ic2eq = max(-Q15_ONE, min(Q15_ONE, state.ic2eq))
-
-        # Select output based on mode
-        if mode == 0:
-            out = lp
-        elif mode == 1:
-            out = hp
-        elif mode == 2:
-            out = bp
-        else:  # mode == 3
-            out = notch
-
-        # Convert back to Q15
-        return sat16(int(out * Q15_ONE))
+    def _svf_sample(self, x: int, state: SVFState, coeff, mode: int) -> int:
+        """Process one Q1.15 sample with bounded, extended-precision state."""
+        return svf_sample(x, state, coeff, mode)
 
     def _svf_filter(self, L: List[int], R: List[int],
                     cutoff_q15: int, reso_q15: int, mode: int) -> Tuple[List[int], List[int]]:
@@ -1040,11 +916,13 @@ class MaterialEngine:
         outR = []
 
         # Compute coefficients (constant for block)
-        g, k = self._svf_coefficients(cutoff_q15, reso_q15)
+        if mode not in (0, 1, 2, 3):
+            raise ValueError("Filter mode must be 0 (LP), 1 (HP), 2 (BP), or 3 (notch)")
+        coeff = self._svf_coefficients(cutoff_q15, reso_q15)
 
         for i in range(self.B):
-            yL = self._svf_sample(L[i], self.svf_L, g, k, mode)
-            yR = self._svf_sample(R[i], self.svf_R, g, k, mode)
+            yL = self._svf_sample(L[i], self.svf_L, coeff, mode)
+            yR = self._svf_sample(R[i], self.svf_R, coeff, mode)
 
             outL.append(yL)
             outR.append(yR)
@@ -1184,12 +1062,15 @@ class MaterialEngine:
         Args:
             noise_level_q15: Amplitude of noise burst (Q15)
         """
-        import random
-
+        # Engine-local stream: one draw per left delay sample, then one per
+        # right delay sample, including at zero amplitude. No global RNG state.
+        noise_level_q15 = max(0, min(Q15_ONE, int(noise_level_q15)))
         for i in range(self.ks_L.delay_samples):
-            noise = random.randint(-noise_level_q15, noise_level_q15)
+            noise = mul_q15_sat((self._exciter_prng.next_u32() >> 16) - Q15_SCALE,
+                                noise_level_q15)
             self.ks_L.buffer[i] = noise
 
         for i in range(self.ks_R.delay_samples):
-            noise = random.randint(-noise_level_q15, noise_level_q15)
+            noise = mul_q15_sat((self._exciter_prng.next_u32() >> 16) - Q15_SCALE,
+                                noise_level_q15)
             self.ks_R.buffer[i] = noise

@@ -1,0 +1,73 @@
+Mode B FM/PM audit, 2026-10-30
+
+WSE-STD-210 section 8.3: phase_delta_q32 = sample_q15 * depth_q15 * 4.
+The prior implementation used product >> 1 (one eighth of the required depth).
+Before audio was captured from phase-27 code before any FM changes.
+Each direct-VM fixture has 2304 samples at note 69, gain 23000.
+
+source=0, depth=0, no external modulator:
+  changed samples: 0
+  former SHA-256: f647a67ca6c3adc2e59c596aaf55006f167cedffc91fda26b573d88ecdae7c0c
+  corrected SHA-256: f647a67ca6c3adc2e59c596aaf55006f167cedffc91fda26b573d88ecdae7c0c
+  Python/JIT audio agrees exactly.
+
+source=0, depth=8192, no external modulator:
+  changed samples: 2303
+  former SHA-256: ceeb3a76cc40782e956f6d3637b3fc62bc43d65896f84cafa59a960fac6d91e1
+  corrected SHA-256: f647a67ca6c3adc2e59c596aaf55006f167cedffc91fda26b573d88ecdae7c0c
+  Python/JIT audio agrees exactly.
+
+source=1, depth=0, no external modulator:
+  changed samples: 0
+  former SHA-256: f647a67ca6c3adc2e59c596aaf55006f167cedffc91fda26b573d88ecdae7c0c
+  corrected SHA-256: f647a67ca6c3adc2e59c596aaf55006f167cedffc91fda26b573d88ecdae7c0c
+  Python/JIT audio agrees exactly.
+
+source=1, depth=8192, no external modulator:
+  changed samples: 2167
+  former SHA-256: d7dee622e514a0a20abe7ee96642d87ceac8cf7f706e4a77e8ab13cd41d57cec
+  corrected SHA-256: 39a4af52694108005ddfbfe78d62c53af6ca8995d4c632f0005cc7ac17debb2f
+  Python/JIT audio agrees exactly.
+
+source=1, depth=32767, no external modulator:
+  changed samples: 2217
+  former SHA-256: 10eee9f8a856af6b48fc483fe5310bb799fba7aa9575e70049d47a5e841c4a3d
+  corrected SHA-256: 981612a6897080199fe4a75ede95dc1b5af94702136b56ee26d541662b269583
+  Python/JIT audio agrees exactly.
+
+source=2, depth=8192, no external modulator:
+  changed samples: 2303
+  former SHA-256: ceeb3a76cc40782e956f6d3637b3fc62bc43d65896f84cafa59a960fac6d91e1
+  corrected SHA-256: f647a67ca6c3adc2e59c596aaf55006f167cedffc91fda26b573d88ecdae7c0c
+  Python/JIT audio agrees exactly.
+
+Authored LFO phase modulation with delay, ramp and release:
+  samples: 2304
+  changed from source-off control: 2176
+  source-off control SHA-256: 510876da182c2cee90da12f5801a2793a0ef4de13ba07ab2eb7652da667ca344
+  modulated SHA-256: c1767273b9a5fb5864ab98d89249781eff915da4a3b336efdc0e3480443fe3f9
+  Direct/capsule frames and audio agree; Python/JIT audio agrees.
+
+No existing audio golden was regenerated.
+Source-off and zero-depth bypasses are exact; legacy feedback retains its one-block delay.
+The feedback source remains a coefficient-derived lane signal, not full sample-rate audio FM.
+Hard sync, live unison, arbitrary modulation graphs and FPGA qualification remain open.
+
+Prior native-preset audit fixtures:
+  dx_marimba_v0: direct/capsule and Python/JIT audio hash unchanged (93e1ab555606bb61cf4f0e7d329822300036fa6b77bedfe6b1b5f4e42df3b667).
+  glitch_lead_v0: direct/capsule and Python/JIT audio hash unchanged (8d3b25441e88af0a6e8dcde4047986618f67dbfe7e4adb8dfbe8e0313f4d7871).
+  pwm_pad_v0: direct/capsule and Python/JIT audio hash unchanged (20b946685160e064093d2aa03fa9855f2bee8f15e45db57ae379da2466c44b87).
+  saw_lead_v0: direct/capsule and Python/JIT audio hash unchanged (cd3198089c38f99cd648e65f6532e1481616eddc50184c8d3f9f6ad235827ac3).
+  violin_ir_v1: direct/capsule and Python/JIT audio hash unchanged (822c5b1ace298f0250070713a99ffac5fecb6a378a8d4383c5046c306b16c1d2).
+
+Final validation:
+  pixi run python -m pytest -q --tb=short
+  4835 passed, 16 skipped, 102 existing warnings in 374.71s.
+  PM/VM-binary/VM-JSON/wire selection: 330 passed in 35.79s.
+  PM/constant-lint selection: 94 passed in 16.25s (all 93 new PM checks plus lint).
+  The earlier full run found only the new code's Q-format magic literals;
+  canonical constants now replace them. No test gate was relaxed.
+  Active feedback retains its reserved eight-slot checkpoint buffer; old four-lane
+  JSON restores with zero padding, and binary future-audio replay passes.
+  Separate probes leave LFO initial-phase/shared-slot ownership and vector
+  ties-to-even coefficient arithmetic as concrete remaining work.

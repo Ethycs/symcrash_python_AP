@@ -1,0 +1,87 @@
+Prepared Mode B basis resource audit, 2026-10-30
+
+Reference: phase-32 verified factory data; 5253 tests passing.
+52 factory traces: 36 blocks / 2304 samples; release at block 24.
+Resource: 37842 pitches, 898540952 bytes.
+Whole-resource validation/mapping in this process: 919.868 ms.
+
+acid_bass_v0: native/capsule and Python/JIT identical to phase 32; 4cba0b4697d119f53cbd549d2fa5b340aa64859510e581755096e2c6cbfa9ae4
+acoustic_marimba_v0: native/capsule and Python/JIT identical to phase 32; 8b074c1486ec456dd81054be1927fda1fe876dae2922b6a8d295240be9f1937f
+analog_strings_v0: native/capsule and Python/JIT identical to phase 32; 5598fdf0f4555b76debefe7f53b0959218b7179602962684050abffefd28c3b2
+bass_cheap_v0: native/capsule and Python/JIT identical to phase 32; 1c3e0e8eb226a227459acd33ef07322de5adf155cf11d0ecf68d706797187b5d
+brass_cheap_v0: native/capsule and Python/JIT identical to phase 32; 4a961c4521625ffe43b7b08852e3a4df75ae9765ca4ddaaaa5e97a91ddd8060e
+brass_stab_v0: native/capsule and Python/JIT identical to phase 32; 80ac9745771bd69ce6082c0548fe5c1721adca8a48de901b200662055758d908
+brass_stab_v1: native/capsule and Python/JIT identical to phase 32; 4cbf1c78e236dea642c9e9406023293b57cc5e85d86650facb1cd3fadc046fe7
+detroit_bass_v0: native/capsule and Python/JIT identical to phase 32; bda0c6932d839405439f4b1c83a500609c9414039b202d3336c08b5dd190d1b6
+dream_marimba_v0: native/capsule and Python/JIT identical to phase 32; 012f9ec8e23761bdfa4202463d7ef5c48338fea5e44082ad62115001558b0b4e
+dx7_bass_1_v0: native/capsule and Python/JIT identical to phase 32; c3f0248cd7ff15d0c384381df732dab2aed3f9d4fe6a44b51047c726f2be352c
+dx7_brass_1_v0: native/capsule and Python/JIT identical to phase 32; 8b6637cea24cae6bebfb0e3a2eba88eaa5066b9a513e472e90038b6451594faa
+dx7_e_piano_1_v0: native/capsule and Python/JIT identical to phase 32; 3abf2c2448e86d7198f40b8f04a928ffa5834ad2823362b3b68cea58f51ee8ab
+dx7_harpsich_1_v0: native/capsule and Python/JIT identical to phase 32; adc5633e68171f1fd8be104d7d3b4263e3943ad27aa35e46a360c39173c3deb1
+dx7_marimba_v0: native/capsule and Python/JIT identical to phase 32; 400094a8317fef9b88db25ada53b0557969fff66e22cd7f9e47f0c7a7d928f6a
+dx7_strings_1_v0: native/capsule and Python/JIT identical to phase 32; ada89750c50df40818c49f2508431d38a0cb8962b8915005c8018f4464dbabd7
+dx7_tub_bells_v0: native/capsule and Python/JIT identical to phase 32; 4c4f7a31415c993e08e26637e0dcc1e3528f41614a95a1a785ca747a3f5754b1
+dx7_vibe_1_v0: native/capsule and Python/JIT identical to phase 32; c42356c29838283f8a9decd442ceea49b31c92f0101cef1eccd433af8201a83e
+dx_clav_v0: native/capsule and Python/JIT identical to phase 32; 5ee766da874a1c2b556836e0a123714fb0913bc0ac3e9c6966052921598987db
+dx_epiano_v0: native/capsule and Python/JIT identical to phase 32; 013547abdc91e509d9e0d3690367ac9fc6fe3c037dd5baa36586949f4ce0f323
+dx_lately_bass_v0: native/capsule and Python/JIT identical to phase 32; 09085ae75725ceefa5fb2c722a71c32bc8d2b597067082a496e0767e04fe427e
+dx_marimba_v0: native/capsule and Python/JIT identical to phase 32; 93e1ab555606bb61cf4f0e7d329822300036fa6b77bedfe6b1b5f4e42df3b667
+fm_bell_v0: native/capsule and Python/JIT identical to phase 32; a9695ae36f0953dfbc58916ad62a34972ad751ef85789e2413e9488900b2fa04
+fm_brass_v0: native/capsule and Python/JIT identical to phase 32; 42e70067c500910b2d40d26c6ba7dfca4e0dce5efae530cef1f055c1fca633e5
+fm_horn_v0: native/capsule and Python/JIT identical to phase 32; 2345a9b850e6b90890fa73e21385a43da3c39f38ef45fc97741de3eaea11c80f
+fm_trumpet_v0: native/capsule and Python/JIT identical to phase 32; 4224f4c2afadd0497f0bcf061256fa738c8945781d64cc60e9fac7650d42432c
+fold_drone_v0: native/capsule and Python/JIT identical to phase 32; 3ebebc0f5a2536b3d069f60d428303f809b8f8d68c0332b1023b29c25343ef28
+glitch_lead_v0: native/capsule and Python/JIT identical to phase 32; 400b127580398073fea0e03b446c60b803293cfb5b349d5476ad9a29059ce68d
+jump_brass_v0: native/capsule and Python/JIT identical to phase 32; f2ce14ab8f50452fbfd299684e9be4aea7539c250101f31e481169d3792cd45b
+oeis_bass_v0: native/capsule and Python/JIT identical to phase 32; 637eac851397e86a6467e0daa83ba14d1a047d174f772852aa2b5b74f5b8de5b
+oeis_bell_v0: native/capsule and Python/JIT identical to phase 32; 4f283ce7a7e51efa4261f93404ff4065c1def9723f6cc48ad9a51cf3421b0572
+oeis_pad_v0: native/capsule and Python/JIT identical to phase 32; 7a95c1e75567e84cd2a4ecf19b9e6ff42cb752f3060440352e83c5214db8fcfd
+pad_cheap_v0: native/capsule and Python/JIT identical to phase 32; 5d5aac69990a4cd1e31b462572a7872195580731bb8c470932416b7e66d1abba
+pluck_bell_v0: native/capsule and Python/JIT identical to phase 32; 648f8a2e1eede0031efd705b76a9b2a0e9832d5dd726ced0d2046d057789ebc8
+pluck_cheap_v0: native/capsule and Python/JIT identical to phase 32; ab221d9599f14c6d2db4fe727a4940657cb5b539a4adf824aeb40cbfee7f887c
+pluck_v0: native/capsule and Python/JIT identical to phase 32; ffc1d0b2d804f8382be9c18979150a350557ad1d714ca251f29da91ceebe1c13
+prime_storm_v0: native/capsule and Python/JIT identical to phase 32; 5ef00f7b71db41562a67ff0973356c89f0a4ff5eceae7ffdbe2666d87696947e
+pwm_pad_v0: native/capsule and Python/JIT identical to phase 32; 91beaa39677b3611ee14569af5baafb18bf5454d463db5ed2a3e34bf4b2078a8
+pwm_string_v0: native/capsule and Python/JIT identical to phase 32; b24a127a4d050e259c38725792ee9995cd87d5abd0622d06e13f970e9077e336
+quasi_glass_v0: native/capsule and Python/JIT identical to phase 32; 4a8b861ede3118f2c9068cfcccfeb85ccdd4ee65604cd9c99c388b97e292b1fd
+rnb_slide_v0: native/capsule and Python/JIT identical to phase 32; e9fcf9518a9b0fb5b97476078cbedbccdfc847a6baeaa353283008ab0f64d6a8
+saw_lead_v0: native/capsule and Python/JIT identical to phase 32; 6096cc7f778ec10de2197e55c1644d74394779b2b04fd01249b3c29006e4e911
+shear_vox_v0: native/capsule and Python/JIT identical to phase 32; cd7e15e80a14c3863fc4737bc2f45ef0155f6b48dbfc1bc1a2b670b7c93014b4
+square_bass_v0: native/capsule and Python/JIT identical to phase 32; 48ecf257e57f3c1064164fce7ef54e4abfef3cda5a61206fe8c319bcc3ebe607
+string_pad_v0: native/capsule and Python/JIT identical to phase 32; 7d31c038186e2212998efb9616b1c35ecd3e7060517faf36b6dcdf63bcb0eb8f
+sub_bass_v0: native/capsule and Python/JIT identical to phase 32; 914881a5537bf8d7a2772cb72260e18d3e14642e50e55230f8ac314c5b901b81
+super_saw_v0: native/capsule and Python/JIT identical to phase 32; b98d7dcbdb125a11c6d384a88a587dcdd6dc456af3d0ca71005a7da36997413a
+sync_lead_v0: native/capsule and Python/JIT identical to phase 32; 5a2fa8ee40ba2a780e64310c1987956d6446f1bfc40439234d266110fc5b159d
+theremin_lead_v0: native/capsule and Python/JIT identical to phase 32; ec349e253a82aa7e537b8231e28dc50cace01a722f2face5d5144132f7d7a1b8
+violin_ir_v1: native/capsule and Python/JIT identical to phase 32; 6d9cbf506316d52efb9ee5d80aee32e6d2599a453aa5e68272e31e63e84aba78
+violin_opt_v0: native/capsule and Python/JIT identical to phase 32; 55a84273a3d50974a6715227cbd3c3f9fc9a24dd823df543097ca9a1a80f57a9
+warm_pad_v0: native/capsule and Python/JIT identical to phase 32; 6e4b4d5d083df8ec13ba241a7ef27813ebfbfafd75880ecc3d3a7d4ed69bb6b7
+wobble_bass_v0: native/capsule and Python/JIT identical to phase 32; 29bdd03e986e7ecbb98775941f8bb5fa899e7da878c4373ce101e099ac3303e1
+
+Frozen VM traces:
+golden_trace_v0: unchanged; 0227619e63795fbafddc6ae9a697c1074a90d47fb7108489472acd4974e5becd
+golden_trace_subtractive_v0: unchanged; d8a46aab67e7984565eda84a6225b211ddf06ea3e5fddfc4b387dfe04cabc4f5
+golden_trace_fm_v0: unchanged; 94075a86a764fb85f896651c72e8827978f54ee2ec9c69871670c6e632699ccb
+golden_trace_stress_v0: unchanged; a313b041a6b4d2c05bdfc31cb5b2c90bc2f7270396c0b557bf9a61d52bb937a6
+
+Cold view lookup plus coefficient copy median: 0.022700 ms.
+Warm lookup median: 0.000303 ms.
+Indicative Windows timing after resource validation; not an audio-device benchmark.
+OS page residency, cache pressure, polyphony and device deadlines remain unqualified.
+No frozen input, golden hash, tolerance or musical checkpoint schema changed.
+
+Resource identity:
+  Version: 1; pitches: 37842; magic: SYMBAS01
+  Recipe SHA-256: 9eec9ffb3bb527ad33c6d4554408f0bf895ac13affdbdc1f9bfa71ca3f225860
+  Pitch-directory/coefficient SHA-256: 71864a750dff44125028c19546242c87f10d7f023b1fc7e236ec37167e7b788d
+  Initial full build plus validation: 37.80 seconds.
+
+Final validation:
+  Initial spectrum/unison/workbench checks: 200 passed in 55.98 seconds.
+  Resource/scheduling/binary/PM checks: 277 passed in 33.86 seconds.
+  First full run: 5300 passed, 1 hygiene failure, 16 skipped, 102 warnings in 449.24 seconds.
+  Replaced the two flagged literals with named constants; no numeric change.
+  Corrected resource/hygiene checks: 49 passed in 15.06 seconds.
+  Final root command: pixi run python -m pytest -q --tb=short
+  5301 passed, 16 skipped, 102 warnings in 410.89s (0:06:50)
+  Native/capsule/Python/JIT factory frames/audio and all frozen hashes remain unchanged.

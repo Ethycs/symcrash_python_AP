@@ -1,0 +1,37 @@
+WSES v0 container and legacy layout audit, 2026-10-30
+Baseline captured before changes; independent byte fixtures cover both CRC scopes.
+Default CORE v0 bytes are unchanged: 644 bytes.
+CORE fixture SHA256: d9c289f6a31ed753da5e3acd0ad156dd740856d5a233f02f59f552bdf80a4c87
+
+unknown_header_version:
+  before {"result": 9}
+  after  {"error": "ValueError", "message": "Unsupported snapshot version: 9"}
+reserved_header:
+  before {"result": "676c6f62616c"}
+  after  {"error": "ValueError", "message": "Nonzero reserved snapshot header field"}
+trailing_bytes:
+  before {"result": "676c6f62616c"}
+  after  {"error": "ValueError", "message": "Trailing snapshot data or incorrect chunk count"}
+unknown_chunk:
+  before {"error": "ValueError", "message": "999 is not a valid ChunkType"}
+  after  {"result": 0}
+edited_payload:
+  before {"error": "ValueError", "message": "CRC mismatch in chunk: got 0xD55E903A, expected 0xFF91B7D8"}
+  after  {"result": "656469746564"}
+voice_identity_mismatch:
+  before {"result": 7}
+  after  {"error": "ValueError", "message": "CORE payload voice ID does not match its chunk"}
+unsigned_ccs_phase:
+  before {"error": "error", "message": "'i' format requires -2147483648 <= number <= 2147483647"}
+  after  {"result": 4294967295}
+legacy_trailing_bytes:
+  before {"result": 0}
+  after  {"error": "ValueError", "message": "Legacy VM core payload must contain exactly 644 bytes"}
+
+Remaining legacy v0 replay limitation (not a regression):
+After 11 rendered blocks, different samples in the next 64-sample block:
+{"a": 0, "b": 64, "fm6": 64}
+The payload omits modern oscillator/resources, wet/tail/control histories and release timing.
+Complete binary replay requires versioned runtime payloads and whole-host integration.
+This pass does not replace them with JSON or alter the normative integer-only requirement.
+No synthesis DSP or existing audio golden was changed.

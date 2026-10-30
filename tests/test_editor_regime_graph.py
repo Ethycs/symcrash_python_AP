@@ -7,6 +7,7 @@ and V4 graph validator per problem.txt requirements.
 """
 
 import pytest
+import copy
 from symcrash_python_ap.editor import (
     EditorSession,
     AddRegime,
@@ -567,6 +568,50 @@ def test_envelope_override_removal():
     # Undo should restore it
     session.undo()
     assert "R1_ATTACK" in ir.layers.L2_regimes.envelope_overrides
+
+
+@pytest.mark.parametrize('typed', [False, True])
+def test_remove_regime_undo_restores_interleaved_transition_priority(typed):
+    pairs = [('A', 'B'), ('A', 'C'), ('B', 'C'), ('any', 'C'), ('any', 'B')]
+    l2 = L2Regimes(
+        regime_nodes=[RegimeNode(id=name, kind='Idle', emit_template='T') for name in ('A', 'B', 'C')],
+        transitions=[RegimeTransition(from_regime=a, to=b, when=str(i)) for i, (a, b) in enumerate(pairs)],
+        regime_graph_spec=(RegimeGraphSpec(start_regime='A', edges=[
+            EdgeSpec(src_regime=a, dst_regime=b, guard=str(i)) for i, (a, b) in enumerate(pairs)])
+            if typed else None),
+        envelope_overrides={'B': [], 'C': []},
+    )
+    ir = InstrumentIR(meta=InstrumentMeta(name='Undo'), io=IOConfig(),
+                      layers=Layers(L0_graph=L0Graph(), L1_lift=L1Lift(), L2_regimes=l2, L3_cmmm=L3Cmmm()))
+    session = EditorSession(ir)
+    before = copy.deepcopy(l2)
+    assert session.execute(RemoveRegime('B')).ok
+    after = copy.deepcopy(l2)
+    for _ in range(3):
+        assert session.undo().ok
+        assert ir.layers.L2_regimes == before
+        assert session.redo().ok
+        assert ir.layers.L2_regimes == after
+
+
+def test_atomic_batch_redo_remains_undoable_across_repeated_cycles():
+    from symcrash_python_ap.editor import SetParam
+    l2 = L2Regimes(regime_nodes=[RegimeNode(id='A', kind='Idle', emit_template='T')])
+    ir = InstrumentIR(meta=InstrumentMeta(name='Undo'), io=IOConfig(),
+                      layers=Layers(L0_graph=L0Graph(), L1_lift=L1Lift(), L2_regimes=l2, L3_cmmm=L3Cmmm()))
+    session = EditorSession(ir)
+    before = copy.deepcopy(ir)
+    results = session.execute_batch([
+        SetParam('meta.name', 'Undo'), AddRegime('B'), AddTransition('A', 'B')], atomic=True)
+    assert all(result.ok for result in results)
+    after = copy.deepcopy(ir)
+    for _ in range(3):
+        assert session.history.undo_count == 1
+        assert session.history.peek_undo() == 'Batch of 3 commands'
+        assert session.undo().ok
+        assert ir == before
+        assert session.redo().ok
+        assert ir == after
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@
 Block Orchestrator
 ==================
 
-LEGACY - pre-VM path (quarantined 2026-07-02). Superseded by
+LEGACY compatibility adapter (quarantined 2026-07-02). Delegates to
 vm/executor.vm_step_block, the single realization kernel (see
 PIPELINE-ARCHITECTURE-GAP.md "Unified Execution Layer"). Kept for the
 legacy integration tests and FPGA reference material only; not part of
@@ -14,7 +14,7 @@ The orchestrator is the execution engine that:
 1. Takes scheduling decisions from BlockScheduler
 2. Applies emission group flags (TOP/MID/BASE/TAIL) to control operations
 3. Manages voice lifecycle (allocate/on/free) when scheduler reassigns voices
-4. Produces audio blocks using only serviced voices
+4. Renders serviced voices and holds unserviced coefficient state
 
 Architecture Note:
 - Scheduler runs on Pico (decides what to do)
@@ -29,6 +29,7 @@ Per WSE-STD-070:
 """
 
 from dataclasses import dataclass, field
+from copy import deepcopy
 from typing import List, Tuple, Optional, Dict, Set
 from enum import IntEnum
 
@@ -44,6 +45,8 @@ from ..budgets import (
     get_regime_budget, RegimeId, popcount32,
 )
 from ..fixed import Q15_ONE, sat16, mul_q15_sat
+from ..vm import VMState, vm_step_block
+from ..vm.scheduling import ExecutionPolicy, ExecutionReport
 
 
 # =============================================================================
@@ -80,8 +83,8 @@ class BlockOrchestrator:
     This is the execution layer that:
     1. Receives ScheduleResult from BlockScheduler
     2. Manages voice allocation lifecycle
-    3. Applies emission group flags to control Symbol Engine operations
-    4. Renders only serviced voices through Wavelet Engine
+    3. Applies emission flags and budgets in the shared VM
+    4. Synthesizes held coefficients for voices that are not serviced
     5. Returns mixed audio and updated telemetry
     """
 
@@ -114,13 +117,22 @@ class BlockOrchestrator:
     # Degradation stats (accumulated per block for telemetry)
     degradation_steps_total: int = 0
     emergency_voices: int = 0
+    vm_states: Dict[int, VMState] = field(default_factory=dict)
+    execution_reports: Dict[int, ExecutionReport] = field(default_factory=dict)
+    _last_render_frames: Dict[int, VoiceFrame] = field(default_factory=dict)
+    _accepted_sequences: Dict[int, Tuple[int, int]] = field(default_factory=dict)
 
     def __post_init__(self):
         """Initialize voice slots and frame storage."""
+        if not 1 <= self.n_voices <= 128 or self.block_size != BLOCK_SIZE:
+            raise ValueError('The VM adapter requires 1..128 voices and 64-sample blocks')
+        from ..vm.resources import prepare_oscillator_resources
+        prepare_oscillator_resources()
         if not self.voice_slots:
             self.voice_slots = [VoiceSlot() for _ in range(self.n_voices)]
         if not self.voice_frames:
             self.voice_frames = [None] * self.n_voices
+        self.scheduler.voice_selector.v_max = self.n_voices
 
     # -------------------------------------------------------------------------
     # Voice Lifecycle
@@ -153,6 +165,10 @@ class BlockOrchestrator:
 
         # Allocate in WaveletEngine (arms microfade)
         self.wavelet.voice_allocate(voice_id, last_sample)
+        self.vm_states[voice_id] = VMState.create(voice_id)
+        self._last_render_frames.pop(voice_id, None)
+        self._accepted_sequences.pop(voice_id, None)
+        self.voice_frames[voice_id] = None
 
         # Update slot state
         slot.state = VoiceState.ALLOCATED
@@ -219,6 +235,10 @@ class BlockOrchestrator:
         # Update slot state
         slot.state = VoiceState.FREE
         slot.owner_id = 0
+        self.voice_frames[voice_id] = None
+        self.vm_states.pop(voice_id, None)
+        self._last_render_frames.pop(voice_id, None)
+        self._accepted_sequences.pop(voice_id, None)
 
         return True
 
@@ -272,9 +292,6 @@ class BlockOrchestrator:
 
         # Get node mask from frame (full mask if not available)
         node_mask = getattr(frame, 'node_mask', 0xFFFFFFFF)
-        if node_mask == 0:
-            node_mask = 0xFFFFFFFF  # Default to all nodes
-
         return apply_degradation(
             backbone_ops=backbone_ops,
             event_ops=event_ops,
@@ -294,14 +311,33 @@ class BlockOrchestrator:
         This is how parameter updates arrive from the wire protocol.
         """
         if 0 <= voice_id < self.n_voices:
-            self.voice_frames[voice_id] = frame
+            if frame.voice_id != voice_id:
+                raise ValueError('Packet voice ID must match its addressed slot')
+            # Validate the core before changing any lifecycle or scheduling state.
+            frame.to_voice_frame()
+            previous = self._accepted_sequences.get(voice_id)
+            if (previous is not None and not frame.reject_code and
+                    previous[0] == frame.program_id):
+                delta = (frame.frame_seq - previous[1]) & 0xFFFFFFFF
+                if delta >= 0x80000000:
+                    return
+                if delta == 0:
+                    return  # A frame sequence identifies one immutable command.
+            frame = deepcopy(frame)
+            if frame.reject_code:
+                self.voice_frames[voice_id] = frame
+                return
 
             # Update slot activity for scheduling
             slot = self.voice_slots[voice_id]
             slot.last_activity_q15 = frame.activity_q15
 
+            if previous is not None and previous[0] != frame.program_id:
+                self.voice_allocate(voice_id, voice_id, frame.note_u8)
+
             # Handle gate events
-            if frame.flags & VoiceFlags.GATE_RISE:
+            if (slot.state in (VoiceState.FREE, VoiceState.ALLOCATED) and frame.flags & VoiceFlags.GATE or
+                    frame.flags & (VoiceFlags.GATE_RISE | VoiceFlags.RETRIGGER)):
                 if slot.state == VoiceState.FREE:
                     # Auto-allocate on gate rise
                     self.voice_allocate(voice_id, voice_id, frame.note_u8)
@@ -309,6 +345,8 @@ class BlockOrchestrator:
 
             elif frame.flags & VoiceFlags.GATE_FALL:
                 slot.state = VoiceState.RELEASING
+            self._accepted_sequences[voice_id] = (frame.program_id, frame.frame_seq)
+            self.voice_frames[voice_id] = frame
 
     # -------------------------------------------------------------------------
     # Block Rendering
@@ -332,52 +370,46 @@ class BlockOrchestrator:
         # 0. Reset per-block degradation stats
         self.degradation_steps_total = 0
         self.emergency_voices = 0
+        self.execution_reports.clear()
 
         # 1. Get scheduling decisions
         schedule = self.scheduler.schedule_block(self.voice_frames, tail_stats)
 
-        # 2. Render only serviced voices
+        # 2. Service through the shared VM. Other accepted voices synthesize
+        # their last legal coefficient vector without advancing musical state.
         voice_blocks: List[Tuple[VoiceFrame, List[int]]] = []
-
-        for sched_info in schedule.serviced:
-            vid = sched_info.voice_id
-            frame = self.voice_frames[vid]
-
-            if frame is None:
+        selected = {info.voice_id: info for info in schedule.serviced}
+        for vid, frame in enumerate(self.voice_frames):
+            if frame is None or frame.reject_code or self.voice_slots[vid].state == VoiceState.FREE:
                 continue
-
-            # Apply degradation ladder to fit voice within budget
-            degrade_result = self._degrade_for_voice(frame)
-
-            # Track degradation stats for telemetry
-            self.degradation_steps_total += degrade_result.degradation_steps
-            if degrade_result.is_emergency:
-                self.emergency_voices += 1
-
-            # Convert to internal VoiceFrame for rendering
-            vf = frame.to_voice_frame()
-
-            # Apply emission group filtering to Symbol Engine
-            # TOP/MID flags from scheduler gate which operators run
-            if self.symbol is not None and params is not None:
-                emission_flags = EmissionFlags(
-                    mid_due=sched_info.mid_due,
-                    top_due=sched_info.top_due,
-                )
-                # Symbol engine step_voice would use:
-                # - emission_flags to gate MID/TOP operator groups
-                # - degrade_result.K for active node count
-                # - degrade_result.get_full_op_chain() for fitted operator list
-                # - degrade_result.tail_mode for tail configuration
-                #
-                # NOTE: Full wiring requires SymbolEngine.step_voice() to accept
-                # these parameters. For now, store on vf for potential use.
-                vf.emission_flags = emission_flags
-                vf.degrade_K = degrade_result.K
-                vf.degrade_tail_mode = degrade_result.tail_mode
-
-            # Render through Wavelet Engine
-            audio = self.wavelet.render_voice(vf)
+            info = selected.get(vid)
+            if info is not None:
+                vf = frame.to_voice_frame()
+                vf.backbone_ops = list(self.default_backbone_ops)
+                # Node masks are an internal extension, not a frozen wire field.
+                if hasattr(frame, 'node_mask'):
+                    vf.node_mask = frame.node_mask
+                self._last_render_frames[vid] = vf
+            else:
+                vf = self._last_render_frames.get(vid)
+                if vf is None:
+                    continue
+            state = self.vm_states.get(vid)
+            if state is None:
+                state = self.vm_states[vid] = VMState.create(vid)
+            policy = ExecutionPolicy(
+                serviced=info is not None,
+                mid_due=info.mid_due if info else False,
+                top_due=info.top_due if info else False,
+                budget=self.current_budget or get_regime_budget(RegimeId.STABLE_TONE))
+            report = ExecutionReport()
+            _, output = vm_step_block(state, vf, policy=policy, report=report)
+            self.execution_reports[vid] = report
+            self.degradation_steps_total += report.degradation_steps
+            self.emergency_voices += int(report.emergency)
+            # Compatibility lifecycle owns only sample regularity and mixing;
+            # it must not run a second synthesis kernel or apply gain twice.
+            audio = self.wavelet.get_regularity(vid).finalize(output.tolist())
             voice_blocks.append((vf, audio))
 
         # 3. Mix to stereo
@@ -399,13 +431,13 @@ class BlockOrchestrator:
     def _update_voice_states(self, serviced_ids: List[int]) -> None:
         """Update voice slot states after block processing."""
         for vid, slot in enumerate(self.voice_slots):
-            if slot.state != VoiceState.FREE:
+            if slot.state != VoiceState.FREE and vid in serviced_ids:
                 slot.blocks_since_gate += 1
 
             # Auto-free voices that have decayed to silence
             if slot.state == VoiceState.RELEASING:
                 frame = self.voice_frames[vid]
-                if frame is None or frame.activity_q15 == 0:
+                if frame is None or (not frame.reject_code and frame.activity_q15 == 0):
                     self.voice_free(vid)
 
     # -------------------------------------------------------------------------
@@ -446,7 +478,8 @@ class OrchestratedPipeline:
     """
     Complete pipeline with scheduling and orchestration.
 
-    This replaces the simple Pipeline class for production use.
+    Compatibility wrapper for legacy packet callers. New native callers use
+    VoiceEngine and the shared VM/SynthMaster execution path.
     """
     orchestrator: BlockOrchestrator = field(default_factory=BlockOrchestrator)
     params: ParamFrame = field(default_factory=ParamFrame)

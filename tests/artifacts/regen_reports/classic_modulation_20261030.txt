@@ -1,0 +1,37 @@
+Classic native modulation audit, 2026-10-30
+
+36 blocks / 2304 samples per fixture, note-off at block 24.
+Before traces captured on phase-30 code: all three nonzero families were silent no-ops.
+Current direct/capsule and Python/JIT frames/audio compared for each fixture.
+
+vibrato:
+  changed audio samples: 2239; max absolute change: 27219
+  changed existing frame fields: 35 frames; spectral commands: 36 frames
+  former SHA-256: 2ef3363ac72b4fe99654c897fc11694fead21f7e16d73c7ccb3387bb6208a088
+  current SHA-256: 5f9b94464e0090af6e28f851f5981490c084ecd9aa6aa925da28c3437b229442
+body_warble:
+  changed audio samples: 2239; max absolute change: 26880
+  changed existing frame fields: 0 frames; spectral commands: 36 frames
+  former SHA-256: 2ef3363ac72b4fe99654c897fc11694fead21f7e16d73c7ccb3387bb6208a088
+  current SHA-256: 1d9adfdb4fc62ba1d8a228627513a1a3ff636f472d15d28b45e16152b6a5afa2
+attack_texture:
+  changed audio samples: 2239; max absolute change: 26645
+  changed existing frame fields: 0 frames; spectral commands: 36 frames
+  former SHA-256: 2ef3363ac72b4fe99654c897fc11694fead21f7e16d73c7ccb3387bb6208a088
+  current SHA-256: 148c69bdb989f578e5137071d86481b99394241fd760ab9f8ce6ff18132f9db4
+
+Unmodulated baseline audio is bit-exact.
+All 52 factory preset low-level voice traces retain their previously audited SHA-256.
+Factory presets use ordinary routed LFOs; their vibrato labels are not these classic IR families.
+Mode B spectral gain curves preserve base signed weights and phase and use constant bounded headroom.
+Amplitude vibrato also supports Mode A/FM6. Spectral controls require Mode B.
+No existing golden trace or expected golden hash was changed.
+
+Validation:
+  103 classic modulation cases plus Q-format hygiene: 104 passed in 27.55 seconds.
+  Full root suite: 5156 passed, 16 skipped, 102 existing warnings in 409.76 seconds.
+  Command: pixi run python -m pytest -q --tb=short
+  Mode A/FM6 amplitude, Mode B spectral arithmetic/audio, scheduled unison holds,
+  migration and JSON/binary/fresh-process replay pass in Python and JIT paths.
+  A separate same-pitch spectrum-latching gap is captured for the next pass;
+  this feature applies temporary modulation to the existing base-weight owner.

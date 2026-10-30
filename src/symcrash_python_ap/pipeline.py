@@ -369,8 +369,8 @@ def demo_catastrophe():
     pipe.material_id = 5  # Cusp
     
     # Reset material state
-    pipe.material.cat_L.s = 0
-    pipe.material.cat_R.s = 0
+    pipe.material.cusp_L.s = 0
+    pipe.material.cusp_R.s = 0
     
     n_blocks = int(4.0 * pipe.fs / pipe.B)
     

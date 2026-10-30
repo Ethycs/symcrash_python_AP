@@ -5,12 +5,12 @@ Safety Tail Hot-Path JIT Kernel
 Numba-compiled port of the per-block Safety Tail chain executed by
 ``SafetyEngine.step_block``:
 
-    Metrics -> RG -> Q -> Master OLA -> Slew Limit -> Limiter -> DC removal
+    Metrics -> RG -> Q -> DC -> Lookahead/soft clip -> Slew -> Safety OLA
 
 DESIGN CONTRACT (same as vm/hotpath_jit.py):
     The kernel is a BIT-EXACT port of the pure-Python methods in
     safety_engine.py, which remain the conformance reference. Every
-    intermediate fits in int64 (largest product is 32767 * 32767), so Python
+    intermediate fits in int64, including widened energy sums, so Python
     int and numba int64 agree exactly. Floor division and arithmetic right
     shift on negative values have identical semantics in CPython and numba.
     No floats are used.
@@ -26,6 +26,8 @@ from __future__ import annotations
 import numpy as np
 
 from ..vm.hotpath_jit import njit, NUMBA_AVAILABLE, jit_enabled  # noqa: F401
+from ..primitives import Q15_SCALE
+from .output_projection import dc_excess_offset, project_output
 
 Q15_ONE = 32767
 Q15_HALF = 16384
@@ -116,6 +118,7 @@ def _slew_asym(cur, target, attack, release):
 
 @njit(cache=True)
 def _sqrt_q15(x, sqrt_lut):
+    """Legacy approximation helper; Safety RMS uses _rms_from_energy instead."""
     if x <= 0:
         return 0
     if x >= Q15_ONE:
@@ -124,6 +127,34 @@ def _sqrt_q15(x, sqrt_lut):
     if idx > sqrt_lut.shape[0] - 1:
         idx = sqrt_lut.shape[0] - 1
     return sqrt_lut[idx]
+
+
+@njit(cache=True)
+def _rms_from_energy(energy, count):
+    """Integer-only port of safety.rms.rms_from_energy for Q15 blocks."""
+    if energy < 0 or count < 0 or (count == 0 and energy != 0):
+        raise ValueError('RMS requires nonnegative energy and a positive sample count')
+    if energy == 0:
+        return 0
+    if energy >= count * Q15_ONE * Q15_ONE:
+        return Q15_ONE
+    # Restoring binary square root; the mean of Q15 squares is at most 2**30.
+    remainder = energy // count
+    root = 0
+    bit = 1 << 30
+    while bit > remainder:
+        bit >>= 2
+    while bit:
+        if remainder >= root + bit:
+            remainder -= root + bit
+            root = (root >> 1) + bit
+        else:
+            root >>= 1
+        bit >>= 2
+    midpoint_squared = count * (2 * root + 1) * (2 * root + 1)
+    if 4 * energy > midpoint_squared or (4 * energy == midpoint_squared and root & 1):
+        root += 1
+    return root
 
 
 @njit(cache=True)
@@ -140,7 +171,7 @@ def safety_tail_step(L, R, n, st, flags, k_mode,
                      e_targets, hf_budgets, sqrt_lut, hann_lut,
                      tail_L, tail_R,
                      limit_threshold, limit_ceiling, attack, release,
-                     slew_max, ola_overlap,
+                     slew_max, dc_max, ola_overlap,
                      outL, outR):
     """Run one block through the whole chain. Mutates st, tail_L/tail_R, outL/outR."""
     # ---- 1) measure_metrics -------------------------------------------------
@@ -153,11 +184,9 @@ def safety_tail_step(L, R, n, st, flags, k_mode,
             peak = a
         if b > peak:
             peak = b
-        energy += (L[i] * L[i] + R[i] * R[i]) >> 16
-    e = energy // (2 * n)
-    if e > Q15_ONE:
-        e = Q15_ONE
-    rms = _sqrt_q15(e, sqrt_lut)
+        energy += L[i] * L[i] + R[i] * R[i]
+    peak = min(Q15_ONE, peak)
+    rms = _rms_from_energy(energy, 2 * n)
 
     hf = 0
     for i in range(1, n):
@@ -212,7 +241,7 @@ def safety_tail_step(L, R, n, st, flags, k_mode,
     q_hf_cut = st[ST_Q_HF_CUT]
     blend = Q15_ONE - q_hf_cut
 
-    # The HF blend is seeded from the slew limiter's last outputs of the previous block.
+    # Seed the HF blend from the previous emitted output.
     prev_yL = st[ST_PREV_L]
     prev_yR = st[ST_PREV_R]
     for i in range(n):
@@ -226,34 +255,35 @@ def safety_tail_step(L, R, n, st, flags, k_mode,
         outL[i] = yL
         outR[i] = yR
 
-    # ---- 4) apply_master_ola --------------------------------------------------
-    if flags & FLAG_MASTER_OLA:
-        if st[ST_OLA_PRIMED] == 0:
-            for i in range(ola_overlap):
-                tail_L[i] = outL[n - ola_overlap + i]
-                tail_R[i] = outR[n - ola_overlap + i]
-            st[ST_OLA_PRIMED] = 1
-        else:
-            # The saved tail is taken from this block's OLA *input*, before crossfading.
-            newtail_L = np.empty(ola_overlap, np.int64)
-            newtail_R = np.empty(ola_overlap, np.int64)
-            for i in range(ola_overlap):
-                newtail_L[i] = outL[n - ola_overlap + i]
-                newtail_R[i] = outR[n - ola_overlap + i]
-            for i in range(ola_overlap):
-                fade_out_gain = _hann_fade_in(ola_overlap - i, ola_overlap, hann_lut)
-                fade_in_gain = _hann_fade_in(i, ola_overlap, hann_lut)
-                prev_L = _mul_q15(tail_L[i], fade_out_gain)
-                curr_L = _mul_q15(outL[i], fade_in_gain)
-                outL[i] = _sat16(prev_L + curr_L)
-                prev_R = _mul_q15(tail_R[i], fade_out_gain)
-                curr_R = _mul_q15(outR[i], fade_in_gain)
-                outR[i] = _sat16(prev_R + curr_R)
-            for i in range(ola_overlap):
-                tail_L[i] = newtail_L[i]
-                tail_R[i] = newtail_R[i]
+    # ---- 4) per-channel DC blocker, retaining wide samples -------------------
+    if flags & FLAG_DC_REMOVAL:
+        offset_L = dc_excess_offset(outL, dc_max)
+        offset_R = dc_excess_offset(outR, dc_max)
+        for i in range(n):
+            outL[i] -= offset_L
+            outR[i] -= offset_R
 
-    # ---- 5) apply_slew_limit --------------------------------------------------
+    # ---- 5) linked block lookahead followed by soft anti-clip -----------------
+    peak = 0
+    for i in range(n):
+        peak = max(peak, abs(outL[i]), abs(outR[i]))
+    target_gain = min(Q15_ONE, (limit_ceiling << 15) // max(1, peak))
+    threshold = min(limit_ceiling, limit_threshold)
+    gL, gR = st[ST_LIM_L], st[ST_LIM_R]
+    for i in range(n):
+        gL = _slew_asym(gL, target_gain, release, attack)
+        gR = _slew_asym(gR, target_gain, release, attack)
+        left = _mul_q15(outL[i], min(gL, target_gain))
+        right = _mul_q15(outR[i], min(gR, target_gain))
+        if abs(left) > threshold:
+            left = (1 if left >= 0 else -1) * (threshold + ((abs(left) - threshold) >> 1))
+        if abs(right) > threshold:
+            right = (1 if right >= 0 else -1) * (threshold + ((abs(right) - threshold) >> 1))
+        outL[i] = max(-limit_ceiling, min(limit_ceiling, left))
+        outR[i] = max(-limit_ceiling, min(limit_ceiling, right))
+    st[ST_LIM_L], st[ST_LIM_R] = gL, gR
+
+    # ---- 6) slew; do not commit intermediate samples to emitted history -------
     if flags & FLAG_SLEW_LIMIT:
         pL = st[ST_PREV_L]
         pR = st[ST_PREV_R]
@@ -276,37 +306,25 @@ def safety_tail_step(L, R, n, st, flags, k_mode,
                 sR = outR[i]
             outR[i] = sR
             pR = sR
-        st[ST_PREV_L] = pL
-        st[ST_PREV_R] = pR
 
-    # ---- 6) apply_limiter -----------------------------------------------------
-    gL = st[ST_LIM_L]
-    gR = st[ST_LIM_R]
+    # ---- 7) final constrained Safety window ----------------------------------
+    anchor = bool((flags & FLAG_MASTER_OLA) and st[ST_OLA_PRIMED])
+    if anchor:
+        for i in range(ola_overlap):
+            weight = _hann_fade_in(i, ola_overlap, hann_lut)
+            outL[i] = _rshift_rne(st[ST_PREV_L] * (Q15_SCALE - weight) + outL[i] * weight, 15)
+            outR[i] = _rshift_rne(st[ST_PREV_R] * (Q15_SCALE - weight) + outR[i] * weight, 15)
+    slew = slew_max if flags & FLAG_SLEW_LIMIT else -1
+    dc_bound = dc_max if flags & FLAG_DC_REMOVAL else -1
+    projected_L = project_output(outL, st[ST_PREV_L], limit_ceiling, slew, dc_bound, anchor)
+    projected_R = project_output(outR, st[ST_PREV_R], limit_ceiling, slew, dc_bound, anchor)
     for i in range(n):
-        a = abs(outL[i])
-        b = abs(outR[i])
-        pk = a if a > b else b
-        if pk > limit_threshold:
-            denom = pk if pk > 1 else 1
-            target_gain = (limit_ceiling << 15) // denom
-            if target_gain > Q15_ONE:
-                target_gain = Q15_ONE
-        else:
-            target_gain = Q15_ONE
-        gL = _slew_asym(gL, target_gain, attack, release)
-        gR = _slew_asym(gR, target_gain, attack, release)
-        outL[i] = _sat16(_mul_q15(outL[i], gL))
-        outR[i] = _sat16(_mul_q15(outR[i], gR))
-    st[ST_LIM_L] = gL
-    st[ST_LIM_R] = gR
-
-    # ---- 7) remove_dc ---------------------------------------------------------
-    if flags & FLAG_DC_REMOVAL:
-        dch = st[ST_DC_HAT]
-        if abs(dch) >= 100:
-            for i in range(n):
-                outL[i] = _sat16(outL[i] - dch)
-                outR[i] = _sat16(outR[i] - dch)
+        outL[i], outR[i] = projected_L[i], projected_R[i]
+    st[ST_PREV_L], st[ST_PREV_R] = outL[n - 1], outR[n - 1]
+    for i in range(ola_overlap):
+        tail_L[i] = outL[n - ola_overlap + i]
+        tail_R[i] = outR[n - ola_overlap + i]
+    st[ST_OLA_PRIMED] = 1
 
 
 # =============================================================================
@@ -321,9 +339,11 @@ def safety_tail_step(L, R, n, st, flags, k_mode,
 
 @njit(cache=True)
 def _local_rms(x, n, center, window, sqrt_lut):
-    """compute_local_rms(samples, center, window)."""
+    """Exact local RMS; sqrt_lut is retained only for caller compatibility."""
     if n == 0:
         return 0
+    if window < 0:
+        raise ValueError('RMS window half-width must be nonnegative')
     start = center - window
     if start < 0:
         start = 0
@@ -331,16 +351,13 @@ def _local_rms(x, n, center, window, sqrt_lut):
     if end > n:
         end = n
     m = end - start
-    if m == 0:
+    if m <= 0:
         return 0
     energy = 0
     for i in range(start, end):
-        s = x[i]
-        energy += (s * s) >> 16
-    avg = energy // m
-    if avg > Q15_ONE:
-        avg = Q15_ONE
-    return _sqrt_q15(avg, sqrt_lut)
+        s = np.int64(x[i])
+        energy += s * s
+    return _rms_from_energy(energy, m)
 
 
 @njit(cache=True)
@@ -349,7 +366,7 @@ def _detect_energy_aware(x, n, prev_sample, slew_thr, curv_thr, energy_floor,
     """detect_discontinuities_energy_aware -> (count, is_degenerate); indices in idx_out."""
     if n < 3:
         return 0, False
-    block_rms = _local_rms(x, n, n // 2, n // 2, sqrt_lut)
+    block_rms = _local_rms(x, n, n // 2, (n + 1) // 2, sqrt_lut)
     is_deg = block_rms < energy_floor
     cnt = 0
     prev = prev_sample
@@ -384,7 +401,7 @@ def _detect_energy_aware(x, n, prev_sample, slew_thr, curv_thr, energy_floor,
 @njit(cache=True)
 def _degenerate_hold(x, n, out, prev_output, energy_floor, sqrt_lut):
     """apply_degenerate_hold(samples, prev_output, energy_floor) into out."""
-    block_rms = _local_rms(x, n, n // 2, n // 2, sqrt_lut)
+    block_rms = _local_rms(x, n, n // 2, (n + 1) // 2, sqrt_lut)
     if block_rms >= energy_floor:
         for i in range(n):
             out[i] = x[i]
@@ -456,7 +473,7 @@ def c1_patch_block(x, n, out, idx_buf, was_degenerate, prev_out,
     cnt, is_deg_now = _detect_energy_aware(x, n, 0, slew_thr, curv_thr, energy_floor,
                                            degen_slew, sqrt_lut, idx_buf)
     if was_degenerate:
-        block_rms = _local_rms(x, n, n // 2, n // 2, sqrt_lut)
+        block_rms = _local_rms(x, n, n // 2, (n + 1) // 2, sqrt_lut)
         is_deg = not (block_rms > hysteresis)
     else:
         is_deg = is_deg_now

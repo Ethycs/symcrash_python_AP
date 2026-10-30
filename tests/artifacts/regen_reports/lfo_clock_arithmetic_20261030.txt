@@ -1,0 +1,242 @@
+LFO clock ownership and Mode B arithmetic audit, 2026-10-30
+
+Before traces were captured from phase-28 code before these repairs.
+Each fixture has 36 blocks / 2304 samples; note release occurs at block 24.
+All 52 factory presets and three clock fixtures are compared.
+
+free_phase:
+  changed samples: 2239; maximum absolute change: 35657; changed frames: 36
+  former SHA-256: a6141d8bc4cc7830ea6eaa3eafa4c3f23abbc526453c40df06a9f154d0b88781
+  corrected SHA-256: 465aa9ca3219f8d1d823fc219d5532ea52d27fd30dc7aa449c1a3acef1dd6ed0
+shared_clock:
+  changed samples: 1663; maximum absolute change: 46751; changed frames: 26
+  former SHA-256: 01bc0e5a6ab34c19fcbf18d886aa369ab22ee7cb3f348cb75c09b3ecccfb87e0
+  corrected SHA-256: a0bb5998261a0a0cfad059e6aae778983d632e141111800f8e62ad644efed360
+gate_reset:
+  changed samples: 10; maximum absolute change: 3; changed frames: 0
+  former SHA-256: a6141d8bc4cc7830ea6eaa3eafa4c3f23abbc526453c40df06a9f154d0b88781
+  corrected SHA-256: 39d19ce1a5a6880d4e65f1bc6e33726d17822c8c929dbc106620db3e9685cd00
+acid_bass_v0:
+  changed samples: 71; maximum absolute change: 6; changed frames: 0
+  former SHA-256: 08107b5693e8bb2b6b8f9cdb5eed034cf5390c16fed077ccbbfd20b66aea31d0
+  corrected SHA-256: 4cba0b4697d119f53cbd549d2fa5b340aa64859510e581755096e2c6cbfa9ae4
+acoustic_marimba_v0:
+  changed samples: 0; maximum absolute change: 0; changed frames: 0
+  former SHA-256: 8b074c1486ec456dd81054be1927fda1fe876dae2922b6a8d295240be9f1937f
+  corrected SHA-256: 8b074c1486ec456dd81054be1927fda1fe876dae2922b6a8d295240be9f1937f
+analog_strings_v0:
+  changed samples: 66; maximum absolute change: 4; changed frames: 0
+  former SHA-256: 041e3e5a74649eb46985341f170e07cf6172e71f71818a7e5c051dda2d40a980
+  corrected SHA-256: 1a45778f36bab6ff553c3a87ba988fcaff39fc310dc65c45dbe6b08b6506d4af
+bass_cheap_v0:
+  changed samples: 0; maximum absolute change: 0; changed frames: 0
+  former SHA-256: 1c3e0e8eb226a227459acd33ef07322de5adf155cf11d0ecf68d706797187b5d
+  corrected SHA-256: 1c3e0e8eb226a227459acd33ef07322de5adf155cf11d0ecf68d706797187b5d
+brass_cheap_v0:
+  changed samples: 0; maximum absolute change: 0; changed frames: 0
+  former SHA-256: 4a961c4521625ffe43b7b08852e3a4df75ae9765ca4ddaaaa5e97a91ddd8060e
+  corrected SHA-256: 4a961c4521625ffe43b7b08852e3a4df75ae9765ca4ddaaaa5e97a91ddd8060e
+brass_stab_v0:
+  changed samples: 0; maximum absolute change: 0; changed frames: 0
+  former SHA-256: 80ac9745771bd69ce6082c0548fe5c1721adca8a48de901b200662055758d908
+  corrected SHA-256: 80ac9745771bd69ce6082c0548fe5c1721adca8a48de901b200662055758d908
+brass_stab_v1:
+  changed samples: 0; maximum absolute change: 0; changed frames: 0
+  former SHA-256: 4cbf1c78e236dea642c9e9406023293b57cc5e85d86650facb1cd3fadc046fe7
+  corrected SHA-256: 4cbf1c78e236dea642c9e9406023293b57cc5e85d86650facb1cd3fadc046fe7
+detroit_bass_v0:
+  changed samples: 29; maximum absolute change: 3; changed frames: 0
+  former SHA-256: 5cf1a045eeac287852e536d61272f52102cfa2f023d671989153e8c9a3ece498
+  corrected SHA-256: bda0c6932d839405439f4b1c83a500609c9414039b202d3336c08b5dd190d1b6
+dream_marimba_v0:
+  changed samples: 0; maximum absolute change: 0; changed frames: 0
+  former SHA-256: 012f9ec8e23761bdfa4202463d7ef5c48338fea5e44082ad62115001558b0b4e
+  corrected SHA-256: 012f9ec8e23761bdfa4202463d7ef5c48338fea5e44082ad62115001558b0b4e
+dx7_bass_1_v0:
+  changed samples: 0; maximum absolute change: 0; changed frames: 0
+  former SHA-256: c3f0248cd7ff15d0c384381df732dab2aed3f9d4fe6a44b51047c726f2be352c
+  corrected SHA-256: c3f0248cd7ff15d0c384381df732dab2aed3f9d4fe6a44b51047c726f2be352c
+dx7_brass_1_v0:
+  changed samples: 0; maximum absolute change: 0; changed frames: 0
+  former SHA-256: 8b6637cea24cae6bebfb0e3a2eba88eaa5066b9a513e472e90038b6451594faa
+  corrected SHA-256: 8b6637cea24cae6bebfb0e3a2eba88eaa5066b9a513e472e90038b6451594faa
+dx7_e_piano_1_v0:
+  changed samples: 0; maximum absolute change: 0; changed frames: 0
+  former SHA-256: 3abf2c2448e86d7198f40b8f04a928ffa5834ad2823362b3b68cea58f51ee8ab
+  corrected SHA-256: 3abf2c2448e86d7198f40b8f04a928ffa5834ad2823362b3b68cea58f51ee8ab
+dx7_harpsich_1_v0:
+  changed samples: 0; maximum absolute change: 0; changed frames: 0
+  former SHA-256: adc5633e68171f1fd8be104d7d3b4263e3943ad27aa35e46a360c39173c3deb1
+  corrected SHA-256: adc5633e68171f1fd8be104d7d3b4263e3943ad27aa35e46a360c39173c3deb1
+dx7_marimba_v0:
+  changed samples: 0; maximum absolute change: 0; changed frames: 0
+  former SHA-256: 400094a8317fef9b88db25ada53b0557969fff66e22cd7f9e47f0c7a7d928f6a
+  corrected SHA-256: 400094a8317fef9b88db25ada53b0557969fff66e22cd7f9e47f0c7a7d928f6a
+dx7_strings_1_v0:
+  changed samples: 0; maximum absolute change: 0; changed frames: 0
+  former SHA-256: ada89750c50df40818c49f2508431d38a0cb8962b8915005c8018f4464dbabd7
+  corrected SHA-256: ada89750c50df40818c49f2508431d38a0cb8962b8915005c8018f4464dbabd7
+dx7_tub_bells_v0:
+  changed samples: 0; maximum absolute change: 0; changed frames: 0
+  former SHA-256: 4c4f7a31415c993e08e26637e0dcc1e3528f41614a95a1a785ca747a3f5754b1
+  corrected SHA-256: 4c4f7a31415c993e08e26637e0dcc1e3528f41614a95a1a785ca747a3f5754b1
+dx7_vibe_1_v0:
+  changed samples: 0; maximum absolute change: 0; changed frames: 0
+  former SHA-256: c42356c29838283f8a9decd442ceea49b31c92f0101cef1eccd433af8201a83e
+  corrected SHA-256: c42356c29838283f8a9decd442ceea49b31c92f0101cef1eccd433af8201a83e
+dx_clav_v0:
+  changed samples: 0; maximum absolute change: 0; changed frames: 0
+  former SHA-256: 5ee766da874a1c2b556836e0a123714fb0913bc0ac3e9c6966052921598987db
+  corrected SHA-256: 5ee766da874a1c2b556836e0a123714fb0913bc0ac3e9c6966052921598987db
+dx_epiano_v0:
+  changed samples: 0; maximum absolute change: 0; changed frames: 0
+  former SHA-256: 013547abdc91e509d9e0d3690367ac9fc6fe3c037dd5baa36586949f4ce0f323
+  corrected SHA-256: 013547abdc91e509d9e0d3690367ac9fc6fe3c037dd5baa36586949f4ce0f323
+dx_lately_bass_v0:
+  changed samples: 0; maximum absolute change: 0; changed frames: 0
+  former SHA-256: 09085ae75725ceefa5fb2c722a71c32bc8d2b597067082a496e0767e04fe427e
+  corrected SHA-256: 09085ae75725ceefa5fb2c722a71c32bc8d2b597067082a496e0767e04fe427e
+dx_marimba_v0:
+  changed samples: 0; maximum absolute change: 0; changed frames: 0
+  former SHA-256: 93e1ab555606bb61cf4f0e7d329822300036fa6b77bedfe6b1b5f4e42df3b667
+  corrected SHA-256: 93e1ab555606bb61cf4f0e7d329822300036fa6b77bedfe6b1b5f4e42df3b667
+fm_bell_v0:
+  changed samples: 0; maximum absolute change: 0; changed frames: 0
+  former SHA-256: a9695ae36f0953dfbc58916ad62a34972ad751ef85789e2413e9488900b2fa04
+  corrected SHA-256: a9695ae36f0953dfbc58916ad62a34972ad751ef85789e2413e9488900b2fa04
+fm_brass_v0:
+  changed samples: 0; maximum absolute change: 0; changed frames: 0
+  former SHA-256: 42e70067c500910b2d40d26c6ba7dfca4e0dce5efae530cef1f055c1fca633e5
+  corrected SHA-256: 42e70067c500910b2d40d26c6ba7dfca4e0dce5efae530cef1f055c1fca633e5
+fm_horn_v0:
+  changed samples: 0; maximum absolute change: 0; changed frames: 0
+  former SHA-256: 2345a9b850e6b90890fa73e21385a43da3c39f38ef45fc97741de3eaea11c80f
+  corrected SHA-256: 2345a9b850e6b90890fa73e21385a43da3c39f38ef45fc97741de3eaea11c80f
+fm_trumpet_v0:
+  changed samples: 0; maximum absolute change: 0; changed frames: 0
+  former SHA-256: 4224f4c2afadd0497f0bcf061256fa738c8945781d64cc60e9fac7650d42432c
+  corrected SHA-256: 4224f4c2afadd0497f0bcf061256fa738c8945781d64cc60e9fac7650d42432c
+fold_drone_v0:
+  changed samples: 15; maximum absolute change: 1; changed frames: 0
+  former SHA-256: 1bae7535e670c7d60cc3404342d704ed229d9f1063870da86c9c056c44d18513
+  corrected SHA-256: 3ebebc0f5a2536b3d069f60d428303f809b8f8d68c0332b1023b29c25343ef28
+glitch_lead_v0:
+  changed samples: 0; maximum absolute change: 0; changed frames: 0
+  former SHA-256: d36ab9c0c30aa927425eff6ce14b51e59c5ba82064e6343e83a7c93029d69203
+  corrected SHA-256: d36ab9c0c30aa927425eff6ce14b51e59c5ba82064e6343e83a7c93029d69203
+jump_brass_v0:
+  changed samples: 0; maximum absolute change: 0; changed frames: 0
+  former SHA-256: f2ce14ab8f50452fbfd299684e9be4aea7539c250101f31e481169d3792cd45b
+  corrected SHA-256: f2ce14ab8f50452fbfd299684e9be4aea7539c250101f31e481169d3792cd45b
+oeis_bass_v0:
+  changed samples: 77; maximum absolute change: 9; changed frames: 0
+  former SHA-256: 36de7bbc60e53cfe50d7b55a0a72b0b621437b0b96e9d9a5a83dee441678e7ac
+  corrected SHA-256: 637eac851397e86a6467e0daa83ba14d1a047d174f772852aa2b5b74f5b8de5b
+oeis_bell_v0:
+  changed samples: 54; maximum absolute change: 3; changed frames: 0
+  former SHA-256: bbd69ba7fe1ec050938b42c4daaf00d07e9edd5bc61b900e1ffd99857530da45
+  corrected SHA-256: 4f283ce7a7e51efa4261f93404ff4065c1def9723f6cc48ad9a51cf3421b0572
+oeis_pad_v0:
+  changed samples: 20; maximum absolute change: 1; changed frames: 0
+  former SHA-256: 746b0bc5b0c283cc8ec7032698ef8fffb146b7e15a3906bbad10108b744bae9d
+  corrected SHA-256: 7a95c1e75567e84cd2a4ecf19b9e6ff42cb752f3060440352e83c5214db8fcfd
+pad_cheap_v0:
+  changed samples: 0; maximum absolute change: 0; changed frames: 0
+  former SHA-256: 5d5aac69990a4cd1e31b462572a7872195580731bb8c470932416b7e66d1abba
+  corrected SHA-256: 5d5aac69990a4cd1e31b462572a7872195580731bb8c470932416b7e66d1abba
+pluck_bell_v0:
+  changed samples: 0; maximum absolute change: 0; changed frames: 0
+  former SHA-256: 909b9e3e0c3175b8710e1540cac5a5cf6989cc90181bdda48f29cf868216c506
+  corrected SHA-256: 909b9e3e0c3175b8710e1540cac5a5cf6989cc90181bdda48f29cf868216c506
+pluck_cheap_v0:
+  changed samples: 0; maximum absolute change: 0; changed frames: 0
+  former SHA-256: ab221d9599f14c6d2db4fe727a4940657cb5b539a4adf824aeb40cbfee7f887c
+  corrected SHA-256: ab221d9599f14c6d2db4fe727a4940657cb5b539a4adf824aeb40cbfee7f887c
+pluck_v0:
+  changed samples: 0; maximum absolute change: 0; changed frames: 0
+  former SHA-256: 2d36fe5a05e40406b965f5294b39ac700a69307211c8edc94aae7eccc9747a19
+  corrected SHA-256: 2d36fe5a05e40406b965f5294b39ac700a69307211c8edc94aae7eccc9747a19
+prime_storm_v0:
+  changed samples: 34; maximum absolute change: 3; changed frames: 0
+  former SHA-256: bc4623e450451007724ef70c517747b22b362a0e1e466166a31642595a8899d5
+  corrected SHA-256: 5ef00f7b71db41562a67ff0973356c89f0a4ff5eceae7ffdbe2666d87696947e
+pwm_pad_v0:
+  changed samples: 37; maximum absolute change: 1; changed frames: 0
+  former SHA-256: 20b946685160e064093d2aa03fa9855f2bee8f15e45db57ae379da2466c44b87
+  corrected SHA-256: 91beaa39677b3611ee14569af5baafb18bf5454d463db5ed2a3e34bf4b2078a8
+pwm_string_v0:
+  changed samples: 97; maximum absolute change: 3; changed frames: 0
+  former SHA-256: 9571e7d2c30d915300f92eb1eb519baf870e67dfc9979994afef1d83a45e149d
+  corrected SHA-256: c8bf4ed03267cd2ea4a2a2b6422dfcb35dd8a31d2f52fb50e9149ad6a3add8f6
+quasi_glass_v0:
+  changed samples: 81; maximum absolute change: 9; changed frames: 0
+  former SHA-256: d193909c809ce27c449a81bcb6211cc5c505d67986b0e134d6c6fbd4ae3267d8
+  corrected SHA-256: 4a8b861ede3118f2c9068cfcccfeb85ccdd4ee65604cd9c99c388b97e292b1fd
+rnb_slide_v0:
+  changed samples: 0; maximum absolute change: 0; changed frames: 0
+  former SHA-256: e9fcf9518a9b0fb5b97476078cbedbccdfc847a6baeaa353283008ab0f64d6a8
+  corrected SHA-256: e9fcf9518a9b0fb5b97476078cbedbccdfc847a6baeaa353283008ab0f64d6a8
+saw_lead_v0:
+  changed samples: 0; maximum absolute change: 0; changed frames: 0
+  former SHA-256: cd3198089c38f99cd648e65f6532e1481616eddc50184c8d3f9f6ad235827ac3
+  corrected SHA-256: cd3198089c38f99cd648e65f6532e1481616eddc50184c8d3f9f6ad235827ac3
+shear_vox_v0:
+  changed samples: 38; maximum absolute change: 2; changed frames: 0
+  former SHA-256: 4118a5cbe7c93e6311e28e5fdc4f25500700b9ec204d773a274d1d6209564fc3
+  corrected SHA-256: cd7e15e80a14c3863fc4737bc2f45ef0155f6b48dbfc1bc1a2b670b7c93014b4
+square_bass_v0:
+  changed samples: 0; maximum absolute change: 0; changed frames: 0
+  former SHA-256: fef91afeae886e4b399a21a7869377664330c979f5e44bbab60de4b3e5dbf753
+  corrected SHA-256: fef91afeae886e4b399a21a7869377664330c979f5e44bbab60de4b3e5dbf753
+string_pad_v0:
+  changed samples: 0; maximum absolute change: 0; changed frames: 0
+  former SHA-256: 69c72f25548855a73806f2508e339b984290c1acf9a0f74e98107f7f11aa8086
+  corrected SHA-256: 69c72f25548855a73806f2508e339b984290c1acf9a0f74e98107f7f11aa8086
+sub_bass_v0:
+  changed samples: 38; maximum absolute change: 9; changed frames: 0
+  former SHA-256: 60f5900dca1fd3b3f01a0df877acd04998238ec8d6d10b45b00f47a2b40f39c9
+  corrected SHA-256: 914881a5537bf8d7a2772cb72260e18d3e14642e50e55230f8ac314c5b901b81
+super_saw_v0:
+  changed samples: 0; maximum absolute change: 0; changed frames: 0
+  former SHA-256: 8867c713e8e6078401a7508d3ef498edb3cabe50a0e4bb5e1deda10bb924469f
+  corrected SHA-256: 8867c713e8e6078401a7508d3ef498edb3cabe50a0e4bb5e1deda10bb924469f
+sync_lead_v0:
+  changed samples: 0; maximum absolute change: 0; changed frames: 0
+  former SHA-256: 45289b1899c8f32386a45708b5a57aa0fef25b268b033a8152eec051adb34698
+  corrected SHA-256: 45289b1899c8f32386a45708b5a57aa0fef25b268b033a8152eec051adb34698
+theremin_lead_v0:
+  changed samples: 38; maximum absolute change: 6; changed frames: 0
+  former SHA-256: 4c2b5204a61bcac2cc125b4a74e491941691834d8ba93a949cd777fd76118d49
+  corrected SHA-256: ec349e253a82aa7e537b8231e28dc50cace01a722f2face5d5144132f7d7a1b8
+violin_ir_v1:
+  changed samples: 84; maximum absolute change: 12; changed frames: 0
+  former SHA-256: 822c5b1ace298f0250070713a99ffac5fecb6a378a8d4383c5046c306b16c1d2
+  corrected SHA-256: 6d9cbf506316d52efb9ee5d80aee32e6d2599a453aa5e68272e31e63e84aba78
+violin_opt_v0:
+  changed samples: 56; maximum absolute change: 2; changed frames: 0
+  former SHA-256: dc1ab569fefc81c6da1e4300745c4253ac270deec4271b2e4083f7e1d893638f
+  corrected SHA-256: 55a84273a3d50974a6715227cbd3c3f9fc9a24dd823df543097ca9a1a80f57a9
+warm_pad_v0:
+  changed samples: 0; maximum absolute change: 0; changed frames: 0
+  former SHA-256: a3784a29179b21846de1af8f04ffc7f9b5ccdb00a51a187b8e1ad9cf8e347127
+  corrected SHA-256: a3784a29179b21846de1af8f04ffc7f9b5ccdb00a51a187b8e1ad9cf8e347127
+wobble_bass_v0:
+  changed samples: 0; maximum absolute change: 0; changed frames: 0
+  former SHA-256: e46a757ea8c3d77dd137e9fdcb1c55a92e1d160637f667c2acda692f9fef5464
+  corrected SHA-256: e46a757ea8c3d77dd137e9fdcb1c55a92e1d160637f667c2acda692f9fef5464
+
+Changed audio fixtures (19 / 55): free_phase, shared_clock, gate_reset, acid_bass_v0, analog_strings_v0, detroit_bass_v0, fold_drone_v0, oeis_bass_v0, oeis_bell_v0, oeis_pad_v0, prime_storm_v0, pwm_pad_v0, pwm_string_v0, quasi_glass_v0, shear_vox_v0, sub_bass_v0, theremin_lead_v0, violin_ir_v1, violin_opt_v0
+Corrected native/capsule frames/audio and Python/JIT frames/audio match for every fixture.
+The FREE initial-phase and shared-clock traces intentionally change musical phase.
+Other sample changes reflect corrected coefficient ties-to-even rounding.
+Scalar, vector and fixed-H Python generators now agree with independent Fraction arithmetic,
+including final-only saturation, headroom normalization and a zero-harmonic DC component.
+The HW-oriented Python helper is not evidence of actual FPGA parity.
+
+Frame comparisons normalize JSON integer map keys before comparing old and new data.
+Only the two intentional clock fixtures change frame values; factory and gate-reset frames remain equal.
+The separate subtractive_arithmetic_20261030.txt audit isolates one existing golden block's change.
+Final new conformance coverage: 73 clock tests and 57 arithmetic tests.
+Final clock/arithmetic/subtractive-golden selection: 135 passed in 16.95 seconds.
+Final root suite: 4965 passed, 16 skipped, 102 existing warnings in 378.11 seconds.
+Command: pixi run python -m pytest -q --tb=short

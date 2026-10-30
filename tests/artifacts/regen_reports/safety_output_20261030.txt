@@ -1,0 +1,38 @@
+Safety output conformance audit, 2026-10-30
+48 stereo blocks per scenario; K=3; all default safety stages enabled.
+Old traces reproduced exactly by restoring only the four changed processing methods.
+Corrected Python/JIT outputs, regulator, limiter and emitted history match exactly.
+Independent exact output constraints: peak <=32512, slew <=8192, abs(sum)<=131072.
+Exhaustive small-domain feasibility/identity tests separately validate joint projection.
+No existing audio golden was regenerated.
+
+dc:
+  peak 30654 -> 2048; slew 8192 -> 2048
+  max abs mean 29713.9375 -> 2048.0
+  changed blocks 48/48
+  old SHA256 d9e359d0c00238e72c7f069a861143e8a81e70df7d0cc86ba0aaff2d5b735d50
+  new SHA256 d244877c5b9321528b96bc361d35111eafb43508a02cde758c9fbef266509e9e
+opposed_dc:
+  peak 32702 -> 2048; slew 8192 -> 2048
+  max abs mean 32511.0 -> 2048.0
+  changed blocks 48/48
+  old SHA256 f30f331bb08126affb01b2b53e22ed1216ab75d3856ce9f275c48615343112dc
+  new SHA256 34abfab6cd43547534806e12feaf7ed2e0e0f0a3236f87090a37b69e636b0a55
+block_steps:
+  peak 32768 -> 2048; slew 8192 -> 2048
+  max abs mean 29713.9375 -> 2048.0
+  changed blocks 48/48
+  old SHA256 91998ab0b61d8cab8b6f466da2be47122dad7374d0e1fd51d16e071f2e3875f0
+  new SHA256 7b6da1c4759c2a5f4adaa83c3089aae1763b696934cc2a8896860934fd9cb308
+biased:
+  peak 31678 -> 8288; slew 9215 -> 8192
+  max abs mean 28637.859375 -> 2047.953125
+  changed blocks 48/48
+  old SHA256 612c471045785f49683778e40049df149f036da057488e84ef2a68855081dc61
+  new SHA256 3cf86f6b86f3e4fbdcc6d89f771f221f00d2d77c085bcb82ad612b35830ec9bd
+noise:
+  peak 32313 -> 30236; slew 8437 -> 8192
+  max abs mean 8598.96875 -> 2047.984375
+  changed blocks 48/48
+  old SHA256 b3df135afbcd35f2f8c83950bb133ce371c0bfc17ff201393c7b3e2a4f118221
+  new SHA256 7417b40e28508b013ee96adc0000e659313a6dda71afd8e0b626fd38d41d4b78

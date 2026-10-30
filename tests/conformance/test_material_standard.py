@@ -167,7 +167,7 @@ class TestTapeBus:
         assert rms_out < rms_in, "Tape saturation not reducing level"
 
 
-class TestCatastropheFold:
+class TestCatastropheFoldPrimitive:
     """Test Catastrophe Fold program (material_id=4) per §8.2."""
 
     def test_fold_has_state(self):
@@ -304,17 +304,10 @@ class TestParameterSlewing:
 
     def test_slew_rate_default_256(self):
         """Default slew rate should be 256 per §5.2."""
-        # This is tested implicitly by MaterialParams.slew_from() default
-        # Explicit test would require inspecting slew formula
         params = MaterialParams()
         target = ParamFrame(drive_q15=32767)
-
-        # After one slew with rate=256
-        # Expected: current + (target - current) × 256 / 32768
-        # = current + (target - current) / 128
-        # For current=0, target=32767: 0 + 32767/128 ≈ 256
-
-        # This is verified by implementation matching §5.2
+        params.slew_from(target)
+        assert params.drive_q15 == 8384  # 8192 + RNE(24575 / 128).
 
 
 # =============================================================================

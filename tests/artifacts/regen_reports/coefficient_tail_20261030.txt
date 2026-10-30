@@ -1,0 +1,35 @@
+CCS coefficient-tail profile audit - 2026-10-30
+
+Only the FM bell audio baseline changes in this pass.
+All six previous goldens reproduced with only the captured pre-change tail restored.
+The independent Fraction-based scalar tail, production Python, and JIT pipeline
+produced identical samples (per-block and whole-trace hashes) for all six renders.
+Oracle: tests/conformance/test_coefficient_tail.py::reference_tail.
+The new tail preserves the established CCS RMS headroom, executes the mode table,
+and enforces fine-band ratios and per-band normalization caps with nearest-even math.
+Scalar legacy SymbolTail Q30 caps are not substituted for CCS defaults.
+
+FM changed blocks (zero-based): [0, 1, 3, 5, 8, 12, 17]
+Projection instrumentation: {'normalization_calls_that_changed_coefficients': 7}
+
+brass_stab_440hz
+  before: 0227619e63795fbafddc6ae9a697c1074a90d47fb7108489472acd4974e5becd
+  after:  0227619e63795fbafddc6ae9a697c1074a90d47fb7108489472acd4974e5becd
+stress_riser_hit_resolve
+  before: c77cc0705e8d7cf9dcbe04e3ecb291a8dce79e6e847b33eb215f3d39a3585fce
+  after:  c77cc0705e8d7cf9dcbe04e3ecb291a8dce79e6e847b33eb215f3d39a3585fce
+fm_bell_evolve
+  before: 18eb89d33820df88023d5ec98fd75af713dc13c3ba1a23d541b5a716394b73a0
+  after:  94075a86a764fb85f896651c72e8827978f54ee2ec9c69871670c6e632699ccb
+subtractive_saw_sweep
+  before: 190cb6fb48f7edd88393ca0f6d71f5f121106a3e6be694220c5e122aae12330a
+  after:  190cb6fb48f7edd88393ca0f6d71f5f121106a3e6be694220c5e122aae12330a
+string_pad_v0
+  before: 1c315b79f0de95c1851f611fe8ffd1ac1aae0379dadc953cee477d0e7766f7de
+  after:  1c315b79f0de95c1851f611fe8ffd1ac1aae0379dadc953cee477d0e7766f7de
+dx_marimba_v0
+  before: 7a549167a0fb5bb7f461aa265ff624a375dd551921c3715c8b11d2b724b59eac
+  after:  7a549167a0fb5bb7f461aa265ff624a375dd551921c3715c8b11d2b724b59eac
+
+Audio quality checks: carrier continuity, combing, pitch and FM sine purity pass.
+Physical audition and hardware/real-time qualification remain outstanding.

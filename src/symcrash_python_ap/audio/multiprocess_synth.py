@@ -17,14 +17,12 @@ Architecture:
 """
 
 import numpy as np
-import multiprocessing as mp
 from multiprocessing import shared_memory, Process, Queue
 from typing import Optional
 import time
 
 # Import canonical constants from primitives (single source of truth)
-from ..primitives import BLOCK_SIZE, SAMPLE_RATE_HZ, Q15_ONE
-from ..primitives import Q15_3_4, Q15_HALF, Q15_QUARTER
+from ..primitives import BLOCK_SIZE, SAMPLE_RATE_HZ
 
 # Constants
 SAMPLE_RATE = SAMPLE_RATE_HZ  # Alias for backward compatibility
@@ -120,161 +118,48 @@ MSG_NOTE_OFF = 3
 MSG_STOP = 4
 
 
-def render_process_main(
-    ring_buffer_name: str,
-    control_queue: Queue,
-    block_size: int,
-    num_blocks: int,
-):
-    """
-    Main function for the render process.
+def render_process_main(ring_buffer_name, control_queue, block_size, num_blocks):
+    """Render complete polyphonic output blocks into the shared device queue."""
+    from queue import Empty
+    from .live_renderer import LiveSynthRenderer
 
-    Runs the synthesis pipeline and writes audio to shared memory.
-    """
-    # Import here to avoid importing in main process
-    from symcrash_python_ap.voice import VoiceEngine, GestureBasis
-    from symcrash_python_ap.frames import VoiceFrame
-    from symcrash_python_ap.safety.unified_renderer import UnifiedOutputStage
-
-    # Connect to shared ring buffer
     ring = SharedRingBuffer(ring_buffer_name, block_size, num_blocks, create=False)
-
-    # Create synth components
-    engine = VoiceEngine(max_voices=4)
-    stage = UnifiedOutputStage(block_size=block_size)
-
-    # State
-    current_note = 60
-    current_voice_id = None
+    renderer = LiveSynthRenderer(block_size=block_size)
     running = True
-    silence = np.zeros(block_size, dtype=np.float32)
-
-    # Macro state (mirrors Pico2SynthBridge behavior)
-    macro_values = [0] * 10
-
     print("[RenderProcess] Started")
-
-    while running:
-        # Process control messages (non-blocking)
-        while not control_queue.empty():
-            try:
-                msg = control_queue.get_nowait()
-                msg_type = msg[0]
-
-                if msg_type == MSG_STOP:
+    try:
+        while running:
+            while True:
+                try:
+                    message = control_queue.get_nowait()
+                except Empty:
+                    break
+                kind = message[0]
+                if kind == MSG_STOP:
                     running = False
                     break
-                elif msg_type == MSG_MACRO:
-                    macro_id, value_q15 = msg[1], msg[2]
-                    macro_values[macro_id] = value_q15
-                    # Update engine based on macro
-                    _apply_macro(engine, macro_id, value_q15)
-                elif msg_type == MSG_NOTE_ON:
-                    note = msg[1]
-                    current_note = note
-                    current_voice_id = engine.allocate_voice(program_id=1001)
-                    if current_voice_id is not None:
-                        gesture = GestureBasis(gate=True, pressure_q15=Q15_3_4)
-                        engine.note_on(current_voice_id, gesture=gesture)
-                elif msg_type == MSG_NOTE_OFF:
-                    if current_voice_id is not None:
-                        engine.note_off(current_voice_id)
-                        current_voice_id = None
-            except:
+                if kind == MSG_MACRO:
+                    renderer.set_pot(message[1], message[2])
+                elif kind == MSG_NOTE_ON:
+                    renderer.note_on(message[1], message[2] if len(message) > 2 else 100)
+                elif kind == MSG_NOTE_OFF:
+                    renderer.note_off(message[1] if len(message) > 1 else None)
+                else:
+                    raise ValueError(f'Unknown render control message: {kind}')
+            if not running:
                 break
-
-        if not running:
-            break
-
-        # Render if buffer has space
-        if ring.available_write() > 0:
-            voice_frames = engine.step_all()
-
-            # Find active voice
-            active_frame = None
-            for vf in voice_frames:
-                if vf.is_active and vf.gain_q15 > 0:
-                    active_frame = vf
-                    break
-
-            if active_frame is not None:
-                voice_state = engine.voices.get(active_frame.voice_id)
-
-                detune_cents = voice_state.detune_cents if voice_state else 0
-                f0_hz = 440.0 * (2.0 ** ((current_note - 69 + detune_cents / 100.0) / 12.0))
-                eta_q15 = voice_state.eta_q15 if voice_state else Q15_ONE
-                master_gain = voice_state.master_gain_q15 if voice_state else Q15_ONE
-                # Q15 multiply with rounding: (a * b + 16384) >> 15
-                scaled_gain = (active_frame.gain_q15 * master_gain + Q15_HALF) >> 15
-
-                harmonics_q15 = voice_state.harmonics_q15 if voice_state else 0  # 0 = pure sine
-                base_amps = [Q15_ONE, Q15_HALF, 10923, Q15_QUARTER, 6554, 5461, 4681, 4096]
-                partial_amps = [base_amps[0]]
-                for amp in base_amps[1:]:
-                    # Q15 multiply with rounding
-                    partial_amps.append((amp * harmonics_q15 + Q15_HALF) >> 15)
-
-                frame = VoiceFrame(
-                    voice_id=active_frame.voice_id,
-                    note=current_note,
-                    cents=detune_cents,
-                    f0_hz=f0_hz,
-                    gain_q15=scaled_gain,
-                    beta_target_q15=eta_q15,
-                    partial_amps_q15=partial_amps,
-                    is_active=True,
-                )
-
-                samples = stage.render_voice(frame)
-                block = np.array(samples, dtype=np.float32) / Q15_ONE
+            if ring.available_write() > 0:
+                # Render only with room in the queue. Do not advance DSP and
+                # drop its output while the consumer is behind.
+                ring.write(renderer.render_mono_float())
             else:
-                block = silence
-
-            ring.write(block)
-        else:
-            # Buffer full, wait a bit
-            time.sleep(0.0001)
-
-    ring.close()
-    print("[RenderProcess] Stopped")
+                time.sleep(0.0001)
+    finally:
+        ring.close()
+        print("[RenderProcess] Stopped")
 
 
-def _apply_macro(engine, macro_id: int, value_q15: int):
-    """Apply macro value to engine (mirrors Pico2SynthBridge)."""
-    # ADSR macros
-    if macro_id == 0:  # Attack
-        blocks = max(1, (value_q15 * 250) // Q15_ONE)
-        engine.default_program.attack_blocks = blocks
-    elif macro_id == 1:  # Decay
-        blocks = max(1, (value_q15 * 500) // Q15_ONE)
-        engine.default_program.decay_blocks = blocks
-    elif macro_id == 2:  # Sustain
-        engine.default_program.sustain_level_q15 = value_q15
-    elif macro_id == 3:  # Release
-        blocks = max(1, (value_q15 * 750) // Q15_ONE)
-        engine.default_program.release_blocks = blocks
 
-    # Apply to active voices
-    for vid in engine.active_voices():
-        if vid in engine.voices:
-            vs = engine.voices[vid]
-            if macro_id == 0:
-                vs.program.attack_blocks = engine.default_program.attack_blocks
-            elif macro_id == 1:
-                vs.program.decay_blocks = engine.default_program.decay_blocks
-            elif macro_id == 2:
-                vs.program.sustain_level_q15 = value_q15
-            elif macro_id == 3:
-                vs.program.release_blocks = engine.default_program.release_blocks
-            elif macro_id == 6:  # Harmonics
-                vs.harmonics_q15 = value_q15
-            elif macro_id == 7:  # Eta
-                vs.eta_q15 = value_q15
-            elif macro_id == 8:  # Detune
-                centered = value_q15 - Q15_HALF
-                vs.detune_cents = (centered * 2400) // Q15_HALF
-            elif macro_id == 9:  # Gain
-                vs.master_gain_q15 = value_q15
 
 
 class MultiprocessSynth:
@@ -358,15 +243,15 @@ class MultiprocessSynth:
         if self.control_queue:
             self.control_queue.put((MSG_MACRO, macro_id, value_q15))
 
-    def note_on(self, note: int):
+    def note_on(self, note: int, velocity: int = 100):
         """Send note on to render process."""
         if self.control_queue:
-            self.control_queue.put((MSG_NOTE_ON, note))
+            self.control_queue.put((MSG_NOTE_ON, note, velocity))
 
-    def note_off(self):
+    def note_off(self, note=None):
         """Send note off to render process."""
         if self.control_queue:
-            self.control_queue.put((MSG_NOTE_OFF,))
+            self.control_queue.put((MSG_NOTE_OFF,) if note is None else (MSG_NOTE_OFF, note))
 
     def read_block(self) -> Optional[np.ndarray]:
         """Read a block from the ring buffer (for audio callback)."""

@@ -27,8 +27,10 @@ Usage:
 
 from enum import IntEnum, Enum
 from typing import Dict, List, NamedTuple, Tuple
+from numbers import Integral
 
-import numpy as np
+from .fixed_rom import TANH_Q15, SQRT_Q15
+from .pitch_rom import MIDI_CENT_PHASE_Q32, MIDI_CENT_FREQ_MHZ
 
 
 # =============================================================================
@@ -1308,43 +1310,38 @@ _TANH_LUT_SIZE = 256
 _TANH_LUT_SHIFT = 8  # Fixed: map full int16 range to 256 entries
 
 def _build_tanh_lut() -> List[int]:
-    """Build tanh LUT covering input range [-32768, 32767] -> index [0, 255]."""
-    lut = []
-    for i in range(_TANH_LUT_SIZE):
-        # Map index to normalized input: i=0 -> -4, i=128 -> 0, i=255 -> ~4
-        x = (i - 128) / 32.0
-        y = np.tanh(x)
-        lut.append(int(round(y * Q15_ONE)))
-    return lut
+    """Compatibility loader: return a mutable copy of the frozen ROM."""
+    return list(TANH_Q15)
 
-_TANH_LUT = _build_tanh_lut()
+_TANH_LUT = TANH_Q15
 
 
 def tanh_q15(x: int) -> int:
     """
-    Bit-accurate tanh via LUT.
-    Input: Q1.15 in [-32768, 32767]
-    Output: Q1.15 tanh, saturating at ±32767 for large inputs
+    Frozen 256-entry approximation of tanh(4*x/32768).
+    Input: Q1.15 in [-32768, 32767], clamped to the table at either end.
+    Output: Q1.15. The table defines the shipped Material transfer curve.
     """
     # Map input range to LUT index [0, 255]
     # x = -32768 -> idx = 0
     # x = 0 -> idx = 128  
     # x = 32767 -> idx = 255
-    idx = (x + 32768) >> _TANH_LUT_SHIFT
+    idx = (int(x) + 32768) >> _TANH_LUT_SHIFT
     idx = max(0, min(_TANH_LUT_SIZE - 1, idx))
     return _TANH_LUT[idx]
 
 
 def tanh_q15_interp(x: int) -> int:
-    """Tanh with linear interpolation."""
-    x_shifted = x + 32768
+    """Frozen tanh curve with RNE delta interpolation and clamped endpoints."""
+    x_shifted = max(0, min(255 << _TANH_LUT_SHIFT, int(x) + 32768))
     idx = x_shifted >> _TANH_LUT_SHIFT
+    if idx == _TANH_LUT_SIZE - 1:
+        return _TANH_LUT[idx]
     frac = x_shifted & ((1 << _TANH_LUT_SHIFT) - 1)
-    idx = max(0, min(_TANH_LUT_SIZE - 2, idx))
     y0 = _TANH_LUT[idx]
     y1 = _TANH_LUT[idx + 1]
     delta = y1 - y0
-    interp = (delta * frac) >> _TANH_LUT_SHIFT
+    interp = RSHIFT_RNE(delta * frac, _TANH_LUT_SHIFT)
     return sat16(y0 + interp)
 
 
@@ -1355,18 +1352,15 @@ def tanh_q15_interp(x: int) -> int:
 _SQRT_LUT_SIZE = 256
 
 def _build_sqrt_lut() -> List[int]:
-    lut = []
-    for i in range(_SQRT_LUT_SIZE):
-        x = i / (_SQRT_LUT_SIZE - 1) if i > 0 else 0
-        y = np.sqrt(x)
-        lut.append(int(round(y * Q15_ONE)))
-    return lut
+    """Compatibility loader: return a mutable copy of the frozen ROM."""
+    return list(SQRT_Q15)
 
-_SQRT_LUT = _build_sqrt_lut()
+_SQRT_LUT = SQRT_Q15
 
 
 def sqrt_q15(x: int) -> int:
     """Approximate sqrt for Q1.15 positive input."""
+    x = int(x)
     if x <= 0:
         return 0
     if x >= Q15_ONE:
@@ -1418,162 +1412,64 @@ def vec_dot_q15(a: List[int], b: List[int]) -> int:
 
 
 # =============================================================================
-# PITCH TABLE (WSE-STD-PITCH v0)
+# FROZEN INTEGER-CENT PITCH TABLES (WSE-IMPL-PITCH-v1)
 # =============================================================================
 
-# Precomputed phase increments for MIDI notes 0-127 at 48kHz sample rate
-# phase_inc = int(round(440.0 * (2 ** ((note - 69) / 12.0)) / 48000.0 * (2**32)))
-# Computed at module load time with double precision, then frozen as integers
+# Both units come from the same equal-tempered absolute pitch, with a single
+# final nearest-even quantization. Runtime conversion performs integer indexing.
 
 PITCH_SAMPLE_RATE = 48000
 PITCH_PHASE_BITS = 32
 
 
 def _build_pitch_table() -> List[int]:
-    """Build MIDI note to phase_inc table (computed once at load)."""
-    table = []
-    for note in range(128):
-        freq = 440.0 * (2.0 ** ((note - 69) / 12.0))
-        phase_inc = int(round((freq / PITCH_SAMPLE_RATE) * (2**PITCH_PHASE_BITS)))
-        table.append(phase_inc)
-    return table
+    """Compatibility loader returning a detached nominal-note table."""
+    return list(MIDI_CENT_PHASE_Q32[::100])
 
 
-_PITCH_TABLE = _build_pitch_table()
+_PITCH_TABLE = MIDI_CENT_PHASE_Q32[::100]
 
-# Ratio for 1 cent in Q32.0: (2^(1/1200) - 1) * 2^32 ≈ 2485961
-# Used for linear interpolation of cents
-_CENT_RATIO_Q32 = 2485961
+def _pitch_cent_index(note: int, cents: int) -> int:
+    """Clamp the note address, then the combined pitch to MIDI 0..127.
+
+    Normalize before saturation, so equivalent note/cent spellings agree and
+    an increasing cent command never reduces frequency, including at the ends.
+    Widen NumPy integers before multiplication/addition to avoid wrapping.
+    """
+    if (not isinstance(note, Integral) or isinstance(note, bool) or
+            not isinstance(cents, Integral) or isinstance(cents, bool)):
+        raise ValueError('Pitch note and cents must be integers')
+    note = max(0, min(127, int(note)))
+    return max(0, min(12700, note * 100 + int(cents)))
 
 
 def midi_to_phase_inc_fixed(note: int, cents: int = 0) -> int:
+    """Equal-tempered Q32 phase step at 48 kHz, rounded once to nearest-even.
+
+    Integer cents are added to the clamped MIDI note address, then the total
+    pitch saturates to MIDI 0..127. Frozen one-cent entries avoid interpolation
+    error, negative-semitone discontinuities and playback/import-time powers.
     """
-    Convert MIDI note + cents to phase increment using integer LUT.
-
-    This is the bit-exact version (WSE-STD-001 compliant) that avoids
-    floating-point noise. Uses precomputed table for notes and linear
-    interpolation for cents with RSHIFT_RNE rounding.
-
-    Args:
-        note: MIDI note number (0-127)
-        cents: Fine tuning in cents (-9999 to +9999)
-
-    Returns:
-        32-bit phase increment for oscillator at 48kHz sample rate
-    """
-    # Clamp note to valid range
-    note = max(0, min(127, note))
-    base_inc = _PITCH_TABLE[note]
-
-    if cents == 0:
-        return base_inc
-
-    # For larger cent ranges, use semitone stepping
-    if abs(cents) >= 100:
-        # Handle full semitones
-        semitones = cents // 100
-        remaining_cents = cents % 100
-
-        # Handle negative cents properly
-        if cents < 0 and remaining_cents != 0:
-            semitones -= 1
-            remaining_cents += 100
-
-        target_note = note + semitones
-        if target_note < 0 or target_note > 127:
-            # Out of range - clamp
-            target_note = max(0, min(127, target_note))
-            remaining_cents = 0
-
-        base_inc = _PITCH_TABLE[target_note]
-        cents = remaining_cents
-
-    if cents == 0:
-        return base_inc
-
-    # Linear interpolation for remaining cents (0-99)
-    # delta = base_inc * cents * (2^(1/1200) - 1)
-    # Using WSE-STD-001 compliant RSHIFT_RNE for bit-exact rounding
-    product = base_inc * cents * _CENT_RATIO_Q32
-    delta = RSHIFT_RNE(product, 32)
-
-    return base_inc + delta
+    return MIDI_CENT_PHASE_Q32[_pitch_cent_index(note, cents)]
 
 
 # =============================================================================
 # FREQUENCY TABLE (for harmonic coefficient generation)
 # =============================================================================
 
-# Precomputed frequencies for MIDI notes 0-127 in millihertz (mHz)
-# freq_mhz = int(round(440.0 * (2 ** ((note - 69) / 12.0)) * 1000))
-# Using millihertz (integer) avoids floating-point noise while providing
-# sufficient precision for wavelet coefficient mapping.
+# Millihertz uses the same pitch index, independently rounded in its own unit.
 
 def _build_freq_table_mhz() -> List[int]:
-    """Build MIDI note to frequency table in millihertz (computed once at load)."""
-    table = []
-    for note in range(128):
-        freq = 440.0 * (2.0 ** ((note - 69) / 12.0))
-        freq_mhz = int(round(freq * 1000))
-        table.append(freq_mhz)
-    return table
+    """Compatibility loader returning a detached nominal-note table."""
+    return list(MIDI_CENT_FREQ_MHZ[::100])
 
 
-_FREQ_TABLE_MHZ = _build_freq_table_mhz()
-
-# Ratio for 1 cent frequency shift: (2^(1/1200) - 1) * 2^20 ≈ 607
-# Used for linear interpolation of cents
-_CENT_FREQ_RATIO_Q20 = 607
+_FREQ_TABLE_MHZ = MIDI_CENT_FREQ_MHZ[::100]
 
 
 def midi_to_freq_mhz(note: int, cents: int = 0) -> int:
-    """
-    Convert MIDI note + cents to frequency in millihertz using integer LUT.
-
-    This is the bit-exact version that avoids floating-point noise.
-    Returns frequency in millihertz (e.g., A4=440Hz returns 440000).
-
-    Args:
-        note: MIDI note number (0-127)
-        cents: Fine tuning in cents (-9999 to +9999)
-
-    Returns:
-        Frequency in millihertz (integer)
-    """
-    # Clamp note to valid range
-    note = max(0, min(127, note))
-    base_freq = _FREQ_TABLE_MHZ[note]
-
-    if cents == 0:
-        return base_freq
-
-    # For larger cent ranges, use semitone stepping
-    if abs(cents) >= 100:
-        semitones = cents // 100
-        remaining_cents = cents % 100
-
-        # Handle negative cents properly
-        if cents < 0 and remaining_cents != 0:
-            semitones -= 1
-            remaining_cents += 100
-
-        target_note = note + semitones
-        if target_note < 0 or target_note > 127:
-            target_note = max(0, min(127, target_note))
-            remaining_cents = 0
-
-        base_freq = _FREQ_TABLE_MHZ[target_note]
-        cents = remaining_cents
-
-    if cents == 0:
-        return base_freq
-
-    # Linear interpolation for remaining cents (0-99)
-    # delta = base_freq * cents * (2^(1/1200) - 1)
-    product = base_freq * cents * _CENT_FREQ_RATIO_Q20
-    delta = RSHIFT_RNE(product, 20)
-
-    return base_freq + delta
+    """Equal-tempered millihertz with the same cent and endpoint law as Q32."""
+    return MIDI_CENT_FREQ_MHZ[_pitch_cent_index(note, cents)]
 
 
 def midi_to_freq_hz(note: int, cents: int = 0) -> float:

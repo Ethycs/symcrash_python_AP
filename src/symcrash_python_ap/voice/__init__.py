@@ -35,6 +35,7 @@ from .voice_engine import (
     TreeBlendRule,
     TreePolicySpec,
     LaneRuleType,
+    EventPatternSpec,
     LaneRuleSpec,
     EventPolicySpec,
 )
@@ -127,6 +128,7 @@ __all__ = [
     'TreeBlendRule',
     'TreePolicySpec',
     'LaneRuleType',
+    'EventPatternSpec',
     'LaneRuleSpec',
     'EventPolicySpec',
     # Scheduler

@@ -105,6 +105,7 @@ class EnvelopeScheduler:
     _attack_blocks: int = 0
     _decay_blocks: int = 0
     _release_blocks: int = 0
+    _sustain_override_q15: Optional[int] = None
 
     def __post_init__(self):
         """Cache block counts from spec."""
@@ -121,6 +122,28 @@ class EnvelopeScheduler:
         self.phase = EnvelopePhase.ATTACK
         self.phase_block = 0
         # Don't reset current_q15 - allows retriggering from current level
+
+    def set_block_controls(self, *, attack_blocks=None, decay_blocks=None,
+                           sustain_level_q15=None, release_blocks=None) -> None:
+        """Apply block-rate controls without restarting the envelope.
+
+        Unspecified values retain the preset/key-scaled settings. Keep control
+        times in integer blocks and leave the shared preset specification intact.
+        """
+        if attack_blocks is not None:
+            self._attack_blocks = max(1, int(attack_blocks))
+        if decay_blocks is not None:
+            self._decay_blocks = max(1, int(decay_blocks))
+        if release_blocks is not None:
+            self._release_blocks = max(1, int(release_blocks))
+        if sustain_level_q15 is not None:
+            self._sustain_override_q15 = max(0, min(Q15_ONE, int(sustain_level_q15)))
+
+    @property
+    def sustain_q15(self) -> int:
+        if self._sustain_override_q15 is not None:
+            return self._sustain_override_q15
+        return self.spec.sustain_q15
 
     def release_note(self) -> None:
         """
@@ -159,7 +182,7 @@ class EnvelopeScheduler:
 
         elif self.phase == EnvelopePhase.DECAY:
             # Linear fall from Q15_ONE to sustain
-            sustain_q15 = self.spec.sustain_q15
+            sustain_q15 = self.sustain_q15
             if self._decay_blocks <= 1:
                 t = 1.0
             else:
@@ -173,7 +196,7 @@ class EnvelopeScheduler:
 
         elif self.phase == EnvelopePhase.SUSTAIN:
             # Hold at sustain level
-            self.current_q15 = self.spec.sustain_q15
+            self.current_q15 = self.sustain_q15
             self.phase_block += 1
 
         elif self.phase == EnvelopePhase.RELEASE:

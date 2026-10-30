@@ -1,0 +1,363 @@
+Equal-tempered integer-cent pitch audit, 2026-10-30
+
+Before baseline: phase 33, 5301 tests passing. Nominal MIDI tables remain bit-exact.
+Independent Decimal ln/exp oracle verifies all 12701 final Q32 and millihertz values.
+Legacy counterfactual restores only the former pitch functions and reference Mode B basis generation.
+New exact atlas: 12701 pitches, 301500612 bytes.
+
+acid_bass_v0:
+  before: 4cba0b4697d119f53cbd549d2fa5b340aa64859510e581755096e2c6cbfa9ae4
+  corrected: 4cba0b4697d119f53cbd549d2fa5b340aa64859510e581755096e2c6cbfa9ae4
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+acoustic_marimba_v0:
+  before: 8b074c1486ec456dd81054be1927fda1fe876dae2922b6a8d295240be9f1937f
+  corrected: 8b074c1486ec456dd81054be1927fda1fe876dae2922b6a8d295240be9f1937f
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+analog_strings_v0:
+  before: 5598fdf0f4555b76debefe7f53b0959218b7179602962684050abffefd28c3b2
+  corrected: 5598fdf0f4555b76debefe7f53b0959218b7179602962684050abffefd28c3b2
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+bass_cheap_v0:
+  before: 1c3e0e8eb226a227459acd33ef07322de5adf155cf11d0ecf68d706797187b5d
+  corrected: 1c3e0e8eb226a227459acd33ef07322de5adf155cf11d0ecf68d706797187b5d
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+brass_cheap_v0:
+  before: 4a961c4521625ffe43b7b08852e3a4df75ae9765ca4ddaaaa5e97a91ddd8060e
+  corrected: 4a961c4521625ffe43b7b08852e3a4df75ae9765ca4ddaaaa5e97a91ddd8060e
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+brass_stab_v0:
+  before: 80ac9745771bd69ce6082c0548fe5c1721adca8a48de901b200662055758d908
+  corrected: 80ac9745771bd69ce6082c0548fe5c1721adca8a48de901b200662055758d908
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+brass_stab_v1:
+  before: 4cbf1c78e236dea642c9e9406023293b57cc5e85d86650facb1cd3fadc046fe7
+  corrected: 4cbf1c78e236dea642c9e9406023293b57cc5e85d86650facb1cd3fadc046fe7
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+detroit_bass_v0:
+  before: bda0c6932d839405439f4b1c83a500609c9414039b202d3336c08b5dd190d1b6
+  corrected: bda0c6932d839405439f4b1c83a500609c9414039b202d3336c08b5dd190d1b6
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+dream_marimba_v0:
+  before: 012f9ec8e23761bdfa4202463d7ef5c48338fea5e44082ad62115001558b0b4e
+  corrected: 012f9ec8e23761bdfa4202463d7ef5c48338fea5e44082ad62115001558b0b4e
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+dx7_bass_1_v0:
+  before: c3f0248cd7ff15d0c384381df732dab2aed3f9d4fe6a44b51047c726f2be352c
+  corrected: c3f0248cd7ff15d0c384381df732dab2aed3f9d4fe6a44b51047c726f2be352c
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+dx7_brass_1_v0:
+  before: 8b6637cea24cae6bebfb0e3a2eba88eaa5066b9a513e472e90038b6451594faa
+  corrected: 46556b8ee0d7b1c0a41582595ca16bb9a23227527c0ee71018c346e79fe7b7a0
+  changed samples: 208; max PCM delta: 4
+  changed frames: 0/36
+dx7_e_piano_1_v0:
+  before: 3abf2c2448e86d7198f40b8f04a928ffa5834ad2823362b3b68cea58f51ee8ab
+  corrected: 3abf2c2448e86d7198f40b8f04a928ffa5834ad2823362b3b68cea58f51ee8ab
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+dx7_harpsich_1_v0:
+  before: adc5633e68171f1fd8be104d7d3b4263e3943ad27aa35e46a360c39173c3deb1
+  corrected: adc5633e68171f1fd8be104d7d3b4263e3943ad27aa35e46a360c39173c3deb1
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+dx7_marimba_v0:
+  before: 400094a8317fef9b88db25ada53b0557969fff66e22cd7f9e47f0c7a7d928f6a
+  corrected: 400094a8317fef9b88db25ada53b0557969fff66e22cd7f9e47f0c7a7d928f6a
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+dx7_strings_1_v0:
+  before: ada89750c50df40818c49f2508431d38a0cb8962b8915005c8018f4464dbabd7
+  corrected: f57d5fae1d3bf028a2376389c7ef3ea157f96610b93c8273d6a42416910a514f
+  changed samples: 647; max PCM delta: 2
+  changed frames: 0/36
+dx7_tub_bells_v0:
+  before: 4c4f7a31415c993e08e26637e0dcc1e3528f41614a95a1a785ca747a3f5754b1
+  corrected: 4c4f7a31415c993e08e26637e0dcc1e3528f41614a95a1a785ca747a3f5754b1
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+dx7_vibe_1_v0:
+  before: c42356c29838283f8a9decd442ceea49b31c92f0101cef1eccd433af8201a83e
+  corrected: c42356c29838283f8a9decd442ceea49b31c92f0101cef1eccd433af8201a83e
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+dx_clav_v0:
+  before: 5ee766da874a1c2b556836e0a123714fb0913bc0ac3e9c6966052921598987db
+  corrected: 5ee766da874a1c2b556836e0a123714fb0913bc0ac3e9c6966052921598987db
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+dx_epiano_v0:
+  before: 013547abdc91e509d9e0d3690367ac9fc6fe3c037dd5baa36586949f4ce0f323
+  corrected: 013547abdc91e509d9e0d3690367ac9fc6fe3c037dd5baa36586949f4ce0f323
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+dx_lately_bass_v0:
+  before: 09085ae75725ceefa5fb2c722a71c32bc8d2b597067082a496e0767e04fe427e
+  corrected: 09085ae75725ceefa5fb2c722a71c32bc8d2b597067082a496e0767e04fe427e
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+dx_marimba_v0:
+  before: 93e1ab555606bb61cf4f0e7d329822300036fa6b77bedfe6b1b5f4e42df3b667
+  corrected: 93e1ab555606bb61cf4f0e7d329822300036fa6b77bedfe6b1b5f4e42df3b667
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+fm_bell_v0:
+  before: a9695ae36f0953dfbc58916ad62a34972ad751ef85789e2413e9488900b2fa04
+  corrected: a9695ae36f0953dfbc58916ad62a34972ad751ef85789e2413e9488900b2fa04
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+fm_brass_v0:
+  before: 42e70067c500910b2d40d26c6ba7dfca4e0dce5efae530cef1f055c1fca633e5
+  corrected: 42e70067c500910b2d40d26c6ba7dfca4e0dce5efae530cef1f055c1fca633e5
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+fm_horn_v0:
+  before: 2345a9b850e6b90890fa73e21385a43da3c39f38ef45fc97741de3eaea11c80f
+  corrected: 2345a9b850e6b90890fa73e21385a43da3c39f38ef45fc97741de3eaea11c80f
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+fm_trumpet_v0:
+  before: 4224f4c2afadd0497f0bcf061256fa738c8945781d64cc60e9fac7650d42432c
+  corrected: 4224f4c2afadd0497f0bcf061256fa738c8945781d64cc60e9fac7650d42432c
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+fold_drone_v0:
+  before: 3ebebc0f5a2536b3d069f60d428303f809b8f8d68c0332b1023b29c25343ef28
+  corrected: 3ebebc0f5a2536b3d069f60d428303f809b8f8d68c0332b1023b29c25343ef28
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+glitch_lead_v0:
+  before: 400b127580398073fea0e03b446c60b803293cfb5b349d5476ad9a29059ce68d
+  corrected: 400b127580398073fea0e03b446c60b803293cfb5b349d5476ad9a29059ce68d
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+jump_brass_v0:
+  before: f2ce14ab8f50452fbfd299684e9be4aea7539c250101f31e481169d3792cd45b
+  corrected: f2ce14ab8f50452fbfd299684e9be4aea7539c250101f31e481169d3792cd45b
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+oeis_bass_v0:
+  before: 637eac851397e86a6467e0daa83ba14d1a047d174f772852aa2b5b74f5b8de5b
+  corrected: 637eac851397e86a6467e0daa83ba14d1a047d174f772852aa2b5b74f5b8de5b
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+oeis_bell_v0:
+  before: 4f283ce7a7e51efa4261f93404ff4065c1def9723f6cc48ad9a51cf3421b0572
+  corrected: 4f283ce7a7e51efa4261f93404ff4065c1def9723f6cc48ad9a51cf3421b0572
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+oeis_pad_v0:
+  before: 7a95c1e75567e84cd2a4ecf19b9e6ff42cb752f3060440352e83c5214db8fcfd
+  corrected: 7a95c1e75567e84cd2a4ecf19b9e6ff42cb752f3060440352e83c5214db8fcfd
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+pad_cheap_v0:
+  before: 5d5aac69990a4cd1e31b462572a7872195580731bb8c470932416b7e66d1abba
+  corrected: 5d5aac69990a4cd1e31b462572a7872195580731bb8c470932416b7e66d1abba
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+pluck_bell_v0:
+  before: 648f8a2e1eede0031efd705b76a9b2a0e9832d5dd726ced0d2046d057789ebc8
+  corrected: 648f8a2e1eede0031efd705b76a9b2a0e9832d5dd726ced0d2046d057789ebc8
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+pluck_cheap_v0:
+  before: ab221d9599f14c6d2db4fe727a4940657cb5b539a4adf824aeb40cbfee7f887c
+  corrected: ab221d9599f14c6d2db4fe727a4940657cb5b539a4adf824aeb40cbfee7f887c
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+pluck_v0:
+  before: ffc1d0b2d804f8382be9c18979150a350557ad1d714ca251f29da91ceebe1c13
+  corrected: ffc1d0b2d804f8382be9c18979150a350557ad1d714ca251f29da91ceebe1c13
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+prime_storm_v0:
+  before: 5ef00f7b71db41562a67ff0973356c89f0a4ff5eceae7ffdbe2666d87696947e
+  corrected: 5ef00f7b71db41562a67ff0973356c89f0a4ff5eceae7ffdbe2666d87696947e
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+pwm_pad_v0:
+  before: 91beaa39677b3611ee14569af5baafb18bf5454d463db5ed2a3e34bf4b2078a8
+  corrected: 91beaa39677b3611ee14569af5baafb18bf5454d463db5ed2a3e34bf4b2078a8
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+pwm_string_v0:
+  before: b24a127a4d050e259c38725792ee9995cd87d5abd0622d06e13f970e9077e336
+  corrected: b24a127a4d050e259c38725792ee9995cd87d5abd0622d06e13f970e9077e336
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+quasi_glass_v0:
+  before: 4a8b861ede3118f2c9068cfcccfeb85ccdd4ee65604cd9c99c388b97e292b1fd
+  corrected: 4a8b861ede3118f2c9068cfcccfeb85ccdd4ee65604cd9c99c388b97e292b1fd
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+rnb_slide_v0:
+  before: e9fcf9518a9b0fb5b97476078cbedbccdfc847a6baeaa353283008ab0f64d6a8
+  corrected: e9fcf9518a9b0fb5b97476078cbedbccdfc847a6baeaa353283008ab0f64d6a8
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+saw_lead_v0:
+  before: 6096cc7f778ec10de2197e55c1644d74394779b2b04fd01249b3c29006e4e911
+  corrected: 6096cc7f778ec10de2197e55c1644d74394779b2b04fd01249b3c29006e4e911
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+shear_vox_v0:
+  before: cd7e15e80a14c3863fc4737bc2f45ef0155f6b48dbfc1bc1a2b670b7c93014b4
+  corrected: cd7e15e80a14c3863fc4737bc2f45ef0155f6b48dbfc1bc1a2b670b7c93014b4
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+square_bass_v0:
+  before: 48ecf257e57f3c1064164fce7ef54e4abfef3cda5a61206fe8c319bcc3ebe607
+  corrected: 48ecf257e57f3c1064164fce7ef54e4abfef3cda5a61206fe8c319bcc3ebe607
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+string_pad_v0:
+  before: 7d31c038186e2212998efb9616b1c35ecd3e7060517faf36b6dcdf63bcb0eb8f
+  corrected: 7d31c038186e2212998efb9616b1c35ecd3e7060517faf36b6dcdf63bcb0eb8f
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+sub_bass_v0:
+  before: 914881a5537bf8d7a2772cb72260e18d3e14642e50e55230f8ac314c5b901b81
+  corrected: 914881a5537bf8d7a2772cb72260e18d3e14642e50e55230f8ac314c5b901b81
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+super_saw_v0:
+  before: b98d7dcbdb125a11c6d384a88a587dcdd6dc456af3d0ca71005a7da36997413a
+  corrected: b98d7dcbdb125a11c6d384a88a587dcdd6dc456af3d0ca71005a7da36997413a
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+sync_lead_v0:
+  before: 5a2fa8ee40ba2a780e64310c1987956d6446f1bfc40439234d266110fc5b159d
+  corrected: 5a2fa8ee40ba2a780e64310c1987956d6446f1bfc40439234d266110fc5b159d
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+theremin_lead_v0:
+  before: ec349e253a82aa7e537b8231e28dc50cace01a722f2face5d5144132f7d7a1b8
+  corrected: ec349e253a82aa7e537b8231e28dc50cace01a722f2face5d5144132f7d7a1b8
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+violin_ir_v1:
+  before: 6d9cbf506316d52efb9ee5d80aee32e6d2599a453aa5e68272e31e63e84aba78
+  corrected: 6d9cbf506316d52efb9ee5d80aee32e6d2599a453aa5e68272e31e63e84aba78
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+violin_opt_v0:
+  before: 55a84273a3d50974a6715227cbd3c3f9fc9a24dd823df543097ca9a1a80f57a9
+  corrected: 55a84273a3d50974a6715227cbd3c3f9fc9a24dd823df543097ca9a1a80f57a9
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+warm_pad_v0:
+  before: 6e4b4d5d083df8ec13ba241a7ef27813ebfbfafd75880ecc3d3a7d4ed69bb6b7
+  corrected: 6e4b4d5d083df8ec13ba241a7ef27813ebfbfafd75880ecc3d3a7d4ed69bb6b7
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+wobble_bass_v0:
+  before: 29bdd03e986e7ecbb98775941f8bb5fa899e7da878c4373ce101e099ac3303e1
+  corrected: 29bdd03e986e7ecbb98775941f8bb5fa899e7da878c4373ce101e099ac3303e1
+  changed samples: 0; max PCM delta: 0
+  changed frames: 0/36
+
+Changed factory audio: 2/52: dx7_brass_1_v0, dx7_strings_1_v0
+All native/capsule and Python/JIT frame/audio pairs agree.
+Every former factory frame/audio trace is reproduced by the legacy counterfactual.
+Every corrected factory frame/audio trace is reproduced by independent pitch conversion.
+
+Frozen VM traces:
+golden_trace_v0:
+  before: 0227619e63795fbafddc6ae9a697c1074a90d47fb7108489472acd4974e5becd
+  corrected: 0227619e63795fbafddc6ae9a697c1074a90d47fb7108489472acd4974e5becd
+  changed samples: 0; max PCM delta: 0
+golden_trace_subtractive_v0:
+  before: d8a46aab67e7984565eda84a6225b211ddf06ea3e5fddfc4b387dfe04cabc4f5
+  corrected: d8a46aab67e7984565eda84a6225b211ddf06ea3e5fddfc4b387dfe04cabc4f5
+  changed samples: 0; max PCM delta: 0
+golden_trace_fm_v0:
+  before: 94075a86a764fb85f896651c72e8827978f54ee2ec9c69871670c6e632699ccb
+  corrected: 94075a86a764fb85f896651c72e8827978f54ee2ec9c69871670c6e632699ccb
+  changed samples: 0; max PCM delta: 0
+golden_trace_stress_v0:
+  before: a313b041a6b4d2c05bdfc31cb5b2c90bc2f7270396c0b557bf9a61d52bb937a6
+  corrected: a313b041a6b4d2c05bdfc31cb5b2c90bc2f7270396c0b557bf9a61d52bb937a6
+  changed samples: 0; max PCM delta: 0
+
+Mode A/B/FM6 detune and endpoint sweep:
+  Mode 0: {'changed_samples': 1982, 'max_delta': 29628}
+  Mode 1: {'changed_samples': 2026, 'max_delta': 30141}
+  Mode 3: {'changed_samples': 2042, 'max_delta': 21407}
+
+Actual stereo three-copy unison audit:
+These legacy comparisons are isolated counterfactuals, not additional pre-edit captures.
+Requested Mode A is currently overridden to Mode B by a separate SynthMaster fallback defect.
+These host cases exercise actual Mode B and FM6; the direct VM sweeps above exercise all three modes.
+  Requested mode 0 (actual Mode B): {'changed_samples': 3508, 'max_delta': 285}
+    legacy counterfactual SHA-256: 361df9c82e6a9f881474ba977b279c7efaf9e2e0fe1c70b7f6aace7ae33cf095
+    corrected/oracle SHA-256: a726608c2c7e880fa050eb4e7ae45d14c0ea3a78fec1821d81bb7929db9455fc
+  Requested mode 1 (actual Mode B): {'changed_samples': 3508, 'max_delta': 285}
+    legacy counterfactual SHA-256: 361df9c82e6a9f881474ba977b279c7efaf9e2e0fe1c70b7f6aace7ae33cf095
+    corrected/oracle SHA-256: a726608c2c7e880fa050eb4e7ae45d14c0ea3a78fec1821d81bb7929db9455fc
+  Requested mode 3 (actual FM6): {'changed_samples': 3764, 'max_delta': 524}
+    legacy counterfactual SHA-256: 8e8e17a97887daf9ec7c8b569f3d8e423d20d40b02b63a1d7fb5377f50e83f0e
+    corrected/oracle SHA-256: fe1d3753ffa124e0f74a41c1c75d28f5dc7e94101b6d1d160b80d59e8b9a51ed
+
+Restored pre-change checkpoint audit:
+  Mode 0: original JSON -> current integer checkpoint and independent new pitch match.
+  Mode 1: original JSON -> current integer checkpoint and independent new pitch match.
+  Mode 3: original JSON -> current integer checkpoint and independent new pitch match.
+
+Pitch and resource identity:
+  Maximum Q32 cent error: 0.001157144
+  Maximum millihertz cent error: 0.101947522
+  Q32 ROM SHA-256: 63cf850841f7d5a14670c75228edbc85956aae6efd69b9980b3c37c3ecc4294f
+  Millihertz ROM SHA-256: a83513b50e70eeb5ecea9a9913313aa88349854f255912076208b33bbd0ea1b3
+  Atlas version 1; 12701 pitches; 301500612 bytes.
+  Atlas recipe SHA-256: 9948e576e22d67a26c6e3f623dd01998ded14fd9100febe4ffaa55e95472594e
+  Atlas data SHA-256: 03ee84dfdcbc05bcc633382f2bcd570d5803690be4738c0d4dc2d35086c3b25a
+  Initial new atlas build plus validation: 11.10 seconds.
+  Old resource remains separate; its content/recipe are not adopted by the new loader.
+  No frozen audio hash or tolerance changed. Pitch-dependent sounds change as audited above.
+
+Final pitch validation:
+  Focused pitch/resource/hygiene: 110 passed in 23.91 seconds (61 new pitch cases).
+  Initial full run: 5360 passed, 2 timing failures, 16 skipped, 102 warnings in 435.06 seconds.
+  Timing failures: streaming mean 1597.6 us / 1333.3 us budget; emitter 50.07 us / 50 us budget.
+  Isolated unchanged streaming/cockpit timing selection: 4 passed in 5.78 seconds; emitter 38.93 us.
+  Second unchanged full run: 5361 passed, 1 streaming timing failure, 16 skipped, 102 warnings in 450.48 seconds.
+  Second streaming mean: 1646.98 us / 1333.33 us budget.
+  Profile-guided alias lookup, int64 energy dot product, and fused Mode B JIT optimization:
+    497 focused arithmetic/modulation/spectrum/tail/scheduling tests passed in 82.14 seconds.
+    All 52 captured factory frame/audio traces remain exact on native and capsule routes.
+    Six paired stream trials retain identical 48000 samples and final VM state.
+    Median trial mean falls from 1049.087 to 758.843 us (27.7% lower).
+    Full evidence: regen_reports/streaming_performance_20261030.txt.
+  Full run after streaming optimization: 5361 passed, emitter timing failure (50.626 us / 50 us),
+    16 skipped, 102 warnings in 453.16 seconds; streaming gate passed.
+  Removed repeated imports, empty-control/LFO work and redundant pre-LFO frequency calculation:
+    464 control/snapshot/native-preset/LFO/unison tests passed in 74.80 seconds.
+    Paired emitter median trial mean: 47.138 -> 31.225 us (33.8% lower).
+    Final frames/musical state and 500-frame control/retrigger trace remain exact.
+  Final root command: pixi run python -m pytest -q --tb=short
+  5362 passed, 16 skipped, 102 warnings in 448.92s (0:07:28)
+  Timing limits, golden inputs and frozen hashes remain unchanged.
+  All VM/workbench golden hashes remain unchanged; root and documentation diffs are whitespace-clean.
+  Desktop timing probes do not establish worst-case audio-device qualification.
+
+Open host issue:
+  SynthMaster fallbacks overwrite authored Mode A with Mode B, empty named-waveform
+  partial arrays with eight fallback amplitudes, and a zero beta with 16384.
+  This is a separately captured ownership defect, not repaired by the pitch change.
+  The stereo audit labels requested and actual modes; direct VM tests exercise true Mode A.
+
+Subsequent host repair:
+  The separately captured fallback ownership defect is now repaired and audited in
+  host_preset_ownership_20261030.txt. The complete subsequent suite passes 5398 tests,
+  with 16 skips and 102 existing warnings in 431.03 seconds. The historical pitch
+  audit above retains its original requested/actual-mode labels.

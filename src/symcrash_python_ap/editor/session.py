@@ -287,15 +287,20 @@ class EditorSession:
             
             def execute(self, ir):
                 # Re-execute all commands
+                executed = []
                 for command, _ in self._commands_and_results:
                     result = command.execute(ir)
                     if not result.ok:
                         return result
-                return EditorResult.success("Batch re-executed")
+                    if result.status == EditorResultStatus.SUCCESS:
+                        executed.append((command, result))
+                # Redo is recorded by CommandHistory only when it returns
+                # fresh undo data. Keep the inverse from this execution.
+                return EditorResult.success("Batch re-executed", {"commands": executed})
             
             def undo(self, ir, undo_data):
                 # Undo all commands in reverse
-                for command, result in reversed(self._commands_and_results):
+                for command, result in reversed(undo_data["commands"]):
                     if result.undo_data is not None:
                         command.undo(ir, result.undo_data)
                 return EditorResult.success("Batch undone")

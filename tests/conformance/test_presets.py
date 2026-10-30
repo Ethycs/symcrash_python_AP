@@ -2,14 +2,10 @@
 WSE-STD-070 Preset Conformance Tests
 =====================================
 
-LEGACY TEST - Preset module was refactored. Tower/Editor API no longer exists.
-This test needs to be rewritten for the new preset loading API.
-
 Tests for presets, editor operations, and tower completion.
 """
 
 import pytest
-pytest.skip("Legacy test - preset module refactored, tower API removed", allow_module_level=True)
 
 from symcrash_python_ap.library.preset_model import (
     # Constants
@@ -523,23 +519,23 @@ class TestLifecycle:
     """Test preset lifecycle per Section 7."""
 
     def test_save_load_roundtrip(self):
-        """Save and load should preserve header."""
+        """Save and load preserve both header identity and authored data."""
         original = create_preset(preset_id=12345, tree_id=67)
+        original.apply_op(set_param('gain', .75))
         data = save_preset(original)
-
-        # At minimum, header should be preserved
-        assert len(data) >= PresetHeader.HEADER_SIZE
+        restored = load_preset(data)
+        assert restored.header == original.header
+        assert restored.body.L2_instrument == original.body.L2_instrument
+        assert len(data) > PresetHeader.HEADER_SIZE
 
     def test_crc_computed_on_save(self):
         """CRC should be computed when saving."""
         preset = create_preset(preset_id=1)
         preset.header.crc32 = 0
 
-        save_preset(preset)
-
-        # CRC should be set (even if body is empty, CRC of empty is computed)
-        # Note: CRC is computed over body, not header
-        assert True  # CRC computation is tested by save_preset
+        data = save_preset(preset)
+        assert preset.header.crc32 == compute_crc32(data[PresetHeader.HEADER_SIZE:])
+        assert preset.header.crc32 != 0
 
     def test_complete_called_on_load(self):
         """Loading should apply completion rules."""

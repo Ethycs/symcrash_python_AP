@@ -142,11 +142,11 @@ class TestO2ScheduledRendering:
     O2. Scheduled Rendering
 
     Requirement:
-    - Only serviced voices are rendered
+    - Serviced voices update; unserviced voices render held coefficients
     - Schedule result reflects scheduler decisions
 
     Test:
-    - Voices not in serviced list produce no audio
+    - Absent voices produce no audio
     - Scheduler decisions flow through to rendering
     """
 
@@ -160,8 +160,8 @@ class TestO2ScheduledRendering:
         assert len(R) == 64
         assert isinstance(schedule, ScheduleResult)
 
-    def test_only_serviced_voices_contribute_audio(self, block_orchestrator, q15_half):
-        """Only voices in schedule.serviced contribute to output."""
+    def test_serviced_voice_produces_audio(self, block_orchestrator, q15_half):
+        """Packet-driven synthesis must actually produce audio."""
         from symcrash_python_ap.frames import VoiceFramePacketV0b, VoiceFlags
 
         # Set up one active voice with loud coefficients
@@ -176,11 +176,8 @@ class TestO2ScheduledRendering:
         # Step block
         L, R, schedule = block_orchestrator.step_block()
 
-        # If voice was serviced, audio should have some energy
-        if 0 in schedule.serviced_ids:
-            # Should have some non-zero samples
-            # (though with zero coeffs it might be silent)
-            pass
+        assert 0 in schedule.serviced_ids
+        assert any(L) and any(R)
 
     def test_unserviced_voices_dont_contribute(self, block_orchestrator):
         """Voices not in serviced list don't contribute audio."""
@@ -245,7 +242,8 @@ class TestO4FrameUpdates:
         frame = VoiceFramePacketV0b(voice_id=5, gain_q15=q15_half)
         block_orchestrator.update_frame(5, frame)
 
-        assert block_orchestrator.voice_frames[5] is frame
+        assert block_orchestrator.voice_frames[5].to_bytes() == frame.to_bytes()
+        assert block_orchestrator.voice_frames[5] is not frame
 
     def test_gate_rise_auto_allocates(self, block_orchestrator, q15_half):
         """GATE_RISE on FREE voice auto-allocates."""
@@ -282,6 +280,7 @@ class TestO4FrameUpdates:
         # Then gate fall
         frame2 = VoiceFramePacketV0b(
             voice_id=3,
+            frame_seq=1,
             flags=VoiceFlags.GATE_FALL,
             gain_q15=q15_half,
             activity_q15=5000,  # Still has activity

@@ -16,7 +16,7 @@ The IR can be stored as YAML or JSON and supports completion rules
 for partial specifications.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import Dict, List, Optional, Any, Union, Tuple
 from enum import Enum, IntEnum
 import json
@@ -495,10 +495,10 @@ class NodeParams:
     pw: float = 0.5  # Pulse width (legacy, use pwm_width_q15 for precision)
 
     # Oscillator mode (0=A/LUT, 1=B/Rotator, 2=Sample, 3=FM6)
-    osc_mode: int = 0
+    osc_mode: Optional[int] = None  # Omitted = native Mode B; explicit 0 = LUT
 
     # Waveform type (0=sine, 1=square, 2=pulse, 3=saw, 4=saw_down, 5=tri)
-    waveform_type: int = 0
+    waveform_type: Optional[int] = None  # Omitted = resolve the authored name
 
     # Carrier-specific fields (v1 Addendum A)
     role: Optional[str] = None        # "off" | "audible" | "exciter_only"
@@ -1463,7 +1463,7 @@ class SafetyConfig:
     Safety engine configuration (WSE-STD-SAFETY).
 
     Controls the Safety Engine audio-space tail processing:
-    - OLA (overlap-add) for wet path smoothing
+    - Master OLA (overlap-add) on the final mix, separate from wet-path OLA
     - DC removal (disabled for CCS path)
     - Limiter for amplitude safety
     - Slew limiting for click prevention
@@ -1476,8 +1476,42 @@ class SafetyConfig:
     master_ola: bool = False                # Master OLA (handled in lane_idwpt_render)
     limiter_threshold_q15: int = 32000      # Hard limiter threshold
     slew_limit_q15: int = 2000              # Maximum sample-to-sample change
-    energy_cap_soft_q32: int = 0x30000000   # Soft energy cap (warning)
-    energy_cap_hard_q32: int = 0x40000000   # Hard energy cap (enforce)
+    # Reserved energy-policy metadata. Domain/window and consumer remain open;
+    # these are not yet enforced audio-space power limits.
+    energy_cap_soft_q32: int = 0x30000000
+    energy_cap_hard_q32: int = 0x40000000
+
+    def __post_init__(self):
+        for name in ('enabled', 'dc_removal', 'master_ola'):
+            if not isinstance(getattr(self, name), bool):
+                raise ValueError(f'Safety {name} must be a boolean')
+        limits = {'limiter_threshold_q15': (1, Q15_ONE),
+                  'slew_limit_q15': (0, Q15_ONE),
+                  'energy_cap_soft_q32': (0, 0xFFFFFFFF),
+                  'energy_cap_hard_q32': (0, 0xFFFFFFFF)}
+        for name, (low, high) in limits.items():
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
+                raise ValueError(f'Safety {name} must be an integer in {low}..{high}')
+        if self.energy_cap_soft_q32 > self.energy_cap_hard_q32:
+            raise ValueError('Safety soft energy cap must not exceed the hard cap')
+
+    @classmethod
+    def from_dict(cls, data):
+        """Parse implemented fields; reject unsupported settings instead of losing them."""
+        if not isinstance(data, dict):
+            raise ValueError('Safety configuration must be a mapping')
+        values = dict(data)
+        for alias, canonical in (('ola_enabled', 'master_ola'),
+                                 ('max_slew_per_sample', 'slew_limit_q15')):
+            if alias in values:
+                if canonical in values and values[canonical] != values[alias]:
+                    raise ValueError(f'Conflicting Safety fields: {alias} and {canonical}')
+                values[canonical] = values.pop(alias)
+        unknown = set(values) - {f.name for f in fields(cls)}
+        if unknown:
+            raise ValueError('Unsupported Safety settings: ' + ', '.join(sorted(unknown)))
+        return cls(**values)
 
 
 @dataclass
@@ -1998,6 +2032,10 @@ def _parse_node_params(data: dict) -> NodeParams:
         params.waveform = data['waveform']
     if data.get('partials'):
         params.harmonics = _parse_harmonic_profile(data['partials'])
+    elif isinstance(data.get('harmonics'), dict):
+        # Canonical persistence stores normalized amplitudes explicitly,
+        # including an authored empty profile, without Q15 auto-detection.
+        params.harmonics = HarmonicProfile(amplitudes=list(data['harmonics']['amplitudes']))
     elif data.get('harmonics'):
         params.harmonics = _parse_harmonic_profile(data['harmonics'])
     if 'phase_spread' in data:
@@ -2055,6 +2093,12 @@ def _parse_node_params(data: dict) -> NodeParams:
         params.fm_enable = data['fm_enable']
     if 'fm_depth_q15' in data:
         params.fm_depth_q15 = data['fm_depth_q15']
+    elif 'fm_depth' in data:
+        import math
+        depth = data['fm_depth']
+        if type(depth) not in (int, float) or not math.isfinite(depth) or not 0 <= depth <= 1:
+            raise ValueError('fm_depth must be finite in 0..1')
+        params.fm_depth_q15 = round(depth * Q15_ONE)
     if 'fm_source' in data:
         params.fm_source = data['fm_source']
 
@@ -2091,6 +2135,9 @@ def _parse_node_params(data: dict) -> NodeParams:
     # Noise
     if 'color' in data:
         params.color = data['color']
+    for name in ('noise_level', 'noise_attack_ms', 'noise_decay_ms'):
+        if name in data:
+            setattr(params, name, float(data[name]))
 
     # Noise exciter: `noise: {color, attack_ms, decay_ms, level}` block
     # (Noise-node flat keys are lifted into this block by _parse_l0_node)
@@ -2180,6 +2227,18 @@ def _parse_node_params(data: dict) -> NodeParams:
     if 'fm6_topo_blend_q15' in data:
         params.fm6_topo_blend_q15 = data['fm6_topo_blend_q15']
 
+    for key, attribute in (('op_ratios_q16', 'op_ratios'), ('op_levels_q15', 'op_levels')):
+        if key in data:
+            values = data[key]
+            if type(values) is not list or any(type(value) is not int for value in values):
+                raise ValueError(f'{key} must be a list of raw integers')
+            setattr(params, attribute, list(values))
+    for key, parser in (('vibrato', _parse_vibrato_params),
+                        ('body_warble', _parse_body_warble_params),
+                        ('attack_texture', _parse_attack_texture_params)):
+        if key in data:
+            setattr(params, key, parser(data[key]))
+
     return params
 
 
@@ -2246,6 +2305,8 @@ def _parse_macro_semantic(data: dict) -> MacroSemantic:
 
 def _parse_vibrato_params(data: dict) -> VibratoParams:
     """Parse vibrato params from dict."""
+    if type(data) is not dict or set(data) - {'rate_hz', 'depth_amp', 'depth_timbre', 'delay_ms', 'ramp_ms'}:
+        raise ValueError('Unknown vibrato parameters; use an LFO pitch route for pitch vibrato')
     return VibratoParams(
         rate_hz=data.get('rate_hz', 5.5),
         depth_amp=data.get('depth_amp', 0.0),
@@ -2257,6 +2318,8 @@ def _parse_vibrato_params(data: dict) -> VibratoParams:
 
 def _parse_body_warble_params(data: dict) -> BodyWarbleParams:
     """Parse body warble params from dict."""
+    if type(data) is not dict or set(data) - {'rate_hz', 'depth', 'target_harmonic'}:
+        raise ValueError('Unknown body warble parameters')
     return BodyWarbleParams(
         rate_hz=data.get('rate_hz', 1.2),
         depth=data.get('depth', 0.0),
@@ -2266,6 +2329,8 @@ def _parse_body_warble_params(data: dict) -> BodyWarbleParams:
 
 def _parse_attack_texture_params(data: dict) -> AttackTextureParams:
     """Parse attack texture params from dict."""
+    if type(data) is not dict or set(data) - {'bright_ms', 'bright_amount', 'harmonics'}:
+        raise ValueError('Unknown attack texture parameters')
     return AttackTextureParams(
         bright_ms=data.get('bright_ms', 60.0),
         bright_amount=data.get('bright_amount', 0.0),
@@ -2360,6 +2425,12 @@ def _parse_l1_lift(data: dict) -> L1Lift:
         intent_mapping=intent_mapping,
         family_mapping=family_mapping,
         fm6_morph=fm6_morph,
+        wavetable_spec=(WavetableSpec.from_dict(data['wavetable_spec'])
+                        if data.get('wavetable_spec') is not None else None),
+        granular_spec=(GranularSpec.from_dict(data['granular_spec'])
+                       if data.get('granular_spec') is not None else None),
+        warp_spec=(WarpSpec.from_dict(data['warp_spec'])
+                   if data.get('warp_spec') is not None else None),
         vibrato=vibrato,
         body_warble=body_warble,
         attack_texture=attack_texture,
@@ -2488,6 +2559,8 @@ def _parse_tree_target(data: dict) -> TreeTarget:
 
 def _parse_event_payload_template(data: dict) -> EventPayloadTemplate:
     """Parse event payload template from dict."""
+    if not isinstance(data, dict) or set(data) - set(EventPayloadTemplate.__dataclass_fields__):
+        raise ValueError('Unsupported event payload field')
     return EventPayloadTemplate(
         variant=data.get('variant', 0),
         op=data.get('op'),
@@ -2509,10 +2582,21 @@ def _parse_event_payload_template(data: dict) -> EventPayloadTemplate:
 
 def _parse_event_policy(data: dict) -> EventPolicy:
     """Parse event policy from dict."""
+    allowed = {'lane', 'condition', 'when', 'payload_template', 'payload', 'strength', 'variant'}
+    if not isinstance(data, dict) or set(data) - allowed:
+        raise ValueError('Unsupported event policy field')
+    for canonical, alias in (('condition', 'when'), ('payload_template', 'payload')):
+        if canonical in data and alias in data and data[canonical] != data[alias]:
+            raise ValueError(f'Conflicting event {canonical}/{alias} values')
+    payload = dict(data.get('payload_template', data.get('payload', {})))
+    if 'variant' in data:
+        if 'variant' in payload and payload['variant'] != data['variant']:
+            raise ValueError('Conflicting event variant values')
+        payload['variant'] = data['variant']
     return EventPolicy(
         lane=data.get('lane', ''),
-        condition=data.get('condition', ''),
-        payload_template=_parse_event_payload_template(data.get('payload_template', {})),
+        condition=data.get('condition', data.get('when', '')),
+        payload_template=_parse_event_payload_template(payload),
         strength=str(data.get('strength', '0.0')),
     )
 
@@ -2712,7 +2796,11 @@ def _parse_material_config(data: dict) -> MaterialConfig:
     and human-readable float keys (e.g., beta_target: 0.5).
     Float keys take priority when both are present.
     """
+    material_id = data.get('material_id', 0)
+    if isinstance(material_id, bool) or not isinstance(material_id, int) or not 0 <= material_id <= 10:
+        raise ValueError('Material program ID must be an integer in 0..10')
     return MaterialConfig(
+        material_id=material_id,
         beta_start_q15=float_or_q15(data, 'beta_start', 'beta_start_q15', 0),
         beta_target_q15=float_or_q15(data, 'beta_target', 'beta_target_q15', Q15_HALF),
         beta_ramp_blocks=data.get('beta_ramp_blocks', 8),
@@ -2731,6 +2819,7 @@ def _parse_compile_config(data: dict) -> CompileConfig:
         degrade_profile=_parse_degrade_profile(data.get('degrade_profile', {})),
         frame_emitter_policy=_parse_frame_emitter_policy(data.get('frame_emitter_policy', {})),
         material=_parse_material_config(data.get('material', {})),
+        safety=SafetyConfig.from_dict(data.get('safety', {})),
     )
 
 
@@ -2799,11 +2888,14 @@ LFO_TARGET_MAP = {
     'tilt': LFOTarget.TILT,
     'brightness': LFOTarget.TILT,
     'harmonic_rolloff': LFOTarget.TILT,
+    'phase': LFOTarget.PHASE,
+    'fm_phase': LFOTarget.PHASE,
     'filter_cutoff': LFOTarget.FILTER_CUTOFF,
     'cutoff': LFOTarget.FILTER_CUTOFF,
     'filter_reso': LFOTarget.FILTER_RESO,
     'resonance': LFOTarget.FILTER_RESO,
     'band_scale': LFOTarget.BAND_SCALE,
+    'vfo_ring': LFOTarget.VFO_RING,
 }
 
 
@@ -2840,9 +2932,23 @@ def _parse_modulators(data: dict) -> List[LFOState]:
         return []
 
     result = []
-    arc_slot = 0
+    from .voice.lfo_clocks import lfo_clock_groups, LFO_CLOCK_SLOTS
+    reserved_slots = set()
+    for item in lfos_list:
+        if 'arc_slot' in item:
+            slot = item['arc_slot']
+            if type(slot) is not int or not 0 <= slot < LFO_CLOCK_SLOTS:
+                raise ValueError('LFO arc_slot must address one of eight phase clocks')
+            reserved_slots.add(slot)
 
     for lfo_def in lfos_list:
+        if 'arc_slot' in lfo_def:
+            arc_slot = lfo_def['arc_slot']
+        else:
+            arc_slot = next((slot for slot in range(LFO_CLOCK_SLOTS) if slot not in reserved_slots), None)
+            if arc_slot is None:
+                raise ValueError('No free LFO phase slot; explicitly share a compatible clock or use at most eight clocks')
+            reserved_slots.add(arc_slot)
         # Parse waveform
         waveform_str = lfo_def.get('waveform', 'sine').lower()
         waveform = LFO_WAVEFORM_MAP.get(waveform_str, LFOWaveform.SINE)
@@ -2856,8 +2962,8 @@ def _parse_modulators(data: dict) -> List[LFOState]:
         for target_def in lfo_def.get('targets', []):
             target_str = target_def.get('type', 'pitch').lower()
             target = LFO_TARGET_MAP.get(target_str, LFOTarget.PITCH)
-            amount = target_def.get('amount', 1.0)
-            amount_q15 = int(amount * Q15_ONE)
+            amount_q15 = (int(target_def['amount'] * Q15_ONE) if 'amount' in target_def
+                          else target_def.get('amount_q15', Q15_ONE))
             routings.append(LFORouting(
                 target=target,
                 amount_q15=amount_q15,
@@ -2888,13 +2994,22 @@ def _parse_modulators(data: dict) -> List[LFOState]:
             arc_slot=arc_slot,
         )
 
+        # Explicit fixed-unit fields preserve authored values without a
+        # lossy samples -> milliseconds -> samples round trip. The state
+        # fields also preserve an IR object's embedded LFO state on export.
+        for name in ('enabled', 'phase', 'phase_inc', 'depth_pitch_cents',
+                     'depth_amp_q15', 'depth_timbre_q15', 'delay_samples',
+                     'ramp_samples', 'elapsed_samples', 'current_depth_scale', 'arc_slot'):
+            if name in lfo_def:
+                value = lfo_def[name]
+                expected = bool if name == 'enabled' else int
+                if type(value) is not expected:
+                    raise ValueError(f'LFO {name} must be {expected.__name__}')
+                setattr(lfo, name, value)
+
         result.append(lfo)
-        arc_slot += 1
 
-        if arc_slot > 8:
-            import warnings
-            warnings.warn(f"LFO '{lfo.id}' exceeds MAX_ARCS=8 slots, phase storage may conflict")
-
+    lfo_clock_groups(result, initial=True)
     return result
 
 
@@ -3231,6 +3346,9 @@ def _translate_sound_design_format(data: dict) -> dict:
             if 'emphasis' in state_def:
                 template['families'] = dict(state_def['emphasis'])
 
+            if 'events' in state_def:
+                template['events'] = state_def['events']
+
             # trees: blend → beta (tree names pass through as-is)
             if 'trees' in state_def:
                 trees = dict(state_def['trees'])
@@ -3464,7 +3582,7 @@ def load_instrument(path) -> InstrumentIR:
     path_str = str(path)
 
     with open(path, 'r', encoding='utf-8') as f:
-        if path_str.endswith('.json'):
+        if path_str.lower().endswith('.json'):
             data = json.load(f)
         else:
             if not HAS_YAML:
@@ -3521,9 +3639,12 @@ def extract_waveform_type(
     caller overrides it).
     """
     for node in ir.layers.L0_graph.nodes:
-        if node.type == "Osc" and node.params.waveform:
-            name = node.params.waveform.lower()
-            return WAVEFORM_NAME_TO_ID.get(name, default)
+        if node.type == "Osc":
+            if node.params.waveform:
+                name = node.params.waveform.lower()
+                return WAVEFORM_NAME_TO_ID.get(name, default)
+            if node.params.waveform_type is not None:
+                return node.params.waveform_type
     return default
 
 
@@ -3628,6 +3749,12 @@ def extract_filter_params(ir: InstrumentIR) -> Optional[dict]:
     return None
 
 
+def instrument_to_dict(ir: InstrumentIR) -> dict:
+    """Export complete canonical authoring data, checked through the loader."""
+    from .library.ir_codec import instrument_to_dict as export
+    return export(ir)
+
+
 def save_instrument(ir: InstrumentIR, path) -> None:
     """
     Save InstrumentIR to a YAML or JSON file.
@@ -3636,38 +3763,8 @@ def save_instrument(ir: InstrumentIR, path) -> None:
         ir: InstrumentIR object
         path: Output path (.yaml, .yml, or .json). Can be string or Path object.
     """
-    path_str = str(path)
-    # Convert to dict (simplified, for demonstration)
-    data = {
-        'instrument_ir_v0': {
-            'meta': {
-                'instrument_id': ir.meta.instrument_id,
-                'name': ir.meta.name,
-                'version': ir.meta.version,
-                'author': ir.meta.author,
-                'seed_u32': ir.meta.seed_u32,
-                'voice_model': {
-                    'max_voices': ir.meta.voice_model.max_voices,
-                    'tile_size': ir.meta.voice_model.tile_size,
-                },
-            },
-            'io': {
-                'sample_rate_hz': ir.io.sample_rate_hz,
-                'block_size': ir.io.block_size,
-            },
-            # Simplified - full serialization would include all layers
-        }
-    }
-
-    with open(path, 'w', encoding='utf-8') as f:
-        if path_str.endswith('.json'):
-            json.dump(data, f, indent=2)
-        else:
-            if not HAS_YAML:
-                raise ImportError(
-                    "YAML support requires pyyaml. Install with: pip install pyyaml"
-                )
-            yaml.safe_dump(data, f, default_flow_style=False)
+    from .library.ir_codec import save_instrument as save
+    save(ir, path)
 
 
 # =============================================================================
@@ -4107,11 +4204,11 @@ __all__ = [
     'L3Cmmm',
     # Compile types
     'CompletionPolicy', 'DegradeGroup', 'DegradeProfile',
-    'EventsPolicy', 'FrameEmitterPolicy', 'CompileConfig',
+    'EventsPolicy', 'FrameEmitterPolicy', 'CompileConfig', 'MaterialConfig', 'SafetyConfig',
     # Top-level types
     'VoiceModel', 'InstrumentMeta', 'IOConfig', 'Layers', 'InstrumentIR',
     # Functions
-    'load_instrument', 'load_instrument_from_dict', 'save_instrument',
+    'load_instrument', 'load_instrument_from_dict', 'save_instrument', 'instrument_to_dict',
     'extract_partials_q15', 'extract_phase_spread_q15', 'extract_filter_params',
     'extract_oeis_params', 'extract_noise_params', 'extract_unison_params',
     'complete_instrument',

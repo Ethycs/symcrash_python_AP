@@ -71,21 +71,16 @@ else:
 # Add parent directory to path for imports
 sys.path.insert(0, str(__file__).rsplit('tools', 1)[0] + 'src')
 
-import numpy as np
 import sounddevice as sd
-from symcrash_python_ap.voice import VoiceEngine, GestureBasis
-from symcrash_python_ap.safety.unified_renderer import UnifiedOutputStage
-from symcrash_python_ap.frames import VoiceFrame
-
-SAMPLE_RATE = 44100
-BLOCK_SIZE = 64
-Q15_ONE = 32767
+from symcrash_python_ap.audio.live_renderer import LiveSynthRenderer
+from symcrash_python_ap.primitives import SAMPLE_RATE_HZ as SAMPLE_RATE, BLOCK_SIZE
 
 
 class StandaloneSynth:
     def __init__(self):
-        self.engine = VoiceEngine(max_voices=4)
-        self.stage = UnifiedOutputStage(block_size=BLOCK_SIZE)
+        self.renderer = LiveSynthRenderer(block_size=BLOCK_SIZE)
+        self.engine = self.renderer.engine
+        self.stage = self.renderer.stage
 
         self.running = False
         self.stream = None
@@ -98,56 +93,16 @@ class StandaloneSynth:
         self.lock = threading.Lock()
 
     def _audio_callback(self, outdata, frames, time_info, status):
-        """Audio callback - fill output buffer with synthesized audio."""
+        """Fill arbitrary callback lengths from complete, safe mono blocks."""
         if status:
             print(f"Audio status: {status}")
-
-        num_blocks = frames // BLOCK_SIZE
-        remainder = frames % BLOCK_SIZE
-        output_idx = 0
-
-        for _ in range(num_blocks):
-            voice_frames = self.engine.step_all()
-
-            # Find first active voice
-            active_frame = None
-            for vf in voice_frames:
-                if vf.is_active and vf.gain_q15 > 0:
-                    active_frame = vf
-                    break
-
-            if active_frame is not None:
-                with self.lock:
-                    note = self.current_note
-                f0_hz = 440.0 * (2.0 ** ((note - 69) / 12.0))
-                frame = VoiceFrame(
-                    voice_id=active_frame.voice_id,
-                    note=note,
-                    f0_hz=f0_hz,
-                    gain_q15=active_frame.gain_q15,
-                    is_active=True,
-                )
-
-                # Use render_voice() (faster than render_block)
-                samples = self.stage.render_voice(frame)
-                outdata[output_idx:output_idx + BLOCK_SIZE, 0] = np.array(samples, dtype=np.float32) / Q15_ONE
-            else:
-                outdata[output_idx:output_idx + BLOCK_SIZE, 0] = 0.0
-
-            output_idx += BLOCK_SIZE
-
-            with self.lock:
-                self.blocks_rendered += 1
-
-        # Fill remainder with silence
-        if remainder > 0:
-            outdata[output_idx:output_idx + remainder, 0] = 0.0
+        self.renderer.fill_mono(outdata[:, 0])
+        with self.lock:
+            self.blocks_rendered = self.engine.block_count
 
     def start(self):
         """Start the synthesizer with real-time audio callback."""
-        # Use device 4 (Realtek Digital Output - proven working)
-        sd.default.device = 4
-        print(f"Using audio device 4: {sd.query_devices(4)['name']}")
+        print(f"Using default audio output: {sd.query_devices(kind='output')['name']}")
 
         self.running = True
 
@@ -171,30 +126,15 @@ class StandaloneSynth:
             self.stream = None
 
     def note_on(self, note: int = 60, velocity: int = 100):
-        """Trigger a note."""
-        with self.lock:
-            self.current_note = note
+        """Queue the note; the callback owns voice and VM mutations."""
+        self.current_note = note
+        self.renderer.note_on(note, velocity)
+        self.note_active = velocity > 0
 
-        self.current_voice_id = self.engine.allocate_voice(program_id=1001)
-
-        if self.current_voice_id is not None:
-            pressure = (velocity * Q15_ONE) // 127
-            gesture = GestureBasis(gate=True, pressure_q15=pressure)
-            self.engine.note_on(self.current_voice_id, gesture=gesture)
-            self.stage.voice_on(self.current_voice_id, note)
-            self.note_active = True
-
-            freq = 440.0 * (2 ** ((note - 69) / 12))
-            print(f"Note ON: {note} (voice {self.current_voice_id}, {freq:.1f}Hz)")
-
-    def note_off(self):
-        """Release the current note."""
-        if self.current_voice_id is not None:
-            self.engine.note_off(self.current_voice_id)
-            self.stage.voice_off(self.current_voice_id)
-            print(f"Note OFF: voice {self.current_voice_id}")
-            self.current_voice_id = None
-            self.note_active = False
+    def note_off(self, note=None):
+        """Release the addressed note, retaining all other sounding voices."""
+        self.renderer.note_off(self.current_note if note is None else note)
+        self.note_active = False
 
     def toggle_note(self):
         """Toggle note on/off."""

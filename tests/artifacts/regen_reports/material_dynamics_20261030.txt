@@ -1,0 +1,64 @@
+Material dynamics and proportional slew audit, 2026-10-30
+
+Contract: WSE-STD-MATERIAL v0 sections 5.2, 6.3, 8.3 and 12.2.
+Material parameters previously called a maximum-step limiter with 256 as an
+integer delta. The specified law is current + RNE((target-current)*256/32768).
+This changes parameter trajectories in every material that consumes them.
+No global slew_q15 helper was changed; its maximum-step meaning remains intact.
+
+Cusp now uses the specified integer cubic coefficient 4 and integration rate
+16384, with widened force accumulation and saturation before integration.
+The old cubic term incorrectly multiplied by Q15 integer 3 (~0.00009), and
+the old integration divided its result by an additional four. Fold/Cusp now
+have independent stereo state. Rank retains the most recent 17 samples when
+switching its active window between 9 and 17, and rounds its trimmed mean RNE.
+
+Procedure:
+1. Before editing, captured the three previous runtime methods (MaterialParams
+   slew_from, MaterialEngine rank sample and Cusp sample) and all eleven
+   192-block material_trace hashes. The five frozen extended hashes matched.
+2. After editing, restored only these captured methods into the new runtime.
+   All eleven captured previous hashes reproduced exactly.
+3. Replaced the corrected methods with independent scalar references:
+   Fraction-based ties-to-even interpolation/multiplication, an append-and-slice
+   chronological rank history, and the written Cusp polynomial recurrence.
+   All eleven reference hashes matched the corrected production hashes exactly.
+4. Updated only the four affected existing extended material golden hashes.
+   SVF's frozen trace is unchanged. Separate conformance tests assert the
+   arithmetic and state isolation directly, including signed extrema.
+
+Existing frozen traces (SHA-256, each block L[64] then R[64], little-endian int16):
+6 Delay
+  old e4705b485704cfff3b3d7058f91518351fd43f98a575cc920ae2580b96a3d0e0
+  new 81a6b6452862b4e4a19168d364444a71b8351b4fe1f52bfa1242d0f267d067af
+7 Chorus
+  old ec0f1a42a26d0b0723161a32a5cd6546a4f3e966bb4537e7daeee189c0e8d568
+  new fcc58b5cf6e569f06c9ef3b4beace3133125f2539029f7b8271cb8c237294a88
+8 Reverb
+  old 331aca8e6b1660cc50e3299250ad39b06613eb8fcc84fa3ab4bd5e9bce6b3116
+  new 847c0efa8c62cf9097361533e74afdb681af8d6e1b15597228f4fec35b10112c
+9 SVF (unchanged)
+  30e3ae153279ba526fb73606d45d591458edf40b531c465abc93311fbb603844
+10 Karplus-Strong
+  old 0f3dc132bd19436c0dd923187bf48d118ff00f60f4d3b54e2a1adac5e76e3689
+  new 307ef646be8df63883607f8b0d24e71a7a81b72106740e25b5be478182a65b34
+
+Additional traces (same stimulus, diagnostic rather than prior golden fixtures):
+0 Clean: unchanged 58d606d8c04e6e7f59d421025ff16082976603c3b0b581981a91e0af6b840ec3
+1 Tape:
+  old cb260d013220d6ab05c0ca258b59655628ceef9f9fac79458cb0b3ce098be0d3
+  new dbf9ee0a332d930b58e31e5c7df4867880cbf773345beb3909d2d76faae090d4
+2 Rank:
+  old 9c69a48c3f6112edda05000ce2a069fb94c57e0f696f1e16c9e31215a9d5f5b5
+  new be75ce5ddc6b97d98503e7696c0cbdfdc56d7bba932a027a6f333acd1ff25ad9
+3 Tropical (zero threshold stimulus): unchanged, same as Clean
+4 Fold (slew change only):
+  old 1f893577e5e4e2e92e97b25c601661e3a8473769faff05b96bb2333dd22cc96b
+  new cd6642b6d109bf86fecfd7db4a06183fec7a1b48eca32aa7fbecefa07543437c
+5 Cusp:
+  old 465d31a27760694393fe41c9ed6b47c20cc5030fde7e15ff3c17cbcbf64406b5
+  new 8aabea0a350b8661ad1d05c5c00d10fa3bc7ef7b3dbeb514734644b12bffce52
+
+Limitations: This does not resolve the conflicting Fold equations in sections
+6.5/8.2, implement draft K-dependent alternate material models, prove click-free
+program switching, or establish Python/HDL parity or physical audition.

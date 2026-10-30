@@ -1,0 +1,45 @@
+Authored L2 graph execution audit, 2026-10-30
+
+Former native path reproduced by removing only the compiled graph from the preset.
+This restores the reviewed former behavior: empty native backbone and no L2 transitions.
+All carrier/envelope/LFO and VM kernels remain identical between the two renders.
+
+FM6 soft graph:
+  blocks: 36; release block: 28
+  corrected state runs: [('first', 3), ('second', 1), ('first', 3), ('second', 21), ('last', 8)]
+  changed samples: 1497 / 2304
+  former SHA-256: be4280d1bda4558a62a18c613c77793f7bc309f978ff2b5698c6c9ee63a545f1
+  corrected SHA-256: aabfb1cd89483b890a778b5ed2955bed81235bb38257bbcc78bbee1c3512580f
+  Reference/JIT frames, states and audio agree exactly within each loading route.
+  Direct/capsule graph states and all graph emission fields agree exactly.
+  Corrected direct/capsule audio differences: 0
+  Former direct/capsule audio differences: 0
+
+Shipped glitch_lead_v0:
+  blocks: 160; release block: 150
+  corrected state runs: [('R1_ATTACK', 11), ('R2_STABLE', 1), ('R3_GLITCH', 60), ('R4_RECOVERY', 45), ('R2_STABLE', 33), ('R0_IDLE', 10)]
+  changed samples: 7375 / 10240
+  former SHA-256: 9c4671eaf012d5108a36ca8bc24e2e33927b7c61b0d1ec2b9952ce4be3ff32ab
+  corrected SHA-256: 62db55b4f240d96178c13ee50d78a18b5d992348568698eaa0fa7df3bb07ae6e
+  Reference/JIT frames, states and audio agree exactly within each loading route.
+  Direct/capsule graph states and all graph emission fields agree exactly.
+  Corrected direct/capsule audio differences: 10098
+  Former direct/capsule audio differences: 10173
+
+76 new graph conformance checks pass in the final 444-test selection (25.99s).
+No existing audio golden was regenerated.
+Soft edges crossfade operator strengths; tree targets and tail policy switch on entry.
+Full tree/output crossfades, L3 kernels, per-regime envelopes and suppression remain open.
+
+Independent loading gap found by this audit: the stock saw graph uses oscillator mode 0
+via direct IR loading and mode 1 via capsule loading. Capsule ADSR reconstructs quantized
+control blocks (5ms -> 4ms, 150ms -> 149.333ms, sustain .7 -> .6999725).
+These differences already exist with graph execution removed and remain unresolved.
+FM6 fixture direct/capsule renders agree; stock saw routes do not.
+
+Initial full validation: 4557 passed, 16 skipped, 102 warnings in 224.14s.
+Follow-up full validation: 4559 passed, 16 skipped, 102 warnings in 223.41s.
+Command: pixi run python -m pytest -q --tb=short
+The latter run preceded the final two alias-combination checks. The final
+implementation passes 444 graph/event/persistence/snapshot/control checks,
+including all 76 graph checks, in 25.99s. This audio audit was then rerun.

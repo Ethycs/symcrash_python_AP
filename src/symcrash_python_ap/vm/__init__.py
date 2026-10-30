@@ -34,6 +34,10 @@ from .state import VMState, EnvelopePhase
 from .decode import DecodedPlan, CarrierRole, decode_frame
 from .tables import Tables, OPERATOR_LANES, Lane
 from .executor import vm_step_block
+from .scheduling import ExecutionPolicy, ExecutionReport
+from .basis_resource import prepare_basis_resources
+from .mode_a_resource import prepare_mode_a_resources
+from .resources import prepare_oscillator_resources
 from .wavetable_engine import (
     WavetableAtlas,
     WavetableBank,
@@ -46,6 +50,8 @@ from .wavetable_engine import (
 )
 
 __all__ = [
+    'ExecutionPolicy',
+    'ExecutionReport',
     # State
     'VMState',
     'EnvelopePhase',
@@ -62,6 +68,9 @@ __all__ = [
 
     # Executor
     'vm_step_block',
+    'prepare_basis_resources',
+    'prepare_mode_a_resources',
+    'prepare_oscillator_resources',
 
     # Wavetable (Phase 4)
     'WavetableAtlas',

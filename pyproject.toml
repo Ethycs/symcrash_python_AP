@@ -19,15 +19,15 @@ symcrash_python_ap = { path = ".", editable = true }
 [tool.pixi.tasks]
 # === Live Synth Tasks ===
 # Hardware control via Pico2 potentiometers (console only)
-live-synth = "python tools/pico2_live_synth.py"
+live-synth = "python tools/synth/pico2_live_synth.py"
 # Hardware control + ImGui window for visual feedback
-live-synth-imgui = "python tools/pico2_live_synth.py --imgui"
+live-synth-imgui = "python tools/synth/pico2_live_synth.py --imgui"
 
 # === Virtual Synth Tasks (no hardware needed) ===
 # Virtual synth with ImGui knobs for control
-virtual-synth = "python tools/pico2_live_synth.py --no-hardware --imgui"
+virtual-synth = "python tools/synth/pico2_live_synth.py --no-hardware --imgui"
 # Virtual synth with multiprocessing (lower latency, no ImGui)
-virtual-synth-mp = "python tools/virtual_synth_mp.py"
+virtual-synth-mp = "python tools/synth/virtual_synth_mp.py"
 
 # === Standalone Tools ===
 # ImGui control panel (standalone, sends UART to hardware)

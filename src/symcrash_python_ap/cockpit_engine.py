@@ -78,6 +78,7 @@ class ControlState:
     target_value: int          # Target value (from input)
     current_value: int         # Current value (after slew)
     dirty: bool = False        # True if changed since last tick
+    slew_blocks_remaining: int = 0
 
 
 # =============================================================================
@@ -94,6 +95,7 @@ class CockpitEngine:
     def __init__(self):
         self.registry = get_central_registry().controls
         self.block_index = 0
+        self.mode_L = 3
 
         # Control state (all controls, indexed by ControlID)
         self._controls: Dict[int, ControlState] = {}
@@ -104,6 +106,9 @@ class CockpitEngine:
 
         # Global state
         self._master_gain_q15 = Q15_ONE
+        self._patched_controls = set()
+        self._patch_targets = set()
+        self._touched_controls = set()
 
         # Health telemetry from scheduler (for display/logging)
         self._health_telemetry: Optional['HealthTelemetry'] = None
@@ -140,8 +145,13 @@ class CockpitEngine:
         clamped = self.registry.clamp(control_id, value)
 
         state = self._controls[control_id]
+        if control_id not in self._touched_controls:
+            state.dirty = True  # An explicit default/zero can override a preset.
+            self._touched_controls.add(control_id)
         if state.target_value != clamped:
             state.target_value = clamped
+            if entry.slew_policy == SlewPolicy.NBLOCK:
+                state.slew_blocks_remaining = max(1, entry.slew_param)
             state.dirty = True
 
     def set_pot(self, pot_id: int, value_q15: int) -> None:
@@ -211,6 +221,12 @@ class CockpitEngine:
             velocity: MIDI velocity (0-127)
             channel: MIDI channel (0-15)
         """
+        note = max(0, min(127, int(note)))
+        velocity = max(0, min(127, int(velocity)))
+        channel = max(0, min(15, int(channel)))
+        if velocity == 0:
+            self.midi_note_off(note, channel)
+            return
         # Convert MIDI velocity (0-127) to Q15 (0-32767)
         velocity_q15 = (velocity * Q15_ONE) // 127
 
@@ -224,7 +240,8 @@ class CockpitEngine:
             note: MIDI note (0-127)
             channel: MIDI channel (0-15)
         """
-        self._event_queue.append(('note_off', note, channel))
+        self._event_queue.append(('note_off', max(0, min(127, int(note))),
+                                  max(0, min(15, int(channel)))))
 
     def midi_pitch_bend(self, value: int, channel: int = 0) -> None:
         """
@@ -238,15 +255,35 @@ class CockpitEngine:
         cents = ((value - 8192) * 200) // 8192  # q15-literal-ok (MIDI pitch-bend center, 2^13)
         self.set_control(ControlID.PITCH_BEND, cents)
 
+    def load_preset(self, preset_id: int, preset_hash32: int = 0) -> None:
+        """Queue selection of a preset registered with the receiving engine."""
+        for value in (preset_id, preset_hash32):
+            if not isinstance(value, int) or not 0 <= value <= 0xFFFFFFFF:
+                raise ValueError('Preset ID and hash must be uint32')
+        self._event_queue.append(('preset_load', preset_id, preset_hash32))
+
+    def set_mode(self, mode_L: int) -> None:
+        """Queue the editing/performance level for the next block (L0..L5)."""
+        if not isinstance(mode_L, int) or not 0 <= mode_L <= 5:
+            raise ValueError('Mode must be in 0..5')
+        self._event_queue.append(('mode_set', mode_L))
+
+    def capture_mark(self, mark_id: int) -> None:
+        """Queue a recorder/debug marker at the next block boundary."""
+        if not isinstance(mark_id, int) or not 0 <= mark_id <= 0xFFFFFFFF:
+            raise ValueError('Capture mark ID must be uint32')
+        self._event_queue.append(('capture_mark', mark_id))
+
     # =========================================================================
     # TICK (Block-rate)
     # =========================================================================
 
-    def tick(self) -> ControlFrame:
+    def tick(self, voice_ids=None) -> ControlFrame:
         """
         Tick the engine (once per block).
 
-        Applies slew filtering and produces a ControlFrame.
+        Applies slew filtering and produces a ControlFrame. voice_ids selects
+        the controlled pool (default: slot 0); every patch has a real voice ID.
 
         Returns:
             ControlFrame for this block
@@ -257,14 +294,14 @@ class CockpitEngine:
         # Build ControlFrame
         frame = ControlFrame(
             block_index=self.block_index,
-            mode_L=3,  # Default to L3
+            mode_L=self.mode_L,
             flags=0,
             globals=GlobalControls(
                 master_gain_q15=self._controls[ControlID.MASTER_GAIN].current_value
             ),
         )
 
-        # Add dirty controls as patches (for voice 0, global voice)
+        # Fan out explicitly: slot zero is an ordinary voice, not a broadcast.
         dirty_items = []
         for control_id, state in self._controls.items():
             if state.dirty:
@@ -276,11 +313,17 @@ class CockpitEngine:
                 ))
                 state.dirty = False  # Clear dirty flag
 
-        if dirty_items:
-            frame.voice_patches.append(VoiceControlPatch(
-                voice_id=0,  # Global voice
-                items=dirty_items,
-            ))
+        self._patched_controls.update(item.control_id for item in dirty_items)
+        targets = tuple(dict.fromkeys((0,) if voice_ids is None else voice_ids))
+        for voice_id in targets:
+            items = dirty_items
+            if voice_id not in self._patch_targets:
+                items = [ControlItem(cid, self.registry.get_entry(cid).value_type,
+                                     self._controls[cid].current_value)
+                         for cid in sorted(self._patched_controls)]
+            if items:
+                frame.voice_patches.append(VoiceControlPatch(voice_id, list(items)))
+        self._patch_targets = set(targets)
 
         # Add events from queue
         for event_data in self._event_queue:
@@ -290,6 +333,16 @@ class CockpitEngine:
             elif event_data[0] == 'note_off':
                 _, note, channel = event_data
                 frame.add_note_off(note, channel)
+            elif event_data[0] == 'preset_load':
+                _, preset_id, preset_hash32 = event_data
+                frame.add_preset_load(preset_id, preset_hash32)
+            elif event_data[0] == 'mode_set':
+                self.mode_L = event_data[1]
+                frame.add_mode_set(self.mode_L)
+            elif event_data[0] == 'capture_mark':
+                frame.add_capture_mark(event_data[1])
+
+        frame.mode_L = self.mode_L
 
         # Clear event queue
         self._event_queue.clear()
@@ -315,8 +368,9 @@ class CockpitEngine:
                 new_value = slew_nblock(
                     state.current_value,
                     state.target_value,
-                    entry.slew_param,
+                    max(1, state.slew_blocks_remaining),
                 )
+                state.slew_blocks_remaining = max(0, state.slew_blocks_remaining - 1)
                 if new_value != state.current_value:
                     state.current_value = new_value
                     state.dirty = True

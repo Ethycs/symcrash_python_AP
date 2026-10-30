@@ -1,0 +1,86 @@
+Complete integer VM CORE v1 replay audit — 2026-10-30
+
+Fixtures: test_vm_snapshot_replay.prepared; eleven rendered blocks before capture.
+Legacy v0 remains an explicit partial format; v1 includes all runtime fields/resources.
+Future stream: 18 blocks; held service every fifth block; pitch change at 4; release at 10.
+All audio uses the actual vm_step_block return, copied before the next shared scratch write.
+No synthesis DSP or existing golden changed.
+Validation: 96 new binary replay tests; 199 focused tests passed.
+Full suite: 4179 passed, 16 skipped, 102 warnings in 201.56 seconds.
+
+a / reference: payload 1808 bytes
+  mismatch samples: legacy=0 / v1=0 / total=1152
+  future audio SHA-256: e39a0014dc01a79c084f9ac3ee8d639e3d9944e962eb01f6d579cfbce9bb7cc4
+  v1 payload SHA-256: ec8392d0e3a62c386c802143ab5d614923b97b686bff84bb9aa8eb97d0550426
+b / reference: payload 2138 bytes
+  mismatch samples: legacy=192 / v1=0 / total=1152
+  future audio SHA-256: 661175e6449ce8f9cc671a22891b1a43f8a3bb0518d0ef8bf3046a48b4364c3d
+  v1 payload SHA-256: 6aae1dd10c7002a81c0319da9c8f5e0af526230c318aa5edd7d39c1e78cd1d91
+pwm / reference: payload 2094 bytes
+  mismatch samples: legacy=192 / v1=0 / total=1152
+  future audio SHA-256: d21a8af6e1ad5970cc51308c9cd74e34c68cc67ea71511e59e233b62e0011fe2
+  v1 payload SHA-256: 68f9bab02a95c1cddb9edc952ca6a309f20ab010c4cd9308c632042de20b65e3
+fm6 / reference: payload 2879 bytes
+  mismatch samples: legacy=1088 / v1=0 / total=1152
+  future audio SHA-256: b03304262ada59acb703357a9258626c8fc63129d5186414aedbd3fc1377edfa
+  v1 payload SHA-256: 2b180664319bbc9fec4b9fb243d7619f5046a7d14fa8c5b3b8e0798a1e3edefc
+morph / reference: payload 2986 bytes
+  mismatch samples: legacy=1088 / v1=0 / total=1152
+  future audio SHA-256: 0068082ac5168f80b77aa2952a2fbf74d41d083d1611634aebc3108b9e268b0f
+  v1 payload SHA-256: ccb5c1aeeae926362555f7914d2559dea7f6f5a4497f759aa65abefed97e43d5
+sample / reference: payload 10064 bytes
+  mismatch samples: legacy=1088 / v1=0 / total=1152
+  future audio SHA-256: 5c1db63b07a2e45154f657daa38381760186a4b10828af148e43cf4d20e281b5
+  v1 payload SHA-256: 72da9b02be3647c57411dbfc0f783e89a6cccad5cb72636172775a8e182843b5
+sample_coeff / reference: payload 18265 bytes
+  mismatch samples: legacy=1088 / v1=0 / total=1152
+  future audio SHA-256: bd715ad9c10cf5b7b4137c07d66640a2e1423a2a7e0d0db23f2c755f62b92810
+  v1 payload SHA-256: 04a7fbe2dcc4fbe06945cdf08e033b7e77940fd26426d4c74d49796c0646b8f7
+wavetable / reference: payload 5016 bytes
+  mismatch samples: legacy=1088 / v1=0 / total=1152
+  future audio SHA-256: d5607c1ee7e19efed424e9225c7c4f5be31ab68de2e2699c0fe56e64debb6b51
+  v1 payload SHA-256: d5ae9483f8afc7ae4bd343721d8139f7f5632c4dccb38f72953636e1b60630c6
+granular / reference: payload 11231 bytes
+  mismatch samples: legacy=1088 / v1=0 / total=1152
+  future audio SHA-256: f59306880880600d1515cd4f73f4e3929028da36bb2cfb103e6216f49aae1990
+  v1 payload SHA-256: 2350c7c333d5d802c80ef5389fdb3c0cd43b0d0801876371743910ddbfbd8624
+a / jit: payload 1808 bytes
+  mismatch samples: legacy=0 / v1=0 / total=1152
+  future audio SHA-256: e39a0014dc01a79c084f9ac3ee8d639e3d9944e962eb01f6d579cfbce9bb7cc4
+  v1 payload SHA-256: ec8392d0e3a62c386c802143ab5d614923b97b686bff84bb9aa8eb97d0550426
+b / jit: payload 2138 bytes
+  mismatch samples: legacy=192 / v1=0 / total=1152
+  future audio SHA-256: 661175e6449ce8f9cc671a22891b1a43f8a3bb0518d0ef8bf3046a48b4364c3d
+  v1 payload SHA-256: 6aae1dd10c7002a81c0319da9c8f5e0af526230c318aa5edd7d39c1e78cd1d91
+pwm / jit: payload 2094 bytes
+  mismatch samples: legacy=192 / v1=0 / total=1152
+  future audio SHA-256: d21a8af6e1ad5970cc51308c9cd74e34c68cc67ea71511e59e233b62e0011fe2
+  v1 payload SHA-256: 68f9bab02a95c1cddb9edc952ca6a309f20ab010c4cd9308c632042de20b65e3
+fm6 / jit: payload 2879 bytes
+  mismatch samples: legacy=1088 / v1=0 / total=1152
+  future audio SHA-256: b03304262ada59acb703357a9258626c8fc63129d5186414aedbd3fc1377edfa
+  v1 payload SHA-256: 2b180664319bbc9fec4b9fb243d7619f5046a7d14fa8c5b3b8e0798a1e3edefc
+morph / jit: payload 2986 bytes
+  mismatch samples: legacy=1088 / v1=0 / total=1152
+  future audio SHA-256: 0068082ac5168f80b77aa2952a2fbf74d41d083d1611634aebc3108b9e268b0f
+  v1 payload SHA-256: ccb5c1aeeae926362555f7914d2559dea7f6f5a4497f759aa65abefed97e43d5
+sample / jit: payload 10064 bytes
+  mismatch samples: legacy=1088 / v1=0 / total=1152
+  future audio SHA-256: 5c1db63b07a2e45154f657daa38381760186a4b10828af148e43cf4d20e281b5
+  v1 payload SHA-256: 72da9b02be3647c57411dbfc0f783e89a6cccad5cb72636172775a8e182843b5
+sample_coeff / jit: payload 18265 bytes
+  mismatch samples: legacy=1088 / v1=0 / total=1152
+  future audio SHA-256: bd715ad9c10cf5b7b4137c07d66640a2e1423a2a7e0d0db23f2c755f62b92810
+  v1 payload SHA-256: 04a7fbe2dcc4fbe06945cdf08e033b7e77940fd26426d4c74d49796c0646b8f7
+wavetable / jit: payload 5016 bytes
+  mismatch samples: legacy=1088 / v1=0 / total=1152
+  future audio SHA-256: d5607c1ee7e19efed424e9225c7c4f5be31ab68de2e2699c0fe56e64debb6b51
+  v1 payload SHA-256: d5ae9483f8afc7ae4bd343721d8139f7f5632c4dccb38f72953636e1b60630c6
+granular / jit: payload 11231 bytes
+  mismatch samples: legacy=1088 / v1=0 / total=1152
+  future audio SHA-256: f59306880880600d1515cd4f73f4e3929028da36bb2cfb103e6216f49aae1990
+  v1 payload SHA-256: 2350c7c333d5d802c80ef5389fdb3c0cd43b0d0801876371743910ddbfbd8624
+
+Boundary: VM voices only. CMMM/VoiceEngine global state, program resources,
+host queues/schedulers, Material/aux/Safety output state and HDL parity remain open.
+Legacy bytes are not sufficient to reconstruct absent runtime state.

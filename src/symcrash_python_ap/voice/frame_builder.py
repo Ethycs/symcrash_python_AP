@@ -45,6 +45,8 @@ from ..instrument_ir import (
 from ..library.ir_extract import extract_amp, extract_fm6
 from ..vm.harmonic_bank import LFOTarget
 from ..vm.state import OSC_MODE_FM6
+from .ir_events import AuthoredEventState, compile_ir_events, event_context, phase_template, phase_regime
+from .ir_regimes import AuthoredRegimeState, compile_ir_regimes
 
 # Golden-ratio conjugate scaled to 2^32 - the repo's golden-angle phase
 # convention (single home; also used by vm/harmonic_bank partial spread).
@@ -164,6 +166,9 @@ class IRFrameBuilder:
         self.noise_seed_xor = noise_seed_xor
         self.relatch = relatch_per_block
         self.last_amp_gain_q15 = 0
+        self._event_state = AuthoredEventState()
+        self._regime_state = AuthoredRegimeState()
+        self._lfo_gate = False
 
         if not self.relatch:
             # Offline: latch once; deep-copy LFOs (private state per voice
@@ -182,6 +187,10 @@ class IRFrameBuilder:
         """Extract all frame parameters from the IR (one latch)."""
         ir = self.ir
         note = self.note
+        self._event_program = compile_ir_events(ir)
+        self._regime_program = compile_ir_regimes(ir)
+        from ..library.native_carrier import extract_native_carrier
+        self._osc_mode, _, native_pwm_width, self._native_carrier = extract_native_carrier(ir)
 
         # --- Amp envelope + dynamics ---
         amp = extract_amp(ir)
@@ -261,26 +270,9 @@ class IRFrameBuilder:
             if int(EnvelopeTarget.FILTER_CUTOFF) in e.target_ids
         ]
 
-        # --- PWM base width from the Osc node ---
-        pwm_width = 16384
-        pwm_enabled = False
-        for node in ir.layers.L0_graph.nodes:
-            if node.type == "Osc":
-                if getattr(node.params, 'pwm_width_q15', None) not in (None, Q15_HALF):
-                    pwm_width = node.params.pwm_width_q15
-                if getattr(node.params, 'pw', 0.5) != 0.5:
-                    pwm_width = int(node.params.pw * Q15_ONE)
-                pwm_enabled = bool(getattr(node.params, 'pwm_enable', False))
-                break
-        # A PWM-targeted LFO implies PWM (only without custom partials)
-        lfos = self._live_lfos()
-        if not self._harmonic_amps and any(
-            r.target == LFOTarget.PWM_WIDTH for lfo in lfos
-            for r in lfo.routings
-        ):
-            pwm_enabled = True
-        self._pwm_width_base = pwm_width
-        self._pwm_enabled = pwm_enabled
+        # --- Shared native PWM defaults ---
+        self._pwm_width_base = native_pwm_width
+        self._pwm_enabled = self._native_carrier.pwm_enabled
 
         # --- FM6 (first FM6 node wins; tool-side defaults) ---
         fm6 = extract_fm6(ir)
@@ -305,7 +297,7 @@ class IRFrameBuilder:
 
     def phase_at(self, clock: NoteClock) -> str:
         """ADSR phase name at this block (drives emit-template choice)."""
-        if not clock.gate:
+        if not clock.gate or clock.block_idx >= clock.sustain_until_block:
             return 'RELEASE'
         if clock.block_idx < self.attack_blocks:
             return 'ATTACK'
@@ -326,15 +318,19 @@ class IRFrameBuilder:
         ops_enable: Optional[list] = None,
         families: Optional[dict] = None,
         amps_override: Optional[list] = None,
+        template_name: Optional[str] = None,
+        event_inputs: Optional[dict] = None,
     ) -> VoiceFrame:
         """
         Build the VoiceFrame for this block.
 
-        ops_enable/families: pass explicitly when an L2 regime machine
-        drives emission (offline renderer); None selects the emit template
-        from the ADSR phase (simple-form law, shared by both paths).
+        ops_enable/families: explicit caller overrides bypass the internal graph.
+        Otherwise the authored L2 graph selects emission; without executable
+        edges, the ADSR phase selects the template (simple-form law).
         amps_override: replaces the extracted harmonic profile for this
         block (workbench character transforms).
+        template_name: explicit L2-selected event template, when supplied.
+        event_inputs: additional integer gesture/macro inputs for event evaluation.
         """
         if self.relatch:
             self._latch()  # knob edits latch at block boundaries
@@ -361,6 +357,31 @@ class IRFrameBuilder:
         self.last_amp_gain_q15 = gain_q15
         phase = self.phase_at(clock)
 
+        graph_weights, graph_context = None, None
+        if self._regime_program is not None and ops_enable is None and template_name is None:
+            from .voice_engine import GestureBasis, default_gesture_to_intent
+            event_gate = clock.gate and b < clock.sustain_until_block
+            gesture = GestureBasis(gate=event_gate, pressure_q15=self.velocity_q15)
+            graph_context = event_context(gesture=gesture, intent=default_gesture_to_intent(gesture),
+                velocity=self.velocity_q15, gain=gain_q15, block=b)
+            graph_context.update(event_inputs or {})
+            graph_weights, graph_context = self._regime_state.step(
+                self._regime_program, graph_context, gate=event_gate)
+            node = self._regime_program.nodes[self._regime_state.node]
+            template_name = node.template
+            ops_enable, families = list(graph_weights), {k: v / Q15_ONE for k, v in graph_weights.items()}
+
+        def finish(frame):
+            self._native_carrier.apply(frame)
+            if self._native_carrier.classic_modulation is not None:
+                self._native_carrier.classic_modulation.apply(frame, b)
+            frame.coeff_osc_mode = self._osc_mode
+            frame.noise_seed_u32 ^= self.noise_seed_xor
+            frame.fm_modulator_q15 = fm_modulator
+            if graph_weights is not None:
+                self._regime_state.apply(self._regime_program, frame, graph_weights, graph_context)
+            return frame
+
         # --- Emit template by phase when the caller has no regime machine ---
         if ops_enable is None:
             ops_enable = []
@@ -380,8 +401,18 @@ class IRFrameBuilder:
         total_cents = 0
         gain_scale_q15 = Q15_ONE
         pwm_width = self._pwm_width_base
-        for lfo in self._live_lfos():
-            lfo.advance_block()
+        lfos = self._live_lfos()
+        from .lfo_clocks import gate_lfo_clocks, advance_lfo_clocks
+        lfo_gate = clock.gate and b < clock.sustain_until_block
+        if lfo_gate and not self._lfo_gate:
+            gate_lfo_clocks(lfos)
+        self._lfo_gate = lfo_gate
+        fm_modulator = None
+        if self._native_carrier.fm_source == 2 and self._native_carrier.fm_depth_q15:
+            from .phase_modulation import phase_lfo_lanes
+            fm_modulator = phase_lfo_lanes(lfos)
+        advance_lfo_clocks(lfos)
+        for lfo in lfos:
             lfo_val = lfo.get_lfo_value()
             for routing in lfo.routings:
                 scaled = (lfo_val * routing.amount_q15 + Q15_HALF) >> 15
@@ -426,12 +457,29 @@ class IRFrameBuilder:
 
         final_gain = ((((gain_q15 * gain_scale_q15 + Q15_HALF) >> 15)
                        * self._vel_scale_q15 + Q15_HALF) >> 15)
-        cents = int(total_cents) + self.cents_offset
+        cents = int(total_cents) + self.cents_offset + self._native_carrier.detune_cents
+
+        commands = None
+        if self._event_program is not None:
+            from .voice_engine import GestureBasis, default_gesture_to_intent
+            event_gate = clock.gate and b < clock.sustain_until_block
+            gesture = GestureBasis(gate=event_gate, pressure_q15=self.velocity_q15)
+            context = event_context(gesture=gesture, intent=default_gesture_to_intent(gesture),
+                velocity=self.velocity_q15, gain=gain_q15, block=b, dwell_done=True)
+            context.update(event_inputs or {})
+            selected = template_name or phase_template(self._event_program, phase)
+            regime = next((rid for rid, name in self._event_program.regime_templates.items()
+                           if name == selected), phase_regime(phase))
+            if graph_weights is not None:
+                regime = self._regime_program.nodes[self._regime_state.node].event_id
+            commands = self._event_state.emit(self._event_program, selected,
+                context, gate=event_gate, regime=regime,
+                entered=graph_weights is not None and bool(graph_context['regime_enter']))
 
         # --- FM6 path ---
         if self._fm6 is not None:
             post_hz = self._fm6['post_filter_hz']
-            return VoiceFrame(
+            return finish(VoiceFrame(
                 note=self.note,
                 cents=cents,
                 coeff_osc_mode=OSC_MODE_FM6,
@@ -445,18 +493,19 @@ class IRFrameBuilder:
                 fm_post_filter_enabled=bool(post_hz) or None,
                 fm_post_filter_cutoff_hz=post_hz,
                 env_targets_q15=env_targets_q15,
+                event_commands=commands,
                 ops_enable=ops_enable,
                 families=families,
                 **self._noise_kwargs,
-            )
+            ))
 
         # --- Mode B path ---
         oeis = self._oeis_params
-        return VoiceFrame(
+        return finish(VoiceFrame(
             note=self.note,
             cents=cents,
             coeff_osc_mode=1,
-            H_request=len(harmonics) or 16,
+            H_request=(min(255, len(harmonics)) if not oeis else 0) or 16,
             gain_q15=final_gain,
             beta_target_q15=0,
             partial_amps_q15=block_amps,
@@ -469,8 +518,9 @@ class IRFrameBuilder:
             pwm_width_q15=pwm_width,
             pwm_enabled=self._pwm_enabled,
             env_targets_q15=env_targets_q15,
+            event_commands=commands,
             **self._noise_kwargs,
-        )
+        ))
 
 
 __all__ = [

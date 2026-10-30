@@ -13,10 +13,8 @@ DESIGN CONTRACT (NON-NEGOTIABLE):
     - RSHIFT_RNE (round-to-nearest, ties-to-even) is ported verbatim from
       fixed.py. All intermediates fit comfortably in int64 (max ~2^31), so
       Python arbitrary-precision int and numba int64 agree exactly.
-    - Where the reference relies on numpy int16 wraparound semantics
-      (e.g. _inject_gate_mask's `coeff_state[i] * factor` which multiplies
-      a np.int16 scalar by a Python int and wraps), the kernel emulates the
-      wraparound explicitly with _wrap16.
+    - Products and sums widen before coefficient writes. Pressure gains use
+      nearest-even reductions and saturate; gates must not wrap their product.
     - Floor division (//) and arithmetic right shift (>>) on negative ints
       have identical semantics in CPython and numba (floor / sign-extend).
     - Float usage (golden-ratio gates, tail RMS sqrt) follows IEEE-754
@@ -37,6 +35,7 @@ import math
 
 import numpy as np
 from ..primitives import Q15_HALF, Q15_NEG_ONE, Q15_ONE, Q15_SCALE
+from .pressure import PRESSURE_NODE_DELTAS_Q15, FOLD_NODE_DELTAS_Q15
 
 try:
     from numba import njit
@@ -223,9 +222,10 @@ def op_tilt(cs, mask, strength):
 
 
 @njit(cache=True)
-def op_pressure(cs, mask, strength):
+def op_pressure(cs, mask, strength, op_id=15):
     """lane_diag ops 15/20 (PressureRamp / FoldPressure)."""
     n = cs.shape[0]
+    deltas = PRESSURE_NODE_DELTAS_Q15 if op_id == 15 else FOLD_NODE_DELTAS_Q15
     for node in range(L_TOTAL_NODES):
         if not (mask & (1 << node)):
             continue
@@ -233,13 +233,10 @@ def op_pressure(cs, mask, strength):
         end = coeff_idx + NODE_LEN
         if end > n:
             end = n
+        delta_gain = _rshift_rne(deltas[node] * strength, 15)
         for i in range(coeff_idx, end):
             x = np.int64(cs[i])
-            ax = -x if x < 0 else x
-            if ax > Q15_HALF:
-                sign = 1 if x > 0 else -1
-                x = sign * (Q15_HALF + ((ax - Q15_HALF) * strength) // Q15_ONE)
-                cs[i] = _clamp16(x)
+            cs[i] = _clamp16(x + _rshift_rne(x * delta_gain, 15))
 
 
 @njit(cache=True)
@@ -263,13 +260,7 @@ def op_swallowtail(cs, mask, strength):
 
 @njit(cache=True)
 def op_gate_mask(cs, mask, strength):
-    """
-    _inject_gate_mask (lanes.py).
-
-    NOTE: the reference computes `cs[i] * (Q15_ONE - strength)` on a
-    np.int16 scalar, which wraps in int16 BEFORE the >> 15 shift. The
-    wraparound is emulated here for bit-exactness.
-    """
+    """Gate attenuation with a widened product, matching _inject_gate_mask."""
     n = cs.shape[0]
     factor = Q15_ONE - strength
     for node in range(L_TOTAL_NODES):
@@ -283,18 +274,12 @@ def op_gate_mask(cs, mask, strength):
         if end > n:
             end = n
         for i in range(coeff_idx, end):
-            prod16 = _wrap16(np.int64(cs[i]) * factor)
-            cs[i] = prod16 >> 15
+            cs[i] = (np.int64(cs[i]) * factor) >> 15
 
 
 @njit(cache=True)
 def op_intramix(cs, mask, strength):
-    """lane_banded op 3 (IntraMix).
-
-    Mirrors the reference exactly, including its expression
-    `base + ((mixed - base) * strength) >> 15` which (by Python operator
-    precedence) shifts the SUM, not just the scaled delta.
-    """
+    """lane_banded op 3: interpolate from each sample toward its stencil."""
     n = cs.shape[0]
     tmp = cs.copy()
     for node in range(L_TOTAL_NODES):
@@ -307,7 +292,7 @@ def op_intramix(cs, mask, strength):
         for i in range(coeff_idx + 1, end):
             mixed = (np.int64(tmp[i - 1]) + 2 * np.int64(tmp[i]) + np.int64(tmp[i + 1])) >> 2
             base = np.int64(tmp[i])
-            cs[i] = _wrap16((base + (mixed - base) * strength) >> 15)
+            cs[i] = _clamp16(base + (((mixed - base) * strength) >> 15))
 
 
 @njit(cache=True)
@@ -451,11 +436,7 @@ def op_lowrank_morph(cs, mask, strength):
 
 @njit(cache=True)
 def op_glue_pair(cs, mask, strength):
-    """lane_proj op 12 (GluePair).
-
-    Mirrors the reference's `val + ((avg - val) * strength) >> 15`
-    precedence (the sum is shifted) exactly.
-    """
+    """lane_proj op 12: interpolate adjacent samples toward their mean."""
     n = cs.shape[0]
     for node in range(L_TOTAL_NODES - 1):
         if not (mask & (1 << node)):
@@ -468,8 +449,8 @@ def op_glue_pair(cs, mask, strength):
             val_a = np.int64(cs[idx_a])
             val_b = np.int64(cs[idx_b])
             avg = (val_a + val_b) >> 1
-            cs[idx_a] = _clamp16((val_a + (avg - val_a) * strength) >> 15)
-            cs[idx_b] = _clamp16((val_b + (avg - val_b) * strength) >> 15)
+            cs[idx_a] = _clamp16(val_a + (((avg - val_a) * strength) >> 15))
+            cs[idx_b] = _clamp16(val_b + (((avg - val_b) * strength) >> 15))
 
 
 def dispatch_backbone_op(coeff_state, op_id, strength_q15, mask) -> bool:
@@ -514,7 +495,7 @@ def dispatch_backbone_op(coeff_state, op_id, strength_q15, mask) -> bool:
         op_glue_pair(coeff_state, m, s)
         return True
     if op_id in (15, 20):
-        op_pressure(coeff_state, m, s)
+        op_pressure(coeff_state, m, s, op_id)
         return True
     if op_id == 16:
         op_gate_mask(coeff_state, m, s)
@@ -735,6 +716,39 @@ def sincos_hk(lut, h_phases, sin_out, cos_out):
 
 
 # =============================================================================
+# MODE B COEFFICIENT ACCUMULATION
+# =============================================================================
+
+@njit(cache=True)
+def mode_b_coefficients(lut, a_h, b_h, dc, phases, dc_frame, sin_basis,
+                        cos_basis, output):
+    """Fuse the reference's rotation, rounded products, sum, and saturation.
+
+    Weights have already received the shared headroom/modulation treatment.
+    Every product widens before RNE; only the final coefficient saturates.
+    No floating-point arithmetic or harmonic-by-leaf temporary is needed.
+    """
+    harmonics = len(a_h)
+    slots = len(phases)
+    w_sin = np.empty((harmonics, slots), dtype=np.int64)
+    w_cos = np.empty((harmonics, slots), dtype=np.int64)
+    for h in range(harmonics):
+        for k in range(slots):
+            phase = (phases[k] * (h + 1)) & 0xFFFFFFFF
+            sine = _sine_q15_k(lut, phase)
+            cosine = _sine_q15_k(lut, (phase + 0x40000000) & 0xFFFFFFFF)
+            w_sin[h, k] = _rshift_rne(a_h[h] * cosine - b_h[h] * sine, 15)
+            w_cos[h, k] = _rshift_rne(a_h[h] * sine + b_h[h] * cosine, 15)
+    for leaf in range(NUM_LEAVES):
+        for k in range(slots):
+            acc = _rshift_rne(dc * np.int64(dc_frame[leaf, k]), 15)
+            for h in range(harmonics):
+                acc += _rshift_rne(w_sin[h, k] * np.int64(sin_basis[h, leaf, k]), 15)
+                acc += _rshift_rne(w_cos[h, k] * np.int64(cos_basis[h, leaf, k]), 15)
+            output[leaf * slots + k] = _clamp16(acc)
+
+
+# =============================================================================
 # FWPT KERNEL (fast_lifting._fwpt_jit_core, array-native)
 # =============================================================================
 
@@ -746,6 +760,8 @@ def fwpt_64(input_buf, headroom_bits, output_coeffs):
     Bit-exact port of fast_lifting._fwpt_jit_core, taking/returning arrays
     directly (no list round-trips).
     """
+    if len(input_buf) != 64 or len(output_coeffs) != 64:
+        raise ValueError('FWPT requires exactly 64 input samples and output coefficients')
     block_size = 64
     depth = 6
 
@@ -950,5 +966,6 @@ __all__ = [
     'idwpt_polyphase',
     # mode B helpers
     'sincos_hk',
+    'mode_b_coefficients',
     '_get_sine_lut_np',
 ]

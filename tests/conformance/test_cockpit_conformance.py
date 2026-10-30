@@ -16,6 +16,41 @@ Per WSE-STD-COCKPIT-ENGINE v0, the engine MUST:
 import pytest
 
 
+@pytest.mark.parametrize("control_id,target,blocks", [(3, 32767, 16), (16, 500, 4), (19, 1500, 4)])
+def test_nblock_reaches_target_on_schedule(control_id, target, blocks):
+    from symcrash_python_ap.cockpit_engine import CockpitEngine
+    engine = CockpitEngine()
+    start = engine.get_control_current(control_id)
+    engine.set_control(control_id, target)
+    values = []
+    for _ in range(blocks):
+        # Repeated hardware packets carrying the same value do not restart it.
+        engine.set_control(control_id, target)
+        engine.tick()
+        values.append(engine.get_control_current(control_id))
+    assert values[-2] != target
+    assert values[-1] == target
+    for step, value in enumerate(values, 1):
+        ideal = start + (target - start) * step / blocks
+        assert abs(value - ideal) <= 1
+
+
+def test_nblock_retarget_ramps_from_current_value():
+    from symcrash_python_ap.cockpit_engine import CockpitEngine
+    from symcrash_python_ap.control_registry import ControlID
+    engine = CockpitEngine()
+    engine.set_control(ControlID.MORPH, 32767)
+    for _ in range(8):
+        engine.tick()
+    start = engine.get_control_current(ControlID.MORPH)
+    engine.set_control(ControlID.MORPH, 0)
+    for step in range(1, 17):
+        engine.tick()
+        value = engine.get_control_current(ControlID.MORPH)
+        assert abs(value - start * (16 - step) / 16) <= 1
+    assert value == 0
+
+
 # =============================================================================
 # CONFORMANCE: ENGINE INSTANTIATION
 # =============================================================================

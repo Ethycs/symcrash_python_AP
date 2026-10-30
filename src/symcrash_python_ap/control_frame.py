@@ -80,6 +80,15 @@ class ControlEvent:
     b: int = 0
 
 
+@dataclass(frozen=True)
+class CaptureMark:
+    """Consumed debug marker, retaining its source block and routing metadata."""
+    block_index: int
+    mark_id: int
+    channel: int = 0
+    voice_id: int = 0xFFFF
+
+
 # =============================================================================
 # GLOBAL CONTROLS
 # =============================================================================
@@ -155,6 +164,14 @@ class ControlFrame:
             b=0
         ))
 
+    def add_capture_mark(self, mark_id: int, channel: int = 0,
+                         voice_id: int = 0xFFFF) -> None:
+        """Add a debug marker without changing voice or DSP state."""
+        self.events.append(ControlEvent(
+            type=EventType.CAPTURE_MARK, channel=channel, voice_id=voice_id,
+            a=mark_id, b=0,
+        ))
+
 
 # =============================================================================
 # EXPORTS
@@ -165,6 +182,7 @@ __all__ = [
     'ControlItem',
     'VoiceControlPatch',
     'ControlEvent',
+    'CaptureMark',
     'GlobalControls',
     'ControlFrame',
 ]

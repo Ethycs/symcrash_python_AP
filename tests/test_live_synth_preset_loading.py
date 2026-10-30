@@ -43,7 +43,8 @@ class TestPresetCompilerInstrumentIR:
         # FM6 section extracted -> FM6 oscillator mode
         assert preset.osc_mode == 3
         assert preset.fm6 is not None
-        assert preset.fm6.algorithm_id == 5
+        # Ear-tuned legacy topology is preserved under its explicit ID.
+        assert preset.fm6.algorithm_id == 35
         assert len(preset.fm6.op_ratios) == 6
         assert len(preset.fm6.op_levels) == 6
 

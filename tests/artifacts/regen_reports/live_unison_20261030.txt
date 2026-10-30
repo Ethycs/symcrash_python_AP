@@ -1,0 +1,28 @@
+Live unison audit, 2026-10-30
+
+Before data was captured after phase 29 and before live unison implementation.
+Each trace contains 36 blocks / 2304 samples per stereo channel; release occurs at block 24.
+Every factory preset authoring unison is checked through native/capsule loading and Python/JIT.
+
+super_saw_v0: {'voices': 7, 'spread_cents': 25, 'width': 1.0}
+  allocated voices: 7
+  nonzero channel samples: 4474
+  differing L/R positions: 2239
+  corrected stereo SHA-256: 8906e32be8a0ae7210dcfd0f613dff01b8b05ad2f130a5ceaa28f9cd5f733b74
+  changed channel samples vs captured single-voice output: 4476
+  maximum absolute sample change: 12955
+  former stereo SHA-256: e6cb24d7123848eb1ba64613db517ec90f0d0681693ca8d292f4f1ddd236d59d
+
+Factory unison presets audited: 1
+All corrected native/capsule and Python/JIT stereo traces match exactly.
+The offline renderer has different envelope/post-mix laws and a noncausal whole-trace peak guard;
+this audit does not claim offline/live sample identity or whole-host checkpoint support.
+
+New conformance coverage: 88 tests in tests/conformance/test_live_unison.py.
+Final unison/native-carrier/voice-checkpoint selection: 364 passed in 63.36 seconds.
+Final legacy VM/golden/scheduling selection: 146 passed in 7.52 seconds.
+Final full root suite: 5053 passed, 16 skipped, 102 existing warnings in 374.39 seconds.
+Command: pixi run python -m pytest -q --tb=short
+Existing golden hashes were not regenerated in this pass.
+Compatibility repairs preserve lightweight presets without native_carrier and old frames without is_starting.
+Native carrier v2 and voice JSON v6 have explicit v1/older-voice migrations; VM JSON/CORE versions are unchanged.

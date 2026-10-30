@@ -1,0 +1,50 @@
+Streaming arithmetic optimization audit, 2026-10-30
+
+Context: two full-suite runs exceeded the unchanged 1333.333 us streaming mean gate.
+Recorded means before optimization: 1597.586 us and 1646.981 us.
+Profiling identified repeated operator-alias scans, coefficient-energy reductions,
+and Mode B array temporaries. Pitch index lookup measured about 2.90 us.
+Changes: fixed ID-to-name map; int64 vdot energy; fused integer Mode B JIT kernel.
+Reference NumPy/scalar coefficient arithmetic remains available.
+
+Paired desktop measurements: same process, fresh string_pad voice per trial,
+100 warmup blocks, 750 timed blocks, default JIT enabled. Interleaved run order.
+Previous routines restored from captured source; their shared sin/cos kernel is unchanged.
+No timing threshold, test fixture, rendering policy, or input program changed.
+  previous: mean 1835.703 us; p95 2319.580 us
+  optimized: mean 753.946 us; p95 1269.755 us
+  optimized: mean 758.843 us; p95 1285.675 us
+  previous: mean 1022.053 us; p95 1512.575 us
+  previous: mean 1049.087 us; p95 1722.650 us
+  optimized: mean 867.300 us; p95 1542.720 us
+Median of three trial means: 1049.087 -> 758.843 us (27.7% lower).
+All six trials: identical 48000 rendered samples and final serialized VM state.
+Audio SHA256: 9a54611620c690853d95889c84547a9af644759e2673a7b1d35251fa2444b7f3
+State SHA256: 1481ccc3e0e279e68217ec417ac1eca21f0d4425fbf95b791b294a65d8bd839a
+These desktop measurements do not prove a worst-case audio-device deadline.
+Factory replay after optimization: all 52 captured factory frame/audio traces remain exact on native and capsule routes.
+
+Emitter timing follow-up:
+After the streaming optimization, the full suite passed the streaming gate but
+the emitter measured 50.626 us against its unchanged 50 us gate:
+5361 passed, 1 failed, 16 skipped, 102 warnings in 453.16 seconds.
+Profile: repeated imports, empty controls/LFO clock work, redundant pre-LFO frequency.
+Those no-op operations are removed; populated controls and clocks retain their paths.
+A first focused run caught a VoiceFrame/legacy ABI alias collision; the module-level
+native frame class is now explicitly named NativeVoiceFrame.
+Paired benchmark: 100 warmup + 10000 timed emissions, same process, interleaved order.
+  previous: 43.926 us/emission
+  optimized: 31.225 us/emission
+  optimized: 30.543 us/emission
+  previous: 47.138 us/emission
+  previous: 65.155 us/emission
+  optimized: 38.326 us/emission
+Median trial mean: 47.138 -> 31.225 us (33.8% lower).
+All final emitted frames and serialized voice runtime fields match.
+The fixed external program is excluded; the duck-typed benchmark preset is serialized as data.
+Independent replay of the captured original methods also matches all 500 frames
+through note/release/retrigger, detune, zero eta override and live control removal.
+500-frame and final state SHA256: cba4bcb489ecfc48ddc71d886ec83cde0a1604a4ebc19577696cd3c219da274c
+Factory replay after emitter optimization: all 52 captured factory frame/audio traces remain exact on native and capsule routes.
+
+Final full regression: 5362 passed, 16 skipped, 102 warnings in 448.92s (0:07:28)

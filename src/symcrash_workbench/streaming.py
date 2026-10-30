@@ -169,6 +169,8 @@ class StreamingVoice:
 
     def __init__(self, session, note: Optional[int] = None,
                  velocity: Optional[float] = None):
+        from symcrash_python_ap.vm.resources import prepare_oscillator_resources
+        prepare_oscillator_resources()
         self.session = session
         if note is not None:
             session.note = int(note)
