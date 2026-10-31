@@ -439,6 +439,24 @@ def vm_step_block(
         # This is a read-only availability check, never resource preparation.
         from .basis_resource import prepared_basis_atlas
         prepared_basis_atlas()
+    # A switch can need both prepared resources, including its outgoing engine.
+    # Check before accepting the frame so a missing asset cannot half-advance it.
+    requested_mode = (OSC_MODE_B if wire_carrier is not None and
+        wire_carrier.role != 0 and wire_carrier.model < 5 else
+        (getattr(frame, 'coeff_osc_mode', 0) or OSC_MODE_A))
+    # begin_wire_block resets all voice/fade state on a new program, even
+    # without an explicit GATE_RISE. Its outgoing generator is discarded.
+    new_wire_program = wire is not None and state.wire_state.program_id != wire.program_id
+    if (state.mode_switch.initialized and state.blocks_since_start > 0
+            and not getattr(frame, 'is_starting', False)
+            and not new_wire_program
+            and (wire_carrier is None or wire_carrier.role != 0 and wire_carrier.model < 5)
+            and requested_mode in (OSC_MODE_A, OSC_MODE_B)
+            and (state.mode_switch.remaining_blocks or requested_mode != state.osc_mode)):
+        from .basis_resource import prepared_basis_atlas
+        from .mode_a_resource import prepared_mode_a_atlas
+        prepared_basis_atlas()
+        prepared_mode_a_atlas()
     if not begin_wire_block(state, frame):
         return state, np.zeros(BLOCK_SAMPLES, dtype=np.int16)
     _process_cmmm_events(state, frame)
@@ -512,6 +530,8 @@ def vm_step_block(
         previous_role = state.wire_state.carrier_role
         state.wire_state.carrier_role = carrier.role
         if carrier.role == 0 or carrier.model == 5:
+            state.mode_switch.initialized = False
+            state.mode_switch.remaining_blocks = 0
             if carrier.role == 0:
                 if previous_role != 0:
                     state.coeff_state.fill(0)
@@ -530,6 +550,16 @@ def vm_step_block(
             output = _run_coeff_tail(state, cfg, cfg.backbone_instrs)
             return state, output
 
+    previous_mode = state.osc_mode
+    switched = state.mode_switch.step(osc_mode, previous_mode,
+        starting=state.blocks_since_start == 1 or getattr(frame, 'is_starting', False))
+    state.osc_mode = osc_mode
+    fading = 0 < state.mode_switch.mix_b_q16 < Q16_ONE and osc_mode in (OSC_MODE_A, OSC_MODE_B)
+    handoff_phase = None
+    if switched:
+        handoff_phase = (state.ccs_state.phase if previous_mode == OSC_MODE_A
+                         else state.mode_b_state.phase)
+
     # Update state if pitch changed
     pitch_changed = state.last_note != params.note or state.last_cents != params.cents
     if pitch_changed:
@@ -537,7 +567,9 @@ def vm_step_block(
         state.last_note = params.note
         state.last_cents = params.cents
     # Table identity is independent of pitch, including same-note preset changes.
-    state.ccs_state.wave_id = params.table_id
+    # Retain the outgoing Mode A shape while B fades in.
+    if osc_mode != OSC_MODE_B or not (switched or fading):
+        state.ccs_state.wave_id = params.table_id
 
     # Update Mode B state if using rotator (always check for first-time init)
     if osc_mode == OSC_MODE_B:
@@ -580,6 +612,10 @@ def vm_step_block(
                 mb_state.fm_mod_buffer = state.prev_fm_mod_buffer
             elif params.fm_source == FM_SOURCE_LFO and params.fm_modulator_q15 is not None:
                 mb_state.fm_mod_buffer = np.array(params.fm_modulator_q15, dtype=np.int16)
+        state.mode_switch.b_harmonic_gains = (None if params.harmonic_gains_q15 is None
+                                              else tuple(params.harmonic_gains_q15))
+        state.mode_switch.b_gain_bound = params.harmonic_gain_bound_q15
+        state.mode_switch.b_fm_source = params.fm_source
 
     if state.ccs_state.phase_inc != params.phase_inc or state.ccs_state.phase_slew_rate:
         # The VoiceFrame owns the pitch trajectory. A hidden VM glide both
@@ -587,6 +623,20 @@ def vm_step_block(
         state.ccs_state.set_pitch(params.phase_inc, slew_blocks=0)
         if osc_mode == OSC_MODE_B:
             state.mode_b_state.phase_inc = params.phase_inc
+
+    if handoff_phase is not None:
+        # A mode selection is phase-continuous even when accompanied by pitch.
+        state.ccs_state.phase = state.mode_b_state.phase = handoff_phase
+    if fading:
+        if osc_mode == OSC_MODE_B:
+            state.ccs_state.phase = state.mode_b_state.phase
+        else:
+            state.mode_b_state.phase = state.ccs_state.phase
+            state.mode_b_state.set_pitch_legato(params.note, params.phase_inc)
+            state.mode_b_state.phase_slew_rate = 0
+            state.mode_b_state.cents = params.cents
+            if state.mode_switch.b_fm_source == FM_SOURCE_FEEDBACK:
+                state.mode_b_state.fm_mod_buffer = state.prev_fm_mod_buffer
 
     # Generate polyphase carrier: 64 leaves × K k-slots = 512 values (K=8)
     carrier_512 = np.zeros(COEFF_LEN, dtype=np.int16)
@@ -885,6 +935,22 @@ def vm_step_block(
             state.ccs_state.set_pitch(params.phase_inc, slew_blocks=0)
         ccs_generate_coeffs_polyphase(state.ccs_state, carrier_512)
 
+    if fading:
+        from .mode_switch import blend_coefficients
+        outgoing = np.empty(COEFF_LEN, dtype=np.int16)
+        if osc_mode == OSC_MODE_B:
+            from .coeff_lut_streaming import ccs_generate_coeffs_polyphase
+            ccs_generate_coeffs_polyphase(state.ccs_state, outgoing)
+            carrier_512 = blend_coefficients(outgoing, carrier_512, state.mode_switch.mix_b_q16)
+        else:
+            from .harmonic_bank import mode_b_generate_coeffs_vectorized, get_basis_for_pitch
+            mb = state.mode_b_state
+            basis = get_basis_for_pitch(params.note, params.phase_inc, min(mb.H_active, mb.H_bandlimit))
+            mode_b_generate_coeffs_vectorized(mb, basis, outgoing,
+                state.mode_switch.b_harmonic_gains, state.mode_switch.b_gain_bound)
+            mb.advance_block()
+            carrier_512 = blend_coefficients(carrier_512, outgoing, state.mode_switch.mix_b_q16)
+
     # PERSISTENT EVOLUTION per WSE-STD-120 section 4.1:
     # Coefficients persist and evolve, carrier provides stabilization
 
@@ -930,8 +996,8 @@ def vm_step_block(
         extract_fm_mod=True,
     )
 
-    # Advance CCS phase for next block (Mode A only - Mode B advances in generate)
-    if osc_mode == OSC_MODE_A:
+    # Both live generators advance exactly once during a fade.
+    if osc_mode == OSC_MODE_A or fading:
         state.ccs_state.advance_block()
 
     return state, output

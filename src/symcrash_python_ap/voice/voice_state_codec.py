@@ -14,7 +14,7 @@ from ..vm.tables import COEFF_LEN
 from ..primitives import Q15_ONE, Q15_NEG_ONE
 
 
-VMSTATE_VERSION = 1
+VMSTATE_VERSION = 2
 LEGACY_VMSTATE_VERSION = 0
 ENVELOPE_SIZE = 24
 VMSTATE_HEADER_SIZE = 4
@@ -158,12 +158,12 @@ def _vmstate_from_bytes_v0(data: bytes) -> VMState:
 
 
 def vmstate_to_bytes(state: VMState, *, version: int = VMSTATE_VERSION) -> bytes:
-    """Encode complete v1 state, or the lossy v0 subset when explicitly requested."""
+    """Encode complete v2 state, or an explicitly requested older format."""
     version = _integer(version, 0, VMSTATE_VERSION, 'VMState version')
     if version == LEGACY_VMSTATE_VERSION:
         return _vmstate_to_bytes_v0(state)
     from .vm_binary_codec import encode
-    return encode(state)
+    return encode(state, version=version)
 
 
 def vmstate_from_bytes(data: bytes) -> VMState:
@@ -174,7 +174,7 @@ def vmstate_from_bytes(data: bytes) -> VMState:
     version = struct.unpack_from('<H', data)[0]
     if version == LEGACY_VMSTATE_VERSION:
         return _vmstate_from_bytes_v0(data)
-    if version == VMSTATE_VERSION:
+    if version in (1, VMSTATE_VERSION):
         from .vm_binary_codec import decode
         return decode(data)
     raise ValueError(f'Unsupported VMState version: {version}')

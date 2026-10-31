@@ -144,16 +144,16 @@ def test_literal_v1_fields_endianness_versions_and_detached_buffers():
     assert state.cmmm_memory.HARMONIC_DECAY == 700
     np.testing.assert_array_equal(state.coeff_state, np.arange(-128, 128))
     np.testing.assert_array_equal(state.tail_previous_coeffs, np.full(256, 17))
-    assert vmstate_to_bytes(state) == raw
+    assert vmstate_to_bytes(state, version=1) == raw
     # Neither byte order nor storage strides alter the canonical representation.
     backing = np.empty(512, dtype='>i2')
     backing[::2] = state.coeff_state
     state.coeff_state = backing[::2]
-    assert vmstate_to_bytes(state) == raw
+    assert vmstate_to_bytes(state, version=1) == raw
     input_buffer = bytearray(raw)
     restored = vmstate_from_bytes(memoryview(input_buffer))
     input_buffer[:] = bytes(len(input_buffer))
-    assert vmstate_to_bytes(restored) == raw
+    assert vmstate_to_bytes(restored, version=1) == raw
     assert vmstate_from_bytes(raw).coeff_state.flags.writeable
 
 
@@ -203,7 +203,7 @@ def test_explicit_legacy_default_fixture_stays_byte_identical():
     raw = vmstate_to_bytes(VMState.create(7), version=0)
     assert len(raw) == 644
     assert hashlib.sha256(raw).hexdigest() == 'd9c289f6a31ed753da5e3acd0ad156dd740856d5a233f02f59f552bdf80a4c87'
-    assert vmstate_to_bytes(VMState.create(7))[:2] == b'\x01\x00'
+    assert vmstate_to_bytes(VMState.create(7))[:2] == b'\x02\x00'
 
 
 @pytest.mark.parametrize('field,value', [
@@ -259,7 +259,7 @@ def test_full_and_subset_executor_restores_are_atomic_and_have_explicit_scope():
     payload = source.snapshot_binary()
     bundle = SnapshotBundle.from_bytes(payload)
     assert [c.voice_id for c in bundle.chunks] == [2, 9, 12]
-    assert all(c.chunk_version == 1 for c in bundle.chunks)
+    assert all(c.chunk_version == 2 for c in bundle.chunks)
     target.restore_binary(payload, [12, 2])
     assert set(target.states) == {2, 12, 99} and target.states[99] is old
     target.restore_binary(payload)

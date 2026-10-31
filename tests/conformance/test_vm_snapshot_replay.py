@@ -204,7 +204,7 @@ def test_unversioned_snapshots_remain_loadable_with_legacy_defaults():
     assert restored.envelope.attack_samples == VMState().envelope.attack_samples
 
 
-@pytest.mark.parametrize('version', [-1, 2, True, '1', None])
+@pytest.mark.parametrize('version', [-1, 3, True, '1', None])
 def test_unknown_snapshot_versions_are_rejected(version):
     snapshot = VMState.create().snapshot()
     snapshot['snapshot_version'] = version

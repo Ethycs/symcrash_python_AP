@@ -11,6 +11,7 @@ from enum import IntEnum
 from typing import List, Optional
 import numpy as np
 from .wire_events import WireExecutionState
+from .mode_switch import ModeSwitchState
 
 from .tables import COEFF_LEN, BLOCK_SAMPLES
 from ..fixed import midi_to_phase_inc_fixed
@@ -394,7 +395,8 @@ class VMState:
     _mode_b_state: Optional['ModeBState'] = None  # type: ignore
 
     # Oscillator mode selection (WSE-STD-210 Section 10.1)
-    osc_mode: int = OSC_MODE_A  # Default to Mode A (LUT-based)
+    osc_mode: int = OSC_MODE_A  # Last serviced oscillator mode
+    mode_switch: ModeSwitchState = field(default_factory=ModeSwitchState)
 
     # -------------------------------------------------------------------------
     # FM Feedback Buffer (Phase 3 - WSE-STD-210 Section 8.3)
@@ -634,6 +636,9 @@ class VMState:
         self.coeff_state.fill(0)
         self.tail_previous_coeffs.fill(0)
         self.wire_state = WireExecutionState()
+        from .mode_switch import ModeSwitchState
+        self.mode_switch = ModeSwitchState()
+        self.osc_mode = OSC_MODE_A
 
         # Reset latency tracking
         self.blocks_since_start = 0
@@ -693,7 +698,7 @@ class VMState:
 
     def snapshot(self) -> dict:
         """
-        Create a detached, JSON-compatible v1 checkpoint for deterministic replay.
+        Create a detached, JSON-compatible v2 checkpoint for deterministic replay.
 
         Loaded oscillator resources are embedded. This is an off-render-path
         operation; it does not include host effects or the VoiceEngine clock.
@@ -702,9 +707,10 @@ class VMState:
             Dictionary with all VM state values and initialized oscillators
         """
         from dataclasses import asdict
-        from .snapshot_codec import encode_oscillators
+        from .snapshot_codec import encode_oscillators, encode
+        self.mode_switch.validate(self.osc_mode)
         return {
-            'snapshot_version': 1,
+            'snapshot_version': 2,
             'voice_id': self.voice_id,
             'phase': self.phase,
             'phase_inc': self.phase_inc,
@@ -713,6 +719,7 @@ class VMState:
             'last_note': self.last_note,
             'last_cents': self.last_cents,
             'osc_mode': self.osc_mode,
+            'mode_switch': encode(self.mode_switch),
             'oscillators': encode_oscillators(self),
             'harmonic_amps_q15': list(self.harmonic_amps_q15),
             'envelope_phase': int(self.envelope.phase),
@@ -773,7 +780,7 @@ class VMState:
     @classmethod
     def restore(cls, snapshot: dict) -> 'VMState':
         """
-        Restore a v1 checkpoint, or load an unversioned legacy snapshot.
+        Restore a v2 checkpoint, v1 checkpoint or unversioned legacy snapshot.
 
         Legacy snapshots retain their historical defaults for omitted state;
         they cannot recover oscillator resources that were never serialized.
@@ -785,10 +792,10 @@ class VMState:
             Restored VMState
         """
         version = snapshot.get('snapshot_version', 0)
-        if type(version) is not int or version not in (0, 1):
+        if type(version) is not int or version not in (0, 1, 2):
             raise ValueError(f'Unsupported VM snapshot version: {version!r}')
         state = cls(voice_id=snapshot['voice_id'])
-        if version == 1:
+        if version >= 1:
             from .snapshot_codec import decode_oscillators
             state.last_note, state.last_cents = snapshot['last_note'], snapshot['last_cents']
             state.osc_mode = snapshot['osc_mode']
@@ -797,6 +804,13 @@ class VMState:
             for name in ('attack_samples', 'decay_samples', 'sustain_level_q15', 'release_samples'):
                 setattr(state.envelope, name, snapshot['envelope_config'][name])
             state.executor_latch.phrase_quantize_pending = snapshot['executor_latch_phrase_pending']
+        if version == 2:
+            from .snapshot_codec import decode
+            from .mode_switch import ModeSwitchState
+            state.mode_switch = decode(snapshot['mode_switch'])
+            if type(state.mode_switch) is not ModeSwitchState:
+                raise ValueError('Incorrect mode-switch snapshot type')
+            state.mode_switch.validate(state.osc_mode)
         state.phase = snapshot['phase']
         state.phase_inc = snapshot['phase_inc']
         state.target_phase_inc = snapshot['target_phase_inc']
@@ -867,7 +881,7 @@ class VMState:
         # Restore CMMM Memory (CMMM Enrichment Gap G2)
         if 'cmmm_memory' in snapshot:
             state.cmmm_memory = CMMMemory.from_dict(snapshot['cmmm_memory'])
-        if version == 1:
+        if version >= 1:
             for name in ('TENSION_DECAY', 'FATIGUE_DECAY', 'HARMONIC_DECAY'):
                 setattr(state.cmmm_memory, name, snapshot['cmmm_memory_rates'][name])
         # Restore noise exciter filter state (Packet E4)

@@ -94,6 +94,14 @@ def _scenario_mode_b_pitch_sweep():
                     cents=cent % 100, legato_mode=True) for cent in range(300)]
 
 
+def _scenario_mode_ab_reversals():
+    # Every measured block runs both generators: alternating targets cannot
+    # complete a four-block fade. 300 pitches also exceed both resource caches.
+    return [replace(_scenario_mode_b_saw(), note=48 + cent // 100,
+                    cents=cent % 100, coeff_osc_mode=cent % 2, coeff_table_id=1,
+                    legato_mode=True) for cent in range(300)]
+
+
 def _scenario_fm6():
     return VoiceFrame(
         voice_id=1, note=57, cents=0, f0_hz=220.0,
@@ -112,6 +120,7 @@ SCENARIOS = [
     ("Mode B (saw, 32 harmonics)", _scenario_mode_b_saw, 48),
     ("Mode B (detuned saw, 32 harmonics)", _scenario_mode_b_detuned, 48),
     ("Mode B (pitch sweep, basis cache misses)", _scenario_mode_b_pitch_sweep, 48),
+    ("Mode A/B (continuous fades + pitch cache misses)", _scenario_mode_ab_reversals, 48),
     ("Mode B (PWM, harmonic bank)", _scenario_mode_b_pwm, 52),
     ("Mode FM6 (alg 5 + feedback)", _scenario_fm6, 57),
 ]

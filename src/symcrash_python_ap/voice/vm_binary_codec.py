@@ -1,4 +1,4 @@
-"""Complete integer-only VM CORE v1 payload (off the audio render path).
+"""Integer-only VM CORE v2 payload, with frozen v1 compatibility.
 
 The schema below freezes record IDs, field order, types and array dimensions.
 No field names, Python type names, JSON, floats or executable objects are stored.
@@ -14,10 +14,10 @@ import struct
 import numpy as np
 
 from ..vm.tables import VM_K, COEFF_LEN
-from ..primitives import Q15_NEG_ONE, Q15_ONE
+from ..primitives import Q15_NEG_ONE, Q15_ONE, Q15_SCALE, Q16_ONE
 
 
-VERSION = 1
+VERSION = 2
 HEADER = struct.Struct('<4H')  # version, voice ID, VM_K, coefficient count
 I64 = ('int', -(1 << 63), (1 << 63) - 1)
 BOOL = ('bool',)
@@ -45,8 +45,8 @@ def record(name):
     return ('record', name)
 
 
-@lru_cache(maxsize=1)
-def _schema():
+@lru_cache(maxsize=2)
+def _schema(version=VERSION):
     from ..vm.state import VMState, EnvelopeState, ExecutorLatch, CMMMemory
     from ..vm.coeff_lut_streaming import CCSState
     from ..vm.wire_events import WireExecutionState
@@ -58,12 +58,14 @@ def _schema():
     from ..vm.sample_source import SampleOscState
     from ..vm.wavetable_engine import WavetableState, WavetableAtlas
     from ..vm.granular_engine import GranularState, GrainState
+    from ..vm.mode_switch import ModeSwitchState
 
     result = {}
 
     def add(code, cls, names, **overrides):
         names = names.split()
-        if set(names) != {f.name for f in fields(cls)} or not set(overrides) <= set(names):
+        omitted = {'mode_switch'} if version == 1 and cls is VMState else set()
+        if set(names) != {f.name for f in fields(cls)} - omitted or not set(overrides) <= set(names):
             raise ValueError(f'Runtime fields have changed: {cls.__name__}; binary schema update required')
         result[cls.__name__] = (code, cls, tuple((n, overrides.get(n, I64)) for n in names))
 
@@ -73,7 +75,9 @@ def _schema():
         wet_ready eta_prev_q15 gain_prev_q15 mask_state_q15 mask_state_initialized
         wet_prev_end wet_seam_initialized wet_ola_tail wet_ola_initialized ccs_state
         use_coeff_osc _mode_b_state osc_mode prev_fm_mod_buffer _sample_state _fm6_state
-        _fm6_morph_state _wavetable_state _granular_state _noise_state executor_latch cmmm_memory''',
+        _fm6_morph_state _wavetable_state _granular_state _noise_state executor_latch cmmm_memory'''
+        + (' mode_switch' if version == 2 else ''),
+        **({'mode_switch': record('ModeSwitchState')} if version == 2 else {}),
         voice_id=integer(0, 65534), last_note=integer(-1, 127),
         harmonic_amps_q15=sequence(integer(Q15_NEG_ONE, Q15_ONE), 16),
         envelope=record('EnvelopeState'), coeff_state=array('i2', COEFF_LEN),
@@ -135,6 +139,13 @@ def _schema():
     add(17, GrainState, '''start_block current_block_q16 length_blocks rate_q16 pan_q15 attack_blocks
         release_blocks amplitude_q15 blocks_played is_active''', is_active=BOOL)
     add(18, NoiseExciterState, 'pink_b0 pink_b1 pink_b2 brown_acc')
+    if version == 2:
+        add(19, ModeSwitchState, '''initialized mix_b_q16 start_mix_b_q16 remaining_blocks
+            b_harmonic_gains b_gain_bound b_fm_source''', initialized=BOOL,
+            mix_b_q16=integer(0, Q16_ONE), start_mix_b_q16=integer(0, Q16_ONE),
+            remaining_blocks=integer(0, 3), b_fm_source=integer(0, 2),
+            b_gain_bound=integer(Q15_SCALE, 4 * Q15_SCALE),
+            b_harmonic_gains=optional(sequence(integer(0, 4 * Q15_SCALE), 32, kind=tuple)))
     return result
 
 
@@ -177,9 +188,13 @@ def _consistent(value, path):
         count = 0 if value.coeff_buffer is None else len(value.coeff_buffer)
         if value.num_source_blocks != count:
             raise ValueError(f'{path}: inconsistent granular source length')
+    elif name == 'ModeSwitchState':
+        value.validate()
+    elif name == 'VMState':
+        value.mode_switch.validate(value.osc_mode)
 
 
-def _write(out, spec, value, path):
+def _write(out, spec, value, path, version=VERSION):
     kind = spec[0]
     if kind == 'int':
         out.extend(struct.pack('<q', _int(value, spec[1], spec[2], path)))
@@ -193,7 +208,7 @@ def _write(out, spec, value, path):
     elif kind == 'optional':
         out.append(int(value is not None))
         if value is not None:
-            _write(out, spec[1], value, path)
+            _write(out, spec[1], value, path, version)
     elif kind == 'text':
         if type(value) is not str:
             raise ValueError(f'{path}: expected UTF-8 metadata')
@@ -217,19 +232,20 @@ def _write(out, spec, value, path):
         _count(len(value), spec, path)
         out.extend(struct.pack('<I', len(value)))
         for i, item in enumerate(value):
-            _write(out, spec[1], item, f'{path}[{i}]')
+            _write(out, spec[1], item, f'{path}[{i}]', version)
     elif kind == 'pair':
         if type(value) is not tuple or len(value) != 2:
             raise ValueError(f'{path}: expected harmonic cache pair')
         for i in range(2):
-            _write(out, spec[i + 1], value[i], f'{path}[{i}]')
+            _write(out, spec[i + 1], value[i], f'{path}[{i}]', version)
     elif kind == 'record':
-        code, cls, members = _schema()[spec[1]]
-        if type(value) is not cls or set(vars(value)) != {name for name, _ in members}:
+        code, cls, members = _schema(version)[spec[1]]
+        omitted = {'mode_switch'} if version == 1 and spec[1] == 'VMState' else set()
+        if type(value) is not cls or set(vars(value)) - omitted != {name for name, _ in members}:
             raise ValueError(f'{path}: unregistered runtime fields or incorrect record type')
         out.extend(struct.pack('<HH', code, len(members)))
         for name, member in members:
-            _write(out, member, getattr(value, name), path + '.' + name)
+            _write(out, member, getattr(value, name), path + '.' + name, version)
         _consistent(value, path)
     else:
         raise AssertionError(f'Unknown internal binary schema kind: {kind}')
@@ -239,6 +255,7 @@ class _Reader:
     def __init__(self, data):
         self.data = memoryview(data)
         self.offset = 0
+        self.version = VERSION
 
     def take(self, size):
         if size > len(self.data) - self.offset:
@@ -286,7 +303,7 @@ class _Reader:
         if kind == 'pair':
             return tuple(self.read(spec[i + 1], f'{path}[{i}]') for i in range(2))
         if kind == 'record':
-            code, cls, members = _schema()[spec[1]]
+            code, cls, members = _schema(self.version)[spec[1]]
             if self.unpack('<HH') != (code, len(members)):
                 raise ValueError(f'{path}: incorrect record ID or field count')
             # Only registered classes can be instantiated. All fields are supplied;
@@ -295,23 +312,31 @@ class _Reader:
             value = object.__new__(cls)
             for name, item in values.items():
                 object.__setattr__(value, name, item)
+            if self.version == 1 and spec[1] == 'VMState':
+                from ..vm.mode_switch import ModeSwitchState
+                value.mode_switch = ModeSwitchState()
             _consistent(value, path)
             return value
         raise AssertionError(f'Unknown internal binary schema kind: {kind}')
 
 
-def encode(state):
+def encode(state, *, version=VERSION):
+    if version not in (1, 2):
+        raise ValueError('Unsupported VM binary version')
     voice = _int(state.voice_id, 0, 65534, 'Voice ID')
-    out = bytearray(HEADER.pack(VERSION, voice, VM_K, COEFF_LEN))
-    _write(out, record('VMState'), state, 'VMState')
+    if version == 1 and state.mode_switch.initialized:
+        raise ValueError('CORE v1 cannot preserve initialized mode-switch state; use v2')
+    out = bytearray(HEADER.pack(version, voice, VM_K, COEFF_LEN))
+    _write(out, record('VMState'), state, 'VMState', version)
     return bytes(out)
 
 
 def decode(data):
     reader = _Reader(data)
     version, voice, k, coeffs = reader.unpack(HEADER.format)
-    if version != VERSION or k != VM_K or coeffs != COEFF_LEN:
+    if version not in (1, 2) or k != VM_K or coeffs != COEFF_LEN:
         raise ValueError('Unsupported VM binary version or runtime layout')
+    reader.version = version
     state = reader.read(record('VMState'), 'VMState')
     if reader.offset != len(data):
         raise ValueError('Trailing VM binary payload data')

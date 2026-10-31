@@ -1,0 +1,125 @@
+Mode A/B transition audit, 2026-10-30
+
+Baseline executor: root 90fea4b. Both runs use the same current prepared resources.
+Four serviced blocks, coefficient-space fade, shared accepted Q32 phase.
+No N/K/P, stored coefficient datatype, resource recipe or existing threshold changes.
+Mid-band sine probe: A4 +37 cents, A5/B5/A5/B5 blocks, first four blocks excluded
+from the boundary metric. This is not an all-waveform click-free proof.
+
+before block 5: expected phase 4280791168, calls [(1, 0, 40221018)]
+before block 10: expected phase 4266615040, calls [(0, 4280791168, 40221018)]
+before block 15: expected phase 4252438912, calls [(1, 4280791168, 40221018)]
+before: boundary peak 2608, intra-difference RMS 1366.587117, ratio 1.908404
+before audio SHA-256: 54b26aa9103d986db6ee0210a7881446fdea76d79a8a962c3a6d222745f91bf5
+after block 5: expected phase 4280791168, calls [(1, 4280791168, 40221018), (0, 4280791168, 40221018)]
+after block 10: expected phase 4266615040, calls [(0, 4266615040, 40221018), (1, 4266615040, 40221018)]
+after block 15: expected phase 4252438912, calls [(1, 4252438912, 40221018), (0, 4252438912, 40221018)]
+after: boundary peak 1924, intra-difference RMS 1366.525922, ratio 1.407950
+after audio SHA-256: 237bb9ee4109839d508a6bfdb7e0f2346f7b208d51b1dece1b2eabd1a93b6e3d
+acid_bass_v0: unchanged raw 4cba0b4697d119f53cbd549d2fa5b340aa64859510e581755096e2c6cbfa9ae4, stereo b5f435c03d26a820a0d008cf773d9086292b4c9617453e52070f6609d8c51462
+acoustic_marimba_v0: unchanged raw 8b074c1486ec456dd81054be1927fda1fe876dae2922b6a8d295240be9f1937f, stereo 63a08da5bd72211f104521a53fe566fbee1be016eb6e007129d52dd2fef605c8
+analog_strings_v0: unchanged raw 5598fdf0f4555b76debefe7f53b0959218b7179602962684050abffefd28c3b2, stereo 9965530c9e187ca1f09cafb3e5721d0ca152c5d97c339131eb4165a3e8c68138
+bass_cheap_v0: unchanged raw 1c3e0e8eb226a227459acd33ef07322de5adf155cf11d0ecf68d706797187b5d, stereo afcc62ef95fee60d7a54d8161eb40590365801089c002725579efd04ac230af6
+brass_cheap_v0: unchanged raw 4a961c4521625ffe43b7b08852e3a4df75ae9765ca4ddaaaa5e97a91ddd8060e, stereo 1602674faa5de94d5fd589826af292bf09b407574c321618c5d39ef575d8c995
+brass_stab_v0: unchanged raw 80ac9745771bd69ce6082c0548fe5c1721adca8a48de901b200662055758d908, stereo 0bce78391f3065961fbe422d1e0ca1db90606f76b1ea0a397869839ac7067e5c
+brass_stab_v1: unchanged raw 4cbf1c78e236dea642c9e9406023293b57cc5e85d86650facb1cd3fadc046fe7, stereo 9482db831b7a74db402d08bb8e49f1c3f3b8a0848b4e90ecef88e441070ab542
+detroit_bass_v0: unchanged raw bda0c6932d839405439f4b1c83a500609c9414039b202d3336c08b5dd190d1b6, stereo ebe8468782689e3ad247cf7ae20b99f49857e574a5c757150ddf859053850610
+dream_marimba_v0: unchanged raw 012f9ec8e23761bdfa4202463d7ef5c48338fea5e44082ad62115001558b0b4e, stereo 28ad0bbf08859236c70a970ca6ca718dc78e8de7569aac99476d0ef155ffdfa5
+dx7_bass_1_v0: unchanged raw c3f0248cd7ff15d0c384381df732dab2aed3f9d4fe6a44b51047c726f2be352c, stereo a3f10a01f15b07a18dc216bf8477c3829e168dd8af1d4b66f37980047ceb4312
+dx7_brass_1_v0: unchanged raw 46556b8ee0d7b1c0a41582595ca16bb9a23227527c0ee71018c346e79fe7b7a0, stereo aa7bd8b19b042a687ea293983f3bc6a686bd81116cfbec00ce294aae676653f1
+dx7_e_piano_1_v0: unchanged raw 3abf2c2448e86d7198f40b8f04a928ffa5834ad2823362b3b68cea58f51ee8ab, stereo c4c8a36b83950c9266f49e68c6bfd30e4053405c6356f1ae0d97c4dc6258f2e6
+dx7_harpsich_1_v0: unchanged raw adc5633e68171f1fd8be104d7d3b4263e3943ad27aa35e46a360c39173c3deb1, stereo 20c2c994f117d5d77b51a1c5e0ab2390d4b02076ee8d5fe6973ce5c88adb5025
+dx7_marimba_v0: unchanged raw 400094a8317fef9b88db25ada53b0557969fff66e22cd7f9e47f0c7a7d928f6a, stereo aa2a3dfdeba9c7e4f03691621e8696e71ad8853f1f79e4d1c2ea8e2b40584ff8
+dx7_strings_1_v0: unchanged raw f57d5fae1d3bf028a2376389c7ef3ea157f96610b93c8273d6a42416910a514f, stereo d7370c3f4223e7b90f08de2df3aa3aa8d0ffc30279da1d68fc77fc45d6d61f50
+dx7_tub_bells_v0: unchanged raw 4c4f7a31415c993e08e26637e0dcc1e3528f41614a95a1a785ca747a3f5754b1, stereo a1eb2a56067d227afaa1e70374266a341458b20e3720fc77d4c2e12768583fe6
+dx7_vibe_1_v0: unchanged raw c42356c29838283f8a9decd442ceea49b31c92f0101cef1eccd433af8201a83e, stereo 2ea409a0418df93422f76a319572965099138d94ec8a18fe01572a110737fcb7
+dx_clav_v0: unchanged raw 5ee766da874a1c2b556836e0a123714fb0913bc0ac3e9c6966052921598987db, stereo affae58f6944cc26dc72fdf2ac4d7e01795cd711e242347d4dd1198e096fc65f
+dx_epiano_v0: unchanged raw 013547abdc91e509d9e0d3690367ac9fc6fe3c037dd5baa36586949f4ce0f323, stereo 7d3b19ea01ad90ea4b569a4e568521709be4bafa47b9085c604f928b34e49322
+dx_lately_bass_v0: unchanged raw 09085ae75725ceefa5fb2c722a71c32bc8d2b597067082a496e0767e04fe427e, stereo 0bcf333a262adb995292351165a00be8610aa8d2219e0855164261874d67e615
+dx_marimba_v0: unchanged raw 93e1ab555606bb61cf4f0e7d329822300036fa6b77bedfe6b1b5f4e42df3b667, stereo 3f9a0122118b35b87458856aade189894507d99a1aa05ae6714447fea1251d03
+fm_bell_v0: unchanged raw a9695ae36f0953dfbc58916ad62a34972ad751ef85789e2413e9488900b2fa04, stereo 4b3eadf857a064b796da109a9a1eb064e7b687aeeeb9921c17d7f0c45ed38be4
+fm_brass_v0: unchanged raw 42e70067c500910b2d40d26c6ba7dfca4e0dce5efae530cef1f055c1fca633e5, stereo 1b3f0d4ad91031028dfbacfbf12b9f4bd626710e0b32d3439c353d0c2537a0c7
+fm_horn_v0: unchanged raw 2345a9b850e6b90890fa73e21385a43da3c39f38ef45fc97741de3eaea11c80f, stereo 08a3b66695c31a52b2d8d8cef1558c833348d760635604f15aa710696a44de2d
+fm_trumpet_v0: unchanged raw 4224f4c2afadd0497f0bcf061256fa738c8945781d64cc60e9fac7650d42432c, stereo a3d209d0be658c97bda54f61447ef77006345f977d3645c851efc1b826c209ff
+fold_drone_v0: unchanged raw 3ebebc0f5a2536b3d069f60d428303f809b8f8d68c0332b1023b29c25343ef28, stereo 3a2df4f096d7702901cbed02914e1baae349a671850e597b7df3885c94af1e94
+glitch_lead_v0: unchanged raw 400b127580398073fea0e03b446c60b803293cfb5b349d5476ad9a29059ce68d, stereo ea84dd43f0164d6f87f439ad7d7575ab8263b608a359c6c2be6169be6acd0d39
+jump_brass_v0: unchanged raw f2ce14ab8f50452fbfd299684e9be4aea7539c250101f31e481169d3792cd45b, stereo ae4560c4d11df8d1576411de7d6c3878e56ecfb30f7ae4aeb5a4d8942a57b3d6
+oeis_bass_v0: unchanged raw 637eac851397e86a6467e0daa83ba14d1a047d174f772852aa2b5b74f5b8de5b, stereo ccf1f12135eefc41439a379847a3550a050c6533d098d115f7835c3068a0634e
+oeis_bell_v0: unchanged raw 4f283ce7a7e51efa4261f93404ff4065c1def9723f6cc48ad9a51cf3421b0572, stereo a6e628ecd5a34e803e3422f315145d3115e50fccca08557996336e182c4b51ab
+oeis_pad_v0: unchanged raw 7a95c1e75567e84cd2a4ecf19b9e6ff42cb752f3060440352e83c5214db8fcfd, stereo 996d651ab61537c9dc0f1da807eaf3ceeb3b15f0aae452406657aec4403ade71
+pad_cheap_v0: unchanged raw 5d5aac69990a4cd1e31b462572a7872195580731bb8c470932416b7e66d1abba, stereo 5a30b8e4ffb4b12ae9f7b4d8273be47dd47ac74e6a7c8d1af258ac207df6bbe5
+pluck_bell_v0: unchanged raw 648f8a2e1eede0031efd705b76a9b2a0e9832d5dd726ced0d2046d057789ebc8, stereo bca0ca4c341009206064e307f15044333a885666b5ccf80741d938216f246598
+pluck_cheap_v0: unchanged raw ab221d9599f14c6d2db4fe727a4940657cb5b539a4adf824aeb40cbfee7f887c, stereo 7d7d3b109b0972c7190c184fb5f9c025af4313be3a6167d9001db117017989aa
+pluck_v0: unchanged raw ffc1d0b2d804f8382be9c18979150a350557ad1d714ca251f29da91ceebe1c13, stereo 9d8aa971d51df558d30bb183684ebfb3a5d55992893949defda68db08adcd08c
+prime_storm_v0: unchanged raw 5ef00f7b71db41562a67ff0973356c89f0a4ff5eceae7ffdbe2666d87696947e, stereo f44ff76994f4bb1a1f203f1bc36ac63f34a44ee71b940dc75220cd77adcb7875
+pwm_pad_v0: unchanged raw 91beaa39677b3611ee14569af5baafb18bf5454d463db5ed2a3e34bf4b2078a8, stereo 8ab0b7f373904e06c70531a3ff412f828d3721685b04ef0805fc963c9252c850
+pwm_string_v0: unchanged raw b24a127a4d050e259c38725792ee9995cd87d5abd0622d06e13f970e9077e336, stereo e376aa89ffc4c3f8f460d5a73ba94f6cea422b4e35885e87cc7c15aa352e0bbe
+quasi_glass_v0: unchanged raw 4a8b861ede3118f2c9068cfcccfeb85ccdd4ee65604cd9c99c388b97e292b1fd, stereo f3316e970f6317f2fb1786b4523c5af45cee66e1ff6375db5692324201133916
+rnb_slide_v0: unchanged raw e9fcf9518a9b0fb5b97476078cbedbccdfc847a6baeaa353283008ab0f64d6a8, stereo f92b276e496e4e97e734052ba2b2b0106a3b20fd65ba885304586ac2499d53d2
+saw_lead_v0: unchanged raw 6096cc7f778ec10de2197e55c1644d74394779b2b04fd01249b3c29006e4e911, stereo 470301c2afa52b7bcc62978e364b2b9ec685fc6d98826a61a0a134fec3982793
+shear_vox_v0: unchanged raw cd7e15e80a14c3863fc4737bc2f45ef0155f6b48dbfc1bc1a2b670b7c93014b4, stereo 0deb42f543741a6340a3a3e2f120ce814d2560ecca61a3d66384268688830ffe
+square_bass_v0: unchanged raw 48ecf257e57f3c1064164fce7ef54e4abfef3cda5a61206fe8c319bcc3ebe607, stereo 5cae6bb46509a31041a9ff499892013e23f21ffbc75f21fd41333c575f302818
+string_pad_v0: unchanged raw 7d31c038186e2212998efb9616b1c35ecd3e7060517faf36b6dcdf63bcb0eb8f, stereo 48e82738d2218ddcf341342ecd7440f6ff5edcb62e102e346e8e719384afea95
+sub_bass_v0: unchanged raw 914881a5537bf8d7a2772cb72260e18d3e14642e50e55230f8ac314c5b901b81, stereo 3953ebe9faa7ab6792e88020b0928167d8f4f3deb5532542a497ad9ee7d5c3cf
+super_saw_v0: unchanged raw b98d7dcbdb125a11c6d384a88a587dcdd6dc456af3d0ca71005a7da36997413a, stereo 3f30623c182a2e46d3d6dd0cffcaf78bb3a70435542eb8daa1b9d37b90faeb35
+sync_lead_v0: unchanged raw 5a2fa8ee40ba2a780e64310c1987956d6446f1bfc40439234d266110fc5b159d, stereo 4b94f3f244de41d918dba2983396a1d42d9539c8277cd075445a75cab4916edf
+theremin_lead_v0: unchanged raw ec349e253a82aa7e537b8231e28dc50cace01a722f2face5d5144132f7d7a1b8, stereo ef47a868930208a699d6829df49eeaeff9d9da0af13465ed005f909a8206fc8d
+violin_ir_v1: unchanged raw 6d9cbf506316d52efb9ee5d80aee32e6d2599a453aa5e68272e31e63e84aba78, stereo c445ce8fa85d7f204243cf882e2eda454bfb6a266c46c3a9a4565cfb83b77c29
+violin_opt_v0: unchanged raw 55a84273a3d50974a6715227cbd3c3f9fc9a24dd823df543097ca9a1a80f57a9, stereo 11bbd0b1692d59b4a0d9e8b3621252ec126ad4bc04eaf2fe95edc51da756cc11
+warm_pad_v0: unchanged raw 6e4b4d5d083df8ec13ba241a7ef27813ebfbfafd75880ecc3d3a7d4ed69bb6b7, stereo 67d895efc9848ec330a137f9f24eea5c6627e3e8dd43cdc440a652b059d5e5d5
+wobble_bass_v0: unchanged raw 29bdd03e986e7ecbb98775941f8bb5fa899e7da878c4373ce101e099ac3303e1, stereo 106f154a156cee5dc3c073675feaa17d58f45d7feb3faedb2672ac29c0038a78
+
+All 52 captured raw and 52 stereo factory streams and emitted frames are unchanged.
+Scope: current native route/JIT versus prior full-route captures; full regression covers other routes.
+Target working-set, integrated deadlines, DMA and FPGA qualification remain open.
+
+Validation before the full rerun completed:
+72 mode-switch tests pass, including reference/JIT checks where applicable.
+The eight realtime/control checks pass with unchanged gates. Continuous
+fades with pitch-cache turnover measured mean 1129.8 us, p95 1512.4 us,
+p99 1935.2 us and maximum 2790.1 us; 117/750 observed deadline misses.
+The first full run had 5650 passes, 14 skips and two failures: unnamed
+Q-format literals and an old A-to-B resource test that assumed no outgoing
+generator. Both are corrected; 148 switch/resource/hygiene tests pass.
+The complete rerun was still running at that checkpoint; its final result
+is recorded below.
+
+Final validation:
+- New mode-switch module: 72 passing tests.
+- Initial affected replay/container selection: 289 passed; later additional
+  mode-switch cases are included in the complete root run below.
+- First full run: 5650 passed, 14 skipped, two failures. The Q-format hygiene
+  failure was fixed with the existing named constants, preserving values.
+  The old unavailable-Mode-A test now distinguishes the A-to-B fade (which
+  requires A and rejects atomically) from independent B-only playback.
+  The affected switch/resource/hygiene selection then passes 148 tests.
+- Realtime/control selection: 8 passed in 11.02 seconds, unchanged mean/p95 gates.
+  Continuous A/B reversal and pitch-cache turnover: mean 1129.8 us,
+  p95 1512.4 us, p99 1935.2 us, max 2790.1 us; 117/750 deadline misses.
+  849 blends and 849 basis misses in 850 blocks (100 warmup, 750 measured).
+- Complete root regression: 5652 passed, 14 skipped, 102 warnings in 572.74s.
+- No golden hashes or numeric/timing thresholds changed.
+- Added documentation links resolve; root and docs diffs are whitespace-clean.
+
+Arithmetic/resource scope:
+The new closed Q16 weight needs 17 unsigned bits; it fits an 18-bit signed
+DSP operand. Complementary-weight int16 products and their sum fit signed
+32-bit arithmetic; the Python implementation uses int64/RNE/SAT16.
+K4 blending adds 512 products, 256 sums and 256 final reductions per mixed
+block, plus both carrier generators. Extra outgoing coefficient vector: 512
+bytes. The NumPy blend holds four int64 vectors (8192 bytes) plus expression
+temporaries/result. Target packing and integrated scheduling remain open.
+CORE v2 adds 46 payload bytes without gains or 306 with the 32 gain values;
+this generic i64 checkpoint format is not a target RAM layout.
+
+Final resource-precheck follow-up:
+After the complete root run, final review added a regression for an A voice
+receiving a new wire program for B with Mode A unavailable. The existing wire
+consumer resets the voice even without GATE_RISE, so no outgoing fade/resource
+is needed. The new assertion first failed, reproducing an over-strict precheck.
+The precheck now recognizes that existing new-program reset before requesting
+the discarded resource. All 198 mode-switch, Mode A/B resource and Q-format
+hygiene tests pass on the final tree in 85.20 seconds. No oscillator arithmetic,
+resource data or test thresholds changed. The full suite was not repeated
+after this availability-only follow-up; the earlier complete result above and
+this final targeted selection have distinct verification scopes.

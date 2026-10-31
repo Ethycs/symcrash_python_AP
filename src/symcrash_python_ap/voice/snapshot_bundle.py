@@ -126,7 +126,7 @@ def _validate_records(chunks):
         chunk._body()
         if chunk.chunk_type not in ChunkType._value2member_map_:
             continue
-        supported = (0, 1) if chunk.chunk_type == ChunkType.CORE else (0,)
+        supported = (0, 1, 2) if chunk.chunk_type == ChunkType.CORE else (0,)
         if chunk.chunk_version not in supported:
             raise ValueError(f'Unsupported version {chunk.chunk_version} for chunk type {int(chunk.chunk_type)}')
         global_chunk = chunk.chunk_type == ChunkType.GLOBAL
@@ -198,8 +198,8 @@ class SnapshotBundle:
         chunks cannot silently stand in for a complete VM checkpoint.
         """
         states = _validate_records(self.chunks)
-        if any(c.chunk_type != ChunkType.CORE or c.chunk_version != VMSTATE_VERSION for c in self.chunks):
-            raise ValueError('VM executor restore requires complete CORE v1 records only')
+        if any(c.chunk_type != ChunkType.CORE or c.chunk_version not in (1, VMSTATE_VERSION) for c in self.chunks):
+            raise ValueError('VM executor restore requires complete CORE v1 or v2 records only')
         selected = _voice_selection(voice_ids, states)
         restored = {} if voice_ids is None else dict(executor.states)
         restored.update((vid, states[vid]) for vid in selected)

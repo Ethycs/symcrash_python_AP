@@ -19,9 +19,10 @@ def _types():
     from .sample_source import SampleOscState
     from .wavetable_engine import WavetableState, WavetableAtlas
     from .granular_engine import GranularState, GrainState
+    from .mode_switch import ModeSwitchState
     return {cls.__name__: cls for cls in (ModeBState, HarmonicWeights, FM6State,
         FMOperator, FM6MorphState, SampleOscState, WavetableState, WavetableAtlas,
-        GranularState, GrainState)}
+        GranularState, GrainState, ModeSwitchState)}
 
 
 ARRAY_DTYPES = frozenset(('int16', 'int32', 'int64', 'uint16', 'uint32', 'uint64', 'float32', 'float64'))

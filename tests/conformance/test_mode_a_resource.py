@@ -278,20 +278,31 @@ def test_playback_cache_misses_never_open_files_or_use_transcendentals(atlas, mo
             lut.get_streaming_lut(command.coeff_table_id)
 
 
-def test_unavailable_mode_a_does_not_affect_holds_rejections_or_mode_b(atlas, monkeypatch):
+def test_mode_a_availability_distinguishes_fades_from_pure_mode_b(atlas, monkeypatch):
     from symcrash_python_ap.vm.scheduling import ExecutionPolicy
     from tests.conformance.test_scheduled_vm import packet
     state = VMState.create(0)
     vm_step_block(state, frame(coeff_osc_mode=0))
     before = state.snapshot()
+    pure_b = VMState.create(1)
+    vm_step_block(pure_b, frame(coeff_osc_mode=1))
     rejected = packet().to_voice_frame()
     rejected.wire_data = replace(rejected.wire_data, reject_code=1)
     monkeypatch.setattr(resource, '_active', None)
     vm_step_block(state, frame(coeff_osc_mode=0), policy=ExecutionPolicy(serviced=False))
     vm_step_block(state, rejected)
     assert state.snapshot() == before
-    vm_step_block(state, frame(coeff_osc_mode=1))
+    # A live A-to-B fade still needs its outgoing A resource and must reject
+    # atomically when that resource is unavailable. A B-only voice does not.
+    with pytest.raises(RuntimeError, match='Prepare Mode A'):
+        vm_step_block(state, frame(coeff_osc_mode=1))
+    assert state.snapshot() == before
+    vm_step_block(pure_b, frame(coeff_osc_mode=1))
+    vm_step_block(pure_b, packet(carrier_model_u8=1).to_voice_frame())
+    # A new wire program resets the voice before rendering, so its incoming
+    # B generator must not require the discarded A resource either.
     vm_step_block(state, packet(carrier_model_u8=1).to_voice_frame())
+    assert state.osc_mode == 1 and state.mode_switch.remaining_blocks == 0
 
 
 def commands():

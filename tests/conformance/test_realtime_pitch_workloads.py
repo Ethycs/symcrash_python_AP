@@ -7,6 +7,7 @@ from symcrash_python_ap.vm.basis_resource import prepare_basis_resources
 from tools.benchmark_vm_step_block import (
     BUDGET_US, bench_scenario, fmt_row, verify_bit_exact,
     _scenario_mode_b_detuned, _scenario_mode_b_pitch_sweep,
+    _scenario_mode_ab_reversals,
 )
 
 
@@ -42,3 +43,33 @@ def test_timing_report_exposes_misses_even_when_mean_passes():
     report = fmt_row('example', np.array([100., 200., 1500.]))
     assert '1/3 observed deadline misses' in report
     assert 'p99=' in report and 'max=' in report
+
+
+def test_continuous_mode_fades_with_pitch_cache_turnover_realtime_budget(monkeypatch):
+    from symcrash_python_ap.vm import mode_switch
+    if not hotpath_jit.NUMBA_AVAILABLE:
+        pytest.skip('realtime acceleration unavailable')
+    original_jit = hotpath_jit.jit_enabled()
+    try:
+        ok, reason = verify_bit_exact(_scenario_mode_ab_reversals(), 48, num_blocks=12)
+        assert ok, reason
+        harmonic_bank.get_basis_for_pitch.cache_clear()
+        blends = 0
+        original_blend = mode_switch.blend_coefficients
+
+        def observe_blend(*args):
+            nonlocal blends
+            blends += 1
+            return original_blend(*args)
+
+        monkeypatch.setattr(mode_switch, 'blend_coefficients', observe_blend)
+        times = bench_scenario(_scenario_mode_ab_reversals(), 48, True, num_blocks=750, warmup=100)
+        # Initial A-only block is the sole exception, before timed measurement.
+        assert blends == 849
+        assert harmonic_bank.get_basis_for_pitch.cache_info().misses == 849
+        details = fmt_row('A/B fades', times)
+        print('\n' + details)
+        assert times.mean() < BUDGET_US, details
+        assert np.percentile(times, 95) < 2 * BUDGET_US, details
+    finally:
+        hotpath_jit.set_jit_enabled(original_jit)

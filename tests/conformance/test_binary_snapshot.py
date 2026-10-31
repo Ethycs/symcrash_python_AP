@@ -119,7 +119,7 @@ def test_unknown_only_bundle_is_valid_and_does_not_invent_voices():
 
 @pytest.mark.parametrize('kind', [1,2,3,4,5])
 def test_known_chunk_versions_are_not_silently_interpreted(kind):
-    raw = container(record(kind,2,0xffff if kind==5 else 7,b'new version'))
+    raw = container(record(kind,3,0xffff if kind==5 else 7,b'new version'))
     with pytest.raises(ValueError, match='Unsupported version'):
         SnapshotBundle.from_bytes(raw)
 
@@ -153,7 +153,7 @@ def test_duplicate_chunk_identities_are_rejected(kind,voice,payload):
 def test_core_inner_version_and_voice_id_must_match_the_supported_chunk():
     with pytest.raises(ValueError, match='voice ID'):
         SnapshotBundle.from_bytes(container(record(1,0,8,raw_core(7))))
-    altered = b'\x02\x00' + raw_core()[2:]
+    altered = b'\x03\x00' + raw_core()[2:]
     with pytest.raises(ValueError, match='Unsupported VMState version'):
         SnapshotBundle.from_bytes(container(record(1,0,7,altered)))
 
@@ -253,7 +253,7 @@ def test_direct_chunk_mutation_cannot_bypass_scope_identity_or_version_checks():
     bundle = SnapshotBundle()
     bundle.add_voice_state(7,VMState.create(7))
     original = deepcopy(bundle.chunks[0])
-    for field,value in [('voice_id',8),('chunk_version',2),('voice_id',0xffff)]:
+    for field,value in [('voice_id',8),('chunk_version',3),('voice_id',0xffff)]:
         bundle.chunks = [deepcopy(original)]
         setattr(bundle.chunks[0],field,value)
         for action in (bundle.to_bytes, lambda:bundle.get_voice_state(7), bundle.list_voice_ids):
