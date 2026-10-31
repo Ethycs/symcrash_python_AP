@@ -1,0 +1,175 @@
+CCS HDL pipeline evidence - 2026-10-30
+Scope: current 64-leaf/depth-six/K2,4,8 inverse decoder. No transform,
+phase-table, stored coefficient width, headroom, Python arithmetic, golden
+or acceptance-threshold changes. Area/throughput changes are explicit below.
+
+Final functional gate:
+pixi run python -m pytest tests/conformance/test_hdl_idwpt.py -q
+12 passed in 93.34s (0:01:33), exit 0.
+2,104 frames / 134,656 output samples against Fraction and compiled Python.
+327,679 signed rounding sums; 262,144 saturation inputs; 2,097,152 headroom
+input/parameter pairs. Twelve reset probes per frame configuration include
+arithmetic stages, drains, later levels, output and K8's second group.
+No RTL edits follow the successful final tests/synthesis/timing matrix.
+The full Python suite was not repeated; Python production is unchanged by
+this HDL pipeline milestone. Earlier lifting regression scope is retained
+in lifting_arithmetic_20261030.txt.
+
+One pair issued/clock; RAM read, operand alignment, sum, RNE and second lift
+operation are registered. Memory write follows. Each phase is 32+5 clocks.
+Five complete levels plus root even-only synthesis = 11 phases = 407 clocks
+per group. No-stall transaction: 487 (K2/K4), 958 (K8). Stalled-pattern
+ranges: 505..507 (K2/K4), 989..991 (K8). External stalls are not bounded here.
+
+Primitive proofs: SAT16 uses bits 17:15 sign extension; headroom uses exact
+pre-shift bounds. Exhaustive RTL tests compare with literal widened integer
+clipping, including the original SAT16 before and after headroom scaling.
+
+Baseline: unpipelined core 784/1552 transaction clocks, K4 32.63 MHz failure.
+First pipeline: 65.91 MHz failure. Exact headroom and clipping circuits:
+K4 seed1 103.94 MHz pass, seed3 95.80 MHz failure. Boundary mux was then
+retimed into the sum stage; every final seed passes. No seed was discarded.
+The initial unpipelined source SHA is preserved in hdl_idwpt_20261030.txt.
+Local executable/source baseline is retained under _phase44_checkpoint.
+
+Final synthesis (Yosys check -assert passes for every configuration):
+
+{
+  "source": "src/symcrash_verilog/ccs_idwpt.v",
+  "source_sha256": "188809200cefaf4cd31d83804766b847544eea8071c7783e952213f24ea04124",
+  "tool": "Yosys 0.33 (git sha1 2584903a060)",
+  "headroom_bits": 2,
+  "configurations": [
+    {
+      "K": 2,
+      "cells": {
+        "CCU2C": 130,
+        "DP16KD": 4,
+        "L6MUX21": 11,
+        "LUT4": 723,
+        "PFUMX": 41,
+        "TRELLIS_DPR16X4": 100,
+        "TRELLIS_FF": 786
+      },
+      "netlist_sha256": "390e001bd0e05dbdb7d7818656849c848212515b3bcdfcd892c900717ece0f7a",
+      "logical_array_bytes": 776,
+      "physical_block_ram_bytes": 9216,
+      "cycles_without_stalls": 487
+    },
+    {
+      "K": 4,
+      "cells": {
+        "CCU2C": 254,
+        "DP16KD": 8,
+        "L6MUX21": 13,
+        "LUT4": 1148,
+        "PFUMX": 105,
+        "TRELLIS_DPR16X4": 84,
+        "TRELLIS_FF": 1512
+      },
+      "netlist_sha256": "4dd66ff7c0f90aa2a23a40da76b80aaa900421bc42b1f08b701f2b3c3e33963a",
+      "logical_array_bytes": 1424,
+      "physical_block_ram_bytes": 18432,
+      "cycles_without_stalls": 487
+    },
+    {
+      "K": 8,
+      "cells": {
+        "CCU2C": 254,
+        "DP16KD": 8,
+        "L6MUX21": 9,
+        "LUT4": 1143,
+        "PFUMX": 108,
+        "TRELLIS_DPR16X4": 84,
+        "TRELLIS_FF": 1512
+      },
+      "netlist_sha256": "8bb5091d96ea713211ad9aca4d8c82c412f3355c7673c261f5cac72614b02d68",
+      "logical_array_bytes": 1424,
+      "physical_block_ram_bytes": 18432,
+      "cycles_without_stalls": 958
+    }
+  ],
+  "scope": "ECP5 synthesis only; no packing, placement, routing or timing proof"
+}
+
+Final timing: fixed 100 MHz, ECP5-25K CSFBGA285 speed 6, headroom 2.
+Experimental out-of-context excludes I/O and global clock promotion/routing;
+no board pins/external delays. These results do not qualify complete-board
+clock/reset timing, integrated workloads or mapped-netlist equivalence.
+
+| K | Seed 1 MHz | Seed 2 MHz | Seed 3 MHz |
+|---|---:|---:|---:|
+| 2 | 108.93 | 110.94 | 108.20 |
+| 4 | 108.03 | 107.60 | 105.47 |
+| 8 | 107.40 | 108.14 | 107.76 |
+
+{"K": 2, "exit_code": 0, "fmax": {"clk": {"achieved": 108.93245697021484, "constraint": 100}}, "netlist_sha256": "390e001bd0e05dbdb7d7818656849c848212515b3bcdfcd892c900717ece0f7a", "passed": true, "seed": 1, "used_resources": {"DCCA": 0, "DP16KD": 4, "MULT18X18D": 0, "TRELLIS_COMB": 1653, "TRELLIS_FF": 786, "TRELLIS_IO": 0, "TRELLIS_RAMW": 100}}
+{"K": 2, "exit_code": 0, "fmax": {"clk": {"achieved": 110.93853759765625, "constraint": 100}}, "netlist_sha256": "390e001bd0e05dbdb7d7818656849c848212515b3bcdfcd892c900717ece0f7a", "passed": true, "seed": 2, "used_resources": {"DCCA": 0, "DP16KD": 4, "MULT18X18D": 0, "TRELLIS_COMB": 1653, "TRELLIS_FF": 786, "TRELLIS_IO": 0, "TRELLIS_RAMW": 100}}
+{"K": 2, "exit_code": 0, "fmax": {"clk": {"achieved": 108.20169067382812, "constraint": 100}}, "netlist_sha256": "390e001bd0e05dbdb7d7818656849c848212515b3bcdfcd892c900717ece0f7a", "passed": true, "seed": 3, "used_resources": {"DCCA": 0, "DP16KD": 4, "MULT18X18D": 0, "TRELLIS_COMB": 1653, "TRELLIS_FF": 786, "TRELLIS_IO": 0, "TRELLIS_RAMW": 100}}
+{"K": 4, "exit_code": 0, "fmax": {"clk": {"achieved": 108.02635955810547, "constraint": 100}}, "netlist_sha256": "4dd66ff7c0f90aa2a23a40da76b80aaa900421bc42b1f08b701f2b3c3e33963a", "passed": true, "seed": 1, "used_resources": {"DCCA": 0, "DP16KD": 8, "MULT18X18D": 0, "TRELLIS_COMB": 2290, "TRELLIS_FF": 1512, "TRELLIS_IO": 0, "TRELLIS_RAMW": 84}}
+{"K": 4, "exit_code": 0, "fmax": {"clk": {"achieved": 107.59630584716797, "constraint": 100}}, "netlist_sha256": "4dd66ff7c0f90aa2a23a40da76b80aaa900421bc42b1f08b701f2b3c3e33963a", "passed": true, "seed": 2, "used_resources": {"DCCA": 0, "DP16KD": 8, "MULT18X18D": 0, "TRELLIS_COMB": 2290, "TRELLIS_FF": 1512, "TRELLIS_IO": 0, "TRELLIS_RAMW": 84}}
+{"K": 4, "exit_code": 0, "fmax": {"clk": {"achieved": 105.47410583496094, "constraint": 100}}, "netlist_sha256": "4dd66ff7c0f90aa2a23a40da76b80aaa900421bc42b1f08b701f2b3c3e33963a", "passed": true, "seed": 3, "used_resources": {"DCCA": 0, "DP16KD": 8, "MULT18X18D": 0, "TRELLIS_COMB": 2290, "TRELLIS_FF": 1512, "TRELLIS_IO": 0, "TRELLIS_RAMW": 84}}
+{"K": 8, "exit_code": 0, "fmax": {"clk": {"achieved": 107.39984893798828, "constraint": 100}}, "netlist_sha256": "8bb5091d96ea713211ad9aca4d8c82c412f3355c7673c261f5cac72614b02d68", "passed": true, "seed": 1, "used_resources": {"DCCA": 0, "DP16KD": 8, "MULT18X18D": 0, "TRELLIS_COMB": 2285, "TRELLIS_FF": 1512, "TRELLIS_IO": 0, "TRELLIS_RAMW": 84}}
+{"K": 8, "exit_code": 0, "fmax": {"clk": {"achieved": 108.14318084716797, "constraint": 100}}, "netlist_sha256": "8bb5091d96ea713211ad9aca4d8c82c412f3355c7673c261f5cac72614b02d68", "passed": true, "seed": 2, "used_resources": {"DCCA": 0, "DP16KD": 8, "MULT18X18D": 0, "TRELLIS_COMB": 2285, "TRELLIS_FF": 1512, "TRELLIS_IO": 0, "TRELLIS_RAMW": 84}}
+{"K": 8, "exit_code": 0, "fmax": {"clk": {"achieved": 107.75862121582031, "constraint": 100}}, "netlist_sha256": "8bb5091d96ea713211ad9aca4d8c82c412f3355c7673c261f5cac72614b02d68", "passed": true, "seed": 3, "used_resources": {"DCCA": 0, "DP16KD": 8, "MULT18X18D": 0, "TRELLIS_COMB": 2285, "TRELLIS_FF": 1512, "TRELLIS_IO": 0, "TRELLIS_RAMW": 84}}
+
+Resource tradeoff: K4 FF 223 -> 1512 (+1289); LUT4 1439 -> 1148;
+BRAM unchanged at eight DP16KD / 18,432 physical bytes. Logical arrays stay
+1,424 bytes and exclude scalar pipeline/control registers. Primitive LUT4
+counts alone omit carry/RAM packing costs. Final K4 has 2290 TRELLIS_COMB.
+
+Remaining gates: K4 compute 407 exceeds T1 estimate 400; K2 compute 407 exceeds
+T2 estimate 100. K8 compute 814 fits its 1000 estimate, but does not include
+carrier/operators. Tier management/update rates, global 133333-cycle budget,
+bounded DMA/stalls, two-block prefetch, aggregate working memories, Mode A
+storage and board integration remain open. Numeric and timing budgets stand.
+
+Tool/source SHA-256 provenance:
+
+f19394cee05ad526e0eb3873bc6c17a5828f56df17fbe2db40cb66513a2d4667  iverilog_12.0-2build2_amd64.deb
+154b74fe60f7fc6223b0ff86063b8eb9429bfd1f532085fce66b555ebf2bf96c  libboost-filesystem1.83.0_1.83.0-2.1ubuntu3.2_amd64.deb
+614e516fc34d3a9f4b39149c79bde94160631b6486943d9782e264ab475fcdc3  libboost-iostreams1.83.0_1.83.0-2.1ubuntu3.2_amd64.deb
+9e7c21160a9cf2e8847b0789bba7a2b3301a4846f0f999270b41b424afb37559  libboost-program-options1.83.0_1.83.0-2.1ubuntu3.2_amd64.deb
+d6b7411fd5368a49ffe88ad66d471bc57a43c2bb4eb105ee3f5fb921bfdf8924  libboost-thread1.83.0_1.83.0-2.1ubuntu3.2_amd64.deb
+7534eb825f6317514d747ce53b4d6c23bf24df1dc1785f9599610ece5515e685  libtcl8.6_8.6.14+dfsg-1build1_amd64.deb
+f1a4335f191b6a99f243b5d6c8020bd7477d76a34ab41023d78f1b3e3e08d35d  nextpnr-ecp5-chipdb_0.6-3build5_amd64.deb
+e6ea3ac3565f6ae936647503603cc568e3a953c5ffba2733fcd3372234ef3ca5  nextpnr-ecp5_0.6-3build5_amd64.deb
+916ba59b6ca6dd1b6b927c7364357c2801ccb85db7eb3ca858ac9a856270fa44  yosys-abc_0.33-5build2_amd64.deb
+94247f2157ec6ce63c6638326e419975d911ace5356b3dc276d1d8b36659efbd  yosys_0.33-5build2_amd64.deb
+188809200cefaf4cd31d83804766b847544eea8071c7783e952213f24ea04124  src/symcrash_verilog/ccs_idwpt.v
+7fe4d1e908ec07c3d34f929611e4f12a0a65661202a88e529e646a4191050f6f  src/symcrash_verilog/tb_ccs_idwpt.v
+95dd973fa49c17822411ada8f89b3ee4078ae581c0de2c9db7a04f6b1c397d01  src/symcrash_verilog/tb_ccs_rounding.v
+72b9247840f8c7f18dae9f01ea4859646c5627424e3adecb3e1f7626765d7dd9  src/symcrash_verilog/tb_ccs_headroom.v
+caeb7df3e27dcfee4130c25100151a1c64a0c5ee8ebe78afc5de4b52dc4fbf23  tools/check_hdl_idwpt.py
+025f6c8e6acc36b509a32cca24979458009755136e203ccb77455559a1fafb97  tools/synth_hdl_idwpt.py
+2893060149cb0b8a788dc62c9a1429fd80ad07d13966ef3ef8f981d9798f00a8  tools/route_hdl_idwpt.py
+afd99cb3cc821b5d1bee859b2e48b2776148c8b8ffd30d98be36816d0202a837  tests/conformance/test_hdl_idwpt.py
+
+Final timing inventory SHA-256: 8c6ca40e92184265474e6783ce8b2778c233dd2587188abde29357df0c2a0e42
+
+Worst final critical path:
+Info: Critical path report for clock 'clk' (posedge -> posedge):
+Info: curr total
+Info:  5.8  5.8  Source bank_b.0.1.DOB8
+Info:  2.8  8.6    Net b_read1[26] budget 1.967000 ns (19,25) -> (19,6)
+Info:                Sink source1_LUT4_Z_37.B
+Info:                Defined in:
+Info:                  <repo>/src/symcrash_verilog/ccs_idwpt.v:97.52-97.59
+Info:  0.2  8.8  Source source1_LUT4_Z_37.F
+Info:  0.7  9.5    Net source1[26] budget 1.967000 ns (19,6) -> (18,6)
+Info:                Sink previous_detail_TRELLIS_FF_Q_37.M
+Info:                Defined in:
+Info:                  <repo>/src/symcrash_verilog/ccs_idwpt.v:117.26-117.33
+Info:  0.0  9.5  Setup previous_detail_TRELLIS_FF_Q_37.M
+Info: 6.1 ns logic, 3.4 ns routing
+
+Info: Max frequency for clock 'clk': 105.47 MHz (PASS at 100.00 MHz)
+
+
+
+Evidence-integrity regression:
+pixi run python -m pytest tests/conformance/test_hdl_evidence.py -q
+5 passed in 0.45s, exit 0. Rejects changed source, changed/missing netlist,
+missing K configuration and incompatible headroom before tool discovery.
+These verify evidence guards, not extra RTL vectors.
+1c3e2c3fb438fe9d5eff007bfa5589348e25a9a8750fad8f2644a299a90e9aec  tests/conformance/test_hdl_evidence.py

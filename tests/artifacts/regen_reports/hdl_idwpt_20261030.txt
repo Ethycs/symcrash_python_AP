@@ -1,0 +1,386 @@
+Current CCS RTL acceptance evidence - 2026-10-30
+
+Scope: standalone balanced 64-leaf, depth-six IDWPT; K=2/4/8.
+N/K/P, signed int16 storage, Python transform and audio goldens unchanged.
+RNE and node SAT16 use the Phase 43 numeric contract. Intermediate RTL
+widths follow proven 17/18-bit inverse bounds, not a precision reduction.
+
+Final RTL tests:
+  pixi run python -m pytest tests/conformance/test_hdl_idwpt.py -q
+  10 passed in 78.97s (0:01:18).
+The maximum-headroom case was then added without RTL changes:
+  pixi run python -m pytest tests/conformance/test_hdl_idwpt.py -q -k 15
+  1 passed, 10 deselected in 5.47s.
+Combined: 327,679 exhaustive signed rounding sums and 2,104 frames
+(134,656 output samples). Every frame is checked against an independent
+Fraction transform; that oracle is separately compared with production JIT.
+Coverage: every scalar impulse position K2/K4/K8, extrema, signed ties,
+seeded random data, headroom 0/1/2/3/15, reset during partial load/update/
+predict/output, busy input, output backpressure/stability, exact cycles.
+Finite vectors do not prove equivalence for every possible block.
+
+No-stall cycles (including all accepted input and output beats):
+  K2: 784; K4: 784; K8: 1552.
+Compute delay: 704 clocks per group, independent of stream stalls.
+Deterministic stalled transaction ranges: K2/K4 802..804, K8 1583..1585.
+The testbench asserts exact unstalled and compute timing; a timeout catches
+failure to complete. External unbounded stalls cannot have bounded latency.
+Standalone acceptance command: pixi run check-hdl (errors if tools absent).
+Pytest optionally skips if Icarus is unavailable; a skip is not acceptance.
+
+Synthesis reproduction: pixi run synth-hdl.
+All K configurations pass Yosys check -assert. Actual cell counts follow.
+Logical array bytes exclude scalar registers. DP16KD physical allocation
+uses 18,432 bits per primitive, not logical payload size. LUT4 alone is not
+packed device utilization; CCU2C and LUTRAM consume logic resources too.
+
+{
+  "source": "src/symcrash_verilog/ccs_idwpt.v",
+  "source_sha256": "5fd8424a1736bb84e3ebb3823ac3a09726c75f061acc2f565ea322350bceb36d",
+  "tool": "Yosys 0.33 (git sha1 2584903a060)",
+  "headroom_bits": 2,
+  "configurations": [
+    {
+      "K": 2,
+      "cells": {
+        "CCU2C": 195,
+        "DP16KD": 4,
+        "L6MUX21": 32,
+        "LUT4": 835,
+        "PFUMX": 120,
+        "TRELLIS_DPR16X4": 100,
+        "TRELLIS_FF": 123
+      },
+      "logical_array_bytes": 776,
+      "physical_block_ram_bytes": 9216,
+      "cycles_without_stalls": 784
+    },
+    {
+      "K": 4,
+      "cells": {
+        "CCU2C": 371,
+        "DP16KD": 8,
+        "L6MUX21": 64,
+        "LUT4": 1439,
+        "PFUMX": 234,
+        "TRELLIS_DPR16X4": 84,
+        "TRELLIS_FF": 223
+      },
+      "logical_array_bytes": 1424,
+      "physical_block_ram_bytes": 18432,
+      "cycles_without_stalls": 784
+    },
+    {
+      "K": 8,
+      "cells": {
+        "CCU2C": 371,
+        "DP16KD": 8,
+        "L6MUX21": 64,
+        "LUT4": 1438,
+        "PFUMX": 232,
+        "TRELLIS_DPR16X4": 84,
+        "TRELLIS_FF": 223
+      },
+      "logical_array_bytes": 1424,
+      "physical_block_ram_bytes": 18432,
+      "cycles_without_stalls": 1552
+    }
+  ],
+  "scope": "ECP5 synthesis only; no packing, placement, routing or timing proof"
+}
+
+RAM inference audit:
+The initial K4 implementation mapped a working bank and small stores to
+registers: 34,924 LUT4, 7,583 FF, four DP16KD. Moving scratch/output writes
+out of reset logic produced 19,291 LUT4, 4,447 FF, 84 LUTRAM, four DP16KD.
+Gating working-bank reads to actual read states removes discarded cross-port
+read/write collision behavior: final 1,439 LUT4, 223 FF, 84 LUTRAM, eight
+DP16KD. Final arithmetic/handshake/reset simulation passes after these edits.
+No arithmetic, geometry or cycle budget was changed to obtain RAM inference.
+
+Remaining gates:
+- Integrated placement/routing and qualified 100 MHz timing; the standalone
+  K4 run fails as preserved below.
+- Mapped-netlist equivalence (Yosys supplied DP16KD model is a black box).
+- Board integration, DMA/prefetch and bounded stalls.
+- Aggregate coefficient BRAM including voices, fades and staging.
+- Actual carrier/operator/mix/effects and tier admission costs.
+The decoder alone exceeds T0/K8=1000, T1/K4=400 and T2/K2=100 DSP estimates.
+Those budgets are unchanged. This is a performance gap, not an acceptance.
+Mode A/B images still exceed documented storage. This HDL milestone neither
+changes those resources nor claims complete hardware conformance.
+Python regression scope remains the separately recorded lifting report;
+the full Python suite was not repeated for this standalone HDL addition.
+
+Tool provenance: isolated Ubuntu Noble packages; no system install.
+Icarus 12.0 (12.0-2build2); Yosys 0.33 (2584903a060, 0.33-5build2).
+Package SHA-256:
+
+f19394cee05ad526e0eb3873bc6c17a5828f56df17fbe2db40cb66513a2d4667  iverilog_12.0-2build2_amd64.deb
+154b74fe60f7fc6223b0ff86063b8eb9429bfd1f532085fce66b555ebf2bf96c  libboost-filesystem1.83.0_1.83.0-2.1ubuntu3.2_amd64.deb
+614e516fc34d3a9f4b39149c79bde94160631b6486943d9782e264ab475fcdc3  libboost-iostreams1.83.0_1.83.0-2.1ubuntu3.2_amd64.deb
+9e7c21160a9cf2e8847b0789bba7a2b3301a4846f0f999270b41b424afb37559  libboost-program-options1.83.0_1.83.0-2.1ubuntu3.2_amd64.deb
+d6b7411fd5368a49ffe88ad66d471bc57a43c2bb4eb105ee3f5fb921bfdf8924  libboost-thread1.83.0_1.83.0-2.1ubuntu3.2_amd64.deb
+7534eb825f6317514d747ce53b4d6c23bf24df1dc1785f9599610ece5515e685  libtcl8.6_8.6.14+dfsg-1build1_amd64.deb
+f1a4335f191b6a99f243b5d6c8020bd7477d76a34ab41023d78f1b3e3e08d35d  nextpnr-ecp5-chipdb_0.6-3build5_amd64.deb
+e6ea3ac3565f6ae936647503603cc568e3a953c5ffba2733fcd3372234ef3ca5  nextpnr-ecp5_0.6-3build5_amd64.deb
+916ba59b6ca6dd1b6b927c7364357c2801ccb85db7eb3ca858ac9a856270fa44  yosys-abc_0.33-5build2_amd64.deb
+94247f2157ec6ce63c6638326e419975d911ace5356b3dc276d1d8b36659efbd  yosys_0.33-5build2_amd64.deb
+
+Verified source SHA-256 (worktree bytes, including line endings):
+5fd8424a1736bb84e3ebb3823ac3a09726c75f061acc2f565ea322350bceb36d  src/symcrash_verilog/ccs_idwpt.v
+4ebfbb433ecb3bf3ce9248d1ecd0110c7d475787b517771e865a3828f6cf7992  src/symcrash_verilog/tb_ccs_idwpt.v
+4256965772a4ae58a893dfba13f5b597610016a10b8cb87561565af309ae48a7  src/symcrash_verilog/tb_ccs_rounding.v
+31b6a83445cd56191bb34d1a5673fcee7d3bc3ceac1a5b0238b487833c0d567a  tools/check_hdl_idwpt.py
+0cd24868ede3d4ea8f07f8b96d81d5307f9ced56732016e3f6a8881dbcd822fc  tools/synth_hdl_idwpt.py
+d4c9d74216278b732d4be38792ef2cba56a705fc6e177d21357b2e0d078586ff  tests/conformance/test_hdl_idwpt.py
+
+Standalone placement/routing probe (after successful RTL checks):
+nextpnr-ecp5 0.6-3build5, --25k --package CSFBGA285 --speed 6,
+--out-of-context --freq 100 --seed 1.
+Input: build/hdl-tests/ccs_idwpt_k4_ecp5.json, generated by the source-hashed
+synthesis run above. Headroom 2, four physical lanes, K4.
+Process exit 1. Required clock unchanged; no --timing-allow-fail override.
+Packed: 2903 TRELLIS_COMB, 223 TRELLIS_FF, 84 TRELLIS_RAMW, 8 DP16KD,
+0 MULT18X18D, 0 IO. Timing JSON reports:
+{
+  "clk": {
+    "achieved": 32.631752014160156,
+    "constraint": 100
+  }
+}
+Thus this implementation fails the 100 MHz target. It needs arithmetic
+pipelining and scheduled optimization with exact numeric equivalence.
+The critical path contains 14.6 ns logic and 16.0 ns routing delay.
+Out-of-context mode is experimental; it omits I/O buffers and global
+promotion/routing. No board pins or external delay constraints are supplied.
+CSFBGA285 and speed 6 identify this model, not a tested physical board.
+K2/K8 have synthesis evidence only; full-system timing remains open.
+
+Local tool setup: Ubuntu packages extracted under build/hdl-tools/nextpnr.
+LD_LIBRARY_PATH points at its usr/lib/x86_64-linux-gnu. The executable uses
+a fixed database directory, so the previously absent Ubuntu-24.04 path
+/usr/share/nextpnr is a symlink to the extracted prefix's usr/share/nextpnr.
+No system packages were installed. Package hashes above include nextpnr,
+chipdb and Boost runtime libraries. See the HDL README for reproduction.
+
+Critical path and failing clock report:
+Info: Critical path report for clock 'clk' (posedge -> posedge):
+Info: curr total
+Info:  5.8  5.8  Source bank_b.0.1.DOB0
+Info:  1.0  6.8    Net b_read1[18] budget -1.386000 ns (28,25) -> (26,24)
+Info:                Sink source1_LUT4_Z_45.B
+Info:                Defined in:
+Info:                  <repo>/src/symcrash_verilog/ccs_idwpt.v:61.52-61.59
+Info:  0.2  7.0  Source source1_LUT4_Z_45.F
+Info:  1.3  8.3    Net source1[18] budget -1.155000 ns (26,24) -> (26,18)
+Info:                Sink arithmetic[1].left_detail_LUT4_Z_13.B
+Info:                Defined in:
+Info:                  <repo>/src/symcrash_verilog/ccs_idwpt.v:86.26-86.33
+Info:  0.2  8.6  Source arithmetic[1].left_detail_LUT4_Z_13.F
+Info:  1.1  9.7    Net arithmetic[1].left_detail[2] budget -0.462000 ns (26,18) -> (26,17)
+Info:                Sink arithmetic[1].detail_sum_CCU2C_S0_3$CCU2_COMB0.B
+Info:                Defined in:
+Info:                  <repo>/src/symcrash_verilog/ccs_idwpt.v:138.28-138.39
+Info:  0.4 10.1  Source arithmetic[1].detail_sum_CCU2C_S0_3$CCU2_COMB0.FCO
+Info:  0.0 10.1    Net arithmetic[1].detail_sum_CCU2C_S0_3$CCU2_FCI_INT budget 0.000000 ns (26,17) -> (26,17)
+Info:                Sink arithmetic[1].detail_sum_CCU2C_S0_3$CCU2_COMB1.FCI
+Info:  0.0 10.1  Source arithmetic[1].detail_sum_CCU2C_S0_3$CCU2_COMB1.FCO
+Info:  0.0 10.1    Net arithmetic[1].detail_sum_CCU2C_S0_4_COUT[2] budget 0.000000 ns (26,17) -> (26,17)
+Info:                Sink arithmetic[1].detail_sum_CCU2C_S0_2$CCU2_COMB0.FCI
+Info:                Defined in:
+Info:                  <repo>/src/symcrash_verilog/ccs_idwpt.v:140.41-141.69
+Info:                  <repo>/build/hdl-tools/yosys/usr/bin/../share/yosys/ecp5/arith_map.v:63.22-63.23
+Info:  0.1 10.2  Source arithmetic[1].detail_sum_CCU2C_S0_2$CCU2_COMB0.FCO
+Info:  0.0 10.2    Net arithmetic[1].detail_sum_CCU2C_S0_2$CCU2_FCI_INT budget 0.000000 ns (26,17) -> (26,17)
+Info:                Sink arithmetic[1].detail_sum_CCU2C_S0_2$CCU2_COMB1.FCI
+Info:  0.0 10.2  Source arithmetic[1].detail_sum_CCU2C_S0_2$CCU2_COMB1.FCO
+Info:  0.0 10.2    Net arithmetic[1].detail_sum_CCU2C_S0_4_COUT[4] budget 0.000000 ns (26,17) -> (27,17)
+Info:                Sink arithmetic[1].detail_sum_CCU2C_S0_1$CCU2_COMB0.FCI
+Info:                Defined in:
+Info:                  <repo>/src/symcrash_verilog/ccs_idwpt.v:140.41-141.69
+Info:                  <repo>/build/hdl-tools/yosys/usr/bin/../share/yosys/ecp5/arith_map.v:63.22-63.23
+Info:  0.1 10.3  Source arithmetic[1].detail_sum_CCU2C_S0_1$CCU2_COMB0.FCO
+Info:  0.0 10.3    Net arithmetic[1].detail_sum_CCU2C_S0_1$CCU2_FCI_INT budget 0.000000 ns (27,17) -> (27,17)
+Info:                Sink arithmetic[1].detail_sum_CCU2C_S0_1$CCU2_COMB1.FCI
+Info:  0.4 10.7  Source arithmetic[1].detail_sum_CCU2C_S0_1$CCU2_COMB1.F
+Info:  1.1 11.8    Net arithmetic[1].detail_sum[7] budget -0.404000 ns (27,17) -> (26,15)
+Info:                Sink arithmetic[1].update_LUT4_Z_B_CCU2C_S0_2$CCU2_COMB1.B
+Info:                Defined in:
+Info:                  <repo>/src/symcrash_verilog/ccs_idwpt.v:140.41-141.69
+Info:                  <repo>/build/hdl-tools/yosys/usr/bin/../share/yosys/ecp5/arith_map.v:65.27-65.29
+Info:  0.4 12.3  Source arithmetic[1].update_LUT4_Z_B_CCU2C_S0_2$CCU2_COMB1.FCO
+Info:  0.0 12.3    Net arithmetic[1].update_LUT4_Z_B_CCU2C_S0_4_COUT[5] budget 0.000000 ns (26,15) -> (27,15)
+Info:                Sink arithmetic[1].update_LUT4_Z_B_CCU2C_S0_1$CCU2_COMB0.FCI
+Info:                Defined in:
+Info:                  <repo>/src/symcrash_verilog/ccs_idwpt.v:96.28-96.45
+Info:                  <repo>/build/hdl-tools/yosys/usr/bin/../share/yosys/ecp5/arith_map.v:63.22-63.23
+Info:  0.1 12.4  Source arithmetic[1].update_LUT4_Z_B_CCU2C_S0_1$CCU2_COMB0.FCO
+Info:  0.0 12.4    Net arithmetic[1].update_LUT4_Z_B_CCU2C_S0_1$CCU2_FCI_INT budget 0.000000 ns (27,15) -> (27,15)
+Info:                Sink arithmetic[1].update_LUT4_Z_B_CCU2C_S0_1$CCU2_COMB1.FCI
+Info:  0.4 12.8  Source arithmetic[1].update_LUT4_Z_B_CCU2C_S0_1$CCU2_COMB1.F
+Info:  1.0 13.7    Net arithmetic[1].update_LUT4_Z_B[7] budget -0.404000 ns (27,15) -> (26,14)
+Info:                Sink arithmetic[1].update_LUT4_Z_8.B
+Info:                Defined in:
+Info:                  <repo>/src/symcrash_verilog/ccs_idwpt.v:96.28-96.45
+Info:                  <repo>/build/hdl-tools/yosys/usr/bin/../share/yosys/ecp5/arith_map.v:34.26-34.27
+Info:  0.2 14.0  Source arithmetic[1].update_LUT4_Z_8.F
+Info:  1.2 15.1    Net arithmetic[1].update[7] budget -0.404000 ns (26,14) -> (26,12)
+Info:                Sink arithmetic[1].even_value_CCU2C_S0_1$CCU2_COMB1.B
+Info:                Defined in:
+Info:                  <repo>/src/symcrash_verilog/ccs_idwpt.v:142.28-142.34
+Info:  0.4 15.6  Source arithmetic[1].even_value_CCU2C_S0_1$CCU2_COMB1.FCO
+Info:  0.0 15.6    Net arithmetic[1].even_value_CCU2C_S0_4_COUT[6] budget 0.000000 ns (26,12) -> (26,12)
+Info:                Sink arithmetic[1].even_value_CCU2C_S0$CCU2_COMB0.FCI
+Info:                Defined in:
+Info:                  <repo>/src/symcrash_verilog/ccs_idwpt.v:143.41-144.69
+Info:                  <repo>/build/hdl-tools/yosys/usr/bin/../share/yosys/ecp5/arith_map.v:63.22-63.23
+Info:  0.1 15.6  Source arithmetic[1].even_value_CCU2C_S0$CCU2_COMB0.FCO
+Info:  0.0 15.6    Net arithmetic[1].even_value_CCU2C_S0$CCU2_FCI_INT budget 0.000000 ns (26,12) -> (26,12)
+Info:                Sink arithmetic[1].even_value_CCU2C_S0$CCU2_COMB1.FCI
+Info:  0.0 15.6  Source arithmetic[1].even_value_CCU2C_S0$CCU2_COMB1.FCO
+Info:  0.0 15.6    Net arithmetic[1].even_value_CCU2C_S0_4_COUT[8] budget 0.000000 ns (26,12) -> (26,12)
+Info:                Sink arithmetic[1].even_value_CCU2C_S0_7$CCU2_COMB0.FCI
+Info:                Defined in:
+Info:                  <repo>/src/symcrash_verilog/ccs_idwpt.v:143.41-144.69
+Info:                  <repo>/build/hdl-tools/yosys/usr/bin/../share/yosys/ecp5/arith_map.v:63.22-63.23
+Info:  0.4 16.1  Source arithmetic[1].even_value_CCU2C_S0_7$CCU2_COMB0.F
+Info:  1.4 17.5    Net wide_even[27] budget -0.314000 ns (26,12) -> (25,11)
+Info:                Sink restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_PFUMX_Z_BLUT_LUT4_Z_D_LUT4_Z_D_LUT4_Z_D_CCU2C_S0_7$CCU2_COMB0.B
+Info:                Defined in:
+Info:                  <repo>/src/symcrash_verilog/ccs_idwpt.v:87.26-87.35
+Info:  0.4 17.9  Source restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_PFUMX_Z_BLUT_LUT4_Z_D_LUT4_Z_D_LUT4_Z_D_CCU2C_S0_7$CCU2_COMB0.FCO
+Info:  0.0 17.9    Net restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_PFUMX_Z_BLUT_LUT4_Z_D_LUT4_Z_D_LUT4_Z_D_CCU2C_S0_7$CCU2_FCI_INT budget 0.000000 ns (25,11) -> (25,11)
+Info:                Sink restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_PFUMX_Z_BLUT_LUT4_Z_D_LUT4_Z_D_LUT4_Z_D_CCU2C_S0_7$CCU2_COMB1.FCI
+Info:  0.0 17.9  Source restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_PFUMX_Z_BLUT_LUT4_Z_D_LUT4_Z_D_LUT4_Z_D_CCU2C_S0_7$CCU2_COMB1.FCO
+Info:  0.0 17.9    Net restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_PFUMX_Z_BLUT_LUT4_Z_D_LUT4_Z_D_LUT4_Z_C[12] budget 0.000000 ns (25,11) -> (25,11)
+Info:                Sink restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_PFUMX_Z_BLUT_LUT4_Z_D_LUT4_Z_D_LUT4_Z_D_CCU2C_S0_6$CCU2_COMB0.FCI
+Info:                Defined in:
+Info:                  <repo>/src/symcrash_verilog/ccs_idwpt.v:115.22-115.41
+Info:                  <repo>/build/hdl-tools/yosys/usr/bin/../share/yosys/ecp5/arith_map.v:65.22-65.25
+Info:  0.1 18.0  Source restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_PFUMX_Z_BLUT_LUT4_Z_D_LUT4_Z_D_LUT4_Z_D_CCU2C_S0_6$CCU2_COMB0.FCO
+Info:  0.0 18.0    Net restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_PFUMX_Z_BLUT_LUT4_Z_D_LUT4_Z_D_LUT4_Z_D_CCU2C_S0_6$CCU2_FCI_INT budget 0.000000 ns (25,11) -> (25,11)
+Info:                Sink restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_PFUMX_Z_BLUT_LUT4_Z_D_LUT4_Z_D_LUT4_Z_D_CCU2C_S0_6$CCU2_COMB1.FCI
+Info:  0.0 18.0  Source restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_PFUMX_Z_BLUT_LUT4_Z_D_LUT4_Z_D_LUT4_Z_D_CCU2C_S0_6$CCU2_COMB1.FCO
+Info:  0.0 18.0    Net restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_PFUMX_Z_BLUT_LUT4_Z_D_LUT4_Z_D_LUT4_Z_C[14] budget 0.000000 ns (25,11) -> (26,11)
+Info:                Sink restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_PFUMX_Z_BLUT_LUT4_Z_D_LUT4_Z_D_LUT4_Z_D_CCU2C_S0_5$CCU2_COMB0.FCI
+Info:                Defined in:
+Info:                  <repo>/src/symcrash_verilog/ccs_idwpt.v:115.22-115.41
+Info:                  <repo>/build/hdl-tools/yosys/usr/bin/../share/yosys/ecp5/arith_map.v:65.22-65.25
+Info:  0.1 18.0  Source restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_PFUMX_Z_BLUT_LUT4_Z_D_LUT4_Z_D_LUT4_Z_D_CCU2C_S0_5$CCU2_COMB0.FCO
+Info:  0.0 18.0    Net restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_PFUMX_Z_BLUT_LUT4_Z_D_LUT4_Z_D_LUT4_Z_D_CCU2C_S0_5$CCU2_FCI_INT budget 0.000000 ns (26,11) -> (26,11)
+Info:                Sink restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_PFUMX_Z_BLUT_LUT4_Z_D_LUT4_Z_D_LUT4_Z_D_CCU2C_S0_5$CCU2_COMB1.FCI
+Info:  0.0 18.0  Source restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_PFUMX_Z_BLUT_LUT4_Z_D_LUT4_Z_D_LUT4_Z_D_CCU2C_S0_5$CCU2_COMB1.FCO
+Info:  0.0 18.0    Net $nextpnr_CCU2C_56$CIN budget 0.000000 ns (26,11) -> (26,11)
+Info:                Sink $nextpnr_CCU2C_56$CCU2_COMB0.FCI
+Info:  0.4 18.5  Source $nextpnr_CCU2C_56$CCU2_COMB0.F
+Info:  0.8 19.3    Net restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_PFUMX_Z_BLUT_LUT4_Z_D_LUT4_Z_D_LUT4_Z_C[16] budget -3.140000 ns (26,11) -> (26,11)
+Info:                Sink $nextpnr_CCU2C_56$CCU2_COMB1.A
+Info:                Defined in:
+Info:                  <repo>/src/symcrash_verilog/ccs_idwpt.v:115.22-115.41
+Info:                  <repo>/build/hdl-tools/yosys/usr/bin/../share/yosys/ecp5/arith_map.v:65.22-65.25
+Info:  0.4 19.7  Source $nextpnr_CCU2C_56$CCU2_COMB1.FCO
+Info:  0.0 19.7    Net $nextpnr_CCU2C_56$COUT budget 0.000000 ns (26,11) -> (26,11)
+Info:                Sink restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_PFUMX_Z_BLUT_LUT4_Z_D_LUT4_Z_D_LUT4_Z_D_CCU2C_S0_4$CCU2_COMB0.FCI
+Info:  0.4 20.2  Source restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_PFUMX_Z_BLUT_LUT4_Z_D_LUT4_Z_D_LUT4_Z_D_CCU2C_S0_4$CCU2_COMB0.F
+Info:  0.7 20.8    Net restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_PFUMX_Z_BLUT_LUT4_Z_D_LUT4_Z_D_LUT4_Z_D[16] budget -0.314000 ns (26,11) -> (27,11)
+Info:                Sink restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_PFUMX_Z_BLUT_LUT4_Z_D_LUT4_Z_D_LUT4_Z.D
+Info:                Defined in:
+Info:                  <repo>/src/symcrash_verilog/ccs_idwpt.v:115.22-115.41
+Info:                  <repo>/build/hdl-tools/yosys/usr/bin/../share/yosys/ecp5/arith_map.v:34.26-34.27
+Info:  0.2 21.1  Source restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_PFUMX_Z_BLUT_LUT4_Z_D_LUT4_Z_D_LUT4_Z.F
+Info:  1.1 22.2    Net restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_PFUMX_Z_BLUT_LUT4_Z_D_LUT4_Z_D budget -0.310000 ns (27,11) -> (28,6)
+Info:                Sink restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_PFUMX_Z_BLUT_LUT4_Z_D_LUT4_Z.D
+Info:                Defined in:
+Info:                  <repo>/build/hdl-tools/yosys/usr/bin/../share/yosys/ecp5/cells_map.v:108.23-108.24
+Info:  0.2 22.4  Source restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_PFUMX_Z_BLUT_LUT4_Z_D_LUT4_Z.F
+Info:  0.7 23.1    Net restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_PFUMX_Z_BLUT_LUT4_Z_D[3] budget -0.310000 ns (28,6) -> (27,6)
+Info:                Sink restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_PFUMX_Z_BLUT_LUT4_Z_D_LUT4_Z_D_LUT4_B_Z_LUT4_Z_8.B
+Info:                Defined in:
+Info:                  <repo>/build/hdl-tools/yosys/usr/bin/../share/yosys/ecp5/cells_map.v:108.23-108.24
+Info:  0.2 23.3  Source restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_PFUMX_Z_BLUT_LUT4_Z_D_LUT4_Z_D_LUT4_B_Z_LUT4_Z_8.F
+Info:  1.1 24.4    Net restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_PFUMX_Z_BLUT_LUT4_Z_D_LUT4_Z_D_LUT4_B_Z[4] budget -0.272000 ns (27,6) -> (27,5)
+Info:                Sink restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C_LUT4_Z_D_CCU2C_COUT_S0_CCU2C_S0_2$CCU2_COMB0.B
+Info:                Defined in:
+Info:                  <repo>/src/symcrash_verilog/ccs_idwpt.v:129.22-129.42
+Info:                  <repo>/build/hdl-tools/yosys/usr/bin/../share/yosys/ecp5/arith_map.v:32.22-32.23
+Info:  0.4 24.9  Source restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C_LUT4_Z_D_CCU2C_COUT_S0_CCU2C_S0_2$CCU2_COMB0.FCO
+Info:  0.0 24.9    Net restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C_LUT4_Z_D_CCU2C_COUT_S0_CCU2C_S0_2$CCU2_FCI_INT budget 0.000000 ns (27,5) -> (27,5)
+Info:                Sink restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C_LUT4_Z_D_CCU2C_COUT_S0_CCU2C_S0_2$CCU2_COMB1.FCI
+Info:  0.0 24.9  Source restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C_LUT4_Z_D_CCU2C_COUT_S0_CCU2C_S0_2$CCU2_COMB1.FCO
+Info:  0.0 24.9    Net restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C_LUT4_Z_D[5] budget 0.000000 ns (27,5) -> (28,5)
+Info:                Sink restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C_LUT4_Z_D_CCU2C_COUT_S0_CCU2C_S0_1$CCU2_COMB0.FCI
+Info:                Defined in:
+Info:                  <repo>/src/symcrash_verilog/ccs_idwpt.v:129.22-129.42
+Info:                  <repo>/build/hdl-tools/yosys/usr/bin/../share/yosys/ecp5/arith_map.v:63.22-63.23
+Info:  0.1 25.0  Source restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C_LUT4_Z_D_CCU2C_COUT_S0_CCU2C_S0_1$CCU2_COMB0.FCO
+Info:  0.0 25.0    Net restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C_LUT4_Z_D_CCU2C_COUT_S0_CCU2C_S0_1$CCU2_FCI_INT budget 0.000000 ns (28,5) -> (28,5)
+Info:                Sink restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C_LUT4_Z_D_CCU2C_COUT_S0_CCU2C_S0_1$CCU2_COMB1.FCI
+Info:  0.0 25.0  Source restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C_LUT4_Z_D_CCU2C_COUT_S0_CCU2C_S0_1$CCU2_COMB1.FCO
+Info:  0.0 25.0    Net restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C_LUT4_Z_D[7] budget 0.000000 ns (28,5) -> (28,5)
+Info:                Sink restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C_LUT4_Z_D_CCU2C_COUT_S0_CCU2C_S0$CCU2_COMB0.FCI
+Info:                Defined in:
+Info:                  <repo>/src/symcrash_verilog/ccs_idwpt.v:129.22-129.42
+Info:                  <repo>/build/hdl-tools/yosys/usr/bin/../share/yosys/ecp5/arith_map.v:63.22-63.23
+Info:  0.1 25.0  Source restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C_LUT4_Z_D_CCU2C_COUT_S0_CCU2C_S0$CCU2_COMB0.FCO
+Info:  0.0 25.0    Net restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C_LUT4_Z_D_CCU2C_COUT_S0_CCU2C_S0$CCU2_FCI_INT budget 0.000000 ns (28,5) -> (28,5)
+Info:                Sink restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C_LUT4_Z_D_CCU2C_COUT_S0_CCU2C_S0$CCU2_COMB1.FCI
+Info:  0.0 25.0  Source restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C_LUT4_Z_D_CCU2C_COUT_S0_CCU2C_S0$CCU2_COMB1.FCO
+Info:  0.0 25.0    Net restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C_LUT4_Z_D[9] budget 0.000000 ns (28,5) -> (28,5)
+Info:                Sink restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C_LUT4_Z_D_CCU2C_COUT_S0_CCU2C_S0_5$CCU2_COMB0.FCI
+Info:                Defined in:
+Info:                  <repo>/src/symcrash_verilog/ccs_idwpt.v:129.22-129.42
+Info:                  <repo>/build/hdl-tools/yosys/usr/bin/../share/yosys/ecp5/arith_map.v:63.22-63.23
+Info:  0.1 25.1  Source restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C_LUT4_Z_D_CCU2C_COUT_S0_CCU2C_S0_5$CCU2_COMB0.FCO
+Info:  0.0 25.1    Net restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C_LUT4_Z_D_CCU2C_COUT_S0_CCU2C_S0_5$CCU2_FCI_INT budget 0.000000 ns (28,5) -> (28,5)
+Info:                Sink restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C_LUT4_Z_D_CCU2C_COUT_S0_CCU2C_S0_5$CCU2_COMB1.FCI
+Info:  0.0 25.1  Source restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C_LUT4_Z_D_CCU2C_COUT_S0_CCU2C_S0_5$CCU2_COMB1.FCO
+Info:  0.0 25.1    Net restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C_LUT4_Z_D[11] budget 0.000000 ns (28,5) -> (28,5)
+Info:                Sink restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C_LUT4_Z_D_CCU2C_COUT_S0_CCU2C_S0_4$CCU2_COMB0.FCI
+Info:                Defined in:
+Info:                  <repo>/src/symcrash_verilog/ccs_idwpt.v:129.22-129.42
+Info:                  <repo>/build/hdl-tools/yosys/usr/bin/../share/yosys/ecp5/arith_map.v:63.22-63.23
+Info:  0.1 25.2  Source restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C_LUT4_Z_D_CCU2C_COUT_S0_CCU2C_S0_4$CCU2_COMB0.FCO
+Info:  0.0 25.2    Net restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C_LUT4_Z_D_CCU2C_COUT_S0_CCU2C_S0_4$CCU2_FCI_INT budget 0.000000 ns (28,5) -> (28,5)
+Info:                Sink restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C_LUT4_Z_D_CCU2C_COUT_S0_CCU2C_S0_4$CCU2_COMB1.FCI
+Info:  0.0 25.2  Source restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C_LUT4_Z_D_CCU2C_COUT_S0_CCU2C_S0_4$CCU2_COMB1.FCO
+Info:  0.0 25.2    Net $nextpnr_CCU2C_94$CIN budget 0.000000 ns (28,5) -> (29,5)
+Info:                Sink $nextpnr_CCU2C_94$CCU2_COMB0.FCI
+Info:  0.4 25.6  Source $nextpnr_CCU2C_94$CCU2_COMB0.F
+Info:  0.8 26.4    Net restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C_LUT4_Z_D[13] budget -3.808000 ns (29,5) -> (29,5)
+Info:                Sink $nextpnr_CCU2C_94$CCU2_COMB1.A
+Info:                Defined in:
+Info:                  <repo>/src/symcrash_verilog/ccs_idwpt.v:129.22-129.42
+Info:                  <repo>/build/hdl-tools/yosys/usr/bin/../share/yosys/ecp5/arith_map.v:63.22-63.23
+Info:  0.4 26.9  Source $nextpnr_CCU2C_94$CCU2_COMB1.FCO
+Info:  0.0 26.9    Net $nextpnr_CCU2C_94$COUT budget 0.000000 ns (29,5) -> (29,5)
+Info:                Sink restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C_LUT4_Z_D_CCU2C_COUT$CCU2_COMB0.FCI
+Info:  0.1 26.9  Source restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C_LUT4_Z_D_CCU2C_COUT$CCU2_COMB0.FCO
+Info:  0.0 26.9    Net restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C_LUT4_Z_D_CCU2C_COUT$CCU2_FCI_INT budget 0.000000 ns (29,5) -> (29,5)
+Info:                Sink restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C_LUT4_Z_D_CCU2C_COUT$CCU2_COMB1.FCI
+Info:  0.0 26.9  Source restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C_LUT4_Z_D_CCU2C_COUT$CCU2_COMB1.FCO
+Info:  0.0 26.9    Net $nextpnr_CCU2C_95$CIN budget 0.000000 ns (29,5) -> (29,5)
+Info:                Sink $nextpnr_CCU2C_95$CCU2_COMB0.FCI
+Info:  0.4 27.4  Source $nextpnr_CCU2C_95$CCU2_COMB0.F
+Info:  0.9 28.3    Net restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C_LUT4_Z_D[15] budget -4.080000 ns (29,5) -> (29,4)
+Info:                Sink restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C_LUT4_Z.D
+Info:                Defined in:
+Info:                  <repo>/src/symcrash_verilog/ccs_idwpt.v:129.22-129.42
+Info:                  <repo>/build/hdl-tools/yosys/usr/bin/../share/yosys/ecp5/arith_map.v:38.23-38.25
+Info:  0.2 28.5  Source restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C_LUT4_Z.F
+Info:  0.8 29.3    Net restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_C[0] budget -0.271000 ns (29,4) -> (30,5)
+Info:                Sink restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_2.B
+Info:                Defined in:
+Info:                  <repo>/build/hdl-tools/yosys/usr/bin/../share/yosys/ecp5/cells_map.v:108.23-108.24
+Info:  0.2 29.5  Source restore_headroom$func$<repo>/src/symcrash_verilog/ccs_idwpt.v:146$429.$result_LUT4_Z_2.F
+Info:  1.1 30.6    Net final_samples[29] budget -0.271000 ns (30,5) -> (31,5)
+Info:                Sink output_words.0.7$RAMW_SLICE.A1
+Info:                Defined in:
+Info:                  <repo>/src/symcrash_verilog/ccs_idwpt.v:0.0-0.0
+Info:  0.0 30.6  Source output_words.0.7$RAMW_SLICE.WDO1
+Info:  0.1 30.6    Net output_words.0.7$RAMW_SLICE$conn$WDO1 budget -0.271000 ns (31,5) -> (31,5)
+Info:                Sink output_words.0.7$DPRAM_COMB1.WD
+Info:  0.0 30.6  Setup output_words.0.7$DPRAM_COMB1.WD
+Info: 14.6 ns logic, 16.0 ns routing
+
+ERROR: Max frequency for clock 'clk': 32.63 MHz (FAIL at 100.00 MHz)
