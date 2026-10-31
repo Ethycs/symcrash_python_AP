@@ -33,11 +33,14 @@ Hosts prepare it at initialization when missing. It is independent of preset
 capsule compilation, and is mapped read-only during playback. Stop running
 hosts before rebuilding an existing image with `--force`, especially on Windows.
 
-Mode A's companion image contains 643 tables (21,072,476 bytes). Prepare it
+Mode A's companion image contains 63,508 tables (2,081,284,256 bytes). Prepare it
 with `pixi run python tools/prepare_mode_a_tables.py`; hosts also prepare it
 at initialization. Both images are disposable build outputs, independent of
-musical checkpoints. The Mode A image preserves the existing native and legacy
-waveform recipes, including their distinct C4 tables.
+musical checkpoints. Mode A v2 covers every shared integer-cent Q32 pitch,
+with a pitch-dependent harmonic cap and three distinct legacy C4 tables.
+The old 21 MB v1 image is superseded; its fingerprint cannot be adopted as v2.
+The offline builder uses up to eight workers; `--workers 1` selects serial
+generation with identical bytes.
 
 The separate legacy `library.preset_model` API supports WSE-STD-070 tower
 objects. Its `save_preset`/`load_preset` functions use a 16-byte header plus the

@@ -397,7 +397,9 @@ class TestModeAModeBParity:
         )
 
         note = 69
-        phase_inc = freq_to_phase_inc(440.0, SAMPLE_RATE)
+        from symcrash_python_ap.fixed import midi_to_phase_inc_fixed
+        # Both prepared oscillator paths use the canonical rounded Q32 pitch.
+        phase_inc = midi_to_phase_inc_fixed(note)
 
         # Mode A
         ccs_state = CCSState()

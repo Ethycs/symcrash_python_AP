@@ -339,6 +339,9 @@ def generate_golden_stress_sequence() -> List[GoldenFrame]:
 # Updated 2026-01-02: Phase-coherent wet path (mask smoothing + C⁰ seam stitching, no windowing)
 # Updated 2026-01-03: Disable DC removal for VM path (CCS is phase-continuous with zero DC)
 # Updated 2026-01-05: Skip SheafProject in CCS mode (was corrupting polyphase coefficients)
+# Refreshed for exact Q32 Mode A tables and RNE interpolation, 2026-10-30.
+# Original implementation reproduces the previous hash; a scalar oracle
+# reproduces the new trace. See regen_reports/mode_a_pitch_20261030.txt.
 FROZEN_BLOCK_HASHES: List[str] = [
     "5856ebdb6ce150e0e2fe5daff34715f29927de1386e465b455e453a69f66a604",
     "c267cdea2eef2c2053cb4b4ccebbe6a687caa48889484b7b633f1c65fa4a2c25",
@@ -355,7 +358,7 @@ FROZEN_BLOCK_HASHES: List[str] = [
     "5d4fcfa85113d816a0f76b98fc3370eba3984613a0ffedfc3be7f93bba0136f4",
     "4a991434d3c9bf044314dc254aec686300f5a33318693270d23dfd251b15a8bd",
     "56675c5e5c338b44a969d1e437b305590cb7f96d225cc37686f5e51ac53b1f00",
-    "42799afd8c4428585b12c7fa63879223264457d9721a0f26c128528d8271e039",
+    "7943de0edeee3a53036d0deb91413fd9478c2de77b28c3f81c4c09bf983e072b",
     "615007be9238b3632f93243c3d2d3f9c28de398bf849bf6e40658a2616bc182b",
     "654aa561f0ba067187bc63074379ba2d737b3bf3f1f1cccc49547c8dc16fd7df",
     "25ab9e63c782802179ec22f3cd78cc2c2658b995941b0642b83d173d98564eb3",
@@ -367,7 +370,7 @@ FROZEN_BLOCK_HASHES: List[str] = [
     "65a929a0737d8dac0b931e8e043a2f05a1ea2d6a58eff9a72b13ae4686d95862",
     "3a857a5affb9c41ed7238f850ca75e1f64589a690c3a1213cd9eb4bb7584e375",
     "d56d84b384a1c4c324d94efeda2971411edb9deae08b199ef5fa4d6841c6393d",
-    "4f03537523fd8bcbbb0ee1b0850431b02a35199d484f14568cc9f32786b2a6a9",
+    "b9ce1c8083a4338f2d88bcd968523bdcf3b4c094ad8dc14bf3e47cb75bb5ab0e",
     "172ecb113ba1b03321fb29d1e4bc40b86ab151f957f76df1ed6699ee5ab7276f",
     "d5571c6807add5a71fc084c54d3d16ae309c61d45306444124fb5677dbff6e91",
     "bb6e568ee81bec43732fe55ce8f3b0c6d81a626817978365daf7aad0d1ed1981",
@@ -384,7 +387,7 @@ FROZEN_BLOCK_HASHES: List[str] = [
     "f38decfc748a25144fa371bc5ad4da3ab37dcb4ce8255001425b3f9dae86709a",
     "2fcbf5ce967f0fddc0fa1d6069f418965458f612c8d879900b806863b090bbd5",
     "7bb0bb2cd19886a7f39cb2e579c2453c3fb415ef2aa9564464da1caf598209f3",
-    "a64fc66d0f8ec64dcb1246ac5041931814b3eef7a14abf4cf59dd2d5c1d427ca",
+    "7fc8620853a11d8182ef78ee40cee2bac6a8702d080a3c987deda11264efc0b2",
     "be6021f8efcb2db74b1cf9acd8b62cc37729ce6e4584d17b90bd5d9be69e1f9f",
     "5879368da67c4514e0d8aa32e5775e6aa9139794df8c6a92d09e299044bb9e86",
     "47b1d16324f0ff145973e38e7652886a459ce1c15afe778edd77fd4b8657cf53",
@@ -401,14 +404,14 @@ FROZEN_BLOCK_HASHES: List[str] = [
     "1916be1a0f59d33c3c8b16eceb90d28cee44064f0091c105e07dbc9f12d63e5f",
     "0317c13f79a6bca172590350f0e65efbf8b7e161e1ffa6dfb73420baf3267a59",
     "c89a05ff1380503bd599af8f216af06bb746a3aa6406a974d9fdf81ca9744e06",
-    "a8f9b0bfc91e1161d94ed0d23830500cb835d10713d70ef894da867e33171cca",
+    "56bb9447c4e0f409c313e802db6a5d19528e7268a44906b386fddefaebb314cd",
     "313b9f543465c714567ab754f900966db6d2c0f2547c741545625bdf757c1148",
     "854a49d0de3dfdbd5b5846c6d32a7777a0c1c9ba6bfa16ac0d545dbfb8a4a642",
 ]
 
 # Final trace hash (hash of all block hashes concatenated)
 # Reviewed explicit mask delivery; audit: regen_reports/scheduled_vm_20261030.txt
-FROZEN_TRACE_HASH = "a313b041a6b4d2c05bdfc31cb5b2c90bc2f7270396c0b557bf9a61d52bb937a6"
+FROZEN_TRACE_HASH = "fe3e3419b8f5b439a27eb142b0724575f8198eb6f64179d463026587551d5cc8"
 
 
 # =============================================================================

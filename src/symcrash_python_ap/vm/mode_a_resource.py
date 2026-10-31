@@ -10,20 +10,23 @@ from threading import Lock
 
 import numpy as np
 
-from .mode_a_recipe import (NOTE_FREQUENCIES_HZ, NOTE_PHASE_INCREMENTS,
+from ..pitch_rom import MIDI_CENT_PHASE_Q32
+from .mode_a_recipe import (PITCH_FREQUENCIES_HZ,
     PULSE_AMPLITUDES, LEGACY_FREQUENCY_HZ, LEGACY_PHASE_INCREMENT)
 
-MAGIC = b'SYMLUT01'
-VERSION = 1
+MAGIC = b'SYMLUT02'
+VERSION = 2
 HEADER = struct.Struct('<8sII32s32s')
 SLOTS = 4
 PHASES = 64
 TABLE_BYTES = 64 * SLOTS * PHASES * 2
-NOTE_TABLES = 5 * 128
+PITCH_COUNT = len(MIDI_CENT_PHASE_Q32)
+NOTE_TABLES = 5 * PITCH_COUNT
 TABLE_COUNT = NOTE_TABLES + 3
 WAVE_NAMES = ('sine', 'saw', 'square', 'triangle', 'pulse')
 _active = None
 _prepare_lock = Lock()
+_PITCH_TO_CENT = {phase: cent for cent, phase in enumerate(MIDI_CENT_PHASE_Q32)}
 
 
 def _wave_id(value):
@@ -33,12 +36,23 @@ def _wave_id(value):
     return int(value)
 
 
-def note_address(wave_id, note):
-    """Use the shared pitch law's clamped MIDI address; keep unknown-ID fallback."""
+def note_address(wave_id, note, cents=0):
+    """Use exactly the shared pitch law's complete, saturated cent address."""
     from ..primitives import _pitch_cent_index
     wave = _wave_id(wave_id)
-    canonical_note = _pitch_cent_index(note, 0) // 100
-    return wave, canonical_note, (wave if wave < 5 else 0) * 128 + canonical_note
+    cent = _pitch_cent_index(note, cents)
+    return wave, cent, (wave if wave < 5 else 0) * PITCH_COUNT + cent
+
+
+def phase_address(wave_id, phase_inc):
+    """Only exact prepared Q32 pitches are supported; never silently retune."""
+    wave = _wave_id(wave_id)
+    if not isinstance(phase_inc, Integral) or isinstance(phase_inc, bool):
+        raise ValueError('Mode A phase increment must be a prepared Q32 integer')
+    cent = _PITCH_TO_CENT.get(int(phase_inc))
+    if cent is None:
+        raise ValueError('Mode A phase increment is absent from the prepared pitch domain')
+    return wave, cent, (wave if wave < 5 else 0) * PITCH_COUNT + cent
 
 
 def legacy_address(wave_id):
@@ -62,10 +76,10 @@ def _validated_keys(keys):
 @lru_cache(maxsize=1)
 def recipe_digest():
     from .hotpath_jit import _get_sine_lut_np
-    digest = hashlib.sha256(b'ModeA-v1/Fs48000/N64/K4/P64/headroom1/RMS16384-floor/'
-        b'five-H32-waveforms/legacy-C4-H16/SineCore-RNE/FWPT-RNE')
-    for values, dtype in [(_get_sine_lut_np(), '<i4'), (NOTE_FREQUENCIES_HZ, '<f8'),
-            (NOTE_PHASE_INCREMENTS, '<u4'), (PULSE_AMPLITUDES, '<f8')]:
+    digest = hashlib.sha256(b'ModeA-v2/Fs48000/N64/K4/P64/headroom1/half-scale-floor/'
+        b'integer-cent-Q32-RNE/Hmin32-floor9x2^31-div10inc/legacy-C4-H16/SineCore-RNE/FWPT-RNE')
+    for values, dtype in [(_get_sine_lut_np(), '<i4'), (PITCH_FREQUENCIES_HZ, '<f8'),
+            (MIDI_CENT_PHASE_Q32, '<u4'), (PULSE_AMPLITUDES, '<f8')]:
         digest.update(np.asarray(values, dtype=dtype).tobytes())
     digest.update(struct.pack('<dI', LEGACY_FREQUENCY_HZ, LEGACY_PHASE_INCREMENT))
     return digest.digest()
@@ -111,9 +125,10 @@ class PreparedModeAAtlas:
         if type(key) is not int or key not in self._offsets:
             raise ValueError('Table is absent from the prepared Mode A resource')
         if key < NOTE_TABLES:
-            wave, note = divmod(key, 128)
-            frequency = NOTE_FREQUENCIES_HZ[note]
-            name = f'{WAVE_NAMES[wave]}_{note}'
+            wave, cent = divmod(key, PITCH_COUNT)
+            frequency = PITCH_FREQUENCIES_HZ[cent]
+            note, cents = divmod(cent, 100)
+            name = f'{WAVE_NAMES[wave]}_{note}' + (f'+{cents}c' if cents else '')
         else:
             wave = key - NOTE_TABLES
             frequency, name = LEGACY_FREQUENCY_HZ, WAVE_NAMES[wave]
@@ -146,7 +161,7 @@ def prepare_mode_a_resources(path=None, *, build_if_missing=True):
                 raise
             from .mode_a_resource_builder import build_mode_a_resource
             logging.getLogger(__name__).warning(
-                'Preparing Mode A table resource (%s); first startup uses about 21 MB of disk space', target)
+                'Preparing Mode A table resource (%s); first startup uses about 1.94 GiB of disk space', target)
             try:
                 build_mode_a_resource(target)
             except PermissionError:

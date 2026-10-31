@@ -1,4 +1,4 @@
-"""Mode A preparation preserves the original tables and removes playback FWPT."""
+"""Mode A resources use exact commanded pitch without playback generation."""
 from dataclasses import replace
 import json
 import subprocess
@@ -20,10 +20,28 @@ def atlas():
     return resource.prepare_mode_a_resources()
 
 
-def original_table(wave, note):
-    return lut.StreamingCoeffLUT.generate_for_frequency(wave,
-        f'{resource.WAVE_NAMES[wave]}_{note}', lut.midi_to_hz(note),
-        lut.get_waveform_generator(wave)[0])
+def reference_table(wave, note, cents=0):
+    """Scalar oracle: independent pitch rounding, phase enumeration and FWPT."""
+    from tests.conformance.test_pitch_conversion import oracle
+    from symcrash_python_ap.wavelet.fast_lifting import fwpt_jit
+    inc = oracle(note, cents)
+    count = min(32, (9 * 2**31) // (10 * inc))
+    generator = [lut.sine_q15, lut._saw_q15, lut._square_q15,
+                 lut._triangle_q15, lut._pulse_q15][wave]
+    data = np.empty((64, 4, 64), dtype=np.int16)
+    for p in range(64):
+        for k in range(4):
+            block = []
+            for n in range(64):
+                phase = ((p << 26) + (n+k)*inc) % 2**32
+                value = generator(phase) if wave == 0 else generator(phase, max_harmonics=count)
+                block.append(max(-32768, min(32767, value * 16384 // 32767)))
+            data[:, k, p] = fwpt_jit(block, headroom_bits=1)
+    cent = max(0, min(12700, max(0, min(127, note))*100+cents))
+    n, c = divmod(cent, 100)
+    name = f'{resource.WAVE_NAMES[wave]}_{n}' + (f'+{c}c' if c else '')
+    return lut.StreamingCoeffLUT(wave, name, data,
+        target_freq_hz=440 * 2**((cent-6900)/1200))
 
 
 def prohibit_preparation(monkeypatch):
@@ -40,8 +58,8 @@ def prohibit_preparation(monkeypatch):
 
 @pytest.mark.parametrize('wave', range(5))
 @pytest.mark.parametrize('note', [0, 69, 127])
-def test_all_coefficients_match_original_scalar_recipe(atlas, wave, note):
-    expected = original_table(wave, note)
+def test_all_coefficients_match_exact_pitch_scalar_recipe(atlas, wave, note):
+    expected = reference_table(wave, note)
     actual = lut.get_lut_for_note(wave, note)
     assert (actual.wave_id, actual.name, actual.target_freq_hz) == (
         expected.wave_id, expected.name, expected.target_freq_hz)
@@ -65,8 +83,8 @@ def test_legacy_tables_keep_their_distinct_c4_recipe(atlas, wave):
 def test_complete_domain_and_bounded_views_without_generation(atlas, monkeypatch):
     prohibit_preparation(monkeypatch)
     lut.clear_mode_a_views()
-    assert len(atlas.keys) == 643
-    assert atlas.path.stat().st_size == 21072476
+    assert len(atlas.keys) == 63508
+    assert atlas.path.stat().st_size == 2081284256
     for wave in range(5):
         for note in range(128):
             table = lut.get_lut_for_note(wave, note)
@@ -77,7 +95,7 @@ def test_complete_domain_and_bounded_views_without_generation(atlas, monkeypatch
     retained = lut.get_lut_for_note(4, 0)
     lut.get_lut_for_note(0, 0)
     assert lut.get_lut_for_note(4, 0) is retained
-    assert (4, 1) not in lut._NOTE_LUT_CACHE  # least recently used view was evicted
+    assert (4, 100) not in lut._NOTE_LUT_CACHE  # least recently used view was evicted
     for wave in range(3):
         assert lut.get_streaming_lut(wave).data.shape == (64, 4, 64)
     lut.clear_mode_a_views()
@@ -105,14 +123,14 @@ def test_invalid_lookup_ids_are_rejected(atlas, wave):
 
 @pytest.fixture
 def small_resource(tmp_path):
-    keys = (0, 255, 640, 642)
+    keys = (0, 255, resource.NOTE_TABLES, resource.NOTE_TABLES+2)
     path = builder.build_mode_a_resource(tmp_path / 'small.bin', table_keys=keys)
     return path, keys
 
 
 def test_deterministic_builder_and_explicit_partial_images(small_resource, tmp_path):
     path, keys = small_resource
-    other = builder.build_mode_a_resource(tmp_path / 'other.bin', table_keys=keys)
+    other = builder.build_mode_a_resource(tmp_path / 'other.bin', table_keys=keys, workers=1)
     assert path.read_bytes() == other.read_bytes()
     with pytest.raises(ValueError, match='coverage'):
         resource.PreparedModeAAtlas(path)
@@ -139,7 +157,7 @@ def test_rejects_corrupt_resources(small_resource, damage):
         resource.PreparedModeAAtlas(path, expected_keys=keys)
 
 
-@pytest.mark.parametrize('keys', [(), (1, 1), (2, 1), (-1,), (643,), (True,), (1.5,)])
+@pytest.mark.parametrize('keys', [(), (1, 1), (2, 1), (-1,), (63508,), (True,), (1.5,)])
 def test_invalid_directories_leave_no_files(tmp_path, keys):
     with pytest.raises(ValueError):
         builder.build_mode_a_resource(tmp_path / 'invalid.bin', table_keys=keys)
@@ -158,6 +176,29 @@ def test_interrupted_build_and_failed_adoption_keep_previous_resource(atlas, tmp
     with pytest.raises(FileNotFoundError):
         resource.prepare_mode_a_resources(tmp_path / 'absent.bin', build_if_missing=False)
     assert resource.prepared_mode_a_atlas() is atlas
+
+
+def test_worker_failure_keeps_previous_destination_and_removes_temporary(tmp_path, monkeypatch):
+    from symcrash_python_ap.pitch_rom import MIDI_CENT_PHASE_Q32
+    target = tmp_path / 'existing.bin'
+    target.write_bytes(b'previous resource')
+    generate = builder._generate_table
+    def failing(lut_data, inc, *args):
+        if inc == MIDI_CENT_PHASE_Q32[255]:
+            raise RuntimeError('failed worker')
+        return generate(lut_data, inc, *args)
+    monkeypatch.setattr(builder, '_generate_table', failing)
+    with pytest.raises(RuntimeError, match='failed worker'):
+        builder.build_mode_a_resource(target, table_keys=(0,255,256,257), workers=4)
+    assert target.read_bytes() == b'previous resource'
+    assert list(tmp_path.iterdir()) == [target]
+
+
+@pytest.mark.parametrize('workers', [0,-1,True,1.5])
+def test_invalid_worker_counts_create_no_files(tmp_path, workers):
+    with pytest.raises(ValueError, match='workers'):
+        builder.build_mode_a_resource(tmp_path / 'invalid.bin', table_keys=(0,), workers=workers)
+    assert not list(tmp_path.iterdir())
 
 
 def test_adoption_clears_views_and_keeps_retained_arrays_valid(atlas, monkeypatch):
@@ -264,10 +305,12 @@ def commands():
 
 def test_cache_misses_and_json_core_restore_preserve_audio(atlas, monkeypatch, execution_path):
     frames = commands()
-    originals = {(f.coeff_table_id, f.note): original_table(f.coeff_table_id, f.note) for f in frames}
+    from symcrash_python_ap.fixed import midi_to_phase_inc_fixed
+    originals = {(f.coeff_table_id, midi_to_phase_inc_fixed(f.note, f.cents)):
+        reference_table(f.coeff_table_id, f.note, f.cents) for f in frames}
     reference = VMState.create(0)
     with monkeypatch.context() as patch:
-        patch.setattr(lut, 'get_lut_for_note', lambda wave, note: originals[wave, note])
+        patch.setattr(lut, 'get_lut_for_pitch', lambda wave, pitch: originals[wave, pitch])
         expected = [vm_step_block(reference, f)[1].copy() for f in frames]
     state = VMState.create(0)
     prohibit_preparation(monkeypatch)
@@ -350,11 +393,11 @@ def test_hosts_prepare_before_late_voice_allocation(atlas, monkeypatch, tmp_path
     monkeypatch.setattr(resource, 'PreparedModeAAtlas', type(atlas))
     prohibit_preparation(monkeypatch)
     lookups = []
-    lookup = lut.get_lut_for_note
+    lookup = lut.get_lut_for_pitch
     def observing(wave, note):
         lookups.append((wave, note))
         return lookup(wave, note)
-    monkeypatch.setattr(lut, 'get_lut_for_note', observing)
+    monkeypatch.setattr(lut, 'get_lut_for_pitch', observing)
     try:
         if kind in ('master', 'workbench'):
             host.note_on(69)

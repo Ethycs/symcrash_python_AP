@@ -431,7 +431,7 @@ def vm_step_block(
     if wire_carrier is None and (getattr(frame, 'coeff_osc_mode', 0) or 0) == OSC_MODE_A:
         from .mode_a_resource import prepared_mode_a_atlas, note_address
         table_id = getattr(frame, 'coeff_table_id', 0)
-        note_address(0 if table_id is None else table_id, getattr(frame, 'note', 60))
+        note_address(0 if table_id is None else table_id, getattr(frame, 'note', 60), pitch_cents)
         prepared_mode_a_atlas()
     if (getattr(frame, 'coeff_osc_mode', 0) == OSC_MODE_B or
             wire_carrier is not None and wire_carrier.role != 0 and wire_carrier.model < 5):
@@ -581,8 +581,10 @@ def vm_step_block(
             elif params.fm_source == FM_SOURCE_LFO and params.fm_modulator_q15 is not None:
                 mb_state.fm_mod_buffer = np.array(params.fm_modulator_q15, dtype=np.int16)
 
-    if state.ccs_state.phase_inc != params.phase_inc:
-        state.ccs_state.set_pitch(params.phase_inc, slew_blocks=8)
+    if state.ccs_state.phase_inc != params.phase_inc or state.ccs_state.phase_slew_rate:
+        # The VoiceFrame owns the pitch trajectory. A hidden VM glide both
+        # delays accepted commands and disagrees with prepared table increments.
+        state.ccs_state.set_pitch(params.phase_inc, slew_blocks=0)
         if osc_mode == OSC_MODE_B:
             state.mode_b_state.phase_inc = params.phase_inc
 

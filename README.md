@@ -30,11 +30,12 @@ the existing image; pitch changes do not run forward wavelet transforms.
 The [resource profile](symcrash_docs/05%20-%20Standards/06%20-%20CCS/WSE-IMPL-BASIS-RESOURCE-v1.md)
 describes custom locations, regeneration and remaining device-timing limits.
 
-Mode A also uses a prepared image: 643 native and legacy tables in about
-21 MB, built in 9.38 seconds locally. Hosts prepare both images before playback.
-Mode A cache misses only create views of immutable data. Its
-[resource profile](symcrash_docs/05%20-%20Standards/06%20-%20CCS/WSE-IMPL-MODE-A-RESOURCE-v1.md)
-records the preserved nominal-note tuning and fixed-harmonic limitations.
+Mode A uses an exact integer-cent pitch image: 63,508 tables in about
+1.94 GiB, built in 87.7 seconds locally. Hosts prepare both images before playback.
+Its tables follow the shared Q32 pitch law and cap source harmonics below
+0.9 Nyquist; cache misses only create views of immutable data. The
+[pitch/resource profile](symcrash_docs/05%20-%20Standards/06%20-%20CCS/WSE-IMPL-MODE-A-RESOURCE-v2.md)
+documents the desktop storage tradeoff and remaining qualification limits.
 
 ## Project Structure
 

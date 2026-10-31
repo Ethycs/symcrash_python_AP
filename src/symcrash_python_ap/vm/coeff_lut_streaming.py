@@ -2,7 +2,7 @@
 WSE-STD-121 — Streaming CoeffLUT (True Subband Time-Series)
 ===========================================================
 
-Implements the nominal-note Mode A table path. The desktop resource profile
+Implements the integer-cent Mode A table path. The desktop resource profile
 documents its scope and remaining WSE-STD-120 qualification limits.
 
 Key insight from CCS-ARCHITECTURE-GAP.md:
@@ -22,10 +22,11 @@ The K dimension is critical: each leaf has K time samples that represent
 a STREAMING subband signal, not a single coefficient value.
 
 Offline Generation:
-    The desktop resource builder preserves the historical nominal-note recipe:
+    The desktop resource builder uses the shared rounded Q32 pitch ROM:
     64-sample waveform blocks at 64 phase bins and four sample offsets, scaled
     by Q15_HALF/Q15_ONE, then transformed with FWPT. Five native waveforms at
-    128 MIDI notes and three distinct legacy C4 tables are prepared at startup.
+    12,701 integer-cent pitches and three legacy C4 tables are prepared at startup.
+    Native source harmonics are capped below 0.9 Nyquist, with at most 32 partials.
     The offline generate_* methods below remain available for diagnostics.
 
 Runtime:
@@ -68,8 +69,8 @@ DEFAULT_INTERP_MODE = INTERP_LINEAR
 # =============================================================================
 # WAVEFORM IDs
 # =============================================================================
-# The historical recipes have a fixed harmonic cap, not a pitch-dependent
-# Nyquist cap. Resource preparation preserves this spectral limitation.
+# Native prepared tables cap harmonics at 0.9 Nyquist for their exact pitch.
+# The standalone historical waveform functions retain an explicit count input.
 # Waveforms are generated at Q15 amplitude and normalized for consistent levels.
 
 WAVE_SINE = 0       # Pure sine wave (fundamental only)
@@ -78,7 +79,7 @@ WAVE_SQUARE = 2     # Square wave - odd harmonics only: 1/h amplitude series
 WAVE_TRIANGLE = 3   # Triangle wave - odd harmonics only: 1/h² amplitude series
 WAVE_PULSE = 4      # Pulse wave - all harmonics with alternating signs
 
-# Historical maximum harmonic count (does not prevent high-note aliasing).
+# Maximum harmonic count; native resource generation also applies the pitch cap.
 MAX_HARMONICS = 32
 
 
@@ -86,6 +87,15 @@ def midi_to_hz(note: int, cents: int = 0) -> float:
     """Convert MIDI note to Hz."""
     semitones = note - 69 + (cents / 100.0)
     return 440.0 * (2.0 ** (semitones / 12.0))
+
+
+def _rshift_rne_array(value, bits):
+    """Widened signed rounding with even ties for coefficient interpolation."""
+    quotient = value >> bits
+    remainder = value & ((1 << bits) - 1)
+    half = 1 << (bits - 1)
+    return quotient + ((remainder > half) |
+                       ((remainder == half) & ((quotient & 1) != 0)))
 
 
 @dataclass
@@ -98,8 +108,8 @@ class StreamingCoeffLUT:
     This represents SUBBAND TIME SERIES, not spectral snapshots.
     Each leaf has K time samples that evolve continuously.
 
-    NOTE: This is a per-note table. The target_freq_hz bakes in the
-    frequency so that IDWPT reconstruction produces the correct pitch.
+    Native resources use the exact accepted Q32 increment. target_freq_hz is
+    display metadata; it does not determine playback phase stepping.
     """
     wave_id: int
     name: str
@@ -171,7 +181,6 @@ class StreamingCoeffLUT:
         frac_bits = shift
         frac = phase_32 & ((1 << frac_bits) - 1)
         frac_64 = np.int64(frac)
-        half = np.int64(1) << (frac_bits - 1)
 
         if interp_mode == INTERP_CUBIC:
             # Cubic Hermite interpolation for smoother results with fewer phase bins
@@ -203,10 +212,10 @@ class StreamingCoeffLUT:
             # Horner's method: val = ((a3*t + a2)*t + a1)*t + a0
             # Each step scales by frac_bits
             # Start with a3 * t
-            val = (a3 * frac_64 + half) >> frac_bits
-            val = ((val + a2) * frac_64 + half) >> frac_bits
-            val = ((val + a1) * frac_64 + half) >> frac_bits
-            val = (val + a0 + 1) >> 1  # Final division by 2 with rounding
+            val = _rshift_rne_array(a3 * frac_64, frac_bits)
+            val = _rshift_rne_array((val + a2) * frac_64, frac_bits)
+            val = _rshift_rne_array((val + a1) * frac_64, frac_bits)
+            val = _rshift_rne_array(val + a0, 1)
 
         else:
             # Linear interpolation (default, fastest)
@@ -214,11 +223,12 @@ class StreamingCoeffLUT:
 
             # Fixed-point lerp:
             #   val = v0 + (v1 - v0) * frac / 2^frac_bits
-            # with rounding to nearest.
+            # Round the complete interpolated coefficient, including v0's
+            # parity on a tie, rather than rounding only the delta.
             v0 = self.data[:, :, phase_idx].astype(np.int64)
             v1 = self.data[:, :, phase_idx_next].astype(np.int64)
             diff = v1 - v0
-            val = v0 + ((diff * frac_64 + half) >> frac_bits)
+            val = _rshift_rne_array((v0 << frac_bits) + diff * frac_64, frac_bits)
 
         np.clip(val, Q15_NEG_ONE, Q15_ONE, out=val)
         output[:, :] = val.astype(np.int16)
@@ -661,28 +671,38 @@ def clear_mode_a_views() -> None:
     _STREAMING_LUT_LIBRARY = None
 
 
-def get_lut_for_note(wave_id: int, midi_note: int) -> StreamingCoeffLUT:
+def get_lut_for_note(wave_id: int, midi_note: int, cents: int = 0) -> StreamingCoeffLUT:
     """
-    Get StreamingCoeffLUT for a specific MIDI note.
+    Get StreamingCoeffLUT for the complete, clamped integer-cent MIDI pitch.
 
     The frequency is baked into each prepared table. Cache misses create
     read-only mapped views; they perform no generation, transforms or file I/O.
-    The note address follows the shared pitch law's MIDI 0..127 clamp.
+    The address and table increment follow the shared pitch ROM exactly.
 
     Args:
         wave_id: Waveform ID (WAVE_SINE=0, WAVE_SAW=1, WAVE_SQUARE=2, WAVE_TRIANGLE=3, WAVE_PULSE=4)
         midi_note: MIDI note number (0-127)
+        cents: Integer-cent offset; complete pitch saturates to MIDI 0..127.
 
     Returns:
         StreamingCoeffLUT for this note/waveform combination
     """
-    from .mode_a_resource import prepared_mode_a_atlas, note_address
+    from .mode_a_resource import note_address
+    return _get_prepared_view(*note_address(wave_id, midi_note, cents))
+
+
+def get_lut_for_pitch(wave_id: int, phase_inc: int) -> StreamingCoeffLUT:
+    """Read a table generated for the exact accepted Q32 phase increment."""
+    from .mode_a_resource import phase_address
+    return _get_prepared_view(*phase_address(wave_id, phase_inc))
+
+
+def _get_prepared_view(wave, cent, table_key):
+    from .mode_a_resource import prepared_mode_a_atlas
     atlas = prepared_mode_a_atlas()
-    wave, note, table_key = note_address(wave_id, midi_note)
-    cache_key = (wave, note)
-    if cache_key in _NOTE_LUT_CACHE:
-        result = _NOTE_LUT_CACHE.pop(cache_key)
-    else:
+    cache_key = (wave, cent)
+    result = _NOTE_LUT_CACHE.pop(cache_key, None)
+    if result is None:
         result = atlas.table(table_key, wave_id=wave)
     _NOTE_LUT_CACHE[cache_key] = result
     if len(_NOTE_LUT_CACHE) > MAX_MODE_A_VIEWS:
@@ -766,15 +786,15 @@ def ccs_generate_coeffs(
     Generate 64 leaf coefficients from CCS state.
 
     This is the main interface for the VM to get carrier coefficients.
-    Uses per-note LUT cache for correct frequency.
+    Uses the prepared table for the state's exact accepted Q32 increment.
 
     Args:
         ccs_state: CCS oscillator state
         output_coeffs: np.ndarray[64] int16 output buffer (modified in place)
         base_mix_q15: Blend factor (not used here, handled by caller)
     """
-    # Get LUT for this note
-    lut = get_lut_for_note(ccs_state.wave_id, ccs_state.note)
+    # Table and oscillator progression use the same Q32 increment.
+    lut = get_lut_for_pitch(ccs_state.wave_id, ccs_state.phase_inc)
 
     # Get subband samples for current phase (just k=0 for stepping stone)
     subband_output = np.zeros((NUM_LEAVES, lut.K), dtype=np.int16)
@@ -808,8 +828,8 @@ def ccs_generate_coeffs_polyphase(
         output_coeffs: np.ndarray[64 * K] int16 output buffer (modified in place)
                        Layout: leaf-major, with K consecutive slots per leaf.
     """
-    # Get LUT for this note
-    lut = get_lut_for_note(ccs_state.wave_id, ccs_state.note)
+    # Table and oscillator progression use the same Q32 increment.
+    lut = get_lut_for_pitch(ccs_state.wave_id, ccs_state.phase_inc)
 
     # Get all K subband samples for current phase
     subband_output = np.zeros((NUM_LEAVES, lut.K), dtype=np.int16)
@@ -836,6 +856,7 @@ __all__ = [
     # LUT access
     'get_streaming_lut',
     'get_lut_for_note',
+    'get_lut_for_pitch',
     'get_waveform_generator',
     # Synthesis functions
     'streaming_idwpt_block',

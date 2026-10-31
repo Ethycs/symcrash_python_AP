@@ -144,15 +144,19 @@ class TestCCSConstants:
 class TestModeAConformance:
     """Mode A conformance tests per WSE-STD-121."""
 
-    @pytest.mark.skip(reason="LUT structure API not exposed - internal to CCS")
     def test_mode_a_lut_structure(self):
         """Mode A LUT MUST have shape [leaf L][time K][phase P]."""
-        pass
+        from symcrash_python_ap.vm import prepare_mode_a_resources
+        from symcrash_python_ap.vm.coeff_lut_streaming import get_lut_for_note, VM_K
+        prepare_mode_a_resources()
+        assert get_lut_for_note(0, 69, 37).data.shape == (64, VM_K, 64)
 
-    @pytest.mark.skip(reason="LUT structure API not exposed - internal to CCS")
     def test_mode_a_dtype(self):
         """Mode A LUT MUST use int16 (Q15) format."""
-        pass
+        from symcrash_python_ap.vm import prepare_mode_a_resources
+        from symcrash_python_ap.vm.coeff_lut_streaming import get_lut_for_note
+        prepare_mode_a_resources()
+        assert get_lut_for_note(0, 69, 37).data.dtype == np.dtype('int16')
 
     def test_mode_a_pitch_accuracy(self):
         """Mode A MUST produce correct pitch within 0.1% error."""
