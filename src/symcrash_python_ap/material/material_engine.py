@@ -635,6 +635,15 @@ class MaterialEngine:
         outL = []
         outR = []
 
+        if (type(self) is MaterialEngine
+                and type(self.delay_L) is DelayState and type(self.delay_R) is DelayState
+                and getattr(self._delay_sample, '__func__', None) is _DELAY_SAMPLE_REFERENCE
+                and soft_clip_q15 is _SOFT_CLIP_REFERENCE):
+            from .material_ring_jit import try_delay_program
+            result = try_delay_program(self, L, R, 6)
+            if result is not None:
+                return result
+
         # Map parameters to delay settings
         # drive: 0-32767 -> 0-48000 samples (0-1000ms at 48kHz)
         # FPGA-friendly: mono fits in BRAM (48000 samples = 96KB)
@@ -714,6 +723,15 @@ class MaterialEngine:
         """
         outL = []
         outR = []
+
+        if (type(self) is MaterialEngine
+                and type(self.chorus_L) is ChorusState and type(self.chorus_R) is ChorusState
+                and getattr(self._chorus_sample, '__func__', None) is _CHORUS_SAMPLE_REFERENCE
+                and sine_q15 is _SINE_REFERENCE):
+            from .material_ring_jit import try_delay_program
+            result = try_delay_program(self, L, R, 7)
+            if result is not None:
+                return result
 
         # Base delay for chorus effect (10-30ms typical)
         base_delay = 720  # 15ms at 48kHz
@@ -1072,6 +1090,15 @@ class MaterialEngine:
         outL = []
         outR = []
 
+        if (type(self) is MaterialEngine
+                and type(self.ks_L) is KarplusStrongState and type(self.ks_R) is KarplusStrongState
+                and getattr(self._ks_sample, '__func__', None) is _KS_SAMPLE_REFERENCE
+                ):
+            from .material_ring_jit import try_delay_program
+            result = try_delay_program(self, L, R, 10)
+            if result is not None:
+                return result
+
         # Map parameters
         exciter_mix = self.params.drive_q15
         damping = self.params.tone_q15
@@ -1141,3 +1168,8 @@ _FOLD_SAMPLE_REFERENCE = MaterialEngine._cat_fold_sample
 _CUSP_SAMPLE_REFERENCE = MaterialEngine._cat_cusp_sample
 _SOFT_CLIP_REFERENCE = soft_clip_q15
 _CUSP_HELPER_REFERENCE = catastrophe_cusp_sample
+
+_DELAY_SAMPLE_REFERENCE = MaterialEngine._delay_sample
+_CHORUS_SAMPLE_REFERENCE = MaterialEngine._chorus_sample
+_KS_SAMPLE_REFERENCE = MaterialEngine._ks_sample
+_SINE_REFERENCE = sine_q15

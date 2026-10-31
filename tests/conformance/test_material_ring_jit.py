@@ -132,10 +132,132 @@ def test_custom_methods_and_reference_switch_preserve_original_dispatch(monkeypa
 def test_fresh_construction_prepares_reverb_before_audio():
     script = '''
 from symcrash_python_ap.material.material_engine import MaterialEngine
-from symcrash_python_ap.material.material_ring_jit import reverb_channel
+from symcrash_python_ap.material import material_ring_jit as jit
 engine = MaterialEngine()
-assert reverb_channel.signatures
-reverb_channel.disable_compile()
+for kernel in (jit.reverb_channel, jit.delay_channel, jit.ks_channel,
+               jit.chorus_delays, jit.chorus_channel):
+    assert kernel.signatures
+    kernel.disable_compile()
 engine._reverb([32767] * 64, [-32768] * 64)
+engine._delay_line([32767] * 64, [-32768] * 64)
+engine._chorus([32767] * 64, [-32768] * 64)
+engine._karplus_strong([32767] * 64, [-32768] * 64)
 '''
     subprocess.run([sys.executable, '-c', script], check=True, timeout=60)
+
+
+PROGRAMS = {6: ('delay', '_delay_line'), 7: ('chorus', '_chorus'), 10: ('ks', '_karplus_strong')}
+
+
+@pytest.mark.parametrize('program', [6, 7, 10])
+@pytest.mark.parametrize('count,capacity', [(1,1), (7,3), (64,11), (64,960), (257,96)])
+@pytest.mark.parametrize('params', [(-32768,)*4, (32767,)*4, (16384,21000,12345,-11317)])
+def test_delay_programs_preserve_every_cell_across_wraps(program, count, capacity, params):
+    engine, reference = MaterialEngine(count), ReferenceMaterial(count)
+    prefix, method = PROGRAMS[program]
+    rng = np.random.default_rng(7900 + program)
+    identities = []
+    for side in ('L', 'R'):
+        state = getattr(engine, f'{prefix}_{side}')
+        state.max_samples = capacity
+        state.buffer = rng.integers(-32768, 32768, capacity + 3).tolist()
+        state.write_idx = capacity - 1
+        if program == 7:
+            state.lfo_phase = 0xffffffff if side == 'L' else 0x80000000
+        if program == 10:
+            state.delay_samples = 1 if side == 'L' else capacity
+            state.prev_sample = -32768 if side == 'L' else 32767
+        identities.append(id(state.buffer))
+        setattr(reference, f'{prefix}_{side}', deepcopy(state))
+    for obj in (engine, reference):
+        for name, value in zip(('drive_q15','tone_q15','pressure_q15','bias_q15'), params):
+            setattr(obj.params, name, value)
+    for _ in range(5):
+        channels = rng.integers(-32768,32768,(2,count)).tolist()
+        before = deepcopy(channels)
+        assert getattr(engine,method)(*channels) == getattr(reference,method)(*channels)
+        assert channels == before
+        for index, side in enumerate(('L','R')):
+            state = getattr(engine,f'{prefix}_{side}')
+            assert asdict(state) == asdict(getattr(reference,f'{prefix}_{side}'))
+            assert id(state.buffer) == identities[index]
+
+
+@pytest.mark.parametrize('program', [6, 7, 10])
+def test_default_delay_capacities_and_live_parameter_changes(program):
+    engine, reference = MaterialEngine(), ReferenceMaterial()
+    prefix, method = PROGRAMS[program]
+    rng = np.random.default_rng(7903)
+    for step in range(8):
+        values = rng.integers(-32768,32768,4).tolist()
+        for obj in (engine, reference):
+            for name,value in zip(('drive_q15','tone_q15','pressure_q15','bias_q15'),values):
+                setattr(obj.params,name,value)
+        channels = rng.integers(-32768,32768,(2,64)).tolist()
+        assert getattr(engine,method)(*channels) == getattr(reference,method)(*channels)
+        for side in ('L','R'):
+            assert asdict(getattr(engine,f'{prefix}_{side}')) == asdict(getattr(reference,f'{prefix}_{side}'))
+
+
+@pytest.mark.parametrize('program', [6, 7, 10])
+def test_delay_recurrences_match_independent_fraction_oracle(program):
+    from symcrash_python_ap.wavelet.sine_core import sine_q15
+    engine = MaterialEngine(17)
+    prefix, method = PROGRAMS[program]
+    for side in ('L','R'):
+        state=getattr(engine,f'{prefix}_{side}')
+        state.max_samples=5; state.buffer=[-32768,32767,-3,1,16384]; state.write_idx=4
+        if program==7:state.lfo_phase=0xfffffff0
+        if program==10:state.delay_samples=3;state.prev_sample=-32768
+    engine.params.drive_q15=1000;engine.params.tone_q15=-12345
+    engine.params.pressure_q15=16384;engine.params.bias_q15=0
+    expected=deepcopy(getattr(engine,f'{prefix}_L'))
+    clip=lambda x:max(-32768,min(32767,x))
+    mul=lambda a,b:clip(round(Fraction(a*b,32768)))
+    soft=lambda x:x if abs(x)<=24576 else (1 if x>=0 else -1)*min(32767,24576+(abs(x)-24576)//2)
+    source=[-32768,32767,-3,-1,1,3,16384,-16384]*2+[1]
+    outputs=[]
+    for x in source:
+        if program==6:delay=max(1,min(1000*48000//32768,4))
+        elif program==10:delay=3
+        else:
+            inc=round(Fraction((32767+49*1000)*(1<<32),10*32767*48000))
+            expected.lfo_phase=(expected.lfo_phase+inc)%(1<<32)
+            depth=(-12345*480)//32768
+            delay=max(1,min(720+round(Fraction(sine_q15(expected.lfo_phase)*depth,32768)),4))
+        delayed=expected.buffer[(expected.write_idx-delay)%5]
+        if program==6:
+            write=clip(x+mul(delayed,-12345))
+            value=soft(clip(mul(x,32767-16384)+mul(delayed,16384)))
+        elif program==7:
+            write=x;value=clip(mul(x,32767-16384)+mul(delayed,16384))
+        else:
+            average=(expected.prev_sample+delayed)//2
+            filtered=delayed+mul(average-delayed,-12345)
+            write=clip(mul(x,1000)+mul(filtered,29491+16384*3276//32768))
+            expected.prev_sample=delayed;value=delayed
+        expected.buffer[expected.write_idx]=write
+        expected.write_idx=(expected.write_idx+1)%5
+        outputs.append(value)
+    assert getattr(engine,method)(source,source)[0] == outputs
+    assert asdict(getattr(engine,f'{prefix}_L')) == asdict(expected)
+
+
+@pytest.mark.parametrize('program', [6, 7, 10])
+def test_delay_program_alias_and_nonstandard_input_fallbacks(program):
+    engine=MaterialEngine();prefix,_=PROGRAMS[program]
+    left,right=getattr(engine,f'{prefix}_L'),getattr(engine,f'{prefix}_R')
+    before=deepcopy((asdict(left),asdict(right)))
+    assert jit.try_delay_program(engine,np.ones(64,dtype=np.int16),[1]*64,program) is None
+    assert before==(asdict(left),asdict(right))
+    right.buffer=left.buffer
+    before=deepcopy((asdict(left),asdict(right)))
+    assert jit.try_delay_program(engine,[1]*64,[2]*64,program) is None
+    assert before==(asdict(left),asdict(right))
+
+
+def test_chorus_boolean_writes_keep_reference_scalar_types():
+    engine=MaterialEngine()
+    assert jit.try_delay_program(engine,[True]*64,[False]*64,7) is None
+    engine._chorus([True]*64,[False]*64)
+    assert all(type(x) is bool for x in engine.chorus_L.buffer[:64])
