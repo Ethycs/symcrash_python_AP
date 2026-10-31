@@ -1,0 +1,1754 @@
+Parameterized CCS/owner integration evidence — 2026-10-31
+Fixed requirements: N64, K2/4/8, all leaves/slots, int16 stored coefficients, original wide intermediates, RNE, saturation and headroom 0..15.
+Target: ECP5-25K speed6 CSFBGA285; verified ABC9; OOC 100MHz seeds1/2/3. DMA window40000/block133333 clocks remain fixed.
+Compile-time parameterization selects the 99-clock K2 branch or the original 247-clock/group serial branch. This is not a runtime mixed-tier engine.
+Ready-frame/no-stall integrated service K2/K4/K8:183/331/642 clocks, including feeder/decode/output; fallback18. Full T2 workload remains unqualified.
+Physical tradeoffs: owner one-hot encoding adds8 FF; K2 chunked matching replaces64 callback-copy FF with8 equality flags, net -56.
+All64 descriptor bits remain checked; callback stage and protocol latency are unchanged. K4/K8 use direct matching in profiles/chunks/admission.
+Admission candidate: independently factored per-bank eligibility, no extra storage/clock, original duplicate/cancel rejection and bank0 priority.
+Proof scopes: exact admission equality; callback-match induction guarded for the simultaneous FREE->WAITING claim; physical FSM encoding equivalence.
+Negative controls reject wrong match-bank/chunk, missing new-claim exception, wrong admission predicate and corrupted physical FSM reset.
+Equiv_induct uses matched-point induction; reset-driven RTL/mapped tests are additional evidence, not a full routed-device proof.
+Mapped-owner tests use actual ECP5 functional primitives; remaining transport and decoder modules are RTL.
+Retained failures include FSM pre-optimization/quoted encfile setup, negative-log guard format, and the matched K2 600-second routing timeout.
+Failed seeds are retained; no clock target or service limit is relaxed. PHY, board clocks/I/O, global packing and complete voice workload remain open.
+
+| Candidate | K | Outcome | MHz seeds1/2/3 | LUT4/FF/CCU2C/DPR/DP |
+|---|---:|---|---|---|
+| k2_cut57 | 2 | 2/3 pass | 98.64851/101.04072/101.08157 | 5348/5309/717/272/2 |
+| ccs_unified57 | 2 | 1/3 pass | 100.99990/96.97440/98.03922 | 5385/5309/717/272/2 |
+| ccs_unified57 | 4 | 2/3 pass | 98.88263/106.80338/101.33765 | 3177/3549/436/64/14 |
+| ccs_unified57 | 8 | 3/3 pass | 100.79630/102.72214/102.46952 | 3277/3551/434/64/14 |
+| ccs_fsm57 | 2 | 1/3 pass | 105.59662/97.25735/98.28010 | 5194/5317/717/272/2 |
+| ccs_fsm57 | 4 | 3/3 pass | 103.09279/105.83130/106.56437 | 3079/3557/436/64/14 |
+| ccs_fsm57 | 8 | 3/3 pass | 103.22048/104.71204/103.75597 | 3046/3559/434/64/14 |
+| ccs_match57 | 2 | Seed 1 execution timeout at 600 seconds; no timing result; seeds 2/3 not run. | none | 5093/5255/717/272/2 |
+| ccs_match57 | 4 | 2/3 pass | 107.74701/99.86020/102.51153 | 3007/3495/436/64/14 |
+| ccs_match57 | 8 | 2/3 pass | 100.90817/97.25735/106.14585 | 3015/3497/434/64/14 |
+| ccs_profiles57 | 4 | 3/3 pass | 103.97172/105.50749/102.51153 | 3043/3557/436/64/14 |
+| ccs_profiles57 | 8 | 2/3 pass | 104.35146/97.83779/104.46046 | 3060/3559/434/64/14 |
+| ccs_chunks57 | 2 | 2/3 pass | 101.12246/97.02144/101.75010 | 5086/5261/717/272/2 |
+| ccs_chunks57 | 4 | 3/3 pass | 101.63634/101.90564/102.49052 | 3034/3557/436/64/14 |
+| ccs_chunks57 | 8 | 3/3 pass | 105.15247/106.13458/100.41169 | 3066/3559/434/64/14 |
+| ccs_admission57 | 2 | 3/3 pass | 104.56970/102.29133/104.35146 | 5093/5261/717/272/2 |
+| ccs_admission57 | 4 | 3/3 pass | 103.08215/102.67995/108.36584 | 3098/3557/436/64/14 |
+| ccs_admission57 | 8 | 3/3 pass | 107.06638/104.06910/105.77533 | 3104/3559/434/64/14 |
+
+{
+  "status": "Isolated engineering candidates. Production RTL and the prepared signed-commit indexes are unchanged.",
+  "unit_frames": {
+    "2": 1872,
+    "4": 2640,
+    "8": 4176
+  },
+  "unit_exact_samples": 556032,
+  "primitives": [
+    "PASS rounding_sums=327679 signed_ties=RNE saturation_inputs=262144",
+    "PASS headroom_values=2097152 widths=17 headroom=0..15 SAT16_before_and_after"
+  ],
+  "integration": [
+    {
+      "candidate": "k2_cut57",
+      "integrated_configurations": 6,
+      "exact_samples": 35904
+    },
+    {
+      "candidate": "ccs_unified57",
+      "integrated_configurations": 18,
+      "exact_samples": 173248,
+      "owner_configurations": 6
+    },
+    {
+      "candidate": "ccs_fsm57",
+      "integrated_configurations": 18,
+      "exact_samples": 173248,
+      "owner_configurations": 6
+    },
+    {
+      "candidate": "ccs_match57",
+      "integrated_configurations": 18,
+      "exact_samples": 173248,
+      "owner_configurations": 6
+    },
+    {
+      "candidate": "ccs_profiles57",
+      "integrated_configurations": 18,
+      "exact_samples": 173248,
+      "owner_configurations": 6
+    },
+    {
+      "candidate": "ccs_chunks57",
+      "integrated_configurations": 18,
+      "exact_samples": 173248,
+      "owner_configurations": 6
+    },
+    {
+      "candidate": "ccs_admission57",
+      "integrated_configurations": 18,
+      "exact_samples": 173248,
+      "owner_configurations": 6
+    }
+  ],
+  "routing": [
+    {
+      "candidate": "k2_cut57",
+      "K": 2,
+      "mhz": [
+        98.64851379394531,
+        101.04071807861328,
+        101.08157348632812
+      ],
+      "outcome": "2/3 pass",
+      "cells": {
+        "TRELLIS_FF": 5309,
+        "LUT4": 5348,
+        "CCU2C": 717,
+        "PFUMX": 700,
+        "L6MUX21": 56,
+        "TRELLIS_DPR16X4": 272,
+        "DP16KD": 2
+      },
+      "sources": {
+        "dma_window.v": "d3d7bc6921065d1c73d6a106ba3575d42e8003f49ef55075773de31d953c00d8",
+        "ccs_dma_window.v": "222beeaa24c763f534af692ac5e3304ae499397ed114fa36eae3cfc532fffddc",
+        "ccs_stream.v": "029691df17b9b69f927f1f6e58eaf4a227117530a5ca299951fb62a6d6ee54d2",
+        "coeff_buffer_owner.v": "19295c2811a70416069502063dace208a42ae086b3394ee16517860b1c44b66a",
+        "ccs_idwpt.v": "1c15e1c2bef691dbc6d4b90a309716a3a6e60d8a33d1b89f8691afe92b4d552d",
+        "dma_priority.v": "d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3",
+        "dma_burst.v": "9355a0fc89b63ba100a262589d394e7aa477bc36f51d01e64e937c455e58b7b6"
+      },
+      "netlist_sha256": "b648fbc532567e72253b40c5e1c77243649578fba6357d915a6c012194ab1458",
+      "critical_paths": [
+        {
+          "seed": 1,
+          "from": "Info:  0.5  0.5  Source window_ready_LUT4_Z_C_LUT4_Z_B_LUT4_C_Z_LUT4_Z_1_C_LUT4_Z_D_LUT4_Z_A_LUT4_B_Z_LUT4_Z_A_TRELLIS_FF_Q.Q",
+          "to": "Info:                Sink fault_tag_TRELLIS_FF_Q_16.CE",
+          "delay": "Info: 2.2 ns logic, 8.0 ns routing"
+        },
+        {
+          "seed": 2,
+          "from": "Info:  0.5  0.5  Source audio_ready_LUT4_B_2_Z_LUT4_C_Z_TRELLIS_FF_CE_Q_LUT4_Z_A_LUT4_A_Z_LUT4_C_Z_TRELLIS_FF_Q_2.Q",
+          "to": "Info:                Sink stream.owner.buffers[1].bit2_TRELLIS_FF_DI.M",
+          "delay": "Info: 2.9 ns logic, 7.0 ns routing"
+        },
+        {
+          "seed": 3,
+          "from": "Info:  0.5  0.5  Source stream.owner.buffers[0].bit2_TRELLIS_FF_DI.Q",
+          "to": "Info:                Sink stream.owner.descriptor[0]_TRELLIS_FF_Q_19.CE",
+          "delay": "Info: 2.1 ns logic, 7.7 ns routing"
+        }
+      ]
+    },
+    {
+      "candidate": "ccs_unified57",
+      "K": 2,
+      "mhz": [
+        100.9999008178711,
+        96.97439575195312,
+        98.03921508789062
+      ],
+      "outcome": "1/3 pass",
+      "cells": {
+        "TRELLIS_FF": 5309,
+        "LUT4": 5385,
+        "CCU2C": 717,
+        "L6MUX21": 70,
+        "PFUMX": 725,
+        "TRELLIS_DPR16X4": 272,
+        "DP16KD": 2
+      },
+      "sources": {
+        "dma_window.v": "d3d7bc6921065d1c73d6a106ba3575d42e8003f49ef55075773de31d953c00d8",
+        "ccs_dma_window.v": "222beeaa24c763f534af692ac5e3304ae499397ed114fa36eae3cfc532fffddc",
+        "ccs_stream.v": "029691df17b9b69f927f1f6e58eaf4a227117530a5ca299951fb62a6d6ee54d2",
+        "coeff_buffer_owner.v": "ea5dfbc2233756528f21d0e839b932b83788a9e244ae0dbea6f95625d0458219",
+        "ccs_idwpt.v": "82ddb6b4a71f44f16ec75cf2d7ad33db240243601138baf14c3b4442cc7341bc",
+        "dma_priority.v": "d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3",
+        "dma_burst.v": "9355a0fc89b63ba100a262589d394e7aa477bc36f51d01e64e937c455e58b7b6"
+      },
+      "netlist_sha256": "06156db1230c8f977ac67c7555e821847b9d2f8aa1458d7c0ff15e000e6bf716",
+      "critical_paths": [
+        {
+          "seed": 1,
+          "from": "Info:  0.5  0.5  Source dma.queue.selected_priority_TRELLIS_FF_Q_3.Q",
+          "to": "Info:                Sink dma.queue.links.0.0.ADA9",
+          "delay": "Info: 2.0 ns logic, 7.9 ns routing"
+        },
+        {
+          "seed": 2,
+          "from": "Info:  0.5  0.5  Source audio_last_L6MUX21_SD_Z_TRELLIS_FF_DI_2.Q",
+          "to": "Info:                Sink stream.owner.buffers[0].next_state_TRELLIS_FF_DI.DI",
+          "delay": "Info: 2.9 ns logic, 7.5 ns routing"
+        },
+        {
+          "seed": 3,
+          "from": "Info:  0.5  0.5  Source stream.owner.tag[0]_TRELLIS_FF_Q_26.Q",
+          "to": "Info:                Sink stream.owner.buffers[1].next_state_TRELLIS_FF_DI_2.M",
+          "delay": "Info: 2.8 ns logic, 7.4 ns routing"
+        }
+      ]
+    },
+    {
+      "candidate": "ccs_unified57",
+      "K": 4,
+      "mhz": [
+        98.88262939453125,
+        106.80337524414062,
+        101.33765411376953
+      ],
+      "outcome": "2/3 pass",
+      "cells": {
+        "TRELLIS_FF": 3549,
+        "LUT4": 3177,
+        "CCU2C": 436,
+        "PFUMX": 223,
+        "L6MUX21": 57,
+        "TRELLIS_DPR16X4": 64,
+        "DP16KD": 14
+      },
+      "sources": {
+        "dma_window.v": "d3d7bc6921065d1c73d6a106ba3575d42e8003f49ef55075773de31d953c00d8",
+        "ccs_dma_window.v": "222beeaa24c763f534af692ac5e3304ae499397ed114fa36eae3cfc532fffddc",
+        "ccs_stream.v": "029691df17b9b69f927f1f6e58eaf4a227117530a5ca299951fb62a6d6ee54d2",
+        "coeff_buffer_owner.v": "ea5dfbc2233756528f21d0e839b932b83788a9e244ae0dbea6f95625d0458219",
+        "ccs_idwpt.v": "82ddb6b4a71f44f16ec75cf2d7ad33db240243601138baf14c3b4442cc7341bc",
+        "dma_priority.v": "d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3",
+        "dma_burst.v": "9355a0fc89b63ba100a262589d394e7aa477bc36f51d01e64e937c455e58b7b6"
+      },
+      "netlist_sha256": "09dcf249d378e14cc5810e17a637cda43e2c6631636c75c773cca1a197be6e56",
+      "critical_paths": [
+        {
+          "seed": 1,
+          "from": "Info:  5.6  5.6  Source stream.payload.0.0.DOA14",
+          "to": "Info:                Sink stream.words[0]_TRELLIS_FF_Q_113.M",
+          "delay": "Info: 5.8 ns logic, 4.3 ns routing"
+        },
+        {
+          "seed": 2,
+          "from": "Info:  0.5  0.5  Source stream.owner.tag[0]_TRELLIS_FF_Q_28.Q",
+          "to": "Info:                Sink stream.owner.tag[0]_TRELLIS_FF_Q_16.CE",
+          "delay": "Info: 2.4 ns logic, 7.0 ns routing"
+        },
+        {
+          "seed": 3,
+          "from": "Info:  5.8  5.8  Source stream.payload.0.0.DOB10",
+          "to": "Info:                Sink stream.words[1]_TRELLIS_FF_Q_99.M",
+          "delay": "Info: 6.1 ns logic, 3.8 ns routing"
+        }
+      ]
+    },
+    {
+      "candidate": "ccs_unified57",
+      "K": 8,
+      "mhz": [
+        100.79629516601562,
+        102.72213745117188,
+        102.46952056884766
+      ],
+      "outcome": "3/3 pass",
+      "cells": {
+        "CCU2C": 434,
+        "LUT4": 3277,
+        "TRELLIS_FF": 3551,
+        "PFUMX": 252,
+        "L6MUX21": 71,
+        "TRELLIS_DPR16X4": 64,
+        "DP16KD": 14
+      },
+      "sources": {
+        "dma_window.v": "d3d7bc6921065d1c73d6a106ba3575d42e8003f49ef55075773de31d953c00d8",
+        "ccs_dma_window.v": "222beeaa24c763f534af692ac5e3304ae499397ed114fa36eae3cfc532fffddc",
+        "ccs_stream.v": "029691df17b9b69f927f1f6e58eaf4a227117530a5ca299951fb62a6d6ee54d2",
+        "coeff_buffer_owner.v": "ea5dfbc2233756528f21d0e839b932b83788a9e244ae0dbea6f95625d0458219",
+        "ccs_idwpt.v": "82ddb6b4a71f44f16ec75cf2d7ad33db240243601138baf14c3b4442cc7341bc",
+        "dma_priority.v": "d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3",
+        "dma_burst.v": "9355a0fc89b63ba100a262589d394e7aa477bc36f51d01e64e937c455e58b7b6"
+      },
+      "netlist_sha256": "668a06cc1fc937696fd2171449886aed506569e88b4c29bb8e613a125612d2a9",
+      "critical_paths": [
+        {
+          "seed": 1,
+          "from": "Info:  0.5  0.5  Source stream.owner.descriptor[0]_TRELLIS_FF_Q_3.Q",
+          "to": "Info:                Sink fault_status_TRELLIS_FF_Q.CE",
+          "delay": "Info: 2.2 ns logic, 7.7 ns routing"
+        },
+        {
+          "seed": 2,
+          "from": "Info:  0.5  0.5  Source window_ready_LUT4_Z_C_LUT4_Z_C_LUT4_C_Z_LUT4_Z_2_B_LUT4_Z_B_LUT4_A_Z_LUT4_Z_C_LUT4_Z_A_TRELLIS_FF_Q.Q",
+          "to": "Info:                Sink fault_tag_TRELLIS_FF_Q_5.CE",
+          "delay": "Info: 2.2 ns logic, 7.6 ns routing"
+        },
+        {
+          "seed": 3,
+          "from": "Info:  0.5  0.5  Source stream.owner.tag[1]_TRELLIS_FF_Q_21.Q",
+          "to": "Info:                Sink window_ready_LUT4_Z_B_LUT4_C_Z_TRELLIS_FF_Q_2.M",
+          "delay": "Info: 3.1 ns logic, 6.6 ns routing"
+        }
+      ]
+    },
+    {
+      "candidate": "ccs_fsm57",
+      "K": 2,
+      "mhz": [
+        105.59661865234375,
+        97.2573471069336,
+        98.28009796142578
+      ],
+      "outcome": "1/3 pass",
+      "cells": {
+        "CCU2C": 717,
+        "LUT4": 5194,
+        "TRELLIS_FF": 5317,
+        "PFUMX": 666,
+        "L6MUX21": 43,
+        "TRELLIS_DPR16X4": 272,
+        "DP16KD": 2
+      },
+      "sources": {
+        "dma_window.v": "d3d7bc6921065d1c73d6a106ba3575d42e8003f49ef55075773de31d953c00d8",
+        "ccs_dma_window.v": "222beeaa24c763f534af692ac5e3304ae499397ed114fa36eae3cfc532fffddc",
+        "ccs_stream.v": "029691df17b9b69f927f1f6e58eaf4a227117530a5ca299951fb62a6d6ee54d2",
+        "coeff_buffer_owner.v": "b746b4cd31a1eb51b07c8497440538bd19809d38aece706a4c0f107770f5bd3e",
+        "ccs_idwpt.v": "82ddb6b4a71f44f16ec75cf2d7ad33db240243601138baf14c3b4442cc7341bc",
+        "dma_priority.v": "d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3",
+        "dma_burst.v": "9355a0fc89b63ba100a262589d394e7aa477bc36f51d01e64e937c455e58b7b6"
+      },
+      "netlist_sha256": "97e1cb9f5be87a60280851fad3b5236a2179cd13a82825ebda79be79f0b2c75c",
+      "critical_paths": [
+        {
+          "seed": 1,
+          "from": "Info:  0.5  0.5  Source dma.queue.heads[9]_TRELLIS_FF_Q_CE_LUT4_Z_D_LUT4_Z_C_LUT4_C_Z_TRELLIS_FF_CE.Q",
+          "to": "Info:                Sink dma.queue.links.0.0.CEB",
+          "delay": "Info: 2.3 ns logic, 7.2 ns routing"
+        },
+        {
+          "seed": 2,
+          "from": "Info:  0.5  0.5  Source result_valid_LUT4_A_C_LUT4_C_Z_LUT4_Z_1_B_LUT4_Z_C_LUT4_D_Z_LUT4_D_Z_LUT4_Z_1_A_LUT4_B_Z_LUT4_Z_A_TRELLIS_FF_Q_1.Q",
+          "to": "Info:                Sink fault_status_TRELLIS_FF_Q.CE",
+          "delay": "Info: 2.2 ns logic, 8.1 ns routing"
+        },
+        {
+          "seed": 3,
+          "from": "Info:  0.5  0.5  Source reading_mask_TRELLIS_FF_Q_1.Q",
+          "to": "Info:                Sink stream.owner.descriptor[1]_TRELLIS_FF_Q_9.CE",
+          "delay": "Info: 2.4 ns logic, 7.8 ns routing"
+        }
+      ]
+    },
+    {
+      "candidate": "ccs_fsm57",
+      "K": 4,
+      "mhz": [
+        103.09278869628906,
+        105.831298828125,
+        106.56436920166016
+      ],
+      "outcome": "3/3 pass",
+      "cells": {
+        "TRELLIS_FF": 3557,
+        "LUT4": 3079,
+        "CCU2C": 436,
+        "PFUMX": 204,
+        "L6MUX21": 49,
+        "TRELLIS_DPR16X4": 64,
+        "DP16KD": 14
+      },
+      "sources": {
+        "dma_window.v": "d3d7bc6921065d1c73d6a106ba3575d42e8003f49ef55075773de31d953c00d8",
+        "ccs_dma_window.v": "222beeaa24c763f534af692ac5e3304ae499397ed114fa36eae3cfc532fffddc",
+        "ccs_stream.v": "029691df17b9b69f927f1f6e58eaf4a227117530a5ca299951fb62a6d6ee54d2",
+        "coeff_buffer_owner.v": "b746b4cd31a1eb51b07c8497440538bd19809d38aece706a4c0f107770f5bd3e",
+        "ccs_idwpt.v": "82ddb6b4a71f44f16ec75cf2d7ad33db240243601138baf14c3b4442cc7341bc",
+        "dma_priority.v": "d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3",
+        "dma_burst.v": "9355a0fc89b63ba100a262589d394e7aa477bc36f51d01e64e937c455e58b7b6"
+      },
+      "netlist_sha256": "f00722464c77f14532a98e69937c8272d2d979bc2965c04ef9e90d5456f6d89a",
+      "critical_paths": [
+        {
+          "seed": 1,
+          "from": "Info:  0.5  0.5  Source dma.queue.selected_priority_TRELLIS_FF_Q_2.Q",
+          "to": "Info:                Sink dma.queue.links.0.0.ADA4",
+          "delay": "Info: 2.0 ns logic, 7.7 ns routing"
+        },
+        {
+          "seed": 2,
+          "from": "Info:  5.6  5.6  Source stream.decoder.serial.bank_b.0.3.DOA1",
+          "to": "Info:                Sink stream.decoder.serial.previous_detail_TRELLIS_FF_Q_8.M",
+          "delay": "Info: 5.8 ns logic, 3.6 ns routing"
+        },
+        {
+          "seed": 3,
+          "from": "Info:  5.8  5.8  Source stream.payload.0.2.DOB3",
+          "to": "Info:                Sink stream.words[0]_TRELLIS_FF_Q_34.M",
+          "delay": "Info: 6.1 ns logic, 3.3 ns routing"
+        }
+      ]
+    },
+    {
+      "candidate": "ccs_fsm57",
+      "K": 8,
+      "mhz": [
+        103.2204818725586,
+        104.7120361328125,
+        103.75597381591797
+      ],
+      "outcome": "3/3 pass",
+      "cells": {
+        "CCU2C": 434,
+        "LUT4": 3046,
+        "TRELLIS_FF": 3559,
+        "PFUMX": 182,
+        "L6MUX21": 37,
+        "TRELLIS_DPR16X4": 64,
+        "DP16KD": 14
+      },
+      "sources": {
+        "dma_window.v": "d3d7bc6921065d1c73d6a106ba3575d42e8003f49ef55075773de31d953c00d8",
+        "ccs_dma_window.v": "222beeaa24c763f534af692ac5e3304ae499397ed114fa36eae3cfc532fffddc",
+        "ccs_stream.v": "029691df17b9b69f927f1f6e58eaf4a227117530a5ca299951fb62a6d6ee54d2",
+        "coeff_buffer_owner.v": "b746b4cd31a1eb51b07c8497440538bd19809d38aece706a4c0f107770f5bd3e",
+        "ccs_idwpt.v": "82ddb6b4a71f44f16ec75cf2d7ad33db240243601138baf14c3b4442cc7341bc",
+        "dma_priority.v": "d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3",
+        "dma_burst.v": "9355a0fc89b63ba100a262589d394e7aa477bc36f51d01e64e937c455e58b7b6"
+      },
+      "netlist_sha256": "d44d8f4d471c2fea0c24a5753551b9767d5403413f7829cb2448cc67f6e8feed",
+      "critical_paths": [
+        {
+          "seed": 1,
+          "from": "Info:  5.8  5.8  Source stream.payload.0.2.DOB11",
+          "to": "Info:                Sink stream.words[0]_TRELLIS_FF_Q_26.M",
+          "delay": "Info: 6.1 ns logic, 3.6 ns routing"
+        },
+        {
+          "seed": 2,
+          "from": "Info:  5.8  5.8  Source stream.payload.0.2.DOB2",
+          "to": "Info:                Sink stream.words[1]_TRELLIS_FF_Q_35.M",
+          "delay": "Info: 6.1 ns logic, 3.5 ns routing"
+        },
+        {
+          "seed": 3,
+          "from": "Info:  0.5  0.5  Source stream.owner.tag[0]_TRELLIS_FF_Q_31.Q",
+          "to": "Info:                Sink stream.owner.descriptor[0]_TRELLIS_FF_Q_10.CE",
+          "delay": "Info: 2.2 ns logic, 7.4 ns routing"
+        }
+      ]
+    },
+    {
+      "candidate": "ccs_match57",
+      "K": 2,
+      "mhz": [],
+      "outcome": "Seed 1 execution timeout at 600 seconds; no timing result; seeds 2/3 not run.",
+      "cells": {
+        "TRELLIS_FF": 5255,
+        "LUT4": 5093,
+        "CCU2C": 717,
+        "PFUMX": 626,
+        "L6MUX21": 28,
+        "TRELLIS_DPR16X4": 272,
+        "DP16KD": 2
+      },
+      "sources": {
+        "dma_window.v": "c7eb2bbf00a6e075e1606cf37bc72c10a80c9b8b909230baa3159770c74bd4f1",
+        "ccs_dma_window.v": "0113b46e573b0c25ee7ad568ee315dcda602b8c92d13bdda5d3abc77d9a85803",
+        "ccs_stream.v": "cc5a796b288bc4475b2beb6dd59d5268ef54d8bc9143f134e2f5392fda23483b",
+        "coeff_buffer_owner.v": "a1f32f7ef03d4bbf0b04f2ea02dee3b91da2bbf74d8377813ad52f6b82cf649a",
+        "ccs_idwpt.v": "82ddb6b4a71f44f16ec75cf2d7ad33db240243601138baf14c3b4442cc7341bc",
+        "dma_priority.v": "d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3",
+        "dma_burst.v": "9355a0fc89b63ba100a262589d394e7aa477bc36f51d01e64e937c455e58b7b6"
+      },
+      "netlist_sha256": "0723172a6b3b61c556378e1a08a92dd1a75e2556b2df8f3591b5557aadbce4f9",
+      "critical_paths": []
+    },
+    {
+      "candidate": "ccs_match57",
+      "K": 4,
+      "mhz": [
+        107.74700927734375,
+        99.86019897460938,
+        102.51152801513672
+      ],
+      "outcome": "2/3 pass",
+      "cells": {
+        "CCU2C": 436,
+        "LUT4": 3007,
+        "TRELLIS_FF": 3495,
+        "PFUMX": 168,
+        "L6MUX21": 27,
+        "TRELLIS_DPR16X4": 64,
+        "DP16KD": 14
+      },
+      "sources": {
+        "dma_window.v": "c7eb2bbf00a6e075e1606cf37bc72c10a80c9b8b909230baa3159770c74bd4f1",
+        "ccs_dma_window.v": "0113b46e573b0c25ee7ad568ee315dcda602b8c92d13bdda5d3abc77d9a85803",
+        "ccs_stream.v": "cc5a796b288bc4475b2beb6dd59d5268ef54d8bc9143f134e2f5392fda23483b",
+        "coeff_buffer_owner.v": "a1f32f7ef03d4bbf0b04f2ea02dee3b91da2bbf74d8377813ad52f6b82cf649a",
+        "ccs_idwpt.v": "82ddb6b4a71f44f16ec75cf2d7ad33db240243601138baf14c3b4442cc7341bc",
+        "dma_priority.v": "d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3",
+        "dma_burst.v": "9355a0fc89b63ba100a262589d394e7aa477bc36f51d01e64e937c455e58b7b6"
+      },
+      "netlist_sha256": "fba20138dcfe064a58aa7418a17115bb8509b8a425356cb5e1fe4fea0ac86a3e",
+      "critical_paths": [
+        {
+          "seed": 1,
+          "from": "Info:  5.8  5.8  Source stream.payload.0.1.DOB13",
+          "to": "Info:                Sink stream.words[1]_TRELLIS_FF_Q_60.M",
+          "delay": "Info: 6.1 ns logic, 3.2 ns routing"
+        },
+        {
+          "seed": 2,
+          "from": "Info:  0.5  0.5  Source audio_ready_LUT4_B_Z_LUT4_C_Z_TRELLIS_FF_CE_2.Q",
+          "to": "Info:                Sink free_mask_TRELLIS_FF_Q_1.M",
+          "delay": "Info: 2.8 ns logic, 7.2 ns routing"
+        },
+        {
+          "seed": 3,
+          "from": "Info:  5.8  5.8  Source stream.payload.0.1.DOB3",
+          "to": "Info:                Sink stream.words[0]_TRELLIS_FF_Q_70.M",
+          "delay": "Info: 6.1 ns logic, 3.7 ns routing"
+        }
+      ]
+    },
+    {
+      "candidate": "ccs_match57",
+      "K": 8,
+      "mhz": [
+        100.90817260742188,
+        97.2573471069336,
+        106.1458511352539
+      ],
+      "outcome": "2/3 pass",
+      "cells": {
+        "CCU2C": 434,
+        "LUT4": 3015,
+        "TRELLIS_FF": 3497,
+        "PFUMX": 180,
+        "L6MUX21": 34,
+        "TRELLIS_DPR16X4": 64,
+        "DP16KD": 14
+      },
+      "sources": {
+        "dma_window.v": "c7eb2bbf00a6e075e1606cf37bc72c10a80c9b8b909230baa3159770c74bd4f1",
+        "ccs_dma_window.v": "0113b46e573b0c25ee7ad568ee315dcda602b8c92d13bdda5d3abc77d9a85803",
+        "ccs_stream.v": "cc5a796b288bc4475b2beb6dd59d5268ef54d8bc9143f134e2f5392fda23483b",
+        "coeff_buffer_owner.v": "a1f32f7ef03d4bbf0b04f2ea02dee3b91da2bbf74d8377813ad52f6b82cf649a",
+        "ccs_idwpt.v": "82ddb6b4a71f44f16ec75cf2d7ad33db240243601138baf14c3b4442cc7341bc",
+        "dma_priority.v": "d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3",
+        "dma_burst.v": "9355a0fc89b63ba100a262589d394e7aa477bc36f51d01e64e937c455e58b7b6"
+      },
+      "netlist_sha256": "2fd96a0f5a95e9e4083287293951c155c7875b2e71abff9f20e3fbba4847a8ca",
+      "critical_paths": [
+        {
+          "seed": 1,
+          "from": "Info:  5.8  5.8  Source stream.payload.0.1.DOB3",
+          "to": "Info:                Sink stream.words[1]_TRELLIS_FF_Q_70.M",
+          "delay": "Info: 6.1 ns logic, 3.8 ns routing"
+        },
+        {
+          "seed": 2,
+          "from": "Info:  0.5  0.5  Source dma.queue.selected_priority_TRELLIS_FF_Q.Q",
+          "to": "Info:                Sink dma.queue.links.0.0.ADA10",
+          "delay": "Info: 2.0 ns logic, 8.3 ns routing"
+        },
+        {
+          "seed": 3,
+          "from": "Info:  0.5  0.5  Source audio_valid_LUT4_Z_B_LUT4_D_Z_TRELLIS_FF_Q.Q",
+          "to": "Info:                Sink stream.owner.tag[0]_TRELLIS_FF_Q_10.CE",
+          "delay": "Info: 2.4 ns logic, 7.0 ns routing"
+        }
+      ]
+    },
+    {
+      "candidate": "ccs_profiles57",
+      "K": 4,
+      "mhz": [
+        103.97171783447266,
+        105.50749206542969,
+        102.51152801513672
+      ],
+      "outcome": "3/3 pass",
+      "cells": {
+        "TRELLIS_FF": 3557,
+        "LUT4": 3043,
+        "CCU2C": 436,
+        "PFUMX": 180,
+        "L6MUX21": 38,
+        "TRELLIS_DPR16X4": 64,
+        "DP16KD": 14
+      },
+      "sources": {
+        "dma_window.v": "c7eb2bbf00a6e075e1606cf37bc72c10a80c9b8b909230baa3159770c74bd4f1",
+        "ccs_dma_window.v": "bdfa94894bf760f6d668bb3145663ae4ec1bd0722b3dc8b57f3b90b164cc63a0",
+        "ccs_stream.v": "cc5a796b288bc4475b2beb6dd59d5268ef54d8bc9143f134e2f5392fda23483b",
+        "coeff_buffer_owner.v": "a1f32f7ef03d4bbf0b04f2ea02dee3b91da2bbf74d8377813ad52f6b82cf649a",
+        "ccs_idwpt.v": "82ddb6b4a71f44f16ec75cf2d7ad33db240243601138baf14c3b4442cc7341bc",
+        "dma_priority.v": "d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3",
+        "dma_burst.v": "9355a0fc89b63ba100a262589d394e7aa477bc36f51d01e64e937c455e58b7b6"
+      },
+      "netlist_sha256": "17c5d6647c7f52179778d7726ffc4fc3b1bd391436154b3118d11ca3f01eb574",
+      "critical_paths": [
+        {
+          "seed": 1,
+          "from": "Info:  0.5  0.5  Source cancel_valid_LUT4_C_Z_PFUMX_ALUT_Z_LUT4_A_Z_TRELLIS_FF_Q_1.Q",
+          "to": "Info:                Sink stream.owner.tag[1]_TRELLIS_FF_Q_17.CE",
+          "delay": "Info: 2.4 ns logic, 7.2 ns routing"
+        },
+        {
+          "seed": 2,
+          "from": "Info:  5.6  5.6  Source stream.decoder.serial.bank_a.0.0.DOA4",
+          "to": "Info:                Sink stream.decoder.serial.arithmetic[0].detail1_TRELLIS_FF_Q_11.M",
+          "delay": "Info: 5.8 ns logic, 3.6 ns routing"
+        },
+        {
+          "seed": 3,
+          "from": "Info:  0.5  0.5  Source result_valid_LUT4_A_B_LUT4_C_Z_LUT4_Z_B_LUT4_Z_A_LUT4_Z_1_A_TRELLIS_FF_Q_2.Q",
+          "to": "Info:                Sink cancel_valid_LUT4_C_Z_PFUMX_ALUT_Z_LUT4_A_Z_TRELLIS_FF_Q.M",
+          "delay": "Info: 2.5 ns logic, 7.3 ns routing"
+        }
+      ]
+    },
+    {
+      "candidate": "ccs_profiles57",
+      "K": 8,
+      "mhz": [
+        104.35145568847656,
+        97.8377914428711,
+        104.46046447753906
+      ],
+      "outcome": "2/3 pass",
+      "cells": {
+        "CCU2C": 434,
+        "LUT4": 3060,
+        "TRELLIS_FF": 3559,
+        "PFUMX": 192,
+        "L6MUX21": 38,
+        "TRELLIS_DPR16X4": 64,
+        "DP16KD": 14
+      },
+      "sources": {
+        "dma_window.v": "c7eb2bbf00a6e075e1606cf37bc72c10a80c9b8b909230baa3159770c74bd4f1",
+        "ccs_dma_window.v": "bdfa94894bf760f6d668bb3145663ae4ec1bd0722b3dc8b57f3b90b164cc63a0",
+        "ccs_stream.v": "cc5a796b288bc4475b2beb6dd59d5268ef54d8bc9143f134e2f5392fda23483b",
+        "coeff_buffer_owner.v": "a1f32f7ef03d4bbf0b04f2ea02dee3b91da2bbf74d8377813ad52f6b82cf649a",
+        "ccs_idwpt.v": "82ddb6b4a71f44f16ec75cf2d7ad33db240243601138baf14c3b4442cc7341bc",
+        "dma_priority.v": "d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3",
+        "dma_burst.v": "9355a0fc89b63ba100a262589d394e7aa477bc36f51d01e64e937c455e58b7b6"
+      },
+      "netlist_sha256": "ec6ef1661b822bb5e621ae7390ce5377e218bf64a75633fa55a040bf4051ee60",
+      "critical_paths": [
+        {
+          "seed": 1,
+          "from": "Info:  0.5  0.5  Source dma.queue.selected_priority_TRELLIS_FF_Q_CE_LUT4_C_Z_TRELLIS_FF_CE_3.Q",
+          "to": "Info:                Sink dma.reject_LUT4_Z_C_LUT4_C_1_Z_TRELLIS_FF_Q_1.M",
+          "delay": "Info: 2.5 ns logic, 7.1 ns routing"
+        },
+        {
+          "seed": 2,
+          "from": "Info:  0.5  0.5  Source audio_last_LUT4_D_Z_LUT4_Z_1_D_LUT4_D_2_Z_TRELLIS_FF_Q_1.Q",
+          "to": "Info:                Sink free_mask_TRELLIS_FF_Q_1.M",
+          "delay": "Info: 2.9 ns logic, 7.4 ns routing"
+        },
+        {
+          "seed": 3,
+          "from": "Info:  5.8  5.8  Source stream.payload.0.1.DOB7",
+          "to": "Info:                Sink stream.words[1]_TRELLIS_FF_Q_66.M",
+          "delay": "Info: 6.1 ns logic, 3.5 ns routing"
+        }
+      ]
+    },
+    {
+      "candidate": "ccs_chunks57",
+      "K": 2,
+      "mhz": [
+        101.1224594116211,
+        97.02143859863281,
+        101.7500991821289
+      ],
+      "outcome": "2/3 pass",
+      "cells": {
+        "TRELLIS_FF": 5261,
+        "LUT4": 5086,
+        "CCU2C": 717,
+        "PFUMX": 640,
+        "L6MUX21": 35,
+        "TRELLIS_DPR16X4": 272,
+        "DP16KD": 2
+      },
+      "sources": {
+        "dma_window.v": "659374f96b67e6cb25054d24369341c6f2e9ec8d653490526073c73044210153",
+        "ccs_dma_window.v": "bdfa94894bf760f6d668bb3145663ae4ec1bd0722b3dc8b57f3b90b164cc63a0",
+        "ccs_stream.v": "cc5a796b288bc4475b2beb6dd59d5268ef54d8bc9143f134e2f5392fda23483b",
+        "coeff_buffer_owner.v": "a1f32f7ef03d4bbf0b04f2ea02dee3b91da2bbf74d8377813ad52f6b82cf649a",
+        "ccs_idwpt.v": "82ddb6b4a71f44f16ec75cf2d7ad33db240243601138baf14c3b4442cc7341bc",
+        "dma_priority.v": "d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3",
+        "dma_burst.v": "9355a0fc89b63ba100a262589d394e7aa477bc36f51d01e64e937c455e58b7b6"
+      },
+      "netlist_sha256": "7939e096d3b9be6d49a257da48488abe96bc14cc5dad7ac73e1192b91eb1dd9f",
+      "critical_paths": [
+        {
+          "seed": 1,
+          "from": "Info:  0.5  0.5  Source stream.decoder.k2.pair_group_TRELLIS_FF_Q_CE_LUT4_Z_D_LUT4_D_Z_TRELLIS_FF_CE_3.Q",
+          "to": "Info:                Sink stream.decoder.k2.pair_group_TRELLIS_FF_Q_CE_LUT4_Z_D_LUT4_D_Z_TRELLIS_FF_CE.CE",
+          "delay": "Info: 2.2 ns logic, 7.7 ns routing"
+        },
+        {
+          "seed": 2,
+          "from": "Info:  0.5  0.5  Source stream.owner.buffers[0].finished_LUT4_Z_D_LUT4_D_C_TRELLIS_FF_Q.Q",
+          "to": "Info:                Sink stream.owner.tag[1]_TRELLIS_FF_Q.CE",
+          "delay": "Info: 2.1 ns logic, 8.2 ns routing"
+        },
+        {
+          "seed": 3,
+          "from": "Info:  0.5  0.5  Source stream.owner.tag[1]_TRELLIS_FF_Q.Q",
+          "to": "Info:                Sink stream.owner.descriptor[0]_TRELLIS_FF_Q_7.CE",
+          "delay": "Info: 2.2 ns logic, 7.6 ns routing"
+        }
+      ]
+    },
+    {
+      "candidate": "ccs_chunks57",
+      "K": 4,
+      "mhz": [
+        101.63634490966797,
+        101.9056396484375,
+        102.49051666259766
+      ],
+      "outcome": "3/3 pass",
+      "cells": {
+        "CCU2C": 436,
+        "LUT4": 3034,
+        "TRELLIS_FF": 3557,
+        "PFUMX": 178,
+        "L6MUX21": 35,
+        "TRELLIS_DPR16X4": 64,
+        "DP16KD": 14
+      },
+      "sources": {
+        "dma_window.v": "659374f96b67e6cb25054d24369341c6f2e9ec8d653490526073c73044210153",
+        "ccs_dma_window.v": "bdfa94894bf760f6d668bb3145663ae4ec1bd0722b3dc8b57f3b90b164cc63a0",
+        "ccs_stream.v": "cc5a796b288bc4475b2beb6dd59d5268ef54d8bc9143f134e2f5392fda23483b",
+        "coeff_buffer_owner.v": "a1f32f7ef03d4bbf0b04f2ea02dee3b91da2bbf74d8377813ad52f6b82cf649a",
+        "ccs_idwpt.v": "82ddb6b4a71f44f16ec75cf2d7ad33db240243601138baf14c3b4442cc7341bc",
+        "dma_priority.v": "d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3",
+        "dma_burst.v": "9355a0fc89b63ba100a262589d394e7aa477bc36f51d01e64e937c455e58b7b6"
+      },
+      "netlist_sha256": "2a65dc6cd28fd594f4acec4de9554e047e261c169c83fe626f6e3cd8818b30f7",
+      "critical_paths": [
+        {
+          "seed": 1,
+          "from": "Info:  5.8  5.8  Source stream.payload.0.0.DOB16",
+          "to": "Info:                Sink stream.words[1]_TRELLIS_FF_Q_93.M",
+          "delay": "Info: 6.1 ns logic, 3.8 ns routing"
+        },
+        {
+          "seed": 2,
+          "from": "Info:  5.8  5.8  Source stream.payload.0.2.DOB16",
+          "to": "Info:                Sink stream.words[1]_TRELLIS_FF_Q_21.M",
+          "delay": "Info: 6.1 ns logic, 3.7 ns routing"
+        },
+        {
+          "seed": 3,
+          "from": "Info:  5.8  5.8  Source stream.payload.0.1.DOB0",
+          "to": "Info:                Sink stream.words[1]_TRELLIS_FF_Q_73.M",
+          "delay": "Info: 6.1 ns logic, 3.7 ns routing"
+        }
+      ]
+    },
+    {
+      "candidate": "ccs_chunks57",
+      "K": 8,
+      "mhz": [
+        105.1524658203125,
+        106.13458251953125,
+        100.41168975830078
+      ],
+      "outcome": "3/3 pass",
+      "cells": {
+        "CCU2C": 434,
+        "LUT4": 3066,
+        "TRELLIS_FF": 3559,
+        "PFUMX": 188,
+        "L6MUX21": 38,
+        "TRELLIS_DPR16X4": 64,
+        "DP16KD": 14
+      },
+      "sources": {
+        "dma_window.v": "659374f96b67e6cb25054d24369341c6f2e9ec8d653490526073c73044210153",
+        "ccs_dma_window.v": "bdfa94894bf760f6d668bb3145663ae4ec1bd0722b3dc8b57f3b90b164cc63a0",
+        "ccs_stream.v": "cc5a796b288bc4475b2beb6dd59d5268ef54d8bc9143f134e2f5392fda23483b",
+        "coeff_buffer_owner.v": "a1f32f7ef03d4bbf0b04f2ea02dee3b91da2bbf74d8377813ad52f6b82cf649a",
+        "ccs_idwpt.v": "82ddb6b4a71f44f16ec75cf2d7ad33db240243601138baf14c3b4442cc7341bc",
+        "dma_priority.v": "d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3",
+        "dma_burst.v": "9355a0fc89b63ba100a262589d394e7aa477bc36f51d01e64e937c455e58b7b6"
+      },
+      "netlist_sha256": "5e136932ea79965705d7a58fd29d2e3d6ed9f4d30e68ef97e2978225044770c5",
+      "critical_paths": [
+        {
+          "seed": 1,
+          "from": "Info:  0.5  0.5  Source stream.owner.tag[0]_TRELLIS_FF_Q_22.Q",
+          "to": "Info:                Sink free_mask_TRELLIS_FF_Q_1.M",
+          "delay": "Info: 2.7 ns logic, 6.8 ns routing"
+        },
+        {
+          "seed": 2,
+          "from": "Info:  0.5  0.5  Source audio_last_LUT4_D_Z_TRELLIS_FF_Q_DI_TRELLIS_FF_DI_1.Q",
+          "to": "Info:                Sink free_mask_TRELLIS_FF_Q_1.M",
+          "delay": "Info: 2.8 ns logic, 6.6 ns routing"
+        },
+        {
+          "seed": 3,
+          "from": "Info:  5.6  5.6  Source stream.payload.0.3.DOA12",
+          "to": "Info:                Sink stream.words[0]_TRELLIS_FF_Q_119.M",
+          "delay": "Info: 5.8 ns logic, 4.1 ns routing"
+        }
+      ]
+    },
+    {
+      "candidate": "ccs_admission57",
+      "K": 2,
+      "mhz": [
+        104.5697021484375,
+        102.29132843017578,
+        104.35145568847656
+      ],
+      "outcome": "3/3 pass",
+      "cells": {
+        "TRELLIS_FF": 5261,
+        "LUT4": 5093,
+        "CCU2C": 717,
+        "PFUMX": 641,
+        "L6MUX21": 33,
+        "TRELLIS_DPR16X4": 272,
+        "DP16KD": 2
+      },
+      "sources": {
+        "dma_window.v": "659374f96b67e6cb25054d24369341c6f2e9ec8d653490526073c73044210153",
+        "ccs_dma_window.v": "bdfa94894bf760f6d668bb3145663ae4ec1bd0722b3dc8b57f3b90b164cc63a0",
+        "ccs_stream.v": "cc5a796b288bc4475b2beb6dd59d5268ef54d8bc9143f134e2f5392fda23483b",
+        "coeff_buffer_owner.v": "be8263fe651b1c854726706d9a59eadc2ba935e76526cd4e4d41b5119a0e7b03",
+        "ccs_idwpt.v": "82ddb6b4a71f44f16ec75cf2d7ad33db240243601138baf14c3b4442cc7341bc",
+        "dma_priority.v": "d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3",
+        "dma_burst.v": "9355a0fc89b63ba100a262589d394e7aa477bc36f51d01e64e937c455e58b7b6"
+      },
+      "netlist_sha256": "ffbc9b5d2a539dd75e1652460ae6a00e5f73cdec5558ca8cd4a5ca2f89febb53",
+      "critical_paths": [
+        {
+          "seed": 1,
+          "from": "Info:  0.5  0.5  Source stream.owner.acquire_bank_TRELLIS_FF_DI_Q_LUT4_Z_C_LUT4_C_A_LUT4_A_Z_LUT4_C_Z_TRELLIS_FF_Q_2.Q",
+          "to": "Info:                Sink free_mask_TRELLIS_FF_Q_1.M",
+          "delay": "Info: 2.1 ns logic, 7.4 ns routing"
+        },
+        {
+          "seed": 2,
+          "from": "Info:  0.5  0.5  Source dma.queue.word_write_enable_LUT4_Z_C_LUT4_B_C_LUT4_Z_1_C_PFUMX_Z_1_C0_TRELLIS_FF_Q.Q",
+          "to": "Info:                Sink dma.queue.selected_priority_TRELLIS_FF_Q_CE_LUT4_C_Z_TRELLIS_FF_CE.CE",
+          "delay": "Info: 2.2 ns logic, 7.6 ns routing"
+        },
+        {
+          "seed": 3,
+          "from": "Info:  0.5  0.5  Source reading_mask_TRELLIS_FF_Q_1.Q",
+          "to": "Info:                Sink stream.owner.descriptor[1]_TRELLIS_FF_Q_18.CE",
+          "delay": "Info: 2.4 ns logic, 7.2 ns routing"
+        }
+      ]
+    },
+    {
+      "candidate": "ccs_admission57",
+      "K": 4,
+      "mhz": [
+        103.0821533203125,
+        102.67994689941406,
+        108.3658447265625
+      ],
+      "outcome": "3/3 pass",
+      "cells": {
+        "CCU2C": 436,
+        "LUT4": 3098,
+        "TRELLIS_FF": 3557,
+        "PFUMX": 201,
+        "L6MUX21": 44,
+        "TRELLIS_DPR16X4": 64,
+        "DP16KD": 14
+      },
+      "sources": {
+        "dma_window.v": "659374f96b67e6cb25054d24369341c6f2e9ec8d653490526073c73044210153",
+        "ccs_dma_window.v": "bdfa94894bf760f6d668bb3145663ae4ec1bd0722b3dc8b57f3b90b164cc63a0",
+        "ccs_stream.v": "cc5a796b288bc4475b2beb6dd59d5268ef54d8bc9143f134e2f5392fda23483b",
+        "coeff_buffer_owner.v": "be8263fe651b1c854726706d9a59eadc2ba935e76526cd4e4d41b5119a0e7b03",
+        "ccs_idwpt.v": "82ddb6b4a71f44f16ec75cf2d7ad33db240243601138baf14c3b4442cc7341bc",
+        "dma_priority.v": "d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3",
+        "dma_burst.v": "9355a0fc89b63ba100a262589d394e7aa477bc36f51d01e64e937c455e58b7b6"
+      },
+      "netlist_sha256": "58a37c7a2a8e062d34a74109aff509ee43d5d55001355488849c2744571d2a9c",
+      "critical_paths": [
+        {
+          "seed": 1,
+          "from": "Info:  5.6  5.6  Source stream.payload.0.3.DOA17",
+          "to": "Info:                Sink stream.words[0]_TRELLIS_FF_Q_2.M",
+          "delay": "Info: 5.8 ns logic, 3.9 ns routing"
+        },
+        {
+          "seed": 2,
+          "from": "Info:  5.8  5.8  Source stream.payload.0.2.DOB0",
+          "to": "Info:                Sink stream.words[0]_TRELLIS_FF_Q_37.M",
+          "delay": "Info: 6.1 ns logic, 3.7 ns routing"
+        },
+        {
+          "seed": 3,
+          "from": "Info:  5.8  5.8  Source stream.decoder.serial.bank_a.0.1.DOB15",
+          "to": "Info:                Sink stream.decoder.serial.arithmetic[2].smooth1_TRELLIS_FF_Q_14.DI",
+          "delay": "Info: 6.1 ns logic, 3.2 ns routing"
+        }
+      ]
+    },
+    {
+      "candidate": "ccs_admission57",
+      "K": 8,
+      "mhz": [
+        107.06637573242188,
+        104.06909942626953,
+        105.77532958984375
+      ],
+      "outcome": "3/3 pass",
+      "cells": {
+        "CCU2C": 434,
+        "LUT4": 3104,
+        "TRELLIS_FF": 3559,
+        "PFUMX": 188,
+        "L6MUX21": 39,
+        "TRELLIS_DPR16X4": 64,
+        "DP16KD": 14
+      },
+      "sources": {
+        "dma_window.v": "659374f96b67e6cb25054d24369341c6f2e9ec8d653490526073c73044210153",
+        "ccs_dma_window.v": "bdfa94894bf760f6d668bb3145663ae4ec1bd0722b3dc8b57f3b90b164cc63a0",
+        "ccs_stream.v": "cc5a796b288bc4475b2beb6dd59d5268ef54d8bc9143f134e2f5392fda23483b",
+        "coeff_buffer_owner.v": "be8263fe651b1c854726706d9a59eadc2ba935e76526cd4e4d41b5119a0e7b03",
+        "ccs_idwpt.v": "82ddb6b4a71f44f16ec75cf2d7ad33db240243601138baf14c3b4442cc7341bc",
+        "dma_priority.v": "d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3",
+        "dma_burst.v": "9355a0fc89b63ba100a262589d394e7aa477bc36f51d01e64e937c455e58b7b6"
+      },
+      "netlist_sha256": "d9c68d344d72f151dde3efbbc38b1e6710c5bde267e8ab88c88818d59564c584",
+      "critical_paths": [
+        {
+          "seed": 1,
+          "from": "Info:  5.8  5.8  Source stream.payload.0.2.DOB5",
+          "to": "Info:                Sink stream.words[1]_TRELLIS_FF_Q_32.M",
+          "delay": "Info: 6.1 ns logic, 3.3 ns routing"
+        },
+        {
+          "seed": 2,
+          "from": "Info:  0.5  0.5  Source dma.queue.heads[0]_TRELLIS_FF_Q_CE_LUT4_Z_D_LUT4_Z_D_LUT4_D_Z_TRELLIS_FF_CE.Q",
+          "to": "Info:                Sink dma.queue.selected_priority_TRELLIS_FF_Q_CE_LUT4_C_Z_TRELLIS_FF_CE_1.CE",
+          "delay": "Info: 2.2 ns logic, 7.4 ns routing"
+        },
+        {
+          "seed": 3,
+          "from": "Info:  5.6  5.6  Source stream.decoder.serial.bank_a.0.2.DOA16",
+          "to": "Info:                Sink stream.decoder.serial.previous_detail_TRELLIS_FF_Q_11.M",
+          "delay": "Info: 5.8 ns logic, 3.6 ns routing"
+        }
+      ]
+    }
+  ],
+  "mapped_owner_integration": [
+    {
+      "candidate": "match",
+      "K": 2,
+      "mode": 1,
+      "summaries": [
+        "PASS windowed_audio K=2 headroom=2 stalls=0 cases=36 windows=29 success=43 misses=5 samples=3072 faults=2 ingress_drops=5 resets=3 overlaps=16 payload_writes=720 publications=43",
+        "PASS windowed_audio K=2 headroom=2 stalls=1 cases=36 windows=29 success=43 misses=5 samples=3072 faults=2 ingress_drops=5 resets=3 overlaps=16 payload_writes=720 publications=43"
+      ],
+      "scope": "Complete mapped owner in MATCHED_COMPLETION=1 mode with actual RTL window/queue/stream/decoder. Headroom2, both stall modes; exact audio, publication/lease, deadline/fault and reset checks. Other modules are RTL, not mapped primitives."
+    },
+    {
+      "candidate": "match",
+      "K": 8,
+      "mode": 1,
+      "summaries": [
+        "PASS windowed_audio K=8 headroom=2 stalls=0 cases=36 windows=29 success=43 misses=5 samples=3072 faults=2 ingress_drops=5 resets=3 overlaps=64 payload_writes=2880 publications=43",
+        "PASS windowed_audio K=8 headroom=2 stalls=1 cases=36 windows=29 success=43 misses=5 samples=3072 faults=2 ingress_drops=5 resets=3 overlaps=64 payload_writes=2880 publications=43"
+      ],
+      "scope": "Complete mapped owner in MATCHED_COMPLETION=1 mode with actual RTL window/queue/stream/decoder. Headroom2, both stall modes; exact audio, publication/lease, deadline/fault and reset checks. Other modules are RTL, not mapped primitives."
+    },
+    {
+      "candidate": "chunks",
+      "K": 2,
+      "mode": 1,
+      "summaries": [
+        "PASS windowed_audio K=2 headroom=2 stalls=0 cases=36 windows=29 success=43 misses=5 samples=3072 faults=2 ingress_drops=5 resets=3 overlaps=16 payload_writes=720 publications=43",
+        "PASS windowed_audio K=2 headroom=2 stalls=1 cases=36 windows=29 success=43 misses=5 samples=3072 faults=2 ingress_drops=5 resets=3 overlaps=16 payload_writes=720 publications=43"
+      ],
+      "scope": "Complete mapped owner in MATCHED_COMPLETION=1 mode with actual RTL window/queue/stream/decoder. Headroom2, both stall modes; exact audio, publication/lease, deadline/fault and reset checks. Other modules are RTL, not mapped primitives."
+    },
+    {
+      "candidate": "chunks",
+      "K": 8,
+      "mode": 0,
+      "summaries": [
+        "PASS windowed_audio K=8 headroom=2 stalls=0 cases=36 windows=29 success=43 misses=5 samples=3072 faults=2 ingress_drops=5 resets=3 overlaps=64 payload_writes=2880 publications=43",
+        "PASS windowed_audio K=8 headroom=2 stalls=1 cases=36 windows=29 success=43 misses=5 samples=3072 faults=2 ingress_drops=5 resets=3 overlaps=64 payload_writes=2880 publications=43"
+      ],
+      "scope": "Complete mapped owner in MATCHED_COMPLETION=0 mode with actual RTL window/queue/stream/decoder. Headroom2, both stall modes; exact audio, publication/lease, deadline/fault and reset checks. Other modules are RTL, not mapped primitives."
+    },
+    {
+      "candidate": "admission",
+      "K": 2,
+      "mode": 1,
+      "summaries": [
+        "PASS windowed_audio K=2 headroom=2 stalls=0 cases=36 windows=29 success=43 misses=5 samples=3072 faults=2 ingress_drops=5 resets=3 overlaps=16 payload_writes=720 publications=43",
+        "PASS windowed_audio K=2 headroom=2 stalls=1 cases=36 windows=29 success=43 misses=5 samples=3072 faults=2 ingress_drops=5 resets=3 overlaps=16 payload_writes=720 publications=43"
+      ],
+      "scope": "Complete mapped owner in MATCHED_COMPLETION=1 mode with actual RTL window/queue/stream/decoder. Headroom2, both stall modes; exact audio, publication/lease, deadline/fault and reset checks. Other modules are RTL, not mapped primitives."
+    },
+    {
+      "candidate": "admission",
+      "K": 8,
+      "mode": 0,
+      "summaries": [
+        "PASS windowed_audio K=8 headroom=2 stalls=0 cases=36 windows=29 success=43 misses=5 samples=3072 faults=2 ingress_drops=5 resets=3 overlaps=64 payload_writes=2880 publications=43",
+        "PASS windowed_audio K=8 headroom=2 stalls=1 cases=36 windows=29 success=43 misses=5 samples=3072 faults=2 ingress_drops=5 resets=3 overlaps=64 payload_writes=2880 publications=43"
+      ],
+      "scope": "Complete mapped owner in MATCHED_COMPLETION=0 mode with actual RTL window/queue/stream/decoder. Headroom2, both stall modes; exact audio, publication/lease, deadline/fault and reset checks. Other modules are RTL, not mapped primitives."
+    }
+  ],
+  "prepared_batches": {
+    "root": {
+      "head": "23377cc6b31e90f6d03ad63ee332beb6fb88143a",
+      "staged_patch_sha256": "ad4bf3ccbe8a590a7048b3fc38a37dff3681762dd7d6c79bde0d6f25852945b9"
+    },
+    "docs": {
+      "head": "86514812c317f4b4c7eb0a26a70e017eac0335f5",
+      "staged_patch_sha256": "76a1af380934cc163e477265a5a6847e51248cff08f447e26a45f8fe319acc1b"
+    },
+    "checkpoint_source_files_verified": 28
+  }
+}
+
+SHA256 artifact manifest (regenerable VVP executables omitted):
+6be0ef55319298c5d1ab7b0762ba1451cd8e6ef6725c8fa66cb1787c6cbf8816  _admission57-integration-tests.log
+705f019e66d810db73a8bd5795cd4fdc6fc355879f402f9190950401f210cdc8  _admission57-k2-route.log
+c49f8f4096b0bb40a71da2ca476ab8a95f828d199e08dde24c3fe816bf89fbc5  _admission57-k4-route.log
+c1f19b9b75ef0ee440306cbba58c345b1f1a989d39558e8af77cbca91b300416  _admission57-k8-route.log
+1c5f64827581b40a82198bb80a5f6dcf9b9ff24246f090036a52b7e984aa2ca5  _admission57-mapped-owner-k2.log
+033b3109a25546a61ede1f36097f2fb7cced663ab8358c1824c0552c72e0c217  _admission57-mapped-owner-k8.log
+7da28745f97f23ecba1d1a9b19a609145811c069b9f8c16997970fdf14580c1b  _admission57-prematch-proof.log
+75d0119abd704d59666a79ed11a3c87a9698ea88a3f8d1a0f3091c5236c25446  _admission57-recode-negative.log
+5986bd2bbf531b591fd0c668f0fc60d99fa7e2f514fb5bf8ca4bc9d4e1c46140  _admission57-recode-proof.log
+5ada7f0f8040754096dfebb6d8d95b4108cf3035cdde5cab17a7a16bb53d4bde  _check_chunks_windows57.py
+2139b7052099fd01e5fcf731b5420f9ea83b5018891d4d4d88f7070bde518d02  _check_k2_integration57_cut.py
+7ac00e7fd4ac76339ee8fde71d04f9b76a02edb9d3276b08387f93c0b822fb3a  _check_match_windows57.py
+c6e89c3b5b6d1e9979098105a9e8e1852c7968baa9ed4e45d5edc3cc29abb103  _check_unified57.py
+da8289ae51feb308a590b3eb9aa4ceed2abe868fcc78ca85816731e70a9961ab  _checkpoint57.py
+53e51ed2b0bc0a45a552038189b15815de95bef9228c956eb7320d2fead04dd1  _chunk_matches57.py
+6be0ef55319298c5d1ab7b0762ba1451cd8e6ef6725c8fa66cb1787c6cbf8816  _chunks57-integration-tests.log
+b7b28b1c8c9c96dfc5660acf2f6351303c48c2dde7badaf9dfaba9bdd4437445  _chunks57-k2-route.log
+11d576f1f9b36b40d70b98d0dfa350c95e69655540426f9af316284415ef0394  _chunks57-k4-route.log
+c28167e06cacc397afefff3a176de9daafeb7a9de1b5693b89cd711612fd1717  _chunks57-k8-route.log
+1c5f64827581b40a82198bb80a5f6dcf9b9ff24246f090036a52b7e984aa2ca5  _chunks57-mapped-owner-k2.log
+033b3109a25546a61ede1f36097f2fb7cced663ab8358c1824c0552c72e0c217  _chunks57-mapped-owner-k8.log
+7da28745f97f23ecba1d1a9b19a609145811c069b9f8c16997970fdf14580c1b  _chunks57-prematch-proof.log
+0950245c9187b87714cfd39db4e87fe3a6e3a05d4ab893c758b7e45524d26a55  _chunks57-window-limits.log
+d3821127a9fbe39b098a249e5e92ca3e7eb9668660cd65b336e79566049aa4fc  _document_integration57.py
+6be0ef55319298c5d1ab7b0762ba1451cd8e6ef6725c8fa66cb1787c6cbf8816  _fsm57-integration-tests.log
+ddc8af0cda67871ac1ab6ca9107bcd085b5b6b2bb7aa320405eda7a239a4315b  _fsm57-k2-route.log
+5c31d6fa27679a24311ece5dd3c619af43f078d0e0f0421ff32b88b16de335f6  _fsm57-k4-route.log
+d57c31ffcaf6ed1c8ceaa06ed82084922aad9b2f9a1f92d592ccf30655992914  _fsm57-k8-route.log
+290138e84d34453bf1de07f2cfd0fd499c35eb62da264da76c7eca6ac57d93d5  _inspect_inventory57.py
+a5d8bff2d3cc248a8b8ffc40bf9bd8961b23759f8516446fe4b25111315ae642  _integrate_admission57.py
+587cd7c6c3f0680111e05361bd0ddd1b8e41bd39ba41080c8424f61f894b9480  _integrate_chunks57.py
+cc94168cd2bf9e7ee2aa35b52396de446e3deb126fcd1e41ad0d103d1a0936f0  _integrate_fsm57.py
+73999fbf8de59afb4bd46cfe6fc60fbbeda0a9397e1eab7140ccd4a78e39c612  _integrate_match57.py
+a77a2a973c51b389b523468c5ddf8b9061f26cce4ae516d97e101e7ddfdb7176  _integrate_profiles57.py
+ef9b561f2e67004033eb898aeba9b402331a39108e7599c1f9008c2dde9592bc  _integrate_unified57.py
+4511ae0b505a991470794cb0bcb12ca9f2f9d541c58a53c900c750f2196460c9  _k2-cut-57-integration-tests.log
+6f4b1c03338cf05b14b2fa4a124c40244ec7d9cafba5cdec936fcec81067a8b5  _k2-cut-57-window-route.log
+a24a6a9faf151d18653517d31b8f731e726f3f8ca3b7ba46893dbe00db89f468  _late_owner57.py
+2737cd42426f21a9f81bf288088b35c9dc33bc6b9329120272c369912ac0eb3d  _make_admission57.py
+f02476e080c74736d82a6ffbf5aa3b1a7c45722acd91e977e799276a3c162108  _make_owner_cut57.py
+6b468ca1653a17af69e5c6ce1d992a7a6295928e6746d3006b45a1f9e65e1183  _mapped_admission_owner57.py
+96ca69f7243bc343a6e14cc372eae08473efd29b432ec4b3ef33410f5b01d1c3  _mapped_chunks_owner57.py
+2ad6ad623541f937bb03d9c470ff3b394fe273079552e93c8d6987743a6c6b3e  _mapped_match_owner57.py
+296d6ef3a1fa18111522aacd3026c04df092fbc304789b7fd579b7b9ea216140  _mapped_owner57.py
+6be0ef55319298c5d1ab7b0762ba1451cd8e6ef6725c8fa66cb1787c6cbf8816  _match57-integration-tests.log
+708d5457472150549d90d217a76caccc79b5f607d7b078ec9c415ced0558f1da  _match57-k2-route.log
+2bdbeb2d4db1997871ab780da8bf3e3451d437a8c5c7113e23608f8bfa82fc87  _match57-k4-route.log
+1232ba22a7fa6d53a11a7f4fd820f4d0e782f789339ffb01f24802af431aa80d  _match57-k8-route.log
+1c5f64827581b40a82198bb80a5f6dcf9b9ff24246f090036a52b7e984aa2ca5  _match57-mapped-owner-k2.log
+033b3109a25546a61ede1f36097f2fb7cced663ab8358c1824c0552c72e0c217  _match57-mapped-owner-k8.log
+ab246811fad979349291217e894764028baeda68972463943673c18acb925957  _match57-prematch-proof.log
+75d0119abd704d59666a79ed11a3c87a9698ea88a3f8d1a0f3091c5236c25446  _match57-recode-negative.log
+5986bd2bbf531b591fd0c668f0fc60d99fa7e2f514fb5bf8ca4bc9d4e1c46140  _match57-recode-proof.log
+0950245c9187b87714cfd39db4e87fe3a6e3a05d4ab893c758b7e45524d26a55  _match57-window-limits.log
+a3217185009ad46c3ec61f5c46db7668044e6f72746c009545055d27a293f578  _owner57-mapped-k2-tests.log
+2971811d38b19c653b08f41e2af6091fcc366da991553d7cc7faa973af10d4a5  _owner57-mapped-k8-tests.log
+bb714ec251c3b183c7b196af035acf585252edcbda8ab728b92f65e3b0c82791  _owner57-recode-initial-failure.log
+7cd2e20f04ffcdf2db825768bcc79ee82e0b5e9df4b0209da3d11588fb38b73e  _owner57-recode-negative-guard-failure.log
+75d0119abd704d59666a79ed11a3c87a9698ea88a3f8d1a0f3091c5236c25446  _owner57-recode-negative.log
+5986bd2bbf531b591fd0c668f0fc60d99fa7e2f514fb5bf8ca4bc9d4e1c46140  _owner57-recode-proof.log
+d9fd946c8fc4ed2cc1d204aa5ed999c0a0293f03d1c250e3dc1743c11db340f7  _owner_fsm57.py
+1f7fb746de918357590268f8cc2dbdf37b7796188b30d28134c4d78130cb77a4  _prematch57.py
+4df728cad848709e51984caf8c5a6f3178f9a3cd4ab617c289c6a6f2780875e3  _prepare_admission_proofs57.py
+e637836c622cddd55c5376f85d64177a3f04d42d6d6a09d506e77d2babb9fa19  _prepared_fifo55.json
+6be0ef55319298c5d1ab7b0762ba1451cd8e6ef6725c8fa66cb1787c6cbf8816  _profiles57-integration-tests.log
+fa6e800cdef3d6331c2ed6a7b10729dba1212339d9cf1f0df91bfe5ac78ca077  _profiles57-k4-route.log
+3c483454023721207d709dae4949881c90d6f87fe0d59c124b06c68d9a8fd946  _profiles57-k8-route.log
+c22ee2e96253c6d849737999095f4902312e34adc59d8db869b4992e95a75ca5  _prove_admission_prematch57.py
+9ad39413c25c0c63ffcb49cee2cb620c44a801abf6a9d182a074857dd8af1bfd  _prove_admission_recode57.py
+8fbbce46256087b4045f4ada8c2dccd24d52eb451bdb27a6bc73146ad715afc6  _prove_admission_recode_negative57.py
+70f5aa084601181d3b523ca713798b8d145b184ab35f236f9ec82073d11f22d0  _prove_chunks57.py
+4fa240581bf32cbb0b71111f85e862de2826ad3858baf8183e0aa7a7f480dab1  _prove_match_recode57.py
+fca5be80ad670a7df78156d931f268c33da15d854e6a42f0b70d3840d6fa6199  _prove_match_recode_negative57.py
+96c074c43fdd3f441b94796cd7f3a14afd27a7bbfb40b0a72320a5e6cd48d35e  _prove_owner_recode57.py
+847c766cb12960fced68e2aaa6202ca79f8d42dee989e7adf3033137aa53d502  _prove_owner_recode57_preopt.py
+833be5b1a5a9c4f04e675ecfbad8794323b2be6a8f0614e9bab144b427a7dc8d  _prove_owner_recode_negative57.py
+6220f69f387f764e40ed238504d31702d45d8173508713959c72aed1f36cd38b  _prove_owner_recode_negative57_log_guard.py
+2b6b10c703fd6ced6e4749cebf5996247cbac8f961f90e88990808ceae882eb2  _prove_prematch57.py
+f2664e6476cb2f2cac7ce40f0e263ad9c3e9a5324e1b7e2d5897213a0ccb4207  _report57-validation.log
+9ccccce431a73a355ba859f8297d40ed6494160a23327b49ef5b805214e4bff2  _report_integration57.py
+1e4eeec7fc450cbc2ccdbc0685b1734a85811b14f7cbfc291c1cb9b15c50b71c  _route_admission57.py
+ed0a3d937ca4394485f66257157ff2fd47c967a8492bbd7fa21758d916cbe6cf  _route_chunks57.py
+f93a5a67d8f7f83b2b295f4c104d0b761f9eee6c826f6638c8cfe02e6249d73f  _route_fsm57.py
+f7f21b686750e05d7988a2282cecf3305aae1ea78ddb2b59c47eae56da15dc5d  _route_k2_integration57_cut.py
+015267d38b1df7ddd0143895fed964e9bfac3cf056b36977de2409d5667c1846  _route_match57.py
+efe45ce7cc292fc4fc98c0a921bb920170d1fffd51eb6fe5fefdae425d9f9c6f  _route_profiles57.py
+35758edef540251dfec8f5e82085b406bf7282509944642cbcfe58d6b1cec57a  _route_unified57.py
+e7559fe9e8521a450ebb9ed6c33616e1c236e77f9bd43a8c1aaad8cfbb6bc7cc  _track_admission57.py
+6be0ef55319298c5d1ab7b0762ba1451cd8e6ef6725c8fa66cb1787c6cbf8816  _unified57-integration-tests.log
+046e0df2b584e852161fe11be666bb6818fcf383757811eafa56b8f9eccb67d5  _unified57-k2-route.log
+c8e08ad7603f1356b14d2bfecb7f8d82b2e4a0ebfc3f0a61fc6734f79cfd331b  _unified57-k4-route.log
+57223fd953b3ebdc1db1164f9a8fbe6ce28bfd22944872fd5d5bcd27c8566970  _unified57-k8-route.log
+81abd2c12b01987f351952a9cb6a79dd1d3ca92c8e50cd64c4e46b65b61f8623  _unified57-quick-tests.log
+79ef75033f88d4e35511c2cb623f11a705370d7abe6eddecc5e8469731780eb4  _unified57-unit-tests.log
+15858b52d11f25c6170f4bf5debebeeb5ef6a80f574d08a6d7d4f70809330a91  _unify_decoder57.py
+fdc6bac476f8eeb36175f51cccbf24e4df2fbcc89d032f344955de826d9f17a1  _verify_unified57_structure.py
+77a20ffaf5adfd7bed890520773a71f91b0a7e5ee25756f87984221c3bd15875  build/hdl-tests/ccs_admission57/admission_equivalence.log
+b7117b1820bc9b57945837f2b46f9323c952af3f3ac622bf9a13af6e51a85521  build/hdl-tests/ccs_admission57/admission_equivalence.v
+c38eb9f561863c3e151fadc8ec8d98a4b4df0664db2e787f07e59f6a8d594345  build/hdl-tests/ccs_admission57/admission_equivalence.ys
+a4fbd92db5046523f41637a3dd2ebe7ebcd42f5dbb3964fb76756b23652171eb  build/hdl-tests/ccs_admission57/admission_missing_duplicate.log
+1d923c3a59694ef6bf302b12d364c273e3f1907f0ebd3bfae39d163c5971f80a  build/hdl-tests/ccs_admission57/admission_missing_duplicate.v
+50bb291e5a693bb02ef9da8e5321dadd4c0048f482ae1d3d842577164a4f3ffc  build/hdl-tests/ccs_admission57/admission_missing_duplicate.ys
+f4c6aa8039ad7d8b881565c814717463eee04c866148db9e14467830bde7b05d  build/hdl-tests/ccs_admission57/admission_proof_inventory.json
+bdfa94894bf760f6d668bb3145663ae4ec1bd0722b3dc8b57f3b90b164cc63a0  build/hdl-tests/ccs_admission57/ccs_dma_window.v
+82ddb6b4a71f44f16ec75cf2d7ad33db240243601138baf14c3b4442cc7341bc  build/hdl-tests/ccs_admission57/ccs_idwpt.v
+cc5a796b288bc4475b2beb6dd59d5268ef54d8bc9143f134e2f5392fda23483b  build/hdl-tests/ccs_admission57/ccs_stream.v
+be8263fe651b1c854726706d9a59eadc2ba935e76526cd4e4d41b5119a0e7b03  build/hdl-tests/ccs_admission57/coeff_buffer_owner.v
+9355a0fc89b63ba100a262589d394e7aa477bc36f51d01e64e937c455e58b7b6  build/hdl-tests/ccs_admission57/dma_burst.v
+d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3  build/hdl-tests/ccs_admission57/dma_priority.v
+659374f96b67e6cb25054d24369341c6f2e9ec8d653490526073c73044210153  build/hdl-tests/ccs_admission57/dma_window.v
+153f16af0cf4718331375480d7aa0fa23bffc42a844c758529986d285de7aafa  build/hdl-tests/ccs_admission57/integration_simulation_inventory.json
+b479b904ee598c833818ed89f4826a3c6c862aa8e6323156b553c6ab578a71f6  build/hdl-tests/ccs_admission57/owner_after_fsm.json
+29bc859cb6b95c585e550bf89c1af29b847f5e8af1a288f21f36fc9d30e5ebd7  build/hdl-tests/ccs_admission57/owner_before_fsm.json
+1c557367c37e9f03b715b2b1330745c0ec821f94a7b87c251e376694cf34e0f0  build/hdl-tests/ccs_admission57/owner_encoding.map
+4d6ee5845080231aaa2dfdfb37f59d2a482aea54aa330bc2d9aeba262aa59975  build/hdl-tests/ccs_admission57/owner_recode.log
+cef2928426c7f0dd5d290e47c8d0bc666b8a6d8405ec48339783f6eb1e986ea8  build/hdl-tests/ccs_admission57/owner_recode.ys
+50eda7198fc60f884574a3347d46d5ecfc8e2fbd0896ade667e0d058f29fd2a1  build/hdl-tests/ccs_admission57/owner_recode_equivalence.log
+dc8e361505a7610acf7fca8690742a2517e8157b3b54f715d589aace1997d2fd  build/hdl-tests/ccs_admission57/owner_recode_equivalence.ys
+55232b384c13ed5600fa02dc7ce7c6e7e2db8d1f667da56dfe5c6e27416d63fa  build/hdl-tests/ccs_admission57/owner_recode_inventory.json
+2adc9b6c23986ceb2d9cf50418bb93e06e6f1fa942b038368922dffb2e1c03f9  build/hdl-tests/ccs_admission57/owner_recode_negative_inventory.json
+31e5dc4141ab02349a092f7b7de051da868ff44e4a9fbcd2c7ab31f0066f0a58  build/hdl-tests/ccs_admission57/owner_recoded_fsm.json
+e26d1af08808369db442d72352c42c47856630561ee1e5dd3daab1cab8bef1cc  build/hdl-tests/ccs_admission57/owner_simulation_inventory.json
+25b540b08e86f5ed9b80b96027af1d77f5ac2968f75a38c1151cefa0acbd0eaf  build/hdl-tests/ccs_admission57/owner_wrong_fsm_reset.json
+b8a7a2e29059eccad463a4b608e5da703c96d2751bdcd3309406038ee867fb9b  build/hdl-tests/ccs_admission57/owner_wrong_fsm_reset.log
+6d5ea1830d98f9847f53082e0462c605d0ee9e387efd04b43cb88bee1f434331  build/hdl-tests/ccs_admission57/owner_wrong_fsm_reset.ys
+9ad73d1efd600cfcb03661741a9cd683190989a3ac9d032ddd0d12b95a8c428d  build/hdl-tests/ccs_admission57/prematch_inductive_step.log
+01ccb982ee38e98e30c49a284785fb7f52477188dcaf2f68e42f51c7408dc2f3  build/hdl-tests/ccs_admission57/prematch_inductive_step.v
+248eac0db8f006aa87628874e869293bf39eb55420cae921c6c61cf1a4208eaf  build/hdl-tests/ccs_admission57/prematch_inductive_step.ys
+44fb342a06909326d498138eac1f2624a96d72d6acb7699663256dda35300156  build/hdl-tests/ccs_admission57/prematch_proof_inventory.json
+79e6ab8b4a2634c3eb4cb57621f5e18f542ed227cb3b89563bf59f89ead69d4b  build/hdl-tests/ccs_admission57/prematch_unqualified_claim.log
+0dda1c75b9d686327f30af8ed83d7edd54f4f25da866e89340d029d65358ca36  build/hdl-tests/ccs_admission57/prematch_unqualified_claim.v
+f0b4ed2925902e05faedb7483e949ddec2cf4c0cc24c3dcd915494465ce6ef10  build/hdl-tests/ccs_admission57/prematch_unqualified_claim.ys
+b2f76b3ce5ca76572232eec2fbe58d81aa1bd7807f00740fe02f86947d189502  build/hdl-tests/ccs_admission57/prematch_wrong_low_chunk.log
+a26aec2b99d9a7f0a2ae9076f91b0a91e9e1011ead86c199b196a180f37c9831  build/hdl-tests/ccs_admission57/prematch_wrong_low_chunk.v
+8e6afbb2703e2f8a586ebd205de03959909271fe0553bd11672cd2165469bd3d  build/hdl-tests/ccs_admission57/prematch_wrong_low_chunk.ys
+cb91993e9a1a03db49bbb58a73aed03f6880fc7e7397171e064e2464703764ce  build/hdl-tests/ccs_admission57/tb_ccs_dma_window.v
+72b9247840f8c7f18dae9f01ea4859646c5627424e3adecb3e1f7626765d7dd9  build/hdl-tests/ccs_admission57/tb_ccs_headroom.v
+18695459c607fe68f4e8721392ae4a3c0db18aec760aa2b1c10b805d1ad66ace  build/hdl-tests/ccs_admission57/tb_ccs_idwpt.v
+95dd973fa49c17822411ada8f89b3ee4078ae581c0de2c9db7a04f6b1c397d01  build/hdl-tests/ccs_admission57/tb_ccs_rounding.v
+122dd5cfee757f0cb283b9af9750872a6bf48b1c04e9d6ec1025ae347f006bf6  build/hdl-tests/ccs_admission57/tb_ccs_stream.v
+112401af00bdc6811e13bbbd702b80dc4c1036ccd1d67299e328928e2dab069a  build/hdl-tests/ccs_admission57/tb_coeff_buffer_owner.v
+26ccc225299473f2c3b50b42ca06d5ee229f543105f9dc353b76dcbb8463c1ee  build/hdl-tests/ccs_admission57/tb_dma_window.v
+ffbc9b5d2a539dd75e1652460ae6a00e5f73cdec5558ca8cd4a5ca2f89febb53  build/hdl-tests/ccs_admission57/window_admission_82ddb6b4a71f_k2_ecp5.json
+855046a48d56c91be41cac43abc4a6df9d845997291c4a1e9de806873d2fbad0  build/hdl-tests/ccs_admission57/window_admission_82ddb6b4a71f_k2_ecp5.log
+1430128d4da3d3e583a7350924850a96c0e2cd0575a6b4770328dd46aba78083  build/hdl-tests/ccs_admission57/window_admission_82ddb6b4a71f_k2_ecp5.ys
+acc289d2b06e77967112b0c66d9cf40b8e12bb2684dc251ebaa970a285a0946d  build/hdl-tests/ccs_admission57/window_admission_82ddb6b4a71f_k2_inventory.json
+c555d5789561edd71297dbe4597514e9b6429d11d55a22a305ff61fbf50d4357  build/hdl-tests/ccs_admission57/window_admission_82ddb6b4a71f_k2_seed1_route.log
+c4732869b888176b6e1051fdd9e902da07c9d30f5137f8632225acc96735bcd9  build/hdl-tests/ccs_admission57/window_admission_82ddb6b4a71f_k2_seed1_timing.json
+82835f052232a26c13fc13ab7fae4ed05a5597d921ba03f41b855ea20bfe1f5a  build/hdl-tests/ccs_admission57/window_admission_82ddb6b4a71f_k2_seed2_route.log
+036688aee239297f0249d8ac17b4d2030cd466498bb3d89b23424f08c9bd2268  build/hdl-tests/ccs_admission57/window_admission_82ddb6b4a71f_k2_seed2_timing.json
+840d2080ecb1c6823916625a3d735b49ad7994253d050f4994ba42a17a3b9a27  build/hdl-tests/ccs_admission57/window_admission_82ddb6b4a71f_k2_seed3_route.log
+fcbd6862070017d2214afb5e732cbafb33d222034147b09de0a6f36fba6e404f  build/hdl-tests/ccs_admission57/window_admission_82ddb6b4a71f_k2_seed3_timing.json
+58a37c7a2a8e062d34a74109aff509ee43d5d55001355488849c2744571d2a9c  build/hdl-tests/ccs_admission57/window_admission_82ddb6b4a71f_k4_ecp5.json
+c7ecacbaa65320de29b733b615d984f3bd1af10b7426dbc5cfb4f12cdfe19844  build/hdl-tests/ccs_admission57/window_admission_82ddb6b4a71f_k4_ecp5.log
+448f321104524a3c6a5b725237fb8909b801524cf8cb83587e9d125d67821b4b  build/hdl-tests/ccs_admission57/window_admission_82ddb6b4a71f_k4_ecp5.ys
+8067a471b1f89806093af53d0c87d9f678664c2139633e423d264711eb808792  build/hdl-tests/ccs_admission57/window_admission_82ddb6b4a71f_k4_inventory.json
+3b7ea139a973b7312e0c2e43b315c8a737da10747f4b364fba2132bf3e7ebd31  build/hdl-tests/ccs_admission57/window_admission_82ddb6b4a71f_k4_seed1_route.log
+960ada3acbb5b9d74f8b9fee62facb5ffc89f6ccb3224147200175221ae1108c  build/hdl-tests/ccs_admission57/window_admission_82ddb6b4a71f_k4_seed1_timing.json
+e7245d55280b33482075643283266697166e6e87bb4fc9df9a2b109bef0cd94f  build/hdl-tests/ccs_admission57/window_admission_82ddb6b4a71f_k4_seed2_route.log
+b8262fd5c9efd490ff87099d6e75dc638f2fcfa0e70b09bb95dc95606e670660  build/hdl-tests/ccs_admission57/window_admission_82ddb6b4a71f_k4_seed2_timing.json
+e063ab03fb7378a72d4b756863fbd916bd9c89253d8e8edbd1b252307027421e  build/hdl-tests/ccs_admission57/window_admission_82ddb6b4a71f_k4_seed3_route.log
+c041e875908699c389d27f5871e880d0c27360233678d27ff1bfc2ecb575178e  build/hdl-tests/ccs_admission57/window_admission_82ddb6b4a71f_k4_seed3_timing.json
+d9c68d344d72f151dde3efbbc38b1e6710c5bde267e8ab88c88818d59564c584  build/hdl-tests/ccs_admission57/window_admission_82ddb6b4a71f_k8_ecp5.json
+ae61811347f58bf19c5f4abdde0aaedd60bf4e2f16ec77f05f5c930aadd88025  build/hdl-tests/ccs_admission57/window_admission_82ddb6b4a71f_k8_ecp5.log
+57fce4ee5d41f1bc24b1406ae7358a44ed6b5b0735e04bf7e9aaac8f1fe70f57  build/hdl-tests/ccs_admission57/window_admission_82ddb6b4a71f_k8_ecp5.ys
+5462edc29d05b57441ff8132bf6a0b9128bb4182f4a9b03273e0d0821b27f269  build/hdl-tests/ccs_admission57/window_admission_82ddb6b4a71f_k8_inventory.json
+fc1972842e424b353a83c2e1bc8253015d493f763efaf7f72cec1117665c2974  build/hdl-tests/ccs_admission57/window_admission_82ddb6b4a71f_k8_seed1_route.log
+de7681da4c7e6480c92e45dc27635525c04f3ead86a18486fd0309ab11883705  build/hdl-tests/ccs_admission57/window_admission_82ddb6b4a71f_k8_seed1_timing.json
+440d155bebfa4d4595716501cdeef5d99c6e1051c99ff8addc27a3adcd9a4461  build/hdl-tests/ccs_admission57/window_admission_82ddb6b4a71f_k8_seed2_route.log
+22aab443d6548848be83e4287798f59ca3cd5076f702f1c52ebab68408acb026  build/hdl-tests/ccs_admission57/window_admission_82ddb6b4a71f_k8_seed2_timing.json
+7197a40b8be5fe92aac5b689ed3db3185cfadb8f7b391962ed820bf8a0e1da69  build/hdl-tests/ccs_admission57/window_admission_82ddb6b4a71f_k8_seed3_route.log
+d90f202edd9f275170781892425a436322f3b7523d6e1c50182efdaa00bbd9b3  build/hdl-tests/ccs_admission57/window_admission_82ddb6b4a71f_k8_seed3_timing.json
+bdfa94894bf760f6d668bb3145663ae4ec1bd0722b3dc8b57f3b90b164cc63a0  build/hdl-tests/ccs_admission_mapped_owner57_k2/ccs_dma_window.v
+82ddb6b4a71f44f16ec75cf2d7ad33db240243601138baf14c3b4442cc7341bc  build/hdl-tests/ccs_admission_mapped_owner57_k2/ccs_idwpt.v
+cc5a796b288bc4475b2beb6dd59d5268ef54d8bc9143f134e2f5392fda23483b  build/hdl-tests/ccs_admission_mapped_owner57_k2/ccs_stream.v
+007100f8edfe8e8e833b63f780ad10ebab690cbbad86aa88e695557555e29281  build/hdl-tests/ccs_admission_mapped_owner57_k2/coeff_buffer_owner.v
+9355a0fc89b63ba100a262589d394e7aa477bc36f51d01e64e937c455e58b7b6  build/hdl-tests/ccs_admission_mapped_owner57_k2/dma_burst.v
+d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3  build/hdl-tests/ccs_admission_mapped_owner57_k2/dma_priority.v
+659374f96b67e6cb25054d24369341c6f2e9ec8d653490526073c73044210153  build/hdl-tests/ccs_admission_mapped_owner57_k2/dma_window.v
+65267178e9bcc8c44d1e13237807ec82a7e1a698d8578d3d6adda163d4ba58c2  build/hdl-tests/ccs_admission_mapped_owner57_k2/mapped_integration_inventory.json
+99a1bab13039ff045a3b9bee83728e2a097893522236d3015eadc215a250aefa  build/hdl-tests/ccs_admission_mapped_owner57_k2/mapped_owner.json
+0f0b44d8dcfe50460fd4385107f62d00441d6a80eeb403943307ba81b253dccd  build/hdl-tests/ccs_admission_mapped_owner57_k2/mapped_owner.v
+6865c07c3919e180e4004f0a9dca9197d8a5f986be067de4787c73b429c0d2e6  build/hdl-tests/ccs_admission_mapped_owner57_k2/mapped_owner.ys
+8bc7fb161c0839b13d4e800ca427cbba24b4c285e754ca410a5395f6c62dbc4c  build/hdl-tests/ccs_admission_mapped_owner57_k2/mapped_owner_synth.log
+cb91993e9a1a03db49bbb58a73aed03f6880fc7e7397171e064e2464703764ce  build/hdl-tests/ccs_admission_mapped_owner57_k2/tb_ccs_dma_window.v
+bdfa94894bf760f6d668bb3145663ae4ec1bd0722b3dc8b57f3b90b164cc63a0  build/hdl-tests/ccs_admission_mapped_owner57_k8/ccs_dma_window.v
+82ddb6b4a71f44f16ec75cf2d7ad33db240243601138baf14c3b4442cc7341bc  build/hdl-tests/ccs_admission_mapped_owner57_k8/ccs_idwpt.v
+cc5a796b288bc4475b2beb6dd59d5268ef54d8bc9143f134e2f5392fda23483b  build/hdl-tests/ccs_admission_mapped_owner57_k8/ccs_stream.v
+2dcd94374f315faaa1d5ba67db0fda2cc9500cf43f95112622e4b1e76afab4dc  build/hdl-tests/ccs_admission_mapped_owner57_k8/coeff_buffer_owner.v
+9355a0fc89b63ba100a262589d394e7aa477bc36f51d01e64e937c455e58b7b6  build/hdl-tests/ccs_admission_mapped_owner57_k8/dma_burst.v
+d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3  build/hdl-tests/ccs_admission_mapped_owner57_k8/dma_priority.v
+659374f96b67e6cb25054d24369341c6f2e9ec8d653490526073c73044210153  build/hdl-tests/ccs_admission_mapped_owner57_k8/dma_window.v
+75b6a6dcfbcd3f1b1263169f430a5ffe46618a24a311f016185aef1c59817ce0  build/hdl-tests/ccs_admission_mapped_owner57_k8/mapped_integration_inventory.json
+0aa8ace62df4f3453d1345bf9b9941515e0988c728351bf8816fd79459eabb4c  build/hdl-tests/ccs_admission_mapped_owner57_k8/mapped_owner.json
+e61d6ee6d4e969272c98882ba611df655da7e3a24f063f85b486cc8ea908d3c5  build/hdl-tests/ccs_admission_mapped_owner57_k8/mapped_owner.v
+b0cafdd7ebac0bba1f6c418fbb8aa4f26b65b8c63205fb23caed74cdd2c66ad9  build/hdl-tests/ccs_admission_mapped_owner57_k8/mapped_owner.ys
+50e92bcc4bbf95f8caeab41323048e6b5f1600a1ecc876429087943a96bc7100  build/hdl-tests/ccs_admission_mapped_owner57_k8/mapped_owner_synth.log
+cb91993e9a1a03db49bbb58a73aed03f6880fc7e7397171e064e2464703764ce  build/hdl-tests/ccs_admission_mapped_owner57_k8/tb_ccs_dma_window.v
+bdfa94894bf760f6d668bb3145663ae4ec1bd0722b3dc8b57f3b90b164cc63a0  build/hdl-tests/ccs_chunks57/ccs_dma_window.v
+82ddb6b4a71f44f16ec75cf2d7ad33db240243601138baf14c3b4442cc7341bc  build/hdl-tests/ccs_chunks57/ccs_idwpt.v
+cc5a796b288bc4475b2beb6dd59d5268ef54d8bc9143f134e2f5392fda23483b  build/hdl-tests/ccs_chunks57/ccs_stream.v
+a1f32f7ef03d4bbf0b04f2ea02dee3b91da2bbf74d8377813ad52f6b82cf649a  build/hdl-tests/ccs_chunks57/coeff_buffer_owner.v
+9355a0fc89b63ba100a262589d394e7aa477bc36f51d01e64e937c455e58b7b6  build/hdl-tests/ccs_chunks57/dma_burst.v
+d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3  build/hdl-tests/ccs_chunks57/dma_priority.v
+659374f96b67e6cb25054d24369341c6f2e9ec8d653490526073c73044210153  build/hdl-tests/ccs_chunks57/dma_window.v
+b9d9533e42d2f0f4207d328cb837cfcb6eb878db9ee1886be66e28c138da2667  build/hdl-tests/ccs_chunks57/integration_simulation_inventory.json
+77adea4bd87dc4091cc0df982e5b70c0788021b1884aa658a45d7d04938a946e  build/hdl-tests/ccs_chunks57/owner_simulation_inventory.json
+99714229d661c26cf11987efb67fae0e30ca0cd1b0469dd6548c8cd6c4a4b3e3  build/hdl-tests/ccs_chunks57/prematch_inductive_step.log
+01ccb982ee38e98e30c49a284785fb7f52477188dcaf2f68e42f51c7408dc2f3  build/hdl-tests/ccs_chunks57/prematch_inductive_step.v
+1be3cf129baeea77c078e4ed3ab1d15b49199459700148173358d3b1820e5aec  build/hdl-tests/ccs_chunks57/prematch_inductive_step.ys
+b91b25f3e76d452a927c20a043c734579dfbff63b3a2fe5ef5d06a4e98deded2  build/hdl-tests/ccs_chunks57/prematch_proof_inventory.json
+2af33876c9d7297919ea8474b1d4d31239f4b401866cd9e09abef32123a333d7  build/hdl-tests/ccs_chunks57/prematch_unqualified_claim.log
+0dda1c75b9d686327f30af8ed83d7edd54f4f25da866e89340d029d65358ca36  build/hdl-tests/ccs_chunks57/prematch_unqualified_claim.v
+cc7dac4f5af053a926fe3d8e1186f1597b83f84cc196f19a7a7e801300f0bab3  build/hdl-tests/ccs_chunks57/prematch_unqualified_claim.ys
+028ca17b967ef9f145835efb19abff9c571f5d154b4c7ee2096392619c0c0c8c  build/hdl-tests/ccs_chunks57/prematch_wrong_low_chunk.log
+a26aec2b99d9a7f0a2ae9076f91b0a91e9e1011ead86c199b196a180f37c9831  build/hdl-tests/ccs_chunks57/prematch_wrong_low_chunk.v
+7d1b099b6543fc5d916b061523a260b44f4fd55d1c074279d4e041ee38172f2e  build/hdl-tests/ccs_chunks57/prematch_wrong_low_chunk.ys
+cb91993e9a1a03db49bbb58a73aed03f6880fc7e7397171e064e2464703764ce  build/hdl-tests/ccs_chunks57/tb_ccs_dma_window.v
+72b9247840f8c7f18dae9f01ea4859646c5627424e3adecb3e1f7626765d7dd9  build/hdl-tests/ccs_chunks57/tb_ccs_headroom.v
+18695459c607fe68f4e8721392ae4a3c0db18aec760aa2b1c10b805d1ad66ace  build/hdl-tests/ccs_chunks57/tb_ccs_idwpt.v
+95dd973fa49c17822411ada8f89b3ee4078ae581c0de2c9db7a04f6b1c397d01  build/hdl-tests/ccs_chunks57/tb_ccs_rounding.v
+122dd5cfee757f0cb283b9af9750872a6bf48b1c04e9d6ec1025ae347f006bf6  build/hdl-tests/ccs_chunks57/tb_ccs_stream.v
+112401af00bdc6811e13bbbd702b80dc4c1036ccd1d67299e328928e2dab069a  build/hdl-tests/ccs_chunks57/tb_coeff_buffer_owner.v
+26ccc225299473f2c3b50b42ca06d5ee229f543105f9dc353b76dcbb8463c1ee  build/hdl-tests/ccs_chunks57/tb_dma_window.v
+7939e096d3b9be6d49a257da48488abe96bc14cc5dad7ac73e1192b91eb1dd9f  build/hdl-tests/ccs_chunks57/window_chunks_82ddb6b4a71f_k2_ecp5.json
+eff6c11a4bf3274ac5a57db98d7c087feb1f6930c1c574de441679e137844691  build/hdl-tests/ccs_chunks57/window_chunks_82ddb6b4a71f_k2_ecp5.log
+ff71d3daba8afec8d2f2564ad303dd92a3c09eda4af3385843a8522c413439be  build/hdl-tests/ccs_chunks57/window_chunks_82ddb6b4a71f_k2_ecp5.ys
+e72c27d6bc8ed1d8237abb09a0a51a5cb5874cba42574d35b42d8d614c2f0af7  build/hdl-tests/ccs_chunks57/window_chunks_82ddb6b4a71f_k2_inventory.json
+ae33ec2c44485398d6a3c29d5e2b898c1ef80d2fa29b141d02f5bf640cb09a4f  build/hdl-tests/ccs_chunks57/window_chunks_82ddb6b4a71f_k2_seed1_route.log
+15feeee02ff91f097912548e0d693df0a312eac109cc9bf29821d88d26b290d8  build/hdl-tests/ccs_chunks57/window_chunks_82ddb6b4a71f_k2_seed1_timing.json
+660bc0c9cd0c5b5354cc8da0c49b1089535387779079bf78c79a5900a92958cd  build/hdl-tests/ccs_chunks57/window_chunks_82ddb6b4a71f_k2_seed2_route.log
+53b98b5ea2c3c36bb20f75fca74047bc60632b259f0ad3a99e8f1f0e1bb693ca  build/hdl-tests/ccs_chunks57/window_chunks_82ddb6b4a71f_k2_seed2_timing.json
+6d55da4ce821d6f461d903cbaa7466e20081f4405e49b8b47480aa9e63938702  build/hdl-tests/ccs_chunks57/window_chunks_82ddb6b4a71f_k2_seed3_route.log
+7850ea7778016f65cc130459b95868d6419f5283506ad70ea34f463a883034ce  build/hdl-tests/ccs_chunks57/window_chunks_82ddb6b4a71f_k2_seed3_timing.json
+2a65dc6cd28fd594f4acec4de9554e047e261c169c83fe626f6e3cd8818b30f7  build/hdl-tests/ccs_chunks57/window_chunks_82ddb6b4a71f_k4_ecp5.json
+74789f4b21a8fafc015a32a4c6e8f78dcc54fd20202bb2159d5c22749e0543ff  build/hdl-tests/ccs_chunks57/window_chunks_82ddb6b4a71f_k4_ecp5.log
+9b85230c7f9256fea147c1d8be421b49b8720dce226316744e37b116dbbafc1a  build/hdl-tests/ccs_chunks57/window_chunks_82ddb6b4a71f_k4_ecp5.ys
+528917c86a12f67e59d1997f255e0351a4da9c78f70f30f9baffcfa207fc6e89  build/hdl-tests/ccs_chunks57/window_chunks_82ddb6b4a71f_k4_inventory.json
+cd4f78db3c430a745c8be045d1751aac47099f7bafe7581f3fe26266aeb177e6  build/hdl-tests/ccs_chunks57/window_chunks_82ddb6b4a71f_k4_seed1_route.log
+a0e8ac3a936b9612ec75a0c7db3786649067a1ec6d6b0385150a56a961985615  build/hdl-tests/ccs_chunks57/window_chunks_82ddb6b4a71f_k4_seed1_timing.json
+e5e2b26bfa74d78644b7ab95e97e5797f2589bf8bbb6e71dc08bf8d60a2d47b2  build/hdl-tests/ccs_chunks57/window_chunks_82ddb6b4a71f_k4_seed2_route.log
+31bbb39cb918c2bc7ce28cb5b4fa17d85b6734209808880648131dc6ae2c6844  build/hdl-tests/ccs_chunks57/window_chunks_82ddb6b4a71f_k4_seed2_timing.json
+60770fc41dcade57261dc49166566bf8b546f6370972cab208258c1caa75e5a9  build/hdl-tests/ccs_chunks57/window_chunks_82ddb6b4a71f_k4_seed3_route.log
+150c8e36762f4b990aa41c2a33b050bc00995f0f14edd4b4ed2f82200218b8b8  build/hdl-tests/ccs_chunks57/window_chunks_82ddb6b4a71f_k4_seed3_timing.json
+5e136932ea79965705d7a58fd29d2e3d6ed9f4d30e68ef97e2978225044770c5  build/hdl-tests/ccs_chunks57/window_chunks_82ddb6b4a71f_k8_ecp5.json
+cbbf39c7c463471557b8de1320f125a74c6de6b74e1d754712b1519323bcf12d  build/hdl-tests/ccs_chunks57/window_chunks_82ddb6b4a71f_k8_ecp5.log
+e5f529f0323414e193532f961c940120055b3ba931f456d7571a8663c8396c9c  build/hdl-tests/ccs_chunks57/window_chunks_82ddb6b4a71f_k8_ecp5.ys
+1158c3edf2a566b7da8b14ed65544c31c8ee23b77c03b7c2f1b836d033d40444  build/hdl-tests/ccs_chunks57/window_chunks_82ddb6b4a71f_k8_inventory.json
+f6949006ba4d97e3bdfd5bc3c126004522c65f12389695187de26e13b6fe44f0  build/hdl-tests/ccs_chunks57/window_chunks_82ddb6b4a71f_k8_seed1_route.log
+abe4a0f6ade1913a34ef814c0a5c45a74743228d222c56e26d6c0615c3a48f05  build/hdl-tests/ccs_chunks57/window_chunks_82ddb6b4a71f_k8_seed1_timing.json
+8ac1c0720fce78cbf087179f8ddc37d6473be8e061e048ec2be1876c18ebf18c  build/hdl-tests/ccs_chunks57/window_chunks_82ddb6b4a71f_k8_seed2_route.log
+37ef48680b71148a705fcb20dea76cabf802219c621bf7ed2cae041860b96d92  build/hdl-tests/ccs_chunks57/window_chunks_82ddb6b4a71f_k8_seed2_timing.json
+1692bfd8b8122a0f1082301994ee49f8caae823125bf26597c3becf9c2db5a34  build/hdl-tests/ccs_chunks57/window_chunks_82ddb6b4a71f_k8_seed3_route.log
+872642fd52b25808e78ff530623c6d1061e79d4d5742f3115faa11348c0a6094  build/hdl-tests/ccs_chunks57/window_chunks_82ddb6b4a71f_k8_seed3_timing.json
+14c34e5bcdd77cb9ea8b4d5b18e3b5c01f17828d9c37defc55b3250a966c0387  build/hdl-tests/ccs_chunks57/window_simulation_inventory.json
+bdfa94894bf760f6d668bb3145663ae4ec1bd0722b3dc8b57f3b90b164cc63a0  build/hdl-tests/ccs_chunks_mapped_owner57_k2/ccs_dma_window.v
+82ddb6b4a71f44f16ec75cf2d7ad33db240243601138baf14c3b4442cc7341bc  build/hdl-tests/ccs_chunks_mapped_owner57_k2/ccs_idwpt.v
+cc5a796b288bc4475b2beb6dd59d5268ef54d8bc9143f134e2f5392fda23483b  build/hdl-tests/ccs_chunks_mapped_owner57_k2/ccs_stream.v
+007100f8edfe8e8e833b63f780ad10ebab690cbbad86aa88e695557555e29281  build/hdl-tests/ccs_chunks_mapped_owner57_k2/coeff_buffer_owner.v
+9355a0fc89b63ba100a262589d394e7aa477bc36f51d01e64e937c455e58b7b6  build/hdl-tests/ccs_chunks_mapped_owner57_k2/dma_burst.v
+d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3  build/hdl-tests/ccs_chunks_mapped_owner57_k2/dma_priority.v
+659374f96b67e6cb25054d24369341c6f2e9ec8d653490526073c73044210153  build/hdl-tests/ccs_chunks_mapped_owner57_k2/dma_window.v
+014977ba8ede8c6d64286f0121ddd6a3f314abeab7d6633c4b1f6760881fe596  build/hdl-tests/ccs_chunks_mapped_owner57_k2/mapped_integration_inventory.json
+724151dd8d2f1d2228d484caa782023afb628bd699287330a3e888702dfd9981  build/hdl-tests/ccs_chunks_mapped_owner57_k2/mapped_owner.json
+541d46b543c8174e28998559965e1a0b2b3427e5c79cce0412d5e66ba5e8acd5  build/hdl-tests/ccs_chunks_mapped_owner57_k2/mapped_owner.v
+a97310648f611cc1d27f14b7b0ee6b83b2e01403d3a895b5d23d9a31d43b86b9  build/hdl-tests/ccs_chunks_mapped_owner57_k2/mapped_owner.ys
+3b24b51c725588fb793803fbbec262ce30d76e57ddc6366bc2d0fc300691c4a0  build/hdl-tests/ccs_chunks_mapped_owner57_k2/mapped_owner_synth.log
+cb91993e9a1a03db49bbb58a73aed03f6880fc7e7397171e064e2464703764ce  build/hdl-tests/ccs_chunks_mapped_owner57_k2/tb_ccs_dma_window.v
+bdfa94894bf760f6d668bb3145663ae4ec1bd0722b3dc8b57f3b90b164cc63a0  build/hdl-tests/ccs_chunks_mapped_owner57_k8/ccs_dma_window.v
+82ddb6b4a71f44f16ec75cf2d7ad33db240243601138baf14c3b4442cc7341bc  build/hdl-tests/ccs_chunks_mapped_owner57_k8/ccs_idwpt.v
+cc5a796b288bc4475b2beb6dd59d5268ef54d8bc9143f134e2f5392fda23483b  build/hdl-tests/ccs_chunks_mapped_owner57_k8/ccs_stream.v
+2dcd94374f315faaa1d5ba67db0fda2cc9500cf43f95112622e4b1e76afab4dc  build/hdl-tests/ccs_chunks_mapped_owner57_k8/coeff_buffer_owner.v
+9355a0fc89b63ba100a262589d394e7aa477bc36f51d01e64e937c455e58b7b6  build/hdl-tests/ccs_chunks_mapped_owner57_k8/dma_burst.v
+d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3  build/hdl-tests/ccs_chunks_mapped_owner57_k8/dma_priority.v
+659374f96b67e6cb25054d24369341c6f2e9ec8d653490526073c73044210153  build/hdl-tests/ccs_chunks_mapped_owner57_k8/dma_window.v
+9ea13851e9ccdc2354ec76cb17fb631c118eeefc0354e2c48073f4f314fb8661  build/hdl-tests/ccs_chunks_mapped_owner57_k8/mapped_integration_inventory.json
+77284185ab4bcc54866e47c2cc8e4fa57c2a926652abff127ce8377944d9f7f9  build/hdl-tests/ccs_chunks_mapped_owner57_k8/mapped_owner.json
+d6d4d1c61214340f1e267b83ac62ddc4e10290c3c03f44c7d942ea89ece341c0  build/hdl-tests/ccs_chunks_mapped_owner57_k8/mapped_owner.v
+d05bc6f92b6bf4aa14f9c1ee0c5f6fcc815576ffca4ab4a86e80fd3df6f09ae8  build/hdl-tests/ccs_chunks_mapped_owner57_k8/mapped_owner.ys
+bbc18cefcac4054eb537c8aabb72212b939d8e40f491c076c3e21cdddd4bd3d4  build/hdl-tests/ccs_chunks_mapped_owner57_k8/mapped_owner_synth.log
+cb91993e9a1a03db49bbb58a73aed03f6880fc7e7397171e064e2464703764ce  build/hdl-tests/ccs_chunks_mapped_owner57_k8/tb_ccs_dma_window.v
+8aa2d0923503fddf5ce7f91df3b4e24992cc0ac1559c55b56da38ea4e7c5a71f  build/hdl-tests/ccs_dma_window_simulation_5fa8194b40c7_k2_h15_1.json
+ecd6e03e2ffdbc8b49b49b01c06b5f79ae78d8ab0fd02792f077562a97be8b29  build/hdl-tests/ccs_dma_window_simulation_5fa8194b40c7_k2_h2_0.json
+3c0236b7d2a7d2afd71ba8d7c8948a15592622841acaa859129426876cde3165  build/hdl-tests/ccs_dma_window_simulation_5fa8194b40c7_k2_h2_1.json
+6fab1810cd3b83e09dc965bffdfdbe38c5d91a092e39396142b5e211e97855e8  build/hdl-tests/ccs_dma_window_simulation_5fa8194b40c7_k4_h15_1.json
+7d64aacf8ab1ffef174576f55f2b2e8702fce3e9589ecc2c25fd08dbc1b2b294  build/hdl-tests/ccs_dma_window_simulation_5fa8194b40c7_k4_h2_0.json
+8cf53b40f8157b880fe0edb468f3c23765b49b7f418dcf1a7eff095fb3e38c37  build/hdl-tests/ccs_dma_window_simulation_5fa8194b40c7_k4_h2_1.json
+e8a973fe35932e349ccd9ceae6d085bb3bf972280e63e675a17e09d198b6c998  build/hdl-tests/ccs_dma_window_simulation_5fa8194b40c7_k8_h15_1.json
+2592b3b01e636b62cf1d6083bf9538f6981afadd4eb9147e924ee4ffb3cca7ba  build/hdl-tests/ccs_dma_window_simulation_5fa8194b40c7_k8_h2_0.json
+d201b40b80bc9532f24ae7d44461d5d0e2cb1cfb748d56a2f6f10b237ded9031  build/hdl-tests/ccs_dma_window_simulation_5fa8194b40c7_k8_h2_1.json
+70415156a203fa29ab9f7c46d9ee8000d119fa640c10bc1e791407f6f90a1850  build/hdl-tests/ccs_dma_window_simulation_677b118b01b6_k2_h15_1.json
+453434137ea42f806164b2cbd93ae9e00bfa3df6d3b0ec99c946ec0248a307d3  build/hdl-tests/ccs_dma_window_simulation_677b118b01b6_k2_h2_0.json
+2c2bfb45feeb9a152e34b8a89cf52c64d55e5853145098d558c89e0b753f2b6d  build/hdl-tests/ccs_dma_window_simulation_677b118b01b6_k2_h2_1.json
+f20ad1cd5a91b9687cbfdb87fcf9cd875f040f4b0b9504e7b700a318228a768b  build/hdl-tests/ccs_dma_window_simulation_677b118b01b6_k4_h15_1.json
+a55b7aecde9f4b59bca815094ff5926c9ae628ba50175594401b4098cba6a283  build/hdl-tests/ccs_dma_window_simulation_677b118b01b6_k4_h2_0.json
+2b2d56bfecfb98ef17ec332e00168dc05623febf92ab4fbd454646154531eab5  build/hdl-tests/ccs_dma_window_simulation_677b118b01b6_k4_h2_1.json
+871f96f30b0ea247f7b7acc1c0fd7c0f9e8e469051c7fc844e59106cb714b14e  build/hdl-tests/ccs_dma_window_simulation_677b118b01b6_k8_h15_1.json
+96ca2efada2316d1d22e29c4a1efdfec40bd402ff5e1103f2436022c0b24544a  build/hdl-tests/ccs_dma_window_simulation_677b118b01b6_k8_h2_0.json
+d3c28e0dd776f88f222ebb363f93ba16e70fa08dcb3d4297a6b125d30ce15d42  build/hdl-tests/ccs_dma_window_simulation_677b118b01b6_k8_h2_1.json
+2f64fac5d19b72db7db32cf540273ad826be621846c4ee8ed1d16814e2cee6e1  build/hdl-tests/ccs_dma_window_simulation_7f04e637b948_k2_h15_1.json
+9399796ec63148d08b1bd9e2aa57647ea8248ec142f8db8adc1c00388bc67648  build/hdl-tests/ccs_dma_window_simulation_7f04e637b948_k2_h2_0.json
+6ce2641859b96211f1228cf825276e13c4239686688cc928fec7bad8cec95d42  build/hdl-tests/ccs_dma_window_simulation_7f04e637b948_k2_h2_1.json
+939dee101ba9f2b34d8645d99354db87184a62d3b12e89fc2fd7197830711caf  build/hdl-tests/ccs_dma_window_simulation_7f04e637b948_k4_h15_1.json
+4c948b4702da636dcc0f25772476a7dac93a906122226fa89e18728f67b869bd  build/hdl-tests/ccs_dma_window_simulation_7f04e637b948_k4_h2_0.json
+6eb91f8e2d34ec8780329331bfa3285dc9b0bd1d7c36153a506d040b72e4f7c0  build/hdl-tests/ccs_dma_window_simulation_7f04e637b948_k4_h2_1.json
+f10c62beff566ee3e18346e54b4e0d99c8dfaccfd1d9d0b9dbf9135f6639d112  build/hdl-tests/ccs_dma_window_simulation_7f04e637b948_k8_h15_1.json
+259561c0513ed5f5848c0998efcc0b6f8359c1da20cf70506b014a01fd9e58c0  build/hdl-tests/ccs_dma_window_simulation_7f04e637b948_k8_h2_0.json
+e7da5a2c19b4b1fa1ae9b9922a67e5bab91a0161db2dc63505604d66fbfd0050  build/hdl-tests/ccs_dma_window_simulation_7f04e637b948_k8_h2_1.json
+94ba51e0f43d18487ddd7120e8e13e7b038d88367763df26f8c8d2670ba0fffb  build/hdl-tests/ccs_dma_window_simulation_86bff2ef7234_k2_h15_1.json
+29d38ff943401c494dd999edc861a6827ee5c4b7542afdc8ca9b077bd064e689  build/hdl-tests/ccs_dma_window_simulation_86bff2ef7234_k2_h2_0.json
+159b2601c2fe7f4848151143647c105838c6f81abb9e090451d0653115996efc  build/hdl-tests/ccs_dma_window_simulation_86bff2ef7234_k2_h2_1.json
+ba9eb458c2ba938029d03dce50870754f88f1389bba7ce6b45cb3ec24fbc33bb  build/hdl-tests/ccs_dma_window_simulation_86bff2ef7234_k4_h15_1.json
+26ccd12adac9524aab6b8b7c5820921b9c8a577ef8d16fd586af5c63445ac0de  build/hdl-tests/ccs_dma_window_simulation_86bff2ef7234_k4_h2_0.json
+359ef461b48d17cbe280bf9da8a93bee77a16e176768df3463321eb5886cfd00  build/hdl-tests/ccs_dma_window_simulation_86bff2ef7234_k4_h2_1.json
+0759dfeeb51c29857dc212bf1385b47c300568208739e3b105e26ebf69901be1  build/hdl-tests/ccs_dma_window_simulation_86bff2ef7234_k8_h15_1.json
+a57cb53c1b1a88b97578dfd3c596832b56824ac99f05c08497aefed6cd62c236  build/hdl-tests/ccs_dma_window_simulation_86bff2ef7234_k8_h2_0.json
+c6f944db2f059652f0a016535dbd1f4cd598cbaffd39e88b026232147041e6aa  build/hdl-tests/ccs_dma_window_simulation_86bff2ef7234_k8_h2_1.json
+eb8d7363d86c59031d285770ac2bfd6714333394e02f971c2e112451c292856a  build/hdl-tests/ccs_dma_window_simulation_9b6b7945b2c4_k2_h15_1.json
+e8fe64f3f3d4c86d7959140c7ac025b8b7d81e72e20f5d89da6a3697a5147962  build/hdl-tests/ccs_dma_window_simulation_9b6b7945b2c4_k2_h2_0.json
+dc64100823991f1c1ab46e97a40563d162612974b2a663ce4343396e8da83495  build/hdl-tests/ccs_dma_window_simulation_9b6b7945b2c4_k2_h2_1.json
+f14b6e808e5121f8838fc411cfd3018f45a79de2a18db1a0cb6e873e9ea77ea9  build/hdl-tests/ccs_dma_window_simulation_d4daf764ddbf_k2_h15_1.json
+1c074de4cca1df6f496d76014cda921f06470f7982d5470b62b6b5434acf3e58  build/hdl-tests/ccs_dma_window_simulation_d4daf764ddbf_k2_h2_0.json
+f64dd5736477300beec1813de82e3eeb5f7ba281b36988c89d6826899bc39ee1  build/hdl-tests/ccs_dma_window_simulation_d4daf764ddbf_k2_h2_1.json
+3b2d2b38b7a80baa75aff2fc93cee3e483da4caa2db53af420ecae0d3a6cb832  build/hdl-tests/ccs_dma_window_simulation_d4daf764ddbf_k4_h15_1.json
+8e4e4fe8992ac0a81c0f8369d73667eb3806bc1aa19ccdc004632d566319ce0f  build/hdl-tests/ccs_dma_window_simulation_d4daf764ddbf_k4_h2_0.json
+2264278a79d5a5b987bd4db3108c0142d547f3e3556a34263efd86e5b4e15704  build/hdl-tests/ccs_dma_window_simulation_d4daf764ddbf_k4_h2_1.json
+b552b007d490b07c773ca0bb3470ee2dd1ec889e227f552479b31b6f9618b737  build/hdl-tests/ccs_dma_window_simulation_d4daf764ddbf_k8_h15_1.json
+08db00cffcbb242eab14f78babf60615294b4e6be2d6286b4fec8ff71e72cfaf  build/hdl-tests/ccs_dma_window_simulation_d4daf764ddbf_k8_h2_0.json
+57ed62fd3b6eac30b915e68451a12b8451796366c0d6748f05371443d83006f4  build/hdl-tests/ccs_dma_window_simulation_d4daf764ddbf_k8_h2_1.json
+cc55ee3a12b030907e42abcb790935ac996f578e24430ca4e80a44bee45e1c3d  build/hdl-tests/ccs_dma_window_simulation_d880ec0abe07_k2_h15_1.json
+9a9c9931d4b70be57e2f22547f58d261fdeeaaf6f1b3a01c3c03ea893e944e99  build/hdl-tests/ccs_dma_window_simulation_d880ec0abe07_k2_h2_0.json
+bddb69f993e66440806b49e924d53ce27623036d3bf3d6228325d19f6d6405a2  build/hdl-tests/ccs_dma_window_simulation_d880ec0abe07_k2_h2_1.json
+61d39887ae98c4349990231b9daffa973a094b9eeeacaa4435d01e8c5740c21b  build/hdl-tests/ccs_dma_window_simulation_d880ec0abe07_k4_h15_1.json
+e785eef842a1909c342095ff96a6ee1b248771234a3967d76cdf6acc5b43ee24  build/hdl-tests/ccs_dma_window_simulation_d880ec0abe07_k4_h2_0.json
+38651a81d12f7144c0c88514bb8c34f5903c11240667281de983dcd07449e600  build/hdl-tests/ccs_dma_window_simulation_d880ec0abe07_k4_h2_1.json
+814766d3f62afbec56ecd7b93a16c96e6a1cb58d09ee9867468ca218d0fea885  build/hdl-tests/ccs_dma_window_simulation_d880ec0abe07_k8_h15_1.json
+aca1faf1c22f67927bce0bbf8e97694caa383383c7ea5ea8cedf9f53abff87cc  build/hdl-tests/ccs_dma_window_simulation_d880ec0abe07_k8_h2_0.json
+9c4ecafdba2ffc2778452cf9b9656a9b09b13a20838e8ac2b43eb137d519c830  build/hdl-tests/ccs_dma_window_simulation_d880ec0abe07_k8_h2_1.json
+dd4dd6164de206b28e75a3779985ea9c3531ccb4530c856ddcee2f4f465ae2d3  build/hdl-tests/ccs_dma_window_synthesis.json
+222beeaa24c763f534af692ac5e3304ae499397ed114fa36eae3cfc532fffddc  build/hdl-tests/ccs_fsm57/ccs_dma_window.v
+82ddb6b4a71f44f16ec75cf2d7ad33db240243601138baf14c3b4442cc7341bc  build/hdl-tests/ccs_fsm57/ccs_idwpt.v
+029691df17b9b69f927f1f6e58eaf4a227117530a5ca299951fb62a6d6ee54d2  build/hdl-tests/ccs_fsm57/ccs_stream.v
+b746b4cd31a1eb51b07c8497440538bd19809d38aece706a4c0f107770f5bd3e  build/hdl-tests/ccs_fsm57/coeff_buffer_owner.v
+9355a0fc89b63ba100a262589d394e7aa477bc36f51d01e64e937c455e58b7b6  build/hdl-tests/ccs_fsm57/dma_burst.v
+d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3  build/hdl-tests/ccs_fsm57/dma_priority.v
+d3d7bc6921065d1c73d6a106ba3575d42e8003f49ef55075773de31d953c00d8  build/hdl-tests/ccs_fsm57/dma_window.v
+95ef45ab9b420647b752e49cf51347ad6d20815209d3255bfec09c213e55d643  build/hdl-tests/ccs_fsm57/integration_simulation_inventory.json
+154c8b5b675603f4c74647c8cd048d6ffbd7207ee7a9658d5847f68c27b32c39  build/hdl-tests/ccs_fsm57/owner_after_fsm.json
+53ec91d09faaa6ef0f1ed0e0c5619a03396def34adfc78f41e49bad9ac7eaf8d  build/hdl-tests/ccs_fsm57/owner_before_fsm.json
+1c557367c37e9f03b715b2b1330745c0ec821f94a7b87c251e376694cf34e0f0  build/hdl-tests/ccs_fsm57/owner_encoding.map
+fc5294eb1d82e10368813cada52f83c1de8be90b2994e425c94ff3acb3edb1c6  build/hdl-tests/ccs_fsm57/owner_fsm_inventory.json
+0b2fad2f8c573ed5538b1c0b5c5190cacd6f6346a2839a1a1e27d2ea4ce314bc  build/hdl-tests/ccs_fsm57/owner_fsm_k2.json
+47f43f179461eb6e238ea786cb4c820707398ad266a3f60ae1b3b20a8c8cc135  build/hdl-tests/ccs_fsm57/owner_fsm_k2.v
+4ed80357ae520e3fb9102a57c3a32f40e7e0471d99ea06f3bd2e3f69ddc7129d  build/hdl-tests/ccs_fsm57/owner_fsm_k2.ys
+cbaa6bb0c535d49451ca31246f9875e6b34d58896b73dcbe8509dfaef8abfa84  build/hdl-tests/ccs_fsm57/owner_fsm_k2_0_run.log
+9dceee7e1a5fe093073543e434ec3bd7a66c54d423c9af30644b735be0246dad  build/hdl-tests/ccs_fsm57/owner_fsm_k2_1_run.log
+8c19b37a172ea97a92588e1834bfe48b7d4ee4dfe03c9c938246cf3431c16c45  build/hdl-tests/ccs_fsm57/owner_fsm_k2_mapped_inventory.json
+d861cc7f7481e2501026bfdb3412a5bf51548d2889da4de3425e9622e5f45056  build/hdl-tests/ccs_fsm57/owner_fsm_k2_synth.log
+559fbc25d1b8edd2009e068d1ece443aed40e65788b3bb3db0e17d8113e89951  build/hdl-tests/ccs_fsm57/owner_fsm_k2_tb.v
+896689180548fac13c07bc3bdcc89db54eed8b12f59aa39e4e3d5389f24fa9c6  build/hdl-tests/ccs_fsm57/owner_fsm_k8.json
+d3b43e4881026e2c13a086108a76fe0ae63ab52647af7f2f1b7847f9c04db7d2  build/hdl-tests/ccs_fsm57/owner_fsm_k8.v
+4ecc03ea3df7a4e5b5917728e37ed3619ea2a1a96fa3c41535285fec1f163f1d  build/hdl-tests/ccs_fsm57/owner_fsm_k8.ys
+77a1db6c222108ed9490bf927ef7c753cb18cc6827e35c43ac083541402ca48c  build/hdl-tests/ccs_fsm57/owner_fsm_k8_0_run.log
+10e8d71b04d15c5fc745cd48cb016ac4bbcc3c22b638693f107cd8991cb2aec9  build/hdl-tests/ccs_fsm57/owner_fsm_k8_1_run.log
+29d242222733d54860e4927f7bf314b6e113b1e1542fe125276f5fb2406a9c5c  build/hdl-tests/ccs_fsm57/owner_fsm_k8_mapped_inventory.json
+0a87b326859da6c8b8e2a74ddf0793b49616cf77fc75cf02e3645db3998dd905  build/hdl-tests/ccs_fsm57/owner_fsm_k8_synth.log
+559fbc25d1b8edd2009e068d1ece443aed40e65788b3bb3db0e17d8113e89951  build/hdl-tests/ccs_fsm57/owner_fsm_k8_tb.v
+0fc3aac034c78ed681f866601d3ea5eb668d389adacbf31513ba234cb0fcf157  build/hdl-tests/ccs_fsm57/owner_fsm_policy.log
+84d5b4321103062b07746391462cf94dc764d9132ab06c81053d47cd22b41d0c  build/hdl-tests/ccs_fsm57/owner_fsm_policy.v
+9b805560f1c67dc2624e0f562c552c300f97f46cc0ad1a61b7e59d7deedaeeb3  build/hdl-tests/ccs_fsm57/owner_fsm_policy.ys
+56283d30af44a9d875610e13c17101a425c4e7d936db00c8f9c889c19c8a7738  build/hdl-tests/ccs_fsm57/owner_fsm_wrong_expiry.log
+cee5e03a9582b49a3748c8f8f1726923447ee515931e2e7ac7e1f686fb6ff61a  build/hdl-tests/ccs_fsm57/owner_fsm_wrong_expiry.v
+9e3bb1c1352b7d13421c1bca81c7ab91b0571b82d4fdb733edb7af5978784fb4  build/hdl-tests/ccs_fsm57/owner_fsm_wrong_expiry.ys
+abbb1d01621f52bedcd933839beb09d54bf60b9dd85063a2ec99507dbe52c822  build/hdl-tests/ccs_fsm57/owner_recode.log
+072149b82c29158a75c45fd07fee0c2d0f1e528c5c19308c5b78290c7381e84c  build/hdl-tests/ccs_fsm57/owner_recode.ys
+d309ccd8b78ce6ebd16893da958e0ea96009fd497357b3ae5d9d423da9ecf860  build/hdl-tests/ccs_fsm57/owner_recode_equivalence.log
+e29b31ae5763e3ca3a5688a3321ab020f487868152738cace82565733c633af0  build/hdl-tests/ccs_fsm57/owner_recode_equivalence.ys
+455a4eaaba9f8c50abc631cda47d009dd9b87d33dd5099787e1747d6dcb35878  build/hdl-tests/ccs_fsm57/owner_recode_inventory.json
+44dd4c6b2666e4e08c972a15aaf17c71ee3197be5fd7b424412b349e307fbf12  build/hdl-tests/ccs_fsm57/owner_recode_negative_inventory.json
+52362ee89211dfbb503ddf6c9daff62f092560fc29ed8ff881da0add915b20d6  build/hdl-tests/ccs_fsm57/owner_recoded_fsm.json
+6f40b5273bbda6d98ec862257471ed2391d5715a6b34be7e8171de7032aeb8ea  build/hdl-tests/ccs_fsm57/owner_simulation_inventory.json
+cd946f25a3cd724689e3cef98f03f2b4d0e906ae1d15dbd3b048db846b4d9cff  build/hdl-tests/ccs_fsm57/owner_wrong_fsm_reset.json
+79b539a05340ed735f61bd94811ae03ebc3457f9b127101b3220a2b0b5a82b9f  build/hdl-tests/ccs_fsm57/owner_wrong_fsm_reset.log
+5d8dbb6ce463a24fcc80d380dfd2e45b81890c61a46f27fdd45a2813d9788013  build/hdl-tests/ccs_fsm57/owner_wrong_fsm_reset.ys
+af7fa64ed52eae9605f796a5328d775b1ba79c1995ac0489fc95f2e6e4c2c8c7  build/hdl-tests/ccs_fsm57/recode_initial_failed/owner_before_fsm.json
+efd93a824b176e73bb7f85ed72267f6af4c3087be4134ada3461afe3e4c2a2b2  build/hdl-tests/ccs_fsm57/recode_initial_failed/owner_recode.log
+6fb3c5fd5cb6e5ce1ab1c46ba060bd79a2c26aeac98d4af256fe2964075a04b1  build/hdl-tests/ccs_fsm57/recode_initial_failed/owner_recode.ys
+cb91993e9a1a03db49bbb58a73aed03f6880fc7e7397171e064e2464703764ce  build/hdl-tests/ccs_fsm57/tb_ccs_dma_window.v
+72b9247840f8c7f18dae9f01ea4859646c5627424e3adecb3e1f7626765d7dd9  build/hdl-tests/ccs_fsm57/tb_ccs_headroom.v
+18695459c607fe68f4e8721392ae4a3c0db18aec760aa2b1c10b805d1ad66ace  build/hdl-tests/ccs_fsm57/tb_ccs_idwpt.v
+95dd973fa49c17822411ada8f89b3ee4078ae581c0de2c9db7a04f6b1c397d01  build/hdl-tests/ccs_fsm57/tb_ccs_rounding.v
+abe1f4de0076a88b057e564098322d67a6f1e338a6abfa146f08cac4f9f442cb  build/hdl-tests/ccs_fsm57/tb_ccs_stream.v
+6e51e42727a89d4a111e7b13bb277da16905dfa59494e305c7bdb73508d4a1e1  build/hdl-tests/ccs_fsm57/tb_coeff_buffer_owner.v
+ffc185fe661d9c2dabc61c5fcbc06ba715f7503b790c86da55c8495c7fd63e95  build/hdl-tests/ccs_fsm57/tb_dma_window.v
+97e1cb9f5be87a60280851fad3b5236a2179cd13a82825ebda79be79f0b2c75c  build/hdl-tests/ccs_fsm57/window_fsm_82ddb6b4a71f_k2_ecp5.json
+7733cdd5c173eb022f3f76a7f515fbbdd4b30551369249549e30cf1ced925bbb  build/hdl-tests/ccs_fsm57/window_fsm_82ddb6b4a71f_k2_ecp5.log
+1e9f23e7f5723073d4405ba13e871a96972052c077240a8a626f869a763912d7  build/hdl-tests/ccs_fsm57/window_fsm_82ddb6b4a71f_k2_ecp5.ys
+4f5123da1c342e429cd04b1ceaf56a0676f6fd8c7cab02d4692342ff79d04d9c  build/hdl-tests/ccs_fsm57/window_fsm_82ddb6b4a71f_k2_inventory.json
+f10d0ca7ee26a066ead3e8abd172f05ed3e021358e4d8942390f6e05375b7454  build/hdl-tests/ccs_fsm57/window_fsm_82ddb6b4a71f_k2_seed1_route.log
+dfa4a7eb431dc790c3dd839a7b36b216800813374cc8b83a01110251100d3053  build/hdl-tests/ccs_fsm57/window_fsm_82ddb6b4a71f_k2_seed1_timing.json
+3a5be154444b4fbcb10803808fa0b8a6b03992e0a77e4f2caae03735f6b5fe76  build/hdl-tests/ccs_fsm57/window_fsm_82ddb6b4a71f_k2_seed2_route.log
+ad0ce46422907e369ea83f76cfda0887c9e5596e7e499fb12a0b482fc6ce0e38  build/hdl-tests/ccs_fsm57/window_fsm_82ddb6b4a71f_k2_seed2_timing.json
+9c1e44cef952cf5f44026bee1be2607a9bf2c3e007fa374c2def8f9a3a956a45  build/hdl-tests/ccs_fsm57/window_fsm_82ddb6b4a71f_k2_seed3_route.log
+70cabe1756e2bc21c9e2d17065b08535bcc6f1585d8decf753b8703528781cb5  build/hdl-tests/ccs_fsm57/window_fsm_82ddb6b4a71f_k2_seed3_timing.json
+f00722464c77f14532a98e69937c8272d2d979bc2965c04ef9e90d5456f6d89a  build/hdl-tests/ccs_fsm57/window_fsm_82ddb6b4a71f_k4_ecp5.json
+6882f7982495a0634b77c904de0b9ff075ee332ff63c4f97410cdfaf9df9a7b0  build/hdl-tests/ccs_fsm57/window_fsm_82ddb6b4a71f_k4_ecp5.log
+cd2e32b8d90feb48912ff073160351f698fe9cac78070dc8cc98a30e73616cf3  build/hdl-tests/ccs_fsm57/window_fsm_82ddb6b4a71f_k4_ecp5.ys
+3669b16fb3604ca5fc2c9fcf6d23406b998dde960dafd4a0119d8f82bee25fb2  build/hdl-tests/ccs_fsm57/window_fsm_82ddb6b4a71f_k4_inventory.json
+dae4447e19229391ce7ba77afbeb6033c7cade8f44f135fa24c85f43a9abb2b8  build/hdl-tests/ccs_fsm57/window_fsm_82ddb6b4a71f_k4_seed1_route.log
+20f9612513188b30fbbf5546e28694e35e964b2625142bbca1e10a3830a20ea4  build/hdl-tests/ccs_fsm57/window_fsm_82ddb6b4a71f_k4_seed1_timing.json
+0c68464a27377e5282b6ca99bbe4313f803c9e6a5de774af4fc68f4cb302947d  build/hdl-tests/ccs_fsm57/window_fsm_82ddb6b4a71f_k4_seed2_route.log
+4f3805feb968026da8133a41cc646896af0dab55291548704f484e7907adc543  build/hdl-tests/ccs_fsm57/window_fsm_82ddb6b4a71f_k4_seed2_timing.json
+db85597b59ba62cfd31b00b549b57e8cf58c09ef2e62a6cb55fe3fd603380772  build/hdl-tests/ccs_fsm57/window_fsm_82ddb6b4a71f_k4_seed3_route.log
+c0a91a53e7ab3cc304b4ee5f00fe18665f9955f49f16497fa5fee6d87b4d46a8  build/hdl-tests/ccs_fsm57/window_fsm_82ddb6b4a71f_k4_seed3_timing.json
+d44d8f4d471c2fea0c24a5753551b9767d5403413f7829cb2448cc67f6e8feed  build/hdl-tests/ccs_fsm57/window_fsm_82ddb6b4a71f_k8_ecp5.json
+17635806fa3d45e27ba3cddc37627c90134a6c6d0c7544aa35ccc1f5f0a8239c  build/hdl-tests/ccs_fsm57/window_fsm_82ddb6b4a71f_k8_ecp5.log
+af087053debffa2905d1fff574774cd55937fcefdf2bb26a925a388a37730616  build/hdl-tests/ccs_fsm57/window_fsm_82ddb6b4a71f_k8_ecp5.ys
+58727431a48b8f5c53790c3875d1dbb76637d302573b7f45ec2740b4d8b45f76  build/hdl-tests/ccs_fsm57/window_fsm_82ddb6b4a71f_k8_inventory.json
+8ffefb16736a2e990578d8e03eecf4d17408c20c23fce6f7d4b9b02e78fa1f84  build/hdl-tests/ccs_fsm57/window_fsm_82ddb6b4a71f_k8_seed1_route.log
+7887f1f766821b2edd7c9b9e7bd5e6d01ea3aca48c2f94f8e66ac6622704b908  build/hdl-tests/ccs_fsm57/window_fsm_82ddb6b4a71f_k8_seed1_timing.json
+b815fe0a71896d31fa3b1766485e6cebeaef17e3444decd7ab0c843cd23f2461  build/hdl-tests/ccs_fsm57/window_fsm_82ddb6b4a71f_k8_seed2_route.log
+8f593521a21151bc297fc6d9df8cef1e2d74925e30eda760263bfa2958d26c58  build/hdl-tests/ccs_fsm57/window_fsm_82ddb6b4a71f_k8_seed2_timing.json
+98b698afd73ae416f4d5d38d48c6c249f9c70f7ebb3d42febb6376044f2d4b65  build/hdl-tests/ccs_fsm57/window_fsm_82ddb6b4a71f_k8_seed3_route.log
+83d18151d9c6c16072d991842e317f2aec0ccba446c7f98a69e7854677897782  build/hdl-tests/ccs_fsm57/window_fsm_82ddb6b4a71f_k8_seed3_timing.json
+0113b46e573b0c25ee7ad568ee315dcda602b8c92d13bdda5d3abc77d9a85803  build/hdl-tests/ccs_match57/ccs_dma_window.v
+82ddb6b4a71f44f16ec75cf2d7ad33db240243601138baf14c3b4442cc7341bc  build/hdl-tests/ccs_match57/ccs_idwpt.v
+cc5a796b288bc4475b2beb6dd59d5268ef54d8bc9143f134e2f5392fda23483b  build/hdl-tests/ccs_match57/ccs_stream.v
+a1f32f7ef03d4bbf0b04f2ea02dee3b91da2bbf74d8377813ad52f6b82cf649a  build/hdl-tests/ccs_match57/coeff_buffer_owner.v
+9355a0fc89b63ba100a262589d394e7aa477bc36f51d01e64e937c455e58b7b6  build/hdl-tests/ccs_match57/dma_burst.v
+d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3  build/hdl-tests/ccs_match57/dma_priority.v
+c7eb2bbf00a6e075e1606cf37bc72c10a80c9b8b909230baa3159770c74bd4f1  build/hdl-tests/ccs_match57/dma_window.v
+46f5e3dc75045b8b7d799fb12cf6f43c3ce42937ed46d7a61785e6d0258fb1de  build/hdl-tests/ccs_match57/integration_simulation_inventory.json
+8d382763d228af808843bcef222b54ad56d993ff86cb814f91652fd26dc5aeab  build/hdl-tests/ccs_match57/owner_after_fsm.json
+aeca82bc63043f4813cc08cfbe7b65d3809d15affb660907e7a7955b4f9e99c7  build/hdl-tests/ccs_match57/owner_before_fsm.json
+1c557367c37e9f03b715b2b1330745c0ec821f94a7b87c251e376694cf34e0f0  build/hdl-tests/ccs_match57/owner_encoding.map
+445f6f136327e41b1114af4ee5105516043a6b2b7f75f00aa841b1f4acff6194  build/hdl-tests/ccs_match57/owner_recode.log
+8e8ab141cb0df6d2d349a9cd6b16dde18362fd94129e856dbb5922b19c204841  build/hdl-tests/ccs_match57/owner_recode.ys
+5431b4720a16e851ca6101c2148484e1ae84efd945f82c9a071a276fac04298d  build/hdl-tests/ccs_match57/owner_recode_equivalence.log
+ff04bba2314b6749e847ef8bc6865206ceb32a3bd54cba2122a3059f3b8cd50a  build/hdl-tests/ccs_match57/owner_recode_equivalence.ys
+a9a67eeddf223b0bd6afe35e69e2a9c416b790d99f76558c2590e9b8c3fb910b  build/hdl-tests/ccs_match57/owner_recode_inventory.json
+137fbbe6a5e4a01cbd24e66629f32a87d64485b97d3b6140a24cf8617bf48db9  build/hdl-tests/ccs_match57/owner_recode_negative_inventory.json
+406fa969536cc2ee96c9f432a99621e62e5ee45a2fc8f86e7afc185bb4b9c4bb  build/hdl-tests/ccs_match57/owner_recoded_fsm.json
+d2365291dc4104558ad6bb6ec0d6d548344eaa8ab3581edceaa1c692418ecc36  build/hdl-tests/ccs_match57/owner_simulation_inventory.json
+b1013a4bd429529d06898159c52518396f5065a2d76d6b05bf4b488935b49d23  build/hdl-tests/ccs_match57/owner_wrong_fsm_reset.json
+b11900aa4ea41daddaf4e5cbac146606a4c341136dd4f7f2bb8470a9988bbe51  build/hdl-tests/ccs_match57/owner_wrong_fsm_reset.log
+c5e740892fe492731bea16e5d3f16e913acbb0dceef3a3e971a10e3e148ad793  build/hdl-tests/ccs_match57/owner_wrong_fsm_reset.ys
+13346460c68243b530689491a3c9cba32b42204ad3a4243f75f915cf8ef4f1e7  build/hdl-tests/ccs_match57/prematch_inductive_step.log
+8565692da402d309ffc3d7c2d4966e4631a68c50fb1cfd0e05da427f649f75db  build/hdl-tests/ccs_match57/prematch_inductive_step.v
+5f2079595fd0c3184ccb96301e485f8217b43b8c33cf86b33efd45c501f6a272  build/hdl-tests/ccs_match57/prematch_inductive_step.ys
+ab084742d91cc0a2b589bb6c803526516d45034c524a970471532a1b2ebfc96d  build/hdl-tests/ccs_match57/prematch_proof_inventory.json
+f9cb787c99edae51b203ff37582c9852253a139263d076a256096bb21b42a599  build/hdl-tests/ccs_match57/prematch_sources.json
+5fa49a1d27c89f2ed85036491bd206b6710491c82190ee4bbadc74c8467f8a2e  build/hdl-tests/ccs_match57/prematch_unqualified_claim.log
+29613ac12cc4b11a779206a0dc0bf6eb705d7974c35c0ede22752107a8d7f72b  build/hdl-tests/ccs_match57/prematch_unqualified_claim.v
+ba201a82906a2560c02aa9ebbaca30f2f65284e31ba283cc77ee4ee346dc3c6d  build/hdl-tests/ccs_match57/prematch_unqualified_claim.ys
+82f102e8bd8f3b921ee58d8d833a0c97ea2483c5553f92317643bbfa0ebbea8b  build/hdl-tests/ccs_match57/prematch_wrong_bank.log
+f9db6845471190319f1a299ab7a607db882ac6d048fd85f7206855a49000fde3  build/hdl-tests/ccs_match57/prematch_wrong_bank.v
+2db515a7810205c07571d01809a4d048e8e71c06c6fc298e15d04aa66e3e005b  build/hdl-tests/ccs_match57/prematch_wrong_bank.ys
+cb91993e9a1a03db49bbb58a73aed03f6880fc7e7397171e064e2464703764ce  build/hdl-tests/ccs_match57/tb_ccs_dma_window.v
+72b9247840f8c7f18dae9f01ea4859646c5627424e3adecb3e1f7626765d7dd9  build/hdl-tests/ccs_match57/tb_ccs_headroom.v
+18695459c607fe68f4e8721392ae4a3c0db18aec760aa2b1c10b805d1ad66ace  build/hdl-tests/ccs_match57/tb_ccs_idwpt.v
+95dd973fa49c17822411ada8f89b3ee4078ae581c0de2c9db7a04f6b1c397d01  build/hdl-tests/ccs_match57/tb_ccs_rounding.v
+122dd5cfee757f0cb283b9af9750872a6bf48b1c04e9d6ec1025ae347f006bf6  build/hdl-tests/ccs_match57/tb_ccs_stream.v
+112401af00bdc6811e13bbbd702b80dc4c1036ccd1d67299e328928e2dab069a  build/hdl-tests/ccs_match57/tb_coeff_buffer_owner.v
+26ccc225299473f2c3b50b42ca06d5ee229f543105f9dc353b76dcbb8463c1ee  build/hdl-tests/ccs_match57/tb_dma_window.v
+0723172a6b3b61c556378e1a08a92dd1a75e2556b2df8f3591b5557aadbce4f9  build/hdl-tests/ccs_match57/window_match_82ddb6b4a71f_k2_ecp5.json
+3629f347b7583967bf1574de7be5212658461a700686ff8a83cb220ce9393638  build/hdl-tests/ccs_match57/window_match_82ddb6b4a71f_k2_ecp5.log
+c93aedb130e07a1d897871c611a7cd06b349447b6b0375bc16c1bc2e6f83046b  build/hdl-tests/ccs_match57/window_match_82ddb6b4a71f_k2_ecp5.ys
+4ef77969a8e8ba1c27b73fc64b9621bb9c27921988d429055cc1d34b60685241  build/hdl-tests/ccs_match57/window_match_82ddb6b4a71f_k2_inventory.json
+4c55c8b6efc4ddd917a0e64127c857a052a6d3ab62383948219842d341b3ef32  build/hdl-tests/ccs_match57/window_match_82ddb6b4a71f_k2_seed1_route.log
+fba20138dcfe064a58aa7418a17115bb8509b8a425356cb5e1fe4fea0ac86a3e  build/hdl-tests/ccs_match57/window_match_82ddb6b4a71f_k4_ecp5.json
+a8c47756520356c1541395c5bad15a607d0af3fef9d0cbb890afb8886d53be86  build/hdl-tests/ccs_match57/window_match_82ddb6b4a71f_k4_ecp5.log
+eac736c195bcd4cc0d354dd6039f7c8330704db992241cdcaae310a48f2b9bdf  build/hdl-tests/ccs_match57/window_match_82ddb6b4a71f_k4_ecp5.ys
+648bd57f55b05dca7ca545658cddf0121802ea103ca54482325eb8c4424c8da2  build/hdl-tests/ccs_match57/window_match_82ddb6b4a71f_k4_inventory.json
+fa360f05d2ec504d4a0cec464ba008082a4df88fe453beef5c47a4fb61f54b21  build/hdl-tests/ccs_match57/window_match_82ddb6b4a71f_k4_seed1_route.log
+abca750469c119ef135b1eec30e0d871fa3b20ae96d7648a01da19c2494cd39b  build/hdl-tests/ccs_match57/window_match_82ddb6b4a71f_k4_seed1_timing.json
+fe93725af8e08d24fe6bba3de61db7d517cbf1eed95eed9b7e435390dd899769  build/hdl-tests/ccs_match57/window_match_82ddb6b4a71f_k4_seed2_route.log
+9b3269bf2621561fa38bab5285d1ed8f572b59329ae2849c6df0f4594f81e72e  build/hdl-tests/ccs_match57/window_match_82ddb6b4a71f_k4_seed2_timing.json
+8b04c60908d08075bbfc94df5b5ba92e5eef907a12ebfe5189c1af92566fe5f3  build/hdl-tests/ccs_match57/window_match_82ddb6b4a71f_k4_seed3_route.log
+b682a78527ae5b9656fb698038cb85d4e7ab41b75a83f9836739332bcb350f35  build/hdl-tests/ccs_match57/window_match_82ddb6b4a71f_k4_seed3_timing.json
+2fd96a0f5a95e9e4083287293951c155c7875b2e71abff9f20e3fbba4847a8ca  build/hdl-tests/ccs_match57/window_match_82ddb6b4a71f_k8_ecp5.json
+603f0b2f13379e41d020e51e502ca57155731529ccdfaf47be2e2d14b78a1945  build/hdl-tests/ccs_match57/window_match_82ddb6b4a71f_k8_ecp5.log
+893ef6a97cb9ecee14c360a2c4596febc8506cb1aef62f16c8df6c6203b84efd  build/hdl-tests/ccs_match57/window_match_82ddb6b4a71f_k8_ecp5.ys
+a984b8a93b67d90998ec21bd76196867b36529a4fdba2d7bda15f7d7146efe9f  build/hdl-tests/ccs_match57/window_match_82ddb6b4a71f_k8_inventory.json
+32eb7a30aa83fa3b0d911a481e9497c20a3ccb3b9f7081d1f3954d9fa753f5d3  build/hdl-tests/ccs_match57/window_match_82ddb6b4a71f_k8_seed1_route.log
+91425266ac863590ec5792076e813a513b53de397e70208d78bff1cfc9a6dc05  build/hdl-tests/ccs_match57/window_match_82ddb6b4a71f_k8_seed1_timing.json
+f2bedfc9159ab387e1435d25259826f44d8dbc2c6dad05beeafabec5c6a23fc0  build/hdl-tests/ccs_match57/window_match_82ddb6b4a71f_k8_seed2_route.log
+5e979364a101dce2e0e6e36dce844be7eef65d904a15cffba7e0b60916beb23e  build/hdl-tests/ccs_match57/window_match_82ddb6b4a71f_k8_seed2_timing.json
+6662fc56dce1d745af972a3e2ecbd488bbaa2fd9ab1f1076e1ffc03b31aa5492  build/hdl-tests/ccs_match57/window_match_82ddb6b4a71f_k8_seed3_route.log
+6bf954aad15ec6b4d396679807aaa71c2db8ce56e645c1b9b648282c5c4a4caf  build/hdl-tests/ccs_match57/window_match_82ddb6b4a71f_k8_seed3_timing.json
+3c154ff65fbc737f0b8390f725fa1d66bba5cdbfe50781d119deb63d014b913f  build/hdl-tests/ccs_match57/window_simulation_inventory.json
+0113b46e573b0c25ee7ad568ee315dcda602b8c92d13bdda5d3abc77d9a85803  build/hdl-tests/ccs_match_mapped_owner57_k2/ccs_dma_window.v
+82ddb6b4a71f44f16ec75cf2d7ad33db240243601138baf14c3b4442cc7341bc  build/hdl-tests/ccs_match_mapped_owner57_k2/ccs_idwpt.v
+cc5a796b288bc4475b2beb6dd59d5268ef54d8bc9143f134e2f5392fda23483b  build/hdl-tests/ccs_match_mapped_owner57_k2/ccs_stream.v
+007100f8edfe8e8e833b63f780ad10ebab690cbbad86aa88e695557555e29281  build/hdl-tests/ccs_match_mapped_owner57_k2/coeff_buffer_owner.v
+9355a0fc89b63ba100a262589d394e7aa477bc36f51d01e64e937c455e58b7b6  build/hdl-tests/ccs_match_mapped_owner57_k2/dma_burst.v
+d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3  build/hdl-tests/ccs_match_mapped_owner57_k2/dma_priority.v
+c7eb2bbf00a6e075e1606cf37bc72c10a80c9b8b909230baa3159770c74bd4f1  build/hdl-tests/ccs_match_mapped_owner57_k2/dma_window.v
+a59a43e4e3d90f38084065b84e835ac4a18a04c00a2d9e5a4cf5847facf3ebb5  build/hdl-tests/ccs_match_mapped_owner57_k2/mapped_integration_inventory.json
+b3cd528b6f351487487a0fff6b67c68ec079e4c61c89828048d1d23445a25145  build/hdl-tests/ccs_match_mapped_owner57_k2/mapped_owner.json
+541d46b543c8174e28998559965e1a0b2b3427e5c79cce0412d5e66ba5e8acd5  build/hdl-tests/ccs_match_mapped_owner57_k2/mapped_owner.v
+0a36dd89f407ab8955bf38acbbeb6b80b136227fc5c1e559706fd3a19c6db21e  build/hdl-tests/ccs_match_mapped_owner57_k2/mapped_owner.ys
+78dc2ba9c58f03b6d20cfbe81bfc11e54f69d039fcb1418fb13876e061595212  build/hdl-tests/ccs_match_mapped_owner57_k2/mapped_owner_synth.log
+cb91993e9a1a03db49bbb58a73aed03f6880fc7e7397171e064e2464703764ce  build/hdl-tests/ccs_match_mapped_owner57_k2/tb_ccs_dma_window.v
+0113b46e573b0c25ee7ad568ee315dcda602b8c92d13bdda5d3abc77d9a85803  build/hdl-tests/ccs_match_mapped_owner57_k8/ccs_dma_window.v
+82ddb6b4a71f44f16ec75cf2d7ad33db240243601138baf14c3b4442cc7341bc  build/hdl-tests/ccs_match_mapped_owner57_k8/ccs_idwpt.v
+cc5a796b288bc4475b2beb6dd59d5268ef54d8bc9143f134e2f5392fda23483b  build/hdl-tests/ccs_match_mapped_owner57_k8/ccs_stream.v
+da31d9b050538d040a9123143342ee653da808d074d1ef43cefb39085d3af6c4  build/hdl-tests/ccs_match_mapped_owner57_k8/coeff_buffer_owner.v
+9355a0fc89b63ba100a262589d394e7aa477bc36f51d01e64e937c455e58b7b6  build/hdl-tests/ccs_match_mapped_owner57_k8/dma_burst.v
+d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3  build/hdl-tests/ccs_match_mapped_owner57_k8/dma_priority.v
+c7eb2bbf00a6e075e1606cf37bc72c10a80c9b8b909230baa3159770c74bd4f1  build/hdl-tests/ccs_match_mapped_owner57_k8/dma_window.v
+531c0fc9d107ea8bbc2abb01792df4238dd04c10b7a1154c9b7472ea502386ea  build/hdl-tests/ccs_match_mapped_owner57_k8/mapped_integration_inventory.json
+ddf9ccedfb02a9e602f3dd295b13ae3abb73f77ac8ae0e1dd84a4450aecdcd0c  build/hdl-tests/ccs_match_mapped_owner57_k8/mapped_owner.json
+ee0136780b65cf2477471dd0681c1849b9d58305c2bedd256a41faa7a8202754  build/hdl-tests/ccs_match_mapped_owner57_k8/mapped_owner.v
+e189cc0d376f82af9ee73e9dece182efa9276ad707be9878a34219212310a550  build/hdl-tests/ccs_match_mapped_owner57_k8/mapped_owner.ys
+208d00a69f0084456a95213ed8b4798f7334e918aad116485cd9b911eba9ac39  build/hdl-tests/ccs_match_mapped_owner57_k8/mapped_owner_synth.log
+cb91993e9a1a03db49bbb58a73aed03f6880fc7e7397171e064e2464703764ce  build/hdl-tests/ccs_match_mapped_owner57_k8/tb_ccs_dma_window.v
+bdfa94894bf760f6d668bb3145663ae4ec1bd0722b3dc8b57f3b90b164cc63a0  build/hdl-tests/ccs_profiles57/ccs_dma_window.v
+82ddb6b4a71f44f16ec75cf2d7ad33db240243601138baf14c3b4442cc7341bc  build/hdl-tests/ccs_profiles57/ccs_idwpt.v
+cc5a796b288bc4475b2beb6dd59d5268ef54d8bc9143f134e2f5392fda23483b  build/hdl-tests/ccs_profiles57/ccs_stream.v
+a1f32f7ef03d4bbf0b04f2ea02dee3b91da2bbf74d8377813ad52f6b82cf649a  build/hdl-tests/ccs_profiles57/coeff_buffer_owner.v
+9355a0fc89b63ba100a262589d394e7aa477bc36f51d01e64e937c455e58b7b6  build/hdl-tests/ccs_profiles57/dma_burst.v
+d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3  build/hdl-tests/ccs_profiles57/dma_priority.v
+c7eb2bbf00a6e075e1606cf37bc72c10a80c9b8b909230baa3159770c74bd4f1  build/hdl-tests/ccs_profiles57/dma_window.v
+498ec8cad57ce09902dae72898720c9ace3df09ab150ccf4e75709df01f885ac  build/hdl-tests/ccs_profiles57/integration_simulation_inventory.json
+cf14c5885106d110816f4335ab5354ea0b6f80f972118d7a0fed91c86819587a  build/hdl-tests/ccs_profiles57/owner_simulation_inventory.json
+cb91993e9a1a03db49bbb58a73aed03f6880fc7e7397171e064e2464703764ce  build/hdl-tests/ccs_profiles57/tb_ccs_dma_window.v
+72b9247840f8c7f18dae9f01ea4859646c5627424e3adecb3e1f7626765d7dd9  build/hdl-tests/ccs_profiles57/tb_ccs_headroom.v
+18695459c607fe68f4e8721392ae4a3c0db18aec760aa2b1c10b805d1ad66ace  build/hdl-tests/ccs_profiles57/tb_ccs_idwpt.v
+95dd973fa49c17822411ada8f89b3ee4078ae581c0de2c9db7a04f6b1c397d01  build/hdl-tests/ccs_profiles57/tb_ccs_rounding.v
+122dd5cfee757f0cb283b9af9750872a6bf48b1c04e9d6ec1025ae347f006bf6  build/hdl-tests/ccs_profiles57/tb_ccs_stream.v
+112401af00bdc6811e13bbbd702b80dc4c1036ccd1d67299e328928e2dab069a  build/hdl-tests/ccs_profiles57/tb_coeff_buffer_owner.v
+26ccc225299473f2c3b50b42ca06d5ee229f543105f9dc353b76dcbb8463c1ee  build/hdl-tests/ccs_profiles57/tb_dma_window.v
+17c5d6647c7f52179778d7726ffc4fc3b1bd391436154b3118d11ca3f01eb574  build/hdl-tests/ccs_profiles57/window_profiles_82ddb6b4a71f_k4_ecp5.json
+b4539a399a9b6f823f7b00c96931377d3d41c65ae17f851739484d972804cdc8  build/hdl-tests/ccs_profiles57/window_profiles_82ddb6b4a71f_k4_ecp5.log
+75e675b81f43ffa832b0676e88cc2ea46ddccdbb87ecb8d5d1709ddf5479b6a3  build/hdl-tests/ccs_profiles57/window_profiles_82ddb6b4a71f_k4_ecp5.ys
+7891a4b80bb7bea37502b557201e8ac0092245011cb0366c01683778e75d3059  build/hdl-tests/ccs_profiles57/window_profiles_82ddb6b4a71f_k4_inventory.json
+40a16fa1a748f7a71aa83af9aa48d3de650e3aceadb4eb621200b4755df9c9c3  build/hdl-tests/ccs_profiles57/window_profiles_82ddb6b4a71f_k4_seed1_route.log
+33f52ec10fe4c6b54a12b5df5cb73795b3ac358bbc4168e3ce0113c7a340ea2f  build/hdl-tests/ccs_profiles57/window_profiles_82ddb6b4a71f_k4_seed1_timing.json
+0445bd8afb349580d1b64793104f515cfbbc901cd5ba19d26f365c4fdaae74ea  build/hdl-tests/ccs_profiles57/window_profiles_82ddb6b4a71f_k4_seed2_route.log
+09914be9f9445d5997b0ed487e6deda103820044c292550b273ed65ade6897a5  build/hdl-tests/ccs_profiles57/window_profiles_82ddb6b4a71f_k4_seed2_timing.json
+458fbfbb55f0d52eb86c33c0af3367ee063d5b877c59d108b2557e0d5135a8dd  build/hdl-tests/ccs_profiles57/window_profiles_82ddb6b4a71f_k4_seed3_route.log
+2c39fa30c97247068e7391be5843b1a38768f2c43c6ee052b2da80f2f0490d42  build/hdl-tests/ccs_profiles57/window_profiles_82ddb6b4a71f_k4_seed3_timing.json
+ec6ef1661b822bb5e621ae7390ce5377e218bf64a75633fa55a040bf4051ee60  build/hdl-tests/ccs_profiles57/window_profiles_82ddb6b4a71f_k8_ecp5.json
+bf8389c98680c7d9afd0e7df3f2347b83219cd73b938543b64f243abec89faa5  build/hdl-tests/ccs_profiles57/window_profiles_82ddb6b4a71f_k8_ecp5.log
+a9f470c3672fb50609ce57fe53c427fb01ca9572812f4ba5ea8e59e6ead935de  build/hdl-tests/ccs_profiles57/window_profiles_82ddb6b4a71f_k8_ecp5.ys
+a286485ce89eb0b992f85b87ea2a7feb312c67906365983bfe2c9a0d0b8d2a1e  build/hdl-tests/ccs_profiles57/window_profiles_82ddb6b4a71f_k8_inventory.json
+de1411dd607f44caed1948b2f9a7b2e5832f72ad688f4af0adf5cc20352032e4  build/hdl-tests/ccs_profiles57/window_profiles_82ddb6b4a71f_k8_seed1_route.log
+c94cf9673b480bc56b9eb9b91dc2c2949825c2c6073960db5628c4bf29c61e15  build/hdl-tests/ccs_profiles57/window_profiles_82ddb6b4a71f_k8_seed1_timing.json
+72c4cca5c8db5a2cbcbf4789b43383b5f66ebdeff37616219014bf1232deb0d8  build/hdl-tests/ccs_profiles57/window_profiles_82ddb6b4a71f_k8_seed2_route.log
+9665c7baa982739ba02845fc5b8a7de7482eeb76ac7ac9ff2d00ad7613e6bd7f  build/hdl-tests/ccs_profiles57/window_profiles_82ddb6b4a71f_k8_seed2_timing.json
+f41e1f07fd9622ae637ea1be06715a95d14987879c2ed55eb6f7405b091691fa  build/hdl-tests/ccs_profiles57/window_profiles_82ddb6b4a71f_k8_seed3_route.log
+c5d1fdc153d0e70bee6c9c6d38786f51192bcb0b82aafcdc691c461dcf698cc9  build/hdl-tests/ccs_profiles57/window_profiles_82ddb6b4a71f_k8_seed3_timing.json
+4464ed6dcfcc11b1a99f04d5289ead660ec3ac31a8d7e84d43e647f61436f28c  build/hdl-tests/ccs_stream_simulation_363e8a44273f_k2_h15_1_0.json
+2a9c825178137a5b9fd5a26124edd92a1765ef19d9d654aba2d047b0ccd1d89f  build/hdl-tests/ccs_stream_simulation_363e8a44273f_k2_h2_0_1.json
+0b54a2bc998a56fc7f015537bb7f8e0077d9915b4a328d99919d659f5a359d1f  build/hdl-tests/ccs_stream_simulation_363e8a44273f_k2_h2_1_1.json
+480099311bf0a62c925aa1cc72569e72e34acacb27e5224634eeb862791ae68d  build/hdl-tests/ccs_stream_simulation_363e8a44273f_k4_h15_1_0.json
+9c9c1f4fe12fd05e5c15a5a81430191f714d0cc0eeffc2794d4c665fb356bada  build/hdl-tests/ccs_stream_simulation_363e8a44273f_k4_h2_0_1.json
+6dd1abe5dfa7b701869b05a9ef7b6bce3e619984a1b47299d14a54507d234634  build/hdl-tests/ccs_stream_simulation_363e8a44273f_k4_h2_1_1.json
+d8276443e4ef04b85984647f9aac0a957325781823415e1a2b6dea7742dd27ac  build/hdl-tests/ccs_stream_simulation_363e8a44273f_k8_h15_1_0.json
+6cfab2eb15eff055637c5fe1f8f1af3610f43e2679d3348890fbc9a37cbd583b  build/hdl-tests/ccs_stream_simulation_363e8a44273f_k8_h2_0_1.json
+a080927305d5e1a18f264fe8e6dac5faf754e30d363cb9319e2bead4137410fc  build/hdl-tests/ccs_stream_simulation_363e8a44273f_k8_h2_1_1.json
+c9ca58eb9d30689094643ef25b43f6997db61c2bac4e7b14fced393a17e731ad  build/hdl-tests/ccs_stream_simulation_80499ba3d094_k2_h15_1_0.json
+5b26996fcb733f8757be2645d1d17240d2d26c8981e23b8d9b5a5b7ec312dedf  build/hdl-tests/ccs_stream_simulation_80499ba3d094_k2_h2_0_1.json
+80c4dabc15e407579ba27e756f3169377bb2bb17e01392a3af8fa7bc43575c84  build/hdl-tests/ccs_stream_simulation_80499ba3d094_k2_h2_1_1.json
+5ba1f7f3e84a203b7946924e0d9adaa6d977d5af56c6c1b3f1b78746b12b86ed  build/hdl-tests/ccs_stream_simulation_80499ba3d094_k4_h15_1_0.json
+05da42fb34cda7b8b265db4ce466479544809e5fbbcbf93949e762eb757300c5  build/hdl-tests/ccs_stream_simulation_80499ba3d094_k4_h2_0_1.json
+8f6d2650b520e420aac71653d5a427391deb8f5b7ae3885e7e6f2cc65cdc21fa  build/hdl-tests/ccs_stream_simulation_80499ba3d094_k4_h2_1_1.json
+3e46129a2a2299d426750d0b223e0c3d69d4030295c8b1f2162da0a6f112a67f  build/hdl-tests/ccs_stream_simulation_80499ba3d094_k8_h15_1_0.json
+70af60a06a7f3183eb2f707924e8120f0d39d84d2b8b890b43436a414c395312  build/hdl-tests/ccs_stream_simulation_80499ba3d094_k8_h2_0_1.json
+20c159dd0e44241a63b9d7d4e1dcc5b51229c8692571a91071a6c3e3fb766229  build/hdl-tests/ccs_stream_simulation_80499ba3d094_k8_h2_1_1.json
+ca35e6faf8e7a3a3d60f7c754f136fd8fcbdc3848fa11ca09ade1cca0f409f5b  build/hdl-tests/ccs_stream_simulation_ccc67c76e3cc_k2_h15_1_0.json
+71f810196e2bb909d21699dc0c341dbe14c04482e26439c3ea07ac223542d0eb  build/hdl-tests/ccs_stream_simulation_ccc67c76e3cc_k2_h2_0_1.json
+132b5c574252710a7cdd40de0e69c15b4b862af65b130e29c41a6b486928e4c3  build/hdl-tests/ccs_stream_simulation_ccc67c76e3cc_k2_h2_1_1.json
+0303adee8f4af5a2fd06716c6d2c9fbae2284f7b9ce217dcc199834e8aebc562  build/hdl-tests/ccs_stream_simulation_ccc67c76e3cc_k4_h15_1_0.json
+9511eb978905a02842cb4405642cf1fd115d4b086fb7cbb2bafc1b8f62dfc1a1  build/hdl-tests/ccs_stream_simulation_ccc67c76e3cc_k4_h2_0_1.json
+767a1c1ca2d6975d3085db8695feedbde080df1b432b2a9b77bc223c5f973af9  build/hdl-tests/ccs_stream_simulation_ccc67c76e3cc_k4_h2_1_1.json
+3faa7db18a570b1e5862a5337128637961c77ab37f274dd434da79ae822410d3  build/hdl-tests/ccs_stream_simulation_ccc67c76e3cc_k8_h15_1_0.json
+aead1728975a8527dadd3018ec105a7ff166f9f9864b5ac63692d7723190eedb  build/hdl-tests/ccs_stream_simulation_ccc67c76e3cc_k8_h2_0_1.json
+3aea9233773aa8be7f71cc4b525bca415630e866db272ae7aaf5d4e35e9bd1ff  build/hdl-tests/ccs_stream_simulation_ccc67c76e3cc_k8_h2_1_1.json
+1f2a0b4db7662bec91e374da0b4984520eb4fd88f09d832d4b9b6f607f7f23f1  build/hdl-tests/ccs_stream_simulation_e8bc2384b116_k2_h15_1_0.json
+92adb16eeec922a1665fbc763ce2d5f1dd4191c2c2104fe28eb8557286522015  build/hdl-tests/ccs_stream_simulation_e8bc2384b116_k2_h2_0_1.json
+6e67917c0ff72af83fec83776174c31f034a60b8d4529f6eb804d8a6da22dedd  build/hdl-tests/ccs_stream_simulation_e8bc2384b116_k2_h2_1_1.json
+1ccc2d967f38368d61c2d8420743e176bb1ac887f71a749f6e0170a809ffa8a2  build/hdl-tests/ccs_stream_simulation_f15849a40386_k2_h15_1_0.json
+b4af4f13d7aede49501ed120b60b8bfe26155d41103c12247eb73d17ec3ef40e  build/hdl-tests/ccs_stream_simulation_f15849a40386_k2_h2_0_1.json
+d24b9064a11eb289a6ee2759385d610ef681afff2bdd853d2ba7fee025d97a65  build/hdl-tests/ccs_stream_simulation_f15849a40386_k2_h2_1_1.json
+9a3d92900051cdc5b3859379d9da49a8069f28d86ed437a56a2b7e3686ccbca6  build/hdl-tests/ccs_stream_simulation_f15849a40386_k4_h15_1_0.json
+34921fe99c28e7d945d83f6f4e4ffe9f55ff35f44c9ac7508754e22213b188f3  build/hdl-tests/ccs_stream_simulation_f15849a40386_k4_h2_0_1.json
+d9670971020ee11c8019d92b2deb009f1f4c7f5309937554c6158d0e461aa26d  build/hdl-tests/ccs_stream_simulation_f15849a40386_k4_h2_1_1.json
+4de3c66ab897c6a43c01323ebb091449c5d7fc7a68b77492d6ded3a6b799c79f  build/hdl-tests/ccs_stream_simulation_f15849a40386_k8_h15_1_0.json
+9bfa71505e91306d97116d957794e4e57922d9f1613cf227bcde5ef153cb0106  build/hdl-tests/ccs_stream_simulation_f15849a40386_k8_h2_0_1.json
+56d9b5a7ec389537fd55cc30e1855c34561634ae06fb25a0ddb920d6d8e9039c  build/hdl-tests/ccs_stream_simulation_f15849a40386_k8_h2_1_1.json
+222beeaa24c763f534af692ac5e3304ae499397ed114fa36eae3cfc532fffddc  build/hdl-tests/ccs_unified57/ccs_dma_window.v
+82ddb6b4a71f44f16ec75cf2d7ad33db240243601138baf14c3b4442cc7341bc  build/hdl-tests/ccs_unified57/ccs_idwpt.v
+029691df17b9b69f927f1f6e58eaf4a227117530a5ca299951fb62a6d6ee54d2  build/hdl-tests/ccs_unified57/ccs_stream.v
+ea5dfbc2233756528f21d0e839b932b83788a9e244ae0dbea6f95625d0458219  build/hdl-tests/ccs_unified57/coeff_buffer_owner.v
+8c2a332beff67876ae80f3bbd3c0078793a723c402fe783eec15b877858bcf8b  build/hdl-tests/ccs_unified57/construction_inventory.json
+90dbd0740949d9cd1694464270f361f0a7359e51a4cf65a37b27d401a54f9dce  build/hdl-tests/ccs_unified57/control_owner_ea5dfbc22337.json
+e38ebc581b3d99a168c8f0734f7a1ab33a0e381f9984c6d96f722782a6c7b8fb  build/hdl-tests/ccs_unified57/control_owner_ea5dfbc22337.log
+3cb11c80e4b8e735a00ef43f02d12041f22a39a6afdbc6c62b0f35b78c5dbbc4  build/hdl-tests/ccs_unified57/control_owner_ea5dfbc22337.v
+8267d9d696056d67a565d281b8b2448c7bdf5b8b4c2b6667f543a6c6670780c4  build/hdl-tests/ccs_unified57/control_owner_ea5dfbc22337.ys
+9355a0fc89b63ba100a262589d394e7aa477bc36f51d01e64e937c455e58b7b6  build/hdl-tests/ccs_unified57/dma_burst.v
+d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3  build/hdl-tests/ccs_unified57/dma_priority.v
+d3d7bc6921065d1c73d6a106ba3575d42e8003f49ef55075773de31d953c00d8  build/hdl-tests/ccs_unified57/dma_window.v
+bc6ae39c675198746820696c5ae5580fc3274e474aab17ef688d3ce1044571a1  build/hdl-tests/ccs_unified57/integration_simulation_inventory.json
+19295c2811a70416069502063dace208a42ae086b3394ee16517860b1c44b66a  build/hdl-tests/ccs_unified57/owner_before_late_mux.v
+ab1cac866bee4ec72bb829fb3fcc3d03659349de5dff75083a24a506e00ad3bd  build/hdl-tests/ccs_unified57/owner_late_inventory.json
+2ff2306ab89fd0898268622fdb33809e90b0d50cdea155454c72f9f69decb024  build/hdl-tests/ccs_unified57/owner_simulation_inventory.json
+694340dc9be64449df7c811e5ec50424ba7478e97e85df49fdc8f49365f8d0d0  build/hdl-tests/ccs_unified57/owner_wrong_finish_qualification.log
+bc974f15770a8234a49d7409109a8c4eb62ab254ce0f13b3bcdb74d6051a9868  build/hdl-tests/ccs_unified57/owner_wrong_finish_qualification.v
+acc4c7a95bae777f28a3aefd94a463c3c8721fcf46f1cff6c0c088defc00c4e8  build/hdl-tests/ccs_unified57/owner_wrong_finish_qualification.ys
+0a8f7fb02ff765ef69e309fff00388a7ccfc210128729162682755f3dc42a33d  build/hdl-tests/ccs_unified57/simulation_inventory.json
+5fe69387d4a6c537214b6224c8e745bf0fd7e2c8d6cad18f4cce408e64e8095d  build/hdl-tests/ccs_unified57/structure_inventory.json
+cb91993e9a1a03db49bbb58a73aed03f6880fc7e7397171e064e2464703764ce  build/hdl-tests/ccs_unified57/tb_ccs_dma_window.v
+72b9247840f8c7f18dae9f01ea4859646c5627424e3adecb3e1f7626765d7dd9  build/hdl-tests/ccs_unified57/tb_ccs_headroom.v
+18695459c607fe68f4e8721392ae4a3c0db18aec760aa2b1c10b805d1ad66ace  build/hdl-tests/ccs_unified57/tb_ccs_idwpt.v
+95dd973fa49c17822411ada8f89b3ee4078ae581c0de2c9db7a04f6b1c397d01  build/hdl-tests/ccs_unified57/tb_ccs_rounding.v
+abe1f4de0076a88b057e564098322d67a6f1e338a6abfa146f08cac4f9f442cb  build/hdl-tests/ccs_unified57/tb_ccs_stream.v
+6e51e42727a89d4a111e7b13bb277da16905dfa59494e305c7bdb73508d4a1e1  build/hdl-tests/ccs_unified57/tb_coeff_buffer_owner.v
+ffc185fe661d9c2dabc61c5fcbc06ba715f7503b790c86da55c8495c7fd63e95  build/hdl-tests/ccs_unified57/tb_dma_window.v
+06156db1230c8f977ac67c7555e821847b9d2f8aa1458d7c0ff15e000e6bf716  build/hdl-tests/ccs_unified57/window_unified_82ddb6b4a71f_k2_ecp5.json
+87005807d28c90a3b953a0c77928ac7fa0cd166e9f802301b3a6242e0cbe3034  build/hdl-tests/ccs_unified57/window_unified_82ddb6b4a71f_k2_ecp5.log
+a3dc152bdc548a73b6d401d799618b21d5fca147958f3b72aa819c70df2e2788  build/hdl-tests/ccs_unified57/window_unified_82ddb6b4a71f_k2_ecp5.ys
+24e7ab30cb37e8cb60c89011d01b01a5d199146ee2703d96b1b1e09655ac83c9  build/hdl-tests/ccs_unified57/window_unified_82ddb6b4a71f_k2_inventory.json
+92e9f6e439db87f6d5f734c8a3002d94d3291bfd97e36f2e903cc1f8adfdf1b1  build/hdl-tests/ccs_unified57/window_unified_82ddb6b4a71f_k2_seed1_route.log
+6accca7e9ccec2b1fcc79c59e3b4b241e832032648b56df97b23fc4210aeaa25  build/hdl-tests/ccs_unified57/window_unified_82ddb6b4a71f_k2_seed1_timing.json
+96e91c128e9356760aa5ee4e625ed6ccd55812762869ff4902cda56950b0a793  build/hdl-tests/ccs_unified57/window_unified_82ddb6b4a71f_k2_seed2_route.log
+9eceafea8f7b4c37dee978defa466b3ffb55315e6f3614c289c1a305ae63867c  build/hdl-tests/ccs_unified57/window_unified_82ddb6b4a71f_k2_seed2_timing.json
+fe74c2da5bc4ddea7a1d374d8c5c6d7819fb0fe1f927d5a80a21feabefc9d5ce  build/hdl-tests/ccs_unified57/window_unified_82ddb6b4a71f_k2_seed3_route.log
+a431a2ec8b9e34ac161514c8ac6ee644f58a07e2687b6c4478724d1c08dae1e3  build/hdl-tests/ccs_unified57/window_unified_82ddb6b4a71f_k2_seed3_timing.json
+09dcf249d378e14cc5810e17a637cda43e2c6631636c75c773cca1a197be6e56  build/hdl-tests/ccs_unified57/window_unified_82ddb6b4a71f_k4_ecp5.json
+bd04de748da9040a78208b3e4ab2a712cecbca3e0e383f05d27e703c7af7d150  build/hdl-tests/ccs_unified57/window_unified_82ddb6b4a71f_k4_ecp5.log
+47ca93c9b58f2b5ced54e81908974184a656c09370a036837e593a4e252332db  build/hdl-tests/ccs_unified57/window_unified_82ddb6b4a71f_k4_ecp5.ys
+885fc0bc40f84ef2a26e69a32d4be1b3498ce6ab2edbb51b39ff570283a28c3d  build/hdl-tests/ccs_unified57/window_unified_82ddb6b4a71f_k4_inventory.json
+f68a74cf6bfd28e65b3e1845d85389ccf892c45c04cc8e403f87080e45dab0f9  build/hdl-tests/ccs_unified57/window_unified_82ddb6b4a71f_k4_seed1_route.log
+405fb8331956ea008a70f590ca369ffdd0b345b5c0eed37459a8319c3bb41a84  build/hdl-tests/ccs_unified57/window_unified_82ddb6b4a71f_k4_seed1_timing.json
+f26ee3108b424d2b26ca65fbe8aca9029723b8d7029ffe9162edbbebdcfb806a  build/hdl-tests/ccs_unified57/window_unified_82ddb6b4a71f_k4_seed2_route.log
+0b0e121a7b33845723339c9fcd4fb0ceca935c28ea3d640c8601f6deb073afb6  build/hdl-tests/ccs_unified57/window_unified_82ddb6b4a71f_k4_seed2_timing.json
+1525468701e819352dac38ddf90b4b12b4bcd809155fcf319faebc59fd26b4f6  build/hdl-tests/ccs_unified57/window_unified_82ddb6b4a71f_k4_seed3_route.log
+ce3d386e644258185aaef992009f6bd2102b45193d2e9e83ef91caa8a8333374  build/hdl-tests/ccs_unified57/window_unified_82ddb6b4a71f_k4_seed3_timing.json
+668a06cc1fc937696fd2171449886aed506569e88b4c29bb8e613a125612d2a9  build/hdl-tests/ccs_unified57/window_unified_82ddb6b4a71f_k8_ecp5.json
+e533ddc29c15403267d1ef9e71b74835fba72343214a8de30bf23952f57a660d  build/hdl-tests/ccs_unified57/window_unified_82ddb6b4a71f_k8_ecp5.log
+b3ff9808735ad04bf6a7542f9e1df19ece99096c1e38c9e90b6083dade298fb4  build/hdl-tests/ccs_unified57/window_unified_82ddb6b4a71f_k8_ecp5.ys
+9547e84e21f4371acd9b56a9bc650beb4c24a106bb4a07d243490982e0941daa  build/hdl-tests/ccs_unified57/window_unified_82ddb6b4a71f_k8_inventory.json
+febf5d771e2d8d66129c515e333f86a4d4c7349333c26777912694a5f088fd5b  build/hdl-tests/ccs_unified57/window_unified_82ddb6b4a71f_k8_seed1_route.log
+b64c6852760e8193d835a813c4a5c9449a59a4ad67e0a931485774839d8f21ce  build/hdl-tests/ccs_unified57/window_unified_82ddb6b4a71f_k8_seed1_timing.json
+db6170afe29a06395a7d5152d3e78fe1710b2a2187b6febebd69aeb89740acb8  build/hdl-tests/ccs_unified57/window_unified_82ddb6b4a71f_k8_seed2_route.log
+1a27f35890df2cdc204f03cdf3fcffc1b4b663877a70b66c2d2e55824a0e2275  build/hdl-tests/ccs_unified57/window_unified_82ddb6b4a71f_k8_seed2_timing.json
+908304151ad1c72f812c771efa8b24498fd5f58e8e9c6d863f78e3e9681d9407  build/hdl-tests/ccs_unified57/window_unified_82ddb6b4a71f_k8_seed3_route.log
+41066c54b73867089c1b20f41f9375e1cda7ba059a2966fef382b8b07bc5d493  build/hdl-tests/ccs_unified57/window_unified_82ddb6b4a71f_k8_seed3_timing.json
+2da4638cd5b3d18602bbc21eb69911cec82967fdefead9d358fd36c2483f0092  build/hdl-tests/coeff_buffers_simulation_14efc0864145_k2_0.json
+b3373e00441616e4bc83145836bd24a177806e44fca5cac49c3ac25761d6752a  build/hdl-tests/coeff_buffers_simulation_14efc0864145_k2_1.json
+d120a3143caf84846b9b81418b2ff11b82aee1ed65e0348e3697577fcba8af6f  build/hdl-tests/coeff_buffers_simulation_14efc0864145_k4_0.json
+ac53822aa47e1f00cd4806ab7cdc52c352e1b9a50d74f68d6877d5d7912bba0d  build/hdl-tests/coeff_buffers_simulation_14efc0864145_k4_1.json
+6d0735b347171b2443401b4a3270b4b6c908b378e20a68c7781564f3f885e909  build/hdl-tests/coeff_buffers_simulation_14efc0864145_k8_0.json
+33bb650f41f3818fd0bdc7100840ae429f3c6a896b8910befc43a71c8a458244  build/hdl-tests/coeff_buffers_simulation_14efc0864145_k8_1.json
+c26240087a61e24b53b31890ea3366c9230f5e53a1ae476aecb9c490d1886f50  build/hdl-tests/coeff_buffers_simulation_185898a155f4_k2_0.json
+2484c24b589c84ed83d1cff2c884dedbc26c297e0352de75cc866079f27e79a9  build/hdl-tests/coeff_buffers_simulation_185898a155f4_k2_1.json
+9147e01642c7e3ecec27fa981faf8b7ecf2cb7e79bc0664f786abf473fb626ed  build/hdl-tests/coeff_buffers_simulation_185898a155f4_k4_0.json
+8cdb95a3fc370a8371df7fcfdc2b740bc1608ed055657019d4ef20f4c00970a5  build/hdl-tests/coeff_buffers_simulation_185898a155f4_k4_1.json
+a8114b019ee993c1b63abb596bb51db3765c321500e2293776ab0de5614264b0  build/hdl-tests/coeff_buffers_simulation_185898a155f4_k8_0.json
+91ad059251ce413838e69bcec6afa38d7488b20ccba050d484a014719b230852  build/hdl-tests/coeff_buffers_simulation_185898a155f4_k8_1.json
+9453b3cfcd53c5f7472c1a5bdbf0b7cb04c47307fb4cf13416c6d4d15ec3bf95  build/hdl-tests/coeff_buffers_simulation_ad10ce9e45c0_k2_0.json
+6df65e6be9aa68969833475fdc69ae6a807d5a064bf449462debdd7348d9441e  build/hdl-tests/coeff_buffers_simulation_ad10ce9e45c0_k2_1.json
+8c0a21cb202aaf763b88c0ce66c574815650d2f7b229977e723d7e8cd70b4b6b  build/hdl-tests/coeff_buffers_simulation_ad10ce9e45c0_k4_0.json
+05528d15c8254add8a534227f92fb183065cd033304f0e53dfa9c24081d03229  build/hdl-tests/coeff_buffers_simulation_ad10ce9e45c0_k4_1.json
+edbdc846ab433b736cdb28bc6b19ff265b5782c1102566180f601321c7b03dc2  build/hdl-tests/coeff_buffers_simulation_ad10ce9e45c0_k8_0.json
+55314cd619d19af0cdfd2d09cf2d663a70f3ec4b0fd497424bb81179c137138d  build/hdl-tests/coeff_buffers_simulation_ad10ce9e45c0_k8_1.json
+3579165747da47486077c115e67bc44dc203e94f9d2fc756a649de9e34dbe333  build/hdl-tests/coeff_buffers_simulation_eb891f523426_k2_0.json
+7754ae066ebe400df0e3e481b2b3aadf644b25918ce159840ae63b559875abe9  build/hdl-tests/coeff_buffers_simulation_eb891f523426_k2_1.json
+b6296aef9e1c191dc72e8cfb83b5755b94778d928ad3a140ad52c638bd4a998c  build/hdl-tests/coeff_buffers_simulation_eb891f523426_k4_0.json
+c49884e3f8b3b4aa00ed9ca667e11ded0458bff8d13aba2fa13d2ffd6aa97036  build/hdl-tests/coeff_buffers_simulation_eb891f523426_k4_1.json
+f85bb03801870dd2dbc40300e70fa7ded9aa35eb9dd9ac1c2429c346d4813283  build/hdl-tests/coeff_buffers_simulation_eb891f523426_k8_0.json
+22df7a3fb07345373d03458b3548a7c5564a67296cdef398bdc68ce094bd3ebc  build/hdl-tests/coeff_buffers_simulation_eb891f523426_k8_1.json
+1b9ac7f2e0a829e9db0875bb8a52d86c7007bde3fa517a1150017e7d70669e5c  build/hdl-tests/dma_window_simulation_86bff2ef7234_1.json
+5f96b82195a078a84de4527b8b174f6cda9a404e07e0664445b29dae34be887a  build/hdl-tests/dma_window_simulation_86bff2ef7234_16.json
+f6c0d008ce16a9d7b4853438f7a573a30fc6f38c62da33b19158153ca314fe3b  build/hdl-tests/dma_window_simulation_86bff2ef7234_2.json
+87992c823a5581a3d9f59d28c9d3aaf7201ee73324e6af85cd34db0225eb5af1  build/hdl-tests/dma_window_simulation_86bff2ef7234_40000.json
+4527c23bd57520f32cc554c326a2974b61ff45038e263c72387ad69587a52732  build/hdl-tests/dma_window_simulation_86bff2ef7234_64.json
+55af410d2c692e4861120dd06b23b12cba512194f4b698fe55d05d4eebbf0c3f  build/hdl-tests/dma_window_simulation_d4daf764ddbf_1.json
+3db921d94b67ca50011945b703baecb2a64e0b74c58c346471e300f54318e5f2  build/hdl-tests/dma_window_simulation_d4daf764ddbf_16.json
+e8b8fb7552d532b93affc4b97a8cd70ecc1647a806989f0f0709d96bd564492e  build/hdl-tests/dma_window_simulation_d4daf764ddbf_2.json
+d670dd582aa240f2e3bc07f79fd1f4be04c02e7dab6bfe945e5301f009a9c9cb  build/hdl-tests/dma_window_simulation_d4daf764ddbf_40000.json
+72b322efafdc570532cc190fbbb085e83f90befac5d748c9a94dba69e952ef41  build/hdl-tests/dma_window_simulation_d4daf764ddbf_64.json
+222beeaa24c763f534af692ac5e3304ae499397ed114fa36eae3cfc532fffddc  build/hdl-tests/k2_cut57/ccs_dma_window.v
+1c15e1c2bef691dbc6d4b90a309716a3a6e60d8a33d1b89f8691afe92b4d552d  build/hdl-tests/k2_cut57/ccs_idwpt.v
+029691df17b9b69f927f1f6e58eaf4a227117530a5ca299951fb62a6d6ee54d2  build/hdl-tests/k2_cut57/ccs_stream.v
+19295c2811a70416069502063dace208a42ae086b3394ee16517860b1c44b66a  build/hdl-tests/k2_cut57/coeff_buffer_owner.v
+9355a0fc89b63ba100a262589d394e7aa477bc36f51d01e64e937c455e58b7b6  build/hdl-tests/k2_cut57/dma_burst.v
+d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3  build/hdl-tests/k2_cut57/dma_priority.v
+d3d7bc6921065d1c73d6a106ba3575d42e8003f49ef55075773de31d953c00d8  build/hdl-tests/k2_cut57/dma_window.v
+41655df3bf2c824583d20966d112569ce75040d89de605a2c567b4fe00efc28b  build/hdl-tests/k2_cut57/integration_simulation_inventory.json
+cb91993e9a1a03db49bbb58a73aed03f6880fc7e7397171e064e2464703764ce  build/hdl-tests/k2_cut57/tb_ccs_dma_window.v
+c719146886893daaf10b48c89371e8ecfa9844a1e2a091a8fc3bafb9e2f42bbd  build/hdl-tests/k2_cut57/tb_ccs_idwpt.v
+576dca5c56b5b1ab61a8b562dd168ddcd0ac731526570e4f251d7bf25c14e8c4  build/hdl-tests/k2_cut57/tb_ccs_stream.v
+6e51e42727a89d4a111e7b13bb277da16905dfa59494e305c7bdb73508d4a1e1  build/hdl-tests/k2_cut57/tb_coeff_buffer_owner.v
+ffc185fe661d9c2dabc61c5fcbc06ba715f7503b790c86da55c8495c7fd63e95  build/hdl-tests/k2_cut57/tb_dma_window.v
+b648fbc532567e72253b40c5e1c77243649578fba6357d915a6c012194ab1458  build/hdl-tests/k2_cut57/window_k2_1c15e1c2bef6_ecp5.json
+862ad150f5127b878f72e91fb7238bf56c343695cd5dfff8df895bba8f2dbac1  build/hdl-tests/k2_cut57/window_k2_1c15e1c2bef6_ecp5.log
+c1d6c89b3f0c20c649fb9240dc363b53485619c5bbbfdad3f7c3120fe7c9e870  build/hdl-tests/k2_cut57/window_k2_1c15e1c2bef6_ecp5.ys
+b4b7f05d15c2e8c19704d27c59cd42540e1a9b2fc48253637fcf5e485954bb75  build/hdl-tests/k2_cut57/window_k2_1c15e1c2bef6_inventory.json
+f0306870f89779a9348c7ac3f2e0a364e78ab224471480b94f338ecdb2059291  build/hdl-tests/k2_cut57/window_k2_1c15e1c2bef6_seed1_route.log
+4ca8757e4826c772e5a62dd077931f0814b876de0b4b9e3d26cb3f663072c831  build/hdl-tests/k2_cut57/window_k2_1c15e1c2bef6_seed1_timing.json
+42cb1b1b7847c58466b0e839ba69b9cbd8433fb059c7cf4184f4103ad98b23b5  build/hdl-tests/k2_cut57/window_k2_1c15e1c2bef6_seed2_route.log
+fc00900e87bbd3278359654034ec8c70dd8d159603f905cd039bbdba90b2c143  build/hdl-tests/k2_cut57/window_k2_1c15e1c2bef6_seed2_timing.json
+76dd53c2e41d7c494911f5efa36f35182673e9b0e4fd83c9b163eed523c0244a  build/hdl-tests/k2_cut57/window_k2_1c15e1c2bef6_seed3_route.log
+870d97438da001c0648915ed84592ee9fb486e3e058c07f99cedb557d1b51147  build/hdl-tests/k2_cut57/window_k2_1c15e1c2bef6_seed3_timing.json
+1c15e1c2bef691dbc6d4b90a309716a3a6e60d8a33d1b89f8691afe92b4d552d  build/hdl-tests/k2_range56/ccs_idwpt.v
+08f58a20b767ee405ae05ca93e8b1bea01d09f91d9bd222e6db78f7d837370a9  build/hdl-tests/k2_range56/range_inventory.json
+9d3c49d7a470d87a8888ffef5312334f5a4b9567d71bffb33782f88a59c296f4  build/hdl-tools/yosys/usr/share/yosys/ecp5/cells_ff.vh
+bbc7bb1406ed0d249ac588f1216c3c3964eb98a802816a4a21b14703d8dae62b  build/hdl-tools/yosys/usr/share/yosys/ecp5/cells_io.vh
+23c1d1d35b5bd9ba5a07e17cf7d5c07fe7b6840e1deb6c2f746c3f430b4cec54  build/hdl-tools/yosys/usr/share/yosys/ecp5/cells_sim.v
+222beeaa24c763f534af692ac5e3304ae499397ed114fa36eae3cfc532fffddc  src/symcrash_verilog/ccs_dma_window.v
+94c302243bb14b1e33780ea1080ed3161df9d6de197e0938394a139be1306e4f  src/symcrash_verilog/ccs_idwpt.v
+029691df17b9b69f927f1f6e58eaf4a227117530a5ca299951fb62a6d6ee54d2  src/symcrash_verilog/ccs_stream.v
+5db73119106dbbe3d6319ee0166f06f38e9f6213a9df40834c3427f8136e2708  src/symcrash_verilog/coeff_buffer_owner.v
+9355a0fc89b63ba100a262589d394e7aa477bc36f51d01e64e937c455e58b7b6  src/symcrash_verilog/dma_burst.v
+d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3  src/symcrash_verilog/dma_priority.v
+d3d7bc6921065d1c73d6a106ba3575d42e8003f49ef55075773de31d953c00d8  src/symcrash_verilog/dma_window.v
+37ff6e5c344afdd629a8c7c7d09873e0232217e1f28f6ae7fa3110efc7048eea  tools/audit_lifting_arithmetic.py
+66b3db905610cb16351357d05e92c6bb25c6c5364714bf2033d4856c6d278f2f  tools/build_hdl_dma.py
+e902a3d96ba4e62295f249bce7559434e2a43b363af842318c85208bc856ec43  tools/check_hdl_ccs_stream.py
+8088a06f7ea47e7b513d6051d8dbeab2bcceb683488274504ea4da06dbb4b52d  tools/check_hdl_coeff_buffers.py
+8465fc08ad6d582d3ab7cf4f7b69e2d7aca1f894b0775828e8a83eae9cd03f78  tools/check_hdl_control.py
+2f43ba972b78931826b434f9fc976fed29f1fe53bd9a4e851489e151b194dab8  tools/check_hdl_dma_window.py
+caeb7df3e27dcfee4130c25100151a1c64a0c5ee8ebe78afc5de4b52dc4fbf23  tools/check_hdl_idwpt.py
+a2515d4d3cbf2c1246b75bb568d81606744b9a9bd9ab2e695e7392d9b4bca0d0  tools/hdl_mapping.py

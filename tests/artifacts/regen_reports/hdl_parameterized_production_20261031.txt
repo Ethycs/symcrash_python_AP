@@ -1,0 +1,432 @@
+Parameterized production CCS evidence — 2026-10-31
+Preserved: N64, K2/4/8, all slots/leaves, stored int16, wide intermediates, RNE, node saturation, headroom0..15.
+Compute clocks: K2=99; K4=247; K8=494 in two groups. Standalone179/327/638; integrated ready183/331/642; fallback18.
+One-hot owner adds8 state FF; K2 full64-bit descriptor matches use8 captured16-bit equality flags, net -56 callback FF.
+Admission factoring adds no register or service clock. No transform size, precision or deadline change.
+Fresh scoped checks:122 pytest checks (48 core+10 proof+56 evidence+8 extra K2/K8 headroom), plus4 mapped-owner integration runs.
+Retained comprehensive unit matrix:96 configurations/556032 exact samples, identical RTL/bench and vector/reference functions except five verified trailing spaces; not a new96-run invocation.
+Current production source-path routing:9/9 pass100MHz, ECP5-25K speed6 CSFBGA285, seeds1/2/3, verifiedABC9.
+The earlier isolated matrix is retained separately; this report validates the production netlists/raw timing independently.
+Final trailing-space cleanup was resynthesized: all three complete netlist byte streams are identical. The nine measured timing results are explicitly retained, not rerun.
+Proof limits: admission equality, guarded callback induction, matched-point physical FSM equivalence. Negative controls are required; full RTL/mapped reset tests are separate.
+Mapped-owner tests use installed ECP5 functional models, real RTL for the other modules; not routed/device simulations.
+Prepared prior FIFO batches retain their exact index hashes; no signing retry or push occurred.
+Whole-synth workload/PHY/board clocks/I/O, global memory packing, runtime mixed tiers and Mode A storage remain open.
+
+{
+  "status": "Production worktree integrated and validated; prepared FIFO indexes unchanged and signing deferred.",
+  "source_hashes": {
+    "dma_window.v": "659374f96b67e6cb25054d24369341c6f2e9ec8d653490526073c73044210153",
+    "ccs_dma_window.v": "bdfa94894bf760f6d668bb3145663ae4ec1bd0722b3dc8b57f3b90b164cc63a0",
+    "ccs_stream.v": "cc5a796b288bc4475b2beb6dd59d5268ef54d8bc9143f134e2f5392fda23483b",
+    "coeff_buffer_owner.v": "be8263fe651b1c854726706d9a59eadc2ba935e76526cd4e4d41b5119a0e7b03",
+    "ccs_idwpt.v": "ea0e092295aad708e99a4964a8534d5a7d5737784410b860de691c7c7770c556",
+    "dma_priority.v": "d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3",
+    "dma_burst.v": "9355a0fc89b63ba100a262589d394e7aa477bc36f51d01e64e937c455e58b7b6"
+  },
+  "resources": [
+    {
+      "K": 2,
+      "cells": {
+        "CCU2C": 717,
+        "DP16KD": 2,
+        "L6MUX21": 33,
+        "LUT4": 5093,
+        "PFUMX": 641,
+        "TRELLIS_DPR16X4": 272,
+        "TRELLIS_FF": 5261
+      },
+      "physical_block_ram_bytes": 4608,
+      "physical_distributed_ram_bytes": 2176,
+      "packed_comb": {
+        "available": 24288,
+        "used": 8497
+      },
+      "mhz": [
+        104.5697021484375,
+        102.29132843017578,
+        104.35145568847656
+      ]
+    },
+    {
+      "K": 4,
+      "cells": {
+        "CCU2C": 436,
+        "DP16KD": 14,
+        "L6MUX21": 44,
+        "LUT4": 3098,
+        "PFUMX": 201,
+        "TRELLIS_DPR16X4": 64,
+        "TRELLIS_FF": 3557
+      },
+      "physical_block_ram_bytes": 32256,
+      "physical_distributed_ram_bytes": 512,
+      "packed_comb": {
+        "available": 24288,
+        "used": 4568
+      },
+      "mhz": [
+        103.0821533203125,
+        102.67994689941406,
+        108.3658447265625
+      ]
+    },
+    {
+      "K": 8,
+      "cells": {
+        "CCU2C": 434,
+        "DP16KD": 14,
+        "L6MUX21": 39,
+        "LUT4": 3104,
+        "PFUMX": 188,
+        "TRELLIS_DPR16X4": 64,
+        "TRELLIS_FF": 3559
+      },
+      "physical_block_ram_bytes": 32256,
+      "physical_distributed_ram_bytes": 512,
+      "packed_comb": {
+        "available": 24288,
+        "used": 4570
+      },
+      "mhz": [
+        107.06637573242188,
+        104.06909942626953,
+        105.77532958984375
+      ]
+    }
+  ],
+  "pytest_checks": {
+    "core": 48,
+    "owner-proof": 10,
+    "evidence": 56,
+    "extra-headroom": 8
+  },
+  "fresh_audio_samples": {
+    "ccs_stream": 141824,
+    "ccs_dma_window": 21504
+  },
+  "mapped_owner_runs": 4,
+  "retained_identical_decoder_matrix": {
+    "configurations": 96,
+    "exact_samples": 556032
+  },
+  "trailing_space_cleanup": {
+    "cleanup": {
+      "before_sha256": "82ddb6b4a71f44f16ec75cf2d7ad33db240243601138baf14c3b4442cc7341bc",
+      "after_sha256": "ea0e092295aad708e99a4964a8534d5a7d5737784410b860de691c7c7770c556",
+      "lines": [
+        186,
+        195,
+        214,
+        279,
+        515
+      ],
+      "change": "Only trailing spaces after five end tokens removed; every other character/line position preserved.",
+      "timing_status": "Resynthesis required; timing may be retained only if complete netlist bytes match."
+    },
+    "netlists": [
+      {
+        "K": 2,
+        "before_netlist": "ccs_dma_window_5fa8194b40c7_abc9_k2_ecp5.json",
+        "after_netlist": "ccs_dma_window_77d3a617dae8_abc9_k2_ecp5.json",
+        "sha256": "ced8940a0546f12f51da1c3b3fc62e4de4e0eb798e1e4273a10570eb7df69662"
+      },
+      {
+        "K": 4,
+        "before_netlist": "ccs_dma_window_5fa8194b40c7_abc9_k4_ecp5.json",
+        "after_netlist": "ccs_dma_window_77d3a617dae8_abc9_k4_ecp5.json",
+        "sha256": "388259a58ee24baee548fa941adba648766911571253888b818a4ded2319844b"
+      },
+      {
+        "K": 8,
+        "before_netlist": "ccs_dma_window_5fa8194b40c7_abc9_k8_ecp5.json",
+        "after_netlist": "ccs_dma_window_77d3a617dae8_abc9_k8_ecp5.json",
+        "sha256": "24343b9a3b4e283f8e80f172fbecec599f670481a27ccc1f2e2014e8fb9fe931"
+      }
+    ],
+    "scope": "All three complete production netlist byte streams are unchanged after trailing-space cleanup; retain their measured nine placements without rerouting."
+  },
+  "scope": "Compile-time K2/K4/K8 prepared-frame transport at100MHz OOC. Runtime mixed tiers, full voice workload, Mode A storage, global packing and board/PHY remain open."
+}
+
+SHA256 artifact manifest:
+ecc44cec739cff2e51f7e38e890ef560d90ca1a74739f5b43116b2381dab4adf  _adopt_pipeline58.py
+acebd3a4fb490dbc14c2dd6f3915e955def72bd48f1a10beeeb8de3aa2f647df  _adopted_pipeline58.json
+5005d23ce21b387ba3e73b0f5e1942402e0caf19f4e122c504aabadafef5788d  _cleanup_pipeline58.json
+322b153afb85a494fb7e99011419bc2a28e4609c6893c6a3c0a18a7478fdc154  _cleanup_pipeline58.py
+fa144cc2e68a437400ea985b8876b62da0502b41a7a6e97322ae642f1bef4a13  _document_production58.py
+0a8f7fb02ff765ef69e309fff00388a7ccfc210128729162682755f3dc42a33d  _phase57_checkpoint/build/hdl-tests/ccs_unified57/simulation_inventory.json
+e637836c622cddd55c5376f85d64177a3f04d42d6d6a09d506e77d2babb9fa19  _prepared_fifo55.json
+7e4c9261ef06a8e2acc7908d229de550980804cd807509a577a10b088836ef47  _production58-core-tests.log
+b9102f4c9d20176ddf4a07ca1df3819ce4dd2aca9e2ce7e74d31abbe4ddb4a66  _production58-evidence-tests.log
+282d90c0c22fd4c7e49b2021c0e6ff8b0d5528ea62cc08dfeeccd01b0e0ce756  _production58-extra-headroom-tests.log
+1c5f64827581b40a82198bb80a5f6dcf9b9ff24246f090036a52b7e984aa2ca5  _production58-mapped-owner-k2.log
+033b3109a25546a61ede1f36097f2fb7cced663ab8358c1824c0552c72e0c217  _production58-mapped-owner-k8.log
+caf16d3660d64aa947c21f84724b22ee256d4aea30d1d9f6fc8107fa32223568  _production58-owner-proof-tests.log
+57ceadbf5704082facaa5eac06693335d307958926fd6e8cff0da6f72dec9447  _production58-owner-proofs-final.log
+bdf6a8978aa1e74afd17525d40b67cd1cd26a2e3d282cc3cd047d05ca14fc02d  _production58-owner-proofs.log
+35cb16444f7d6a3010ead9ff3bca2e7a48243b61802b75b27077e81b7cc5eb46  _production58-window-clean-synth.log
+7af2da940d71e026b07df1afbfd33381e9b9283cb2533786f63f85bae0594b19  _production58-window-k2-route.log
+ebe491f060acb2a8ed7f57cff584a55a4ca719bb801f34ca656d6e38154b2ca5  _production58-window-k4-route.log
+6e3079f76feb5b4c75e66640f5da40d81f341e6dcd9a27d2a6d4b88879f33b46  _production58-window-k8-route.log
+03f188cdf1595e781df3eb59ccac692552029d5950d48028c147122fbcad9d26  _production58-window-synth.log
+f3b6b1ec70a9bff8d5a81ebfc24a997bfb43f63ca46727ea3af0bec8311836d5  _promote_owner_proofs58.py
+baaabb69b4c9499092ce47c1cd0588ab3983909efef7d8b9c8b514b433f011cd  _readme_production58.py
+8308a82c54d5b33916d8fc1b8bf7d50e2dd562441fb21b22d6011a07971d15b6  _report_production58.py
+24b47df935174847c148d8240a372910680c00ffd5e3963e63f67ffd1adeab9b  _retain_clean_timing58.py
+ff47847dace9c667d9bcbc4505d89f2106b02b3a615d0ec139ec2870c059bab7  _retained_timing58.json
+4ad36d18f410e87f39c3e0e7e3a513901953cc73e656827366c9ad7e2d7970bf  _route_production58.py
+360ea5af37875495fffcab06411899bc135ff77983ec8374ccdc80815c5d31db  _track_production58.py
+ced8940a0546f12f51da1c3b3fc62e4de4e0eb798e1e4273a10570eb7df69662  build/hdl-tests/ccs_dma_window_5fa8194b40c7_abc9_k2_ecp5.json
+388259a58ee24baee548fa941adba648766911571253888b818a4ded2319844b  build/hdl-tests/ccs_dma_window_5fa8194b40c7_abc9_k4_ecp5.json
+24343b9a3b4e283f8e80f172fbecec599f670481a27ccc1f2e2014e8fb9fe931  build/hdl-tests/ccs_dma_window_5fa8194b40c7_abc9_k8_ecp5.json
+ced8940a0546f12f51da1c3b3fc62e4de4e0eb798e1e4273a10570eb7df69662  build/hdl-tests/ccs_dma_window_77d3a617dae8_abc9_k2_ecp5.json
+652f29aea3b1e4c1de471026d63b051bef91dbd119aac9e53a7962affb14b3b6  build/hdl-tests/ccs_dma_window_77d3a617dae8_abc9_k2_ecp5.log
+ddc9155c7d7d32e856ede5b30af694757e6cfe7b59ac738eac3ccdd4d0659a9c  build/hdl-tests/ccs_dma_window_77d3a617dae8_abc9_k2_ecp5.ys
+befae85f29953aa49ce0fdd78dc1828f1cdbe597c73e027120f8a2876d84c6de  build/hdl-tests/ccs_dma_window_77d3a617dae8_abc9_k2_seed1_route.log
+c4732869b888176b6e1051fdd9e902da07c9d30f5137f8632225acc96735bcd9  build/hdl-tests/ccs_dma_window_77d3a617dae8_abc9_k2_seed1_timing.json
+2626cdcafb834f0ee2f4b40d1e861516a1034fcad5930de743b5dcfac82c28da  build/hdl-tests/ccs_dma_window_77d3a617dae8_abc9_k2_seed2_route.log
+036688aee239297f0249d8ac17b4d2030cd466498bb3d89b23424f08c9bd2268  build/hdl-tests/ccs_dma_window_77d3a617dae8_abc9_k2_seed2_timing.json
+eb83b28b7e01c56a22817adef99b3493febdb042969507844f5b62d23f159b8a  build/hdl-tests/ccs_dma_window_77d3a617dae8_abc9_k2_seed3_route.log
+fcbd6862070017d2214afb5e732cbafb33d222034147b09de0a6f36fba6e404f  build/hdl-tests/ccs_dma_window_77d3a617dae8_abc9_k2_seed3_timing.json
+388259a58ee24baee548fa941adba648766911571253888b818a4ded2319844b  build/hdl-tests/ccs_dma_window_77d3a617dae8_abc9_k4_ecp5.json
+af6c0efb403a96265f08a6a2ccdaba9d4337761c6856de4388998e025fe65f43  build/hdl-tests/ccs_dma_window_77d3a617dae8_abc9_k4_ecp5.log
+d0448b547679254a834a068f6f66d0d2ad37f014a582554f276ed19a38543675  build/hdl-tests/ccs_dma_window_77d3a617dae8_abc9_k4_ecp5.ys
+b2ca2c44b442fb40706c48c2f8102d0d58fe5fb2865f2df936df22e1962f3036  build/hdl-tests/ccs_dma_window_77d3a617dae8_abc9_k4_seed1_route.log
+960ada3acbb5b9d74f8b9fee62facb5ffc89f6ccb3224147200175221ae1108c  build/hdl-tests/ccs_dma_window_77d3a617dae8_abc9_k4_seed1_timing.json
+a52de0483c922d1372080cda567d9d26e70736d689fa7c3ea78d71144ca28e7a  build/hdl-tests/ccs_dma_window_77d3a617dae8_abc9_k4_seed2_route.log
+b8262fd5c9efd490ff87099d6e75dc638f2fcfa0e70b09bb95dc95606e670660  build/hdl-tests/ccs_dma_window_77d3a617dae8_abc9_k4_seed2_timing.json
+6ae1391508b95388e785a5915f167c746b7060e44a3a3cb5493adbfb154d8faa  build/hdl-tests/ccs_dma_window_77d3a617dae8_abc9_k4_seed3_route.log
+c041e875908699c389d27f5871e880d0c27360233678d27ff1bfc2ecb575178e  build/hdl-tests/ccs_dma_window_77d3a617dae8_abc9_k4_seed3_timing.json
+24343b9a3b4e283f8e80f172fbecec599f670481a27ccc1f2e2014e8fb9fe931  build/hdl-tests/ccs_dma_window_77d3a617dae8_abc9_k8_ecp5.json
+ca163f564413146c5376e29a40384f99e703ac4776adfa2755e2149dae33dfb9  build/hdl-tests/ccs_dma_window_77d3a617dae8_abc9_k8_ecp5.log
+4162a73285bb95311164af8b50aa9698850ff046e61e9d0cc3b8f30f28d0cf0b  build/hdl-tests/ccs_dma_window_77d3a617dae8_abc9_k8_ecp5.ys
+3c8aca1236e096b4db937e9ab08249270f55628d108cb9eeb71ea62e21996508  build/hdl-tests/ccs_dma_window_77d3a617dae8_abc9_k8_seed1_route.log
+de7681da4c7e6480c92e45dc27635525c04f3ead86a18486fd0309ab11883705  build/hdl-tests/ccs_dma_window_77d3a617dae8_abc9_k8_seed1_timing.json
+096f4f84d95e6f16e3d1d4b47d6bd1c2e08a0d112b62662f095ec9e9040ebfd5  build/hdl-tests/ccs_dma_window_77d3a617dae8_abc9_k8_seed2_route.log
+22aab443d6548848be83e4287798f59ca3cd5076f702f1c52ebab68408acb026  build/hdl-tests/ccs_dma_window_77d3a617dae8_abc9_k8_seed2_timing.json
+a9375e4f89e6dd628f737f5b7560c25e134095914556100f87478a153ce6e536  build/hdl-tests/ccs_dma_window_77d3a617dae8_abc9_k8_seed3_route.log
+d90f202edd9f275170781892425a436322f3b7523d6e1c50182efdaa00bbd9b3  build/hdl-tests/ccs_dma_window_77d3a617dae8_abc9_k8_seed3_timing.json
+283b0dc170a549de24f4752819324ce161b666870c36f48ecaa220c74dff8374  build/hdl-tests/ccs_dma_window_77d3a617dae8_abc9_timing_inventory.json
+ecd6e03e2ffdbc8b49b49b01c06b5f79ae78d8ab0fd02792f077562a97be8b29  build/hdl-tests/ccs_dma_window_simulation_5fa8194b40c7_k2_h2_0.json
+3c0236b7d2a7d2afd71ba8d7c8948a15592622841acaa859129426876cde3165  build/hdl-tests/ccs_dma_window_simulation_5fa8194b40c7_k2_h2_1.json
+6fab1810cd3b83e09dc965bffdfdbe38c5d91a092e39396142b5e211e97855e8  build/hdl-tests/ccs_dma_window_simulation_5fa8194b40c7_k4_h15_1.json
+7d64aacf8ab1ffef174576f55f2b2e8702fce3e9589ecc2c25fd08dbc1b2b294  build/hdl-tests/ccs_dma_window_simulation_5fa8194b40c7_k4_h2_0.json
+8cf53b40f8157b880fe0edb468f3c23765b49b7f418dcf1a7eff095fb3e38c37  build/hdl-tests/ccs_dma_window_simulation_5fa8194b40c7_k4_h2_1.json
+2592b3b01e636b62cf1d6083bf9538f6981afadd4eb9147e924ee4ffb3cca7ba  build/hdl-tests/ccs_dma_window_simulation_5fa8194b40c7_k8_h2_0.json
+d201b40b80bc9532f24ae7d44461d5d0e2cb1cfb748d56a2f6f10b237ded9031  build/hdl-tests/ccs_dma_window_simulation_5fa8194b40c7_k8_h2_1.json
+da99e450f4c58abf457ba96107cd1db8a0ebd7d9064f1ecdfce19cea6ffd2143  build/hdl-tests/ccs_dma_window_synthesis.json
+283b0dc170a549de24f4752819324ce161b666870c36f48ecaa220c74dff8374  build/hdl-tests/ccs_dma_window_timing_inventory.json
+5b26996fcb733f8757be2645d1d17240d2d26c8981e23b8d9b5a5b7ec312dedf  build/hdl-tests/ccs_stream_simulation_80499ba3d094_k2_h2_0_1.json
+80c4dabc15e407579ba27e756f3169377bb2bb17e01392a3af8fa7bc43575c84  build/hdl-tests/ccs_stream_simulation_80499ba3d094_k2_h2_1_1.json
+af69b4da88fde5cd9f6daf76d64152ffe888bcba9f9703a0578b650722897bda  build/hdl-tests/ccs_stream_simulation_80499ba3d094_k4_h0_1_0.json
+5ba1f7f3e84a203b7946924e0d9adaa6d977d5af56c6c1b3f1b78746b12b86ed  build/hdl-tests/ccs_stream_simulation_80499ba3d094_k4_h15_1_0.json
+05da42fb34cda7b8b265db4ce466479544809e5fbbcbf93949e762eb757300c5  build/hdl-tests/ccs_stream_simulation_80499ba3d094_k4_h2_0_1.json
+8f6d2650b520e420aac71653d5a427391deb8f5b7ae3885e7e6f2cc65cdc21fa  build/hdl-tests/ccs_stream_simulation_80499ba3d094_k4_h2_1_1.json
+70af60a06a7f3183eb2f707924e8120f0d39d84d2b8b890b43436a414c395312  build/hdl-tests/ccs_stream_simulation_80499ba3d094_k8_h2_0_1.json
+20c159dd0e44241a63b9d7d4e1dcc5b51229c8692571a91071a6c3e3fb766229  build/hdl-tests/ccs_stream_simulation_80499ba3d094_k8_h2_1_1.json
+2da4638cd5b3d18602bbc21eb69911cec82967fdefead9d358fd36c2483f0092  build/hdl-tests/coeff_buffers_simulation_14efc0864145_k2_0.json
+b3373e00441616e4bc83145836bd24a177806e44fca5cac49c3ac25761d6752a  build/hdl-tests/coeff_buffers_simulation_14efc0864145_k2_1.json
+d120a3143caf84846b9b81418b2ff11b82aee1ed65e0348e3697577fcba8af6f  build/hdl-tests/coeff_buffers_simulation_14efc0864145_k4_0.json
+ac53822aa47e1f00cd4806ab7cdc52c352e1b9a50d74f68d6877d5d7912bba0d  build/hdl-tests/coeff_buffers_simulation_14efc0864145_k4_1.json
+6d0735b347171b2443401b4a3270b4b6c908b378e20a68c7781564f3f885e909  build/hdl-tests/coeff_buffers_simulation_14efc0864145_k8_0.json
+33bb650f41f3818fd0bdc7100840ae429f3c6a896b8910befc43a71c8a458244  build/hdl-tests/coeff_buffers_simulation_14efc0864145_k8_1.json
+51b1df302aeebcb436fd0273c6f097bd5e5ee70c9f77aee0a631f12a1eabe797  build/hdl-tests/control_abc9_candidate_k4_ecp5.json
+c4edcbc4f115d06b01e673d365bda66d7dd660be58da81c352ed2a5a44a3c5ac  build/hdl-tests/control_abc9_candidate_k4_ecp5.log
+9556c803961e27d5e740506db7796c5ddd4149ce2e2fde234b1e86511152b66e  build/hdl-tests/control_abc9_candidate_k4_ecp5.ys
+3d953a5bdf4902d2d49ebdae889c1b69c55b90ec5858209bc60871def4aff983  build/hdl-tests/control_abc9_candidate_k4_probe.json
+840aefb81199ae89629917c9dda378714f0c4d1cee8deb42618af5a0e88c77e6  build/hdl-tests/control_abc9_candidate_k4_seed1_route.log
+a74eff8c2abee2d96bd10b205f2994a8779cd499001e2444656c63482b8801a5  build/hdl-tests/control_abc9_candidate_k4_seed1_timing.json
+7d5add71ce4d3edb32f8ee231061d25802afd951eb98cf2ed5b54c1ecbe1af9d  build/hdl-tests/control_abc9_stage_k4.log
+30e72667be3e22e76bfa1ccf2b51c07cddd7bd1cd1087d33e0f13c36ae1554d9  build/hdl-tests/control_abc9_stage_k4.ys
+1fbf8583ff7c759f23f4d888358481236dc66105974b736276ec5606682ac84f  build/hdl-tests/control_abc9_stage_k4_export_failed.log
+c47f3372446bf6eb59915d3825cf5b60d12aebd20dc0db03f37c4a7523ee7f90  build/hdl-tests/control_abc9_stage_k4_premap.il
+f802deadf23fc456621d36fcfd2ef9bf81311b2d4f4c765ee8f414bdae4a1ced  build/hdl-tests/control_abc9_stage_k4_premap.json
+98569d1d88a0df7a8bdf370faa33ecfb8a95d686584165ef0a3b5e7ee43e27a4  build/hdl-tests/control_boundary_candidate_k4_ecp5.json
+c2e4c0be736d85f03c62e8fced5b080a3c0181bcd02527565c0244c84ff15def  build/hdl-tests/control_boundary_candidate_k4_ecp5.log
+78fb8a8ef83ad43039695e0396aa7ac64e6aa34a02f4b3b54e125826c671c189  build/hdl-tests/control_boundary_candidate_k4_ecp5.ys
+a0d34a482c636353e034a2030b74888c1335dbc965dd32979166224b9fb1e2d8  build/hdl-tests/control_boundary_candidate_k4_probe.json
+7f8560faf1b4c3f38a29c102cdc7a6caa95b382411c781e102fc5d19c75b0de9  build/hdl-tests/control_boundary_candidate_k4_seed1_route.log
+120238c056887be2e4a15f266bdde23226c3c822ea80fc0480d14f1c31041828  build/hdl-tests/control_boundary_candidate_k4_seed1_timing.json
+06f14a827e5ac0693871e0c0b262934a17bec6f0380f4f567f617e59f9f9d366  build/hdl-tests/control_keep_candidate_k4_ecp5.json
+52b3a3caf8dce4885c86ae1bbb3da5690300509d67b1853ee5ff1d2717c46139  build/hdl-tests/control_keep_candidate_k4_ecp5.log
+022196caf5c3d9382352fb8bbc2fccdf12bc998422ee7c28db2c365546887b15  build/hdl-tests/control_keep_candidate_k4_ecp5.ys
+5b8ad8d8b8f56d6d6299b385674187895a46f74fb20f3c03cf6687eb04bc601e  build/hdl-tests/control_keep_candidate_k4_probe.json
+fc1c0badb68a89f71740dd58a9fd0191b77bc04213b7093950f77ca7cd116c55  build/hdl-tests/control_keep_candidate_k4_seed1_route.log
+de991cedd31bc9d2c1a610fe5489a5d85ed913a368e3b9554767224f98408b65  build/hdl-tests/control_keep_candidate_k4_seed1_timing.json
+b498fdcb6f49edecd51a43629200be83f444190b34afbe942962e9e35bfb1b79  build/hdl-tests/control_nowidelut_candidate_k4_ecp5.json
+c1d095457ef7e37e7e38fa9c1823e6e57b8202e6bc5c1edb0bca6127cfdcd682  build/hdl-tests/control_nowidelut_candidate_k4_ecp5.log
+ef12db3bb72c42504a55457b9352d2ee94e220c246e9fb1e9c942d1eab916c84  build/hdl-tests/control_nowidelut_candidate_k4_ecp5.ys
+4d0c48f23660915c4acab461a54df54253e3bd1ed2990b420f8492ee6bb494b2  build/hdl-tests/control_nowidelut_candidate_k4_probe.json
+b0404505ff76c17f847363d59a9ce54ebca835862e8313a432d366dd18a49b9c  build/hdl-tests/control_nowidelut_candidate_k4_seed1_route.log
+87068af1c10f58394cfac7c9167a2a0f63e918cb36d02ea41a981cdecfae87e6  build/hdl-tests/control_nowidelut_candidate_k4_seed1_timing.json
+8d692bf7bed4dc6d5dd1f2480f4c385c96b051c9cabfe5b0f57549efbfe2f5ea  build/hdl-tests/control_owner_5db73119106d.json
+b8e3be272ac22293ad9b6e2249863f2d8acc9385a44bdd57a1305c89a60a74de  build/hdl-tests/control_owner_5db73119106d.log
+d88abd0ed0e847a701cf283db46ee771a0a78438e8a12796ff5a1bc5d30c4cc3  build/hdl-tests/control_owner_5db73119106d.v
+096ce3896b2d377bc9992eb62b636152d5364ea93b83a4d1462410133a0cfe64  build/hdl-tests/control_owner_5db73119106d.ys
+dc75a480f04054414fc9a5c0ec3c7b2d9617b3556bccc9d1f658b75a028456e4  build/hdl-tests/control_owner_be8263fe651b.json
+43b5fcc98d74befc2251b82dd348c1beaa75e5f91a4d8c0a89dd764b701a6e37  build/hdl-tests/control_owner_be8263fe651b.log
+84d5b4321103062b07746391462cf94dc764d9132ab06c81053d47cd22b41d0c  build/hdl-tests/control_owner_be8263fe651b.v
+130460c2200b3a7fa4d853b93ceac5e8fc80003bce9338de1987f20a02358742  build/hdl-tests/control_owner_be8263fe651b.ys
+1ef47285175c7c3649215cadceee8c9ff13bc384ed4a9d23bea6128c428cea24  build/hdl-tests/control_payload_read_029691df17b9.json
+be6eae4f882ad4f461318e2ab7429d09689068eb785ef8e2a991308c826db05d  build/hdl-tests/control_payload_read_029691df17b9.log
+fca55382c28b50d09e9accaf014dbd2ef4314692d9e219b4f02014f7ae478d70  build/hdl-tests/control_payload_read_029691df17b9.v
+46a95ed31ccd5f7abb362acafeba8e872016471b2c622d49018b585d80203d1f  build/hdl-tests/control_payload_read_029691df17b9.ys
+eecfcb16331adac9106d3360f02d18109822499b56349701f847bd62ff2bebe8  build/hdl-tests/control_payload_read_49bc09139eb0.json
+2b33a83049fc52362a8e7c416539e9042a33b27d2f9e65edcfd579172091ca32  build/hdl-tests/control_payload_read_49bc09139eb0.log
+fca55382c28b50d09e9accaf014dbd2ef4314692d9e219b4f02014f7ae478d70  build/hdl-tests/control_payload_read_49bc09139eb0.v
+b2a232c8110a040d7d0ebaa66277738692338e7b6abb29620f9af76eae895e16  build/hdl-tests/control_payload_read_49bc09139eb0.ys
+635c11b2786dbd9f50e2d67c28fcd92a6655f54e7f968392504130cda01a4419  build/hdl-tests/control_payload_read_ae38aa52dce3.json
+59829b34318e8c02ebe84ac48ac89bb95e72fc63e6996c513cdd73181f39072b  build/hdl-tests/control_payload_read_ae38aa52dce3.log
+a9cf2c9e766ce2902b0d8c6d8aaefa8872bc5280b658da4f1a4042e19a6c8bee  build/hdl-tests/control_payload_read_ae38aa52dce3.v
+b0210d494f0eb2628beaed2f353af95f55be090d79832911682416e34b4cb599  build/hdl-tests/control_payload_read_ae38aa52dce3.ys
+98f6b9d1e77b3c04985a5e7d931e317fd9dd39d41ad1e4ada247468f428c0d0d  build/hdl-tests/control_payload_read_cc5a796b288b.json
+50f69a4e64f23500ead1689cc149b38420a4edac2bd20175eeb048a87fd59ac0  build/hdl-tests/control_payload_read_cc5a796b288b.log
+fca55382c28b50d09e9accaf014dbd2ef4314692d9e219b4f02014f7ae478d70  build/hdl-tests/control_payload_read_cc5a796b288b.v
+de87a91839d2074d6af59cd0630d414b59a15d5eca515f60f04dee1b3f55a058  build/hdl-tests/control_payload_read_cc5a796b288b.ys
+a941b078626ebdcdb2672bbc9bb0cc1928656d17565923be578e2a1927c358e1  build/hdl-tests/control_payload_write_222beeaa24c7.json
+5c39380757980ee5305e91c756deff018ec3bc8b76e62aab1d3aaeecd2056b09  build/hdl-tests/control_payload_write_222beeaa24c7.log
+dc6f4d7a6bdc1ff19db07bb2e4524ad734ce4020612fa04837b75fca74c56916  build/hdl-tests/control_payload_write_222beeaa24c7.v
+dfafc7589415b1b09adc42b99d420fe7870525f064db30a626d2dd3189c5550f  build/hdl-tests/control_payload_write_222beeaa24c7.ys
+795228ef09f36d261d23fc18d9f902d2b2600140677d85caf95ec1232e0e5bcd  build/hdl-tests/control_payload_write_bdfa94894bf7.json
+c8be16e40f753f7562f9a2dcd27396305fc518f6498ce95715c4b93cba0a9b0a  build/hdl-tests/control_payload_write_bdfa94894bf7.log
+dc6f4d7a6bdc1ff19db07bb2e4524ad734ce4020612fa04837b75fca74c56916  build/hdl-tests/control_payload_write_bdfa94894bf7.v
+8ed8ac39cd20df623b39d3c24f674f74f7bd63a06b34da95dc8c01b1cede6450  build/hdl-tests/control_payload_write_bdfa94894bf7.ys
+f21ab0c9b56e5c133e3b3d3ca5f8f35e1d06485d05479b7ed64bc4ae70283973  build/hdl-tests/control_read_candidate_k4_ecp5.json
+4ce0a05f809388ec23279fb0568406f75a5d08365da894938eed58e68aeeac16  build/hdl-tests/control_read_candidate_k4_ecp5.log
+2c6e151a0f3d0dfb346dcf360fdff0b92dee7e0e9ecbbaac749a26a29794ed5f  build/hdl-tests/control_read_candidate_k4_ecp5.ys
+6fbafacf4547bf28a297ecaadf7294ba67b57d32498be53b197afa6b1368c6c0  build/hdl-tests/control_read_candidate_k4_probe.json
+9e576321111be80d28d206c8ba51c4e64b56b3a977eba4875dda661fe1900de7  build/hdl-tests/control_read_candidate_k4_seed1_route.log
+d39e6ec424c5c1c3c24c7447de91ea712c7c5b42374391e0a5765e57f7e6671f  build/hdl-tests/control_read_candidate_k4_seed1_timing.json
+51b1df302aeebcb436fd0273c6f097bd5e5ee70c9f77aee0a631f12a1eabe797  build/hdl-tests/control_verified_candidate_k4_ecp5.json
+82a6719114f05b00d0e60d368cd3d3fed93021e6af7eb4b2e362fe911bbf6afc  build/hdl-tests/control_verified_candidate_k4_ecp5.log
+04d084fc08f16e50ffb3bd8f68ac7a2ac9e8345ce3e2244d8343d4f7e211b782  build/hdl-tests/control_verified_candidate_k4_ecp5.ys
+d650ce19f301a8f5ce08053fc733340497396594ba874d4b3dc06b9ff883640f  build/hdl-tests/control_verified_candidate_k4_probe.json
+7a5d64da732c889ef8981f670a16e09257fd93bb88275e24cf89320eb8d617cf  build/hdl-tests/control_verified_candidate_k4_seed1_route.log
+a74eff8c2abee2d96bd10b205f2994a8779cd499001e2444656c63482b8801a5  build/hdl-tests/control_verified_candidate_k4_seed1_timing.json
+8709531b4ee492ef97ddcc2dc5ddd89ce28dae071e24b3e4bd1826b4bd8d0903  build/hdl-tests/fifo_mapping_029691df17b9.v
+e21c314cc911e7c46ef1b2b3a19c3568e0af6f4f6f454448cb02e975cd1a4da8  build/hdl-tests/fifo_mapping_029691df17b9_ecp5.json
+5221c12a5c432878fcb51047aa8583bfb46b61995456a54bb922518b74907438  build/hdl-tests/fifo_mapping_029691df17b9_ecp5.log
+69e64c62bfd2365703c34e1479859403b7c18ff8765db892bf87cee167d37f08  build/hdl-tests/fifo_mapping_029691df17b9_ecp5.ys
+06f668ee56aee27cbfb3ac0f76ebc9f0407882f9e5026363668ebe2ee66d04ad  build/hdl-tests/fifo_mapping_029691df17b9_proof.json
+d8cffa39110852077645f9bb0e34052c2f1bf11dff49323b8dda24f9292e3049  build/hdl-tests/fifo_mapping_029691df17b9_proof.log
+42b0d91986e5e202aebcbf3ba1ecfe550b0be932a73273e13962b40e1342613f  build/hdl-tests/fifo_mapping_029691df17b9_proof.v
+ad19494479c4f6674587ff2ffd477ebc1a522ce4cb35b66106fb5cd6caf53ac4  build/hdl-tests/fifo_mapping_029691df17b9_proof.ys
+372ba686e4c55885f40b9c4150e02c7d1672a21a5427ed3de368d91b2cd5354d  build/hdl-tests/fifo_mapping_029691df17b9_proof_flat.json
+8709531b4ee492ef97ddcc2dc5ddd89ce28dae071e24b3e4bd1826b4bd8d0903  build/hdl-tests/fifo_mapping_39f7bb3be9b0.v
+8a4f00f27567248d9e2e9b56fc5e368e61d16837aeab1e3395c8247359cfd1ed  build/hdl-tests/fifo_mapping_39f7bb3be9b0_ecp5.json
+90a6806fe2c019d90981e39715dc82a1e68de875d40aabf069af39931b8254d9  build/hdl-tests/fifo_mapping_39f7bb3be9b0_ecp5.log
+3d2d3a0a618cabdd511a695b69a8a6cd260b1d15b8b9be9b0b6cf077f81eb3d7  build/hdl-tests/fifo_mapping_39f7bb3be9b0_ecp5.ys
+b3ca5cb97b1c0772656778942e2216aec0d8835109a5a7fee8836fea89c30713  build/hdl-tests/fifo_mapping_39f7bb3be9b0_proof.json
+6b4e46fd44d05e0557c18fc266d6009789bf494609cf447d98cbb24c13258489  build/hdl-tests/fifo_mapping_39f7bb3be9b0_proof.log
+42b0d91986e5e202aebcbf3ba1ecfe550b0be932a73273e13962b40e1342613f  build/hdl-tests/fifo_mapping_39f7bb3be9b0_proof.v
+c57b48ebc28b09d64adc10792fd46e011e8a321a0765e869d9a0f00519360da8  build/hdl-tests/fifo_mapping_39f7bb3be9b0_proof.ys
+8709531b4ee492ef97ddcc2dc5ddd89ce28dae071e24b3e4bd1826b4bd8d0903  build/hdl-tests/fifo_mapping_cc5a796b288b.v
+eaae9dc78b5891b6a3f8ea8eafbb4a5ea41bbcebcdcb773f4954006be746a4c0  build/hdl-tests/fifo_mapping_cc5a796b288b_ecp5.json
+94b74b2b9cf14283a6e57e2eae2bae8aaeda11a54659d15e33d6543cc249bd5d  build/hdl-tests/fifo_mapping_cc5a796b288b_ecp5.log
+006744dcc069a0297f8305b21b332d28b6a6cee5603fb95d16295815eba92e89  build/hdl-tests/fifo_mapping_cc5a796b288b_ecp5.ys
+338bc1587d6b5399c97bffbe51ffc992ad5da0693868005a1ac9a5a981914ec7  build/hdl-tests/fifo_mapping_cc5a796b288b_proof.json
+a0acfa1944e052656a22e8843bcd82b96cdbb496866a44fa3ee87df031c35d16  build/hdl-tests/fifo_mapping_cc5a796b288b_proof.log
+42b0d91986e5e202aebcbf3ba1ecfe550b0be932a73273e13962b40e1342613f  build/hdl-tests/fifo_mapping_cc5a796b288b_proof.v
+69ef99ddb4d119f948886cb41e5f8efbce207d7bab6b1cde527a1602497c4d91  build/hdl-tests/fifo_mapping_cc5a796b288b_proof.ys
+cf379dc05f63de2a3e926ccd8024406197f5b426bc8891db590024e470086b1e  build/hdl-tests/fifo_mapping_cc5a796b288b_proof_flat.json
+c9409870d4b8ce3b8806e36fbe563a690837666956dd7aac055c22a0152edbfe  build/hdl-tests/owner_admission_be8263fe651b.log
+6feda653addb9ac40ee374f76abdf9b7337b77b2edb71f8c9bd1791c7238414e  build/hdl-tests/owner_admission_be8263fe651b.v
+2a1d603c44168fa46133ae40ca96c3da189d1bb430b21edc309463795fd56f71  build/hdl-tests/owner_admission_be8263fe651b.ys
+9b9ad976f33274a2c57f317de44f1fd92d44579a0630df21395cc53703c7046e  build/hdl-tests/owner_admission_be8263fe651b_inventory.json
+2ab96d2facc5c625387afcf2fa282efc3075358adccc20eaae94636451bcef93  build/hdl-tests/owner_encoding_be8263fe651b_k2_m1/after.json
+68304f893050434947ec07b13a4da848f5808d9bbdcd18655a2393d33578c21c  build/hdl-tests/owner_encoding_be8263fe651b_k2_m1/before.json
+1c557367c37e9f03b715b2b1330745c0ec821f94a7b87c251e376694cf34e0f0  build/hdl-tests/owner_encoding_be8263fe651b_k2_m1/encoding.map
+fe565be75977329f0e3a6c7d207d801a705a9bd5335ad4b834e6e57c0353c70a  build/hdl-tests/owner_encoding_be8263fe651b_k2_m1/equivalence.log
+101083cc8fd38b52380df29fda09a2fe7780fefe74b7d011ca0197a31d995252  build/hdl-tests/owner_encoding_be8263fe651b_k2_m1/equivalence.ys
+45c015c6aeb4f7b69ec44c17c4056d690920b12ea4bbd9a481c682267f555089  build/hdl-tests/owner_encoding_be8263fe651b_k2_m1/inventory.json
+e337acb32d18b79e20a400a8635c609f7c8d85912920bbdabeec1979853551a5  build/hdl-tests/owner_encoding_be8263fe651b_k2_m1/recode.log
+0799896df29fdb8bf0314c6e940e8024d34a19cb88b41c31d68c55a30e529166  build/hdl-tests/owner_encoding_be8263fe651b_k2_m1/recode.ys
+9fb19efe7d880b1e7180acf6f33b520d158539997316a79dc88649f14664c89b  build/hdl-tests/owner_encoding_be8263fe651b_k2_m1/recoded.json
+f72b1499dbb1197ece1b9f2f5d5332ff0257a17a1090d89af7ced542fc398dca  build/hdl-tests/owner_encoding_be8263fe651b_k8_m0/after.json
+4a549c1669c424132f46e5a95470cf2f55686e6cf44646c7fc0ff603a7e09088  build/hdl-tests/owner_encoding_be8263fe651b_k8_m0/before.json
+1c557367c37e9f03b715b2b1330745c0ec821f94a7b87c251e376694cf34e0f0  build/hdl-tests/owner_encoding_be8263fe651b_k8_m0/encoding.map
+d23352ce5a32a02dd9dce7cfe5dd094fb996c3551616b2a535d4e7ae3b11afa2  build/hdl-tests/owner_encoding_be8263fe651b_k8_m0/equivalence.log
+a6b27dda3486d1393977c3f2948dda6eb93e39479558bd7a9894b9bd18b31d7c  build/hdl-tests/owner_encoding_be8263fe651b_k8_m0/equivalence.ys
+59c16f1ea8a57513aeeb7c002b34a8776c139d8debb9927de62574b984d2c25c  build/hdl-tests/owner_encoding_be8263fe651b_k8_m0/inventory.json
+72af48c0072555c3a502db380ebaa44825dbef198b4810c021e15b39facb6110  build/hdl-tests/owner_encoding_be8263fe651b_k8_m0/recode.log
+5dfaeccf9463841265b7a864593099912b2236d45886021cb51f00a989f30003  build/hdl-tests/owner_encoding_be8263fe651b_k8_m0/recode.ys
+97e9cfd61a951fa70f3f627b5d07425bbc835ad848eec728b824c52d497a4194  build/hdl-tests/owner_encoding_be8263fe651b_k8_m0/recoded.json
+bdfa94894bf760f6d668bb3145663ae4ec1bd0722b3dc8b57f3b90b164cc63a0  build/hdl-tests/owner_mapping_5fa8194b40c7_k2/ccs_dma_window.v
+82ddb6b4a71f44f16ec75cf2d7ad33db240243601138baf14c3b4442cc7341bc  build/hdl-tests/owner_mapping_5fa8194b40c7_k2/ccs_idwpt.v
+cc5a796b288bc4475b2beb6dd59d5268ef54d8bc9143f134e2f5392fda23483b  build/hdl-tests/owner_mapping_5fa8194b40c7_k2/ccs_stream.v
+007100f8edfe8e8e833b63f780ad10ebab690cbbad86aa88e695557555e29281  build/hdl-tests/owner_mapping_5fa8194b40c7_k2/coeff_buffer_owner.v
+9355a0fc89b63ba100a262589d394e7aa477bc36f51d01e64e937c455e58b7b6  build/hdl-tests/owner_mapping_5fa8194b40c7_k2/dma_burst.v
+d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3  build/hdl-tests/owner_mapping_5fa8194b40c7_k2/dma_priority.v
+659374f96b67e6cb25054d24369341c6f2e9ec8d653490526073c73044210153  build/hdl-tests/owner_mapping_5fa8194b40c7_k2/dma_window.v
+099e83e0ce98dab0ac3c877c06b5dc7e0da9456efa30fce7ee1ecb47b5f2ba80  build/hdl-tests/owner_mapping_5fa8194b40c7_k2/inventory.json
+ea43687a7d1205471ec5271bf1e5fbec083536217f2e6f3fbed5f5e5c38ae114  build/hdl-tests/owner_mapping_5fa8194b40c7_k2/mapped_owner.json
+79ac8bc00836f93e9f130e1fe6be8abb7e7ec83cc9115ed2b43079b85be0c98c  build/hdl-tests/owner_mapping_5fa8194b40c7_k2/mapped_owner.log
+0f0b44d8dcfe50460fd4385107f62d00441d6a80eeb403943307ba81b253dccd  build/hdl-tests/owner_mapping_5fa8194b40c7_k2/mapped_owner.v
+72dd8c4ed02f12f379c5cf75291553aae91bc7644ce3295af27bc9a91f513580  build/hdl-tests/owner_mapping_5fa8194b40c7_k2/mapped_owner.ys
+cb91993e9a1a03db49bbb58a73aed03f6880fc7e7397171e064e2464703764ce  build/hdl-tests/owner_mapping_5fa8194b40c7_k2/tb_ccs_dma_window.v
+bdfa94894bf760f6d668bb3145663ae4ec1bd0722b3dc8b57f3b90b164cc63a0  build/hdl-tests/owner_mapping_5fa8194b40c7_k8/ccs_dma_window.v
+82ddb6b4a71f44f16ec75cf2d7ad33db240243601138baf14c3b4442cc7341bc  build/hdl-tests/owner_mapping_5fa8194b40c7_k8/ccs_idwpt.v
+cc5a796b288bc4475b2beb6dd59d5268ef54d8bc9143f134e2f5392fda23483b  build/hdl-tests/owner_mapping_5fa8194b40c7_k8/ccs_stream.v
+2dcd94374f315faaa1d5ba67db0fda2cc9500cf43f95112622e4b1e76afab4dc  build/hdl-tests/owner_mapping_5fa8194b40c7_k8/coeff_buffer_owner.v
+9355a0fc89b63ba100a262589d394e7aa477bc36f51d01e64e937c455e58b7b6  build/hdl-tests/owner_mapping_5fa8194b40c7_k8/dma_burst.v
+d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3  build/hdl-tests/owner_mapping_5fa8194b40c7_k8/dma_priority.v
+659374f96b67e6cb25054d24369341c6f2e9ec8d653490526073c73044210153  build/hdl-tests/owner_mapping_5fa8194b40c7_k8/dma_window.v
+2d1d11ecc8f61e1c101421c6ebf4d0df873421611949abbde7a911f23ae35860  build/hdl-tests/owner_mapping_5fa8194b40c7_k8/inventory.json
+6383fc2a4d927e48b85a0459df660bdb73580beb1201ce3d54ca789a2754302d  build/hdl-tests/owner_mapping_5fa8194b40c7_k8/mapped_owner.json
+d02a5c47af39d791d23660e6610f29743641d0d84eed3a7a2107aefddf70695a  build/hdl-tests/owner_mapping_5fa8194b40c7_k8/mapped_owner.log
+e61d6ee6d4e969272c98882ba611df655da7e3a24f063f85b486cc8ea908d3c5  build/hdl-tests/owner_mapping_5fa8194b40c7_k8/mapped_owner.v
+bf867be835fdeac014b9e8564e0a76f0bdc3007a19c34f5a8c8c4af99c938246  build/hdl-tests/owner_mapping_5fa8194b40c7_k8/mapped_owner.ys
+cb91993e9a1a03db49bbb58a73aed03f6880fc7e7397171e064e2464703764ce  build/hdl-tests/owner_mapping_5fa8194b40c7_k8/tb_ccs_dma_window.v
+9bd994b6d94c32607b44f9ebbbd76894d53fb0536704b0eb92ae67b978c6e2f2  build/hdl-tests/owner_prematch_be8263fe651b_659374f96b67.log
+62f3a2de860bdc57a82eadbe063218ca3a245dcfbe9653bdeda83a6ddb68afa2  build/hdl-tests/owner_prematch_be8263fe651b_659374f96b67.v
+c0e16b0c05043b203858868886c933572b33adde895c3e9f41ef974c83b6ce79  build/hdl-tests/owner_prematch_be8263fe651b_659374f96b67.ys
+21f5763f0667adf6eb33ebd57aa1aff4ac60c1e2b0ff34d5ee25820b90500092  build/hdl-tests/owner_prematch_be8263fe651b_659374f96b67_inventory.json
+6d0752dc6bf115c3d6225539a8525f8bf0dc44ef9fced9fcf8f602b81b2be7fe  build/hdl-tests/production58_before_cleanup/ccs_dma_window_synthesis.json
+82ddb6b4a71f44f16ec75cf2d7ad33db240243601138baf14c3b4442cc7341bc  build/hdl-tests/production58_before_cleanup/ccs_idwpt.v
+b18012cd556ea1d209aaf35c75bf8e55d200d6e140afa7ccdbca8cb919019c4a  build/hdl-tests/production58_window_k2_timing_inventory.json
+dbb84435562cde3196357f41049395ce3190b2f0530ade7d55dec23d15fd6e24  build/hdl-tests/production58_window_k4_timing_inventory.json
+a106a6927078380a9c518bad4d6e74be093f004cdfc61a659b936dc635b72531  build/hdl-tests/production58_window_k8_timing_inventory.json
+9d3c49d7a470d87a8888ffef5312334f5a4b9567d71bffb33782f88a59c296f4  build/hdl-tools/yosys/usr/share/yosys/ecp5/cells_ff.vh
+bbc7bb1406ed0d249ac588f1216c3c3964eb98a802816a4a21b14703d8dae62b  build/hdl-tools/yosys/usr/share/yosys/ecp5/cells_io.vh
+23c1d1d35b5bd9ba5a07e17cf7d5c07fe7b6840e1deb6c2f746c3f430b4cec54  build/hdl-tools/yosys/usr/share/yosys/ecp5/cells_sim.v
+35e5dd1c76af8293d0a03c13fac9f5c1c7fb56909688c833d4f09bd5781ab0bb  pyproject.toml
+bdfa94894bf760f6d668bb3145663ae4ec1bd0722b3dc8b57f3b90b164cc63a0  src/symcrash_verilog/ccs_dma_window.v
+ea0e092295aad708e99a4964a8534d5a7d5737784410b860de691c7c7770c556  src/symcrash_verilog/ccs_idwpt.v
+cc5a796b288bc4475b2beb6dd59d5268ef54d8bc9143f134e2f5392fda23483b  src/symcrash_verilog/ccs_stream.v
+be8263fe651b1c854726706d9a59eadc2ba935e76526cd4e4d41b5119a0e7b03  src/symcrash_verilog/coeff_buffer_owner.v
+659374f96b67e6cb25054d24369341c6f2e9ec8d653490526073c73044210153  src/symcrash_verilog/dma_window.v
+cb91993e9a1a03db49bbb58a73aed03f6880fc7e7397171e064e2464703764ce  src/symcrash_verilog/tb_ccs_dma_window.v
+18695459c607fe68f4e8721392ae4a3c0db18aec760aa2b1c10b805d1ad66ace  src/symcrash_verilog/tb_ccs_idwpt.v
+122dd5cfee757f0cb283b9af9750872a6bf48b1c04e9d6ec1025ae347f006bf6  src/symcrash_verilog/tb_ccs_stream.v
+112401af00bdc6811e13bbbd702b80dc4c1036ccd1d67299e328928e2dab069a  src/symcrash_verilog/tb_coeff_buffer_owner.v
+26ccc225299473f2c3b50b42ca06d5ee229f543105f9dc353b76dcbb8463c1ee  src/symcrash_verilog/tb_dma_window.v
+d0a9970e24a214861ebf6d3cfa0a7deed59a6cba8e3eed56c1a696aa27f2792c  tests/conformance/test_hdl_ccs_stream.py
+fa05ded22b450bd2f6dca11889a00937f3a75407f3afa99005ee4f3a60834b78  tests/conformance/test_hdl_ccs_stream_evidence.py
+51c1c58f77d871e2f065be24f9c373e537344bbdfb974c20df89701c87489d81  tests/conformance/test_hdl_coeff_buffers.py
+6a3a758b14082be87f9850a5ac9d4c671657010396547d5d1ab3868e0db27639  tests/conformance/test_hdl_coeff_buffers_evidence.py
+c8b6062f2d4fd2e2f8713a9d2925407cdadab6af226628e69c67c5314ffd10db  tests/conformance/test_hdl_control.py
+4949975db6f08e0d72cf283d38bdc26df063e94868677f1520f4a6f28c91860d  tests/conformance/test_hdl_dma.py
+0647707ad31fbdf306432ae951d595b0b2784933531437a0d51dc5b25a157109  tests/conformance/test_hdl_dma_bounds.py
+d609fd90d1a0eedb13dd9eace60f55c053a2c3c22408675bd3ef762336e37550  tests/conformance/test_hdl_dma_evidence.py
+40ebbf8289265445c4ef1e7d51eaec8d64b312284a1120030feda48722711562  tests/conformance/test_hdl_dma_priority.py
+be78abb5be4c1c7810c57f3c519d2499c9771a774452517f6121eb7aa340f4f6  tests/conformance/test_hdl_dma_priority_evidence.py
+eae4901d90ad933f07c2cc7e4b104ef94067282d2f2d980c15c71220f33cac2e  tests/conformance/test_hdl_dma_window.py
+9e6e9ae4c2cb9aed6cc51ca95bc3e625d04ace9f6631230c1e383ad4a4937a0e  tests/conformance/test_hdl_dma_window_evidence.py
+1c3e2c3fb438fe9d5eff007bfa5589348e25a9a8750fad8f2644a299a90e9aec  tests/conformance/test_hdl_evidence.py
+145475aabb6ca564c42c76999d074762e0cbccdcdb45dd00d9b4eea4e6776835  tests/conformance/test_hdl_fifo.py
+96b3aa3971e91009edcc74655723724390cd4cbac0875d6d32cf10af0739643c  tests/conformance/test_hdl_idwpt.py
+d16f32d427c8f2766dec8412ad3e6dacc3ecdb399068ec13aa62699eb2f0b41e  tests/conformance/test_hdl_mapping.py
+e3f83902369c6b55e6619b682f757602bcc0529bd132e821492dc7ff0a9e1e7b  tests/conformance/test_hdl_owner_pipeline.py
+37ff6e5c344afdd629a8c7c7d09873e0232217e1f28f6ae7fa3110efc7048eea  tools/audit_lifting_arithmetic.py
+66b3db905610cb16351357d05e92c6bb25c6c5364714bf2033d4856c6d278f2f  tools/build_hdl_dma.py
+bab777ff525b872b1c62fc734a0d6685023eee2202fef85c89af18df80b21349  tools/build_hdl_dma_window.py
+e902a3d96ba4e62295f249bce7559434e2a43b363af842318c85208bc856ec43  tools/check_hdl_ccs_stream.py
+a0cf53eb230e530498cff112aafe17293e86ad9f73655e5d051029bc8e3ca1a0  tools/check_hdl_control.py
+2f43ba972b78931826b434f9fc976fed29f1fe53bd9a4e851489e151b194dab8  tools/check_hdl_dma_window.py
+79d7f9e8492d7c5a6e16bfbef511593b4151e83363424862fda356f26b02639e  tools/check_hdl_fifo.py
+7a480cd44d631c93c645d49adf0a89630eb2b45f1bca404e2cf6b825d92d0893  tools/check_hdl_idwpt.py
+6aac10f3a8b0cd22202d413180c9eb715e8ee19458ad864a30ff55515cb53641  tools/check_hdl_owner_mapping.py
+a0b09aaa82c4a818b414e38398998a3db3e662ac4fcec78e88156ade4cc412d6  tools/check_hdl_owner_pipeline.py
+a2515d4d3cbf2c1246b75bb568d81606744b9a9bd9ab2e695e7392d9b4bca0d0  tools/hdl_mapping.py
+beb226648f7e6636f8dc588214799619236fcf0fcc48f71570a01f4a0fd0b1bc  tools/synth_hdl_idwpt.py

@@ -1,0 +1,43 @@
+Hardware memory gates and voice-state boundary evidence -- 2026-10-31
+
+Status: engineering progress; complete hardware page packing remains open.
+Physical BRAM gate repaired: 56 x 18432 / 8 = 129024 bytes, not 131072.
+No RTL, transform, datatype, arithmetic, allocation-size or deadline changes.
+Both prepared Git indexes preserved; signing deferred.
+
+Commands:
+  pixi run python -m pytest tests/conformance/test_hardware_resources.py tests/conformance/test_hardware_memory_map.py -q
+  pixi run python -m pytest tests/conformance/test_hardware_voice_boundary.py -q
+  pixi run check-hardware-resources --json
+
+Tests: 31 memory/map + 31 voice-boundary = 62 passed.
+Address oracle: 6480 ordered interval pairs, plus nested multiple overlaps,
+adjacency, malformed inputs, exact boundaries and CLI failure propagation.
+Complete normative address tables are checked against the inventory.
+Voice boundary: nine oscillator paths, Python/JIT, pitch/hold/release,
+12 standalone K2/K4/K8 x tail-mode combinations, arbitrary unequal-history
+checkpoint preservation. Full-engine replay remains K4.
+
+Hardware check exits 1, as required by unresolved storage/map failures:
+  BRAM static Reserved: 0x1f800..0x20000 outside capacity (2048 bytes).
+  BRAM tiered Reserved: 0x1f800..0x20000 outside capacity (2048 bytes).
+  External Sample ROM overlaps Reserved: 0x7f00000..0x8000000 (1048576 bytes).
+  External Sample ROM exceeds RAM: 0x8000000..0x8040000 (262144 bytes).
+  Existing oscillator image storage failures remain reported separately.
+
+hardware_memory_map_20261031.json contains full limits/maps/violations.
+hardware_voice_state_inventory_20261031.json accounts for all 41 root fields
+in each of ten CORE v2 fixtures, with exact codec byte offsets and source hashes.
+These Python checkpoint sizes are not hardware-page storage requirements.
+
+One persistent coefficient vector at a clean service boundary is sufficient
+for both current and tail history; independent working vectors are necessary
+during processing. No codec or new hardware packing is claimed yet.
+K2/K4/K8 committed vector bytes: 256/512/1024; remaining page:1792/1536/1024.
+No datatype reduction, omitted slots, dynamic K change or frozen-history alias.
+External resource/state ownership, complete global packing, all DMA traffic
+and whole-block timing still require engineering and measurement.
+
+Earlier failed test harness runs are retained as _state66-memory-tests.log,
+_state66-boundary-tests.log and _state66-boundary-tests-final.log.
+Qualified cache/renderer RTL and its prior timing evidence are unchanged.

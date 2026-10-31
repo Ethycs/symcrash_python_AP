@@ -1,6 +1,8 @@
 `timescale 1ns/1ps
 module tb_dma_window;
     parameter WINDOW_CYCLES=40000;
+    wire [127:0] match_descriptors=128'd0;
+    wire [1:0] done_matches;
     reg clk=0;
     always #5 clk=!clk;
     reg rst_n=0,window_valid=0,seal=0,result_ready=0,submit_valid=0;

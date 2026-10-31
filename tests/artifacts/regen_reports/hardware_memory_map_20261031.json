@@ -1,0 +1,222 @@
+{
+  "target": "OrangeCrab ECP5-25F",
+  "scope": "Default oscillator image storage and separate documented logical maps; physical bank packing, full voice state and realtime timing are not qualified",
+  "allocations": [
+    {
+      "name": "Mode A default image",
+      "bytes": 2081284256,
+      "region": "coefficients"
+    },
+    {
+      "name": "Mode B default image",
+      "bytes": 3124940,
+      "region": "coefficients"
+    }
+  ],
+  "limits": {
+    "coefficients": 4194304,
+    "external_total": 134217728,
+    "coefficient_working": 32768,
+    "bram_total": 129024
+  },
+  "violations": [
+    {
+      "region": "coefficients",
+      "used_bytes": 2084409196,
+      "limit_bytes": 4194304,
+      "excess_bytes": 2080214892
+    },
+    {
+      "region": "external_total",
+      "used_bytes": 2084409196,
+      "limit_bytes": 134217728,
+      "excess_bytes": 1950191468
+    }
+  ],
+  "bram_inventory": {
+    "blocks": 56,
+    "bits_per_block": 18432
+  },
+  "memory_maps": [
+    {
+      "name": "bram_static",
+      "source": "WSE-STD-BRAM-RAM \u00a76.1",
+      "capacity": 129024,
+      "spans": [
+        {
+          "name": "Voice Cache",
+          "start": 0,
+          "bytes": 32768
+        },
+        {
+          "name": "Coeff Working",
+          "start": 32768,
+          "bytes": 32768
+        },
+        {
+          "name": "Reverb Taps",
+          "start": 65536,
+          "bytes": 16384
+        },
+        {
+          "name": "FX Scratch",
+          "start": 81920,
+          "bytes": 8192
+        },
+        {
+          "name": "DMA Staging",
+          "start": 90112,
+          "bytes": 8192
+        },
+        {
+          "name": "Output Mix",
+          "start": 98304,
+          "bytes": 8192
+        },
+        {
+          "name": "Reserved",
+          "start": 106496,
+          "bytes": 24576
+        }
+      ],
+      "violations": [
+        {
+          "kind": "capacity",
+          "names": [
+            "Reserved"
+          ],
+          "start": 129024,
+          "end": 131072,
+          "bytes": 2048
+        }
+      ],
+      "address_map_passed": false
+    },
+    {
+      "name": "bram_tiered",
+      "source": "WSE-STD-VOICE-TIERS \u00a75.3",
+      "capacity": 129024,
+      "spans": [
+        {
+          "name": "Active Voice Cache",
+          "start": 0,
+          "bytes": 16384
+        },
+        {
+          "name": "Prefetch Buffer",
+          "start": 16384,
+          "bytes": 16384
+        },
+        {
+          "name": "Coefficient Working",
+          "start": 32768,
+          "bytes": 32768
+        },
+        {
+          "name": "Reverb Tap Windows",
+          "start": 65536,
+          "bytes": 8192
+        },
+        {
+          "name": "Ghost Mix Staging",
+          "start": 73728,
+          "bytes": 8192
+        },
+        {
+          "name": "Mix Accumulators",
+          "start": 81920,
+          "bytes": 2048
+        },
+        {
+          "name": "DMA Descriptors",
+          "start": 83968,
+          "bytes": 2048
+        },
+        {
+          "name": "Reserved",
+          "start": 86016,
+          "bytes": 45056
+        }
+      ],
+      "violations": [
+        {
+          "kind": "capacity",
+          "names": [
+            "Reserved"
+          ],
+          "start": 129024,
+          "end": 131072,
+          "bytes": 2048
+        }
+      ],
+      "address_map_passed": false
+    },
+    {
+      "name": "external_tiered",
+      "source": "WSE-STD-VOICE-TIERS \u00a75.2",
+      "capacity": 134217728,
+      "spans": [
+        {
+          "name": "Voice States",
+          "start": 0,
+          "bytes": 524288
+        },
+        {
+          "name": "Ghost Buffers",
+          "start": 524288,
+          "bytes": 12582912
+        },
+        {
+          "name": "Coefficient LUTs",
+          "start": 13107200,
+          "bytes": 1048576
+        },
+        {
+          "name": "Basis Frames",
+          "start": 14155776,
+          "bytes": 262144
+        },
+        {
+          "name": "Reverb Delay Lines",
+          "start": 14680064,
+          "bytes": 262144
+        },
+        {
+          "name": "Sample ROM",
+          "start": 14942208,
+          "bytes": 119537664
+        },
+        {
+          "name": "Reserved",
+          "start": 133169152,
+          "bytes": 1048576
+        }
+      ],
+      "violations": [
+        {
+          "kind": "capacity",
+          "names": [
+            "Sample ROM"
+          ],
+          "start": 134217728,
+          "end": 134479872,
+          "bytes": 262144
+        },
+        {
+          "kind": "overlap",
+          "names": [
+            "Sample ROM",
+            "Reserved"
+          ],
+          "start": 133169152,
+          "end": 134217728,
+          "bytes": 1048576
+        }
+      ],
+      "address_map_passed": false
+    }
+  ],
+  "address_maps_passed": false,
+  "storage_passed": false,
+  "passed": false
+}

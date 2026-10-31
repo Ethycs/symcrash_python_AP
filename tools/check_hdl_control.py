@@ -20,10 +20,25 @@ SOURCES = {'owner': HDL / 'coeff_buffer_owner.v',
 
 
 def owner_module(text):
-    assert 'reg [2:0] state [0:1];' in text, 'Owner state width is outside this proof model'
+    factored = 'wire [2:0] state [0:1];' in text
+    if factored:
+        for fragment in ('(* fsm_encoding = "one-hot" *) reg [2:0] current_state;',
+                         'assign state[bank]=current_state;',
+                         'if (!rst_n) current_state <= FREE;',
+                         'else current_state <= next_state;'):
+            assert fragment in text, 'Owner state storage is outside this proof model'
+    else:
+        assert 'reg [2:0] state [0:1];' in text, 'Owner state width is outside this proof model'
     start = text.index('        wire bank_claim=')
     end = text.index('        always @(posedge clk or negedge rst_n)', start)
     cone = text[start:end].replace('state[bank]', 'current_state').replace('match_ready[bank]', 'match_ready')
+    if factored:
+        # This proof covers the local transition policy. The independent
+        # admission proof in check_hdl_owner_pipeline establishes that the
+        # per-bank predicate equals the original claim/selection expression.
+        predicate = 'wire bank_claim=prefetch_valid && prefetch_eligible && claimable[bank];'
+        assert predicate in cone, 'Owner admission is outside this proof model'
+        cone = cone.replace(predicate, 'wire bank_claim=claim && selected==bank;')
     constants = re.search(r'localparam FREE=.*?;', text, re.S).group(0)
     return '''module control_proof(
 input [2:0] current_state,

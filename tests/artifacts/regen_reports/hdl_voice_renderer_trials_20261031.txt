@@ -1,0 +1,46 @@
+Symcrash shared voice-cache/decoder engineering trials, 2026-10-31
+Status: no candidate meets 100 MHz; no production adoption.
+N64; K2/K4/K8; int16 coefficients; documented RNE/SAT and headroom retained.
+16 opaque 2048-byte pages; full u16 voice identities/u32 tags.
+Physical mapped memory: 15 DP16KD = 34560 bytes; 160 DPR cells = 1280 bytes; no DSP.
+Each placement targets ECP5-25K, CSFBGA285, speed6, 100 MHz, seeds1/2/3, out of context.
+Scope: cache and one decoder. Shared DMA queue/window, operators/mix, scheduler and board are separate.
+
+candidate | LUT4/FF/CCU | RTL profiles/samples | ready K2/K4/K8 clocks | MHz seeds1/2/3
+direct | 6090/5552/522 | 10/451200 | 183/346/672 | 56.976807/59.584099/59.601860
+registered_request | 6022/5606/522 | 10/453120 | 184/347/673 | 72.870369/72.150070/70.462227
+per_page_compare | 6549/5606/522 | 10/453120 | 184/347/673 | 86.700188/87.183952/86.948959
+response_ready | 6580/5606/525 | 10/453120 | 184/347/673 | 76.219513/82.365540/74.194984
+fifo_credit | 6555/5606/522 | 10/453120 | 184/347/797 | 89.678055/89.110672/74.587906
+lease_slot | 6487/5606/522 | 10/453120 | 184/347/797 | 85.807449/88.370445/83.049576
+idle_counters | 6477/5606/522 | 1/8000 | 184/347/797 | 69.925179/73.281548/79.289566
+request_valid | 6413/5606/525 | 1/8000 | 184/347/797 | 90.301605/83.745079/83.416748
+read_bounds | 6321/5606/522 | 1/8000 | 184/347/797 | 84.882439/84.267296/81.142487
+
+The FIFO-credit and subsequent trials add 124 K8 service clocks; no budget was relaxed.
+Per-page comparison candidate: two mapped-model runs, 16000 exact samples, stalls off/on.
+Restricted checked DP16KD functional model, pinned Yosys LUT/FF/DPR library; not vendor timing or board evidence.
+Earlier request candidate: first mapped run passed; second timed out at600s and is incomplete.
+Per-page cache regression: six bounded-adapter profiles; 8 credits; normal max26602/40000 clocks; forced overruns separate.
+Four integration corruption controls rejected; 13 synthesis/timing evidence-guard pytest checks passed.
+Formal scopes follow (payload/decoder cuts and comparison limits are explicit).
+- direct/proofs: 6 positive/negative checks; All-input command range/identity validity and conditional read-address/gather coordinates, with captured-field guards. Not complete temporal cache/decoder equivalence.
+- registered_request/proofs: 6 positive/negative checks; All-input command range/identity validity and conditional read-address/gather coordinates, with captured-field guards. Not complete temporal cache/decoder equivalence.
+- registered_request/lease_proof: 4 positive/negative checks; Reset base plus temporal induction of actual cache/control and request/port arbitration. Cache payload is cut and renderer requests are arbitrary inputs. Does not prove decoder arithmetic or renderer temporal protocol.
+- per_page_compare/match_proof: 4 positive/negative checks; Unconditional all-input full-width hit equivalence; no temporal assumptions or payload equivalence.
+- per_page_compare/lease_proof: 4 positive/negative checks; Reset base plus temporal induction of actual cache/control and request/port arbitration. Cache payload is cut and renderer requests are arbitrary inputs. Does not prove decoder arithmetic or renderer temporal protocol.
+- response_ready/fifo_proof: 3 positive/negative checks; Actual renderer control with payload/decoder cut, arbitrary decoder flow control, and the cache one-response ready/valid contract. Proves reservation, group-word accounting and response capacity from reset; no audio arithmetic equivalence claim.
+- fifo_credit/fifo_proof: 3 positive/negative checks; Actual renderer control with payload/decoder cut, arbitrary decoder flow control, and the cache one-response ready/valid contract. Proves reservation, group-word accounting and response capacity from reset; no audio arithmetic equivalence claim.
+- lease_slot/lease_proof: 4 positive/negative checks; Reset base plus temporal induction of actual cache/control and request/port arbitration. Cache payload is cut and renderer requests are arbitrary inputs. Does not prove decoder arithmetic or renderer temporal protocol.
+- idle_counters/lease_proof: 4 positive/negative checks; Reset base plus temporal induction of actual cache/control and request/port arbitration. Cache payload is cut and renderer requests are arbitrary inputs. Does not prove decoder arithmetic or renderer temporal protocol.
+- idle_counters/counter_equivalence: 2 positive/negative checks; Sequential equivalence of public cache control outputs; payload cut, matched metadata state. Idle-only private counters are not compared unconditionally.
+- request_valid/lease_proof: 4 positive/negative checks; Reset base plus temporal induction of actual cache/control and request/port arbitration. Cache payload is cut and renderer requests are arbitrary inputs. Does not prove decoder arithmetic or renderer temporal protocol.
+- request_valid/request_equivalence: 3 positive/negative checks; Unconditional combinational accepted-request, owner, host-ready and prefetch-reservation equivalence; source-derived expressions, arbitrary control inputs.
+- read_bounds/fifo_proof: 3 positive/negative checks; Actual renderer control with payload/decoder cut, arbitrary decoder flow control, and the cache one-response ready/valid contract. Proves reservation, group-word accounting and response capacity from reset; no audio arithmetic equivalence claim.
+- read_bounds/read_predicate_equivalence: 3 positive/negative checks; Unconditional all-input read-request predicate equivalence, including every K encoding, seven-bit index, occupancy and pending bit.
+
+Source-bound progress audit: 972 validated artifacts; prior 222 cache artifacts unchanged.
+Both phase55 prepared Git indexes and heads remain unchanged; signing deferred by user.
+All nine candidate directories and failed experiments retained; _voice62_progress.json contains exact source/evidence hashes.
+No full-workload admission, fixed state serializer, shared multi-client DMA or board qualification is claimed.
+Next structural option: acquisition-result pipeline with explicit reservation; quantify registers/latency and re-prove ownership.

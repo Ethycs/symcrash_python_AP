@@ -19,8 +19,9 @@ def test_hdl_arithmetic_handshakes_reset_and_cycles(simulator, slots, stalls):
 
 
 @pytest.mark.parametrize('headroom', [0, 1, 3, 15])
-def test_hdl_preserves_headroom_contract(simulator, headroom):
-    check(4, headroom, True, exhaustive=False, simulator=simulator)
+@pytest.mark.parametrize('slots', [2, 4, 8])
+def test_hdl_preserves_headroom_contract(simulator, headroom, slots):
+    check(slots, headroom, True, exhaustive=False, simulator=simulator)
 
 
 def test_hdl_rounding_exhausts_proven_lifting_sum_ranges(simulator):

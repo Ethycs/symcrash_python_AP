@@ -6,6 +6,7 @@
  */
 module coeff_buffer_owner #(
     parameter K = 4,
+    parameter MATCHED_COMPLETION = 0,
     parameter [15:0] BASE = 16'h8000
 ) (
     input wire clk, rst_n,
@@ -17,6 +18,11 @@ module coeff_buffer_owner #(
     output wire dma_submit_valid,
     input wire dma_submit_ready,
     output wire [63:0] dma_submit_descriptor,
+    // Optional match flags captured with the existing DMA callback. The
+    // combined window owns that register stage; standalone clients use the
+    // original complete-descriptor comparison by default.
+    input wire [1:0] dma_done_matches,
+    output wire [127:0] dma_match_descriptors,
     input wire dma_done_valid,
     input wire [63:0] dma_done_descriptor,
     input wire [3:0] dma_done_status,
@@ -39,24 +45,34 @@ module coeff_buffer_owner #(
     localparam [15:0] SECOND_BASE = BASE + FRAME_BYTES;
     localparam FREE=3'd0, WAITING=3'd1, FILLING=3'd2, READY=3'd3,
                READING=3'd4, DISCARD_WAIT=3'd5, DISCARD_FILL=3'd6;
-    reg [2:0] state [0:1];
+    wire [2:0] state [0:1];
     reg [31:0] tag [0:1];
     reg [63:0] descriptor [0:1];
+    assign dma_match_descriptors={descriptor[1],descriptor[0]};
+    wire [1:0] completed_matches=MATCHED_COMPLETION ? dma_done_matches :
+        {dma_done_descriptor==descriptor[1],dma_done_descriptor==descriptor[0]};
     reg pending_valid, pending_bank;
     wire claim, submit, acquire;
     wire [1:0] match_ready;
     wire hit = |match_ready;
     wire selected = !free_mask[0];
-    wire duplicate = (state[0] != FREE && tag[0] == prefetch_tag) ||
-                     (state[1] != FREE && tag[1] == prefetch_tag);
+    // Factor admission per destination bank. A free destination cannot
+    // itself contain a live duplicate; only the other bank must be checked.
+    // Bank 0 retains priority. This removes the shared duplicate/selection
+    // chain from the metadata clock enables without adding storage/latency.
+    wire [1:0] tag_matches={tag[1]==prefetch_tag,tag[0]==prefetch_tag};
+    (* keep *) wire [1:0] claimable={
+        !free_mask[0] && free_mask[1] && !tag_matches[0],
+        free_mask[0] && (free_mask[1] || !tag_matches[1])};
+    (* keep *) wire prefetch_eligible=rst_n && !pending_valid &&
+        !(cancel_valid && cancel_tag==prefetch_tag) &&
+        !(acquire && acquire_tag==prefetch_tag);
     wire [3:0] wire_priority = 4'd15 - {2'b0,prefetch_class};
     wire [15:0] destination = selected ? SECOND_BASE : BASE;
     wire [63:0] incoming = {prefetch_ram_address, destination,
                            FRAME_BEATS, wire_priority, 2'b00, 1'b1, 1'b1};
     assign prefetch_bank = selected;
-    assign prefetch_ready = rst_n && |free_mask && !pending_valid && !duplicate &&
-                            !(cancel_valid && cancel_tag == prefetch_tag) &&
-                            !(acquire && acquire_tag == prefetch_tag);
+    assign prefetch_ready = prefetch_eligible && |claimable;
     assign claim = prefetch_valid && prefetch_ready;
     assign dma_submit_valid = rst_n && pending_valid;
     assign dma_submit_descriptor = descriptor[pending_bank];
@@ -66,47 +82,56 @@ module coeff_buffer_owner #(
 
     genvar bank;
     generate for (bank=0; bank<2; bank=bank+1) begin : buffers
+        // Keep the logical 0..6 policy while requesting one-hot physical
+        // encoding of each independent controller. Expected cost: 7 FF per
+        // bank instead of 3; actual mapping and timing must be measured.
+        (* fsm_encoding = "one-hot" *) reg [2:0] current_state;
+        assign state[bank]=current_state;
+`ifndef SYNTHESIS
+        // Only a simultaneous new FREE->WAITING claim can invalidate the
+        // earlier comparison; WAITING ignores completion for state/faults.
+        always @(posedge clk) if(rst_n && MATCHED_COMPLETION && dma_done_valid && state[bank]!=WAITING)
+            if(dma_done_matches[bank] !== (dma_done_descriptor==descriptor[bank]))
+                $fatal(1,"Prematched callback differs outside a new claim");
+`endif
         wire expire = (cancel_valid && cancel_tag == tag[bank]) ||
                       (acquire && !hit && acquire_tag == tag[bank]);
-        wire finished = dma_done_valid && dma_done_descriptor == descriptor[bank];
+        (* keep *) wire finished = dma_done_valid && completed_matches[bank];
         assign free_mask[bank] = state[bank] == FREE;
         assign ready_mask[bank] = state[bank] == READY;
         assign reading_mask[bank] = state[bank] == READING;
         assign match_ready[bank] = ready_mask[bank] && tag[bank] == acquire_tag &&
                                   !(cancel_valid && cancel_tag == acquire_tag);
-        always @(posedge clk) begin
-            if (claim && selected == bank) begin
-                tag[bank] <= prefetch_tag;
-                descriptor[bank] <= incoming;
-            end
-        end
-        wire bank_claim=claim && selected==bank;
+        wire bank_claim=prefetch_valid && prefetch_eligible && claimable[bank];
         wire bank_submit=submit && pending_bank==bank;
         wire bank_acquire=acquire && match_ready[bank];
         wire bank_release=release_valid && release_bank==bank;
-        // Decode transitions into the existing destination values. The ORs
-        // below directly form the same three stored bits, without a priority
-        // mux across state branches. No extra state, latency or encoding.
-        wire next_wait=(state[bank]==FREE && bank_claim) ||
-                       (state[bank]==WAITING && !bank_submit && !expire);
-        wire next_fill=(state[bank]==WAITING && bank_submit && !expire) ||
-                       (state[bank]==FILLING && !finished && !expire);
-        wire next_ready=(state[bank]==FILLING && finished && !expire && dma_done_status==0) ||
-                        (state[bank]==READY && !expire && !bank_acquire);
-        wire next_read=(state[bank]==READY && !expire && bank_acquire) ||
-                       (state[bank]==READING && !bank_release);
-        wire next_discard_wait=(state[bank]==WAITING && !bank_submit && expire) ||
-                               (state[bank]==DISCARD_WAIT && !bank_submit);
-        wire next_discard_fill=(state[bank]==WAITING && bank_submit && expire) ||
-                               (state[bank]==DISCARD_WAIT && bank_submit) ||
-                               (state[bank]==FILLING && !finished && expire) ||
-                               (state[bank]==DISCARD_FILL && !finished);
-        wire [2:0] next_state={next_read || next_discard_wait || next_discard_fill,
-                               next_fill || next_ready || next_discard_fill,
-                               next_wait || next_ready || next_discard_wait};
+        reg [2:0] next_state;
+        always @* begin
+            next_state=current_state;
+            case(current_state)
+                FREE: if(bank_claim) next_state=WAITING;
+                WAITING: if(bank_submit) next_state=expire ? DISCARD_FILL : FILLING;
+                         else if(expire) next_state=DISCARD_WAIT;
+                FILLING: if(finished) next_state=(!expire && dma_done_status==0) ? READY : FREE;
+                         else if(expire) next_state=DISCARD_FILL;
+                READY: if(expire) next_state=FREE;
+                       else if(bank_acquire) next_state=READING;
+                READING: if(bank_release) next_state=FREE;
+                DISCARD_WAIT: if(bank_submit) next_state=DISCARD_FILL;
+                DISCARD_FILL: if(finished) next_state=FREE;
+                default: next_state=FREE;
+            endcase
+        end
         always @(posedge clk or negedge rst_n) begin
-            if (!rst_n) state[bank] <= FREE;
-            else state[bank] <= next_state;
+            if (!rst_n) current_state <= FREE;
+            else current_state <= next_state;
+        end
+        always @(posedge clk) begin
+            if (bank_claim) begin
+                tag[bank] <= prefetch_tag;
+                descriptor[bank] <= incoming;
+            end
         end
     end endgenerate
 
@@ -126,9 +151,9 @@ module coeff_buffer_owner #(
             end
             fault_valid <= 0;
             if (dma_done_valid && dma_done_status != 0) begin
-                if ((state[0] == FILLING || state[0] == DISCARD_FILL) && dma_done_descriptor == descriptor[0]) begin
+                if ((state[0] == FILLING || state[0] == DISCARD_FILL) && completed_matches[0]) begin
                     fault_valid <= 1; fault_tag <= tag[0]; fault_status <= dma_done_status;
-                end else if ((state[1] == FILLING || state[1] == DISCARD_FILL) && dma_done_descriptor == descriptor[1]) begin
+                end else if ((state[1] == FILLING || state[1] == DISCARD_FILL) && completed_matches[1]) begin
                     fault_valid <= 1; fault_tag <= tag[1]; fault_status <= dma_done_status;
                 end
             end

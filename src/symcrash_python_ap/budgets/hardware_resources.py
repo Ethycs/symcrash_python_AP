@@ -11,7 +11,11 @@ from dataclasses import dataclass
 KIB = 1024
 MIB = KIB * KIB
 EXTERNAL_RAM_BYTES = 128 * MIB
-BRAM_BYTES = 128 * KIB
+# WSE-STD-BRAM-RAM §2.2 gives the physical inventory as 56 x 18 Kbit.
+# Its "128 KB" label is rounded; it is not another 2 KiB of storage.
+BRAM_BLOCKS = 56
+BRAM_BLOCK_BITS = 18 * KIB
+BRAM_BYTES = BRAM_BLOCKS * BRAM_BLOCK_BITS // 8
 COEFFICIENT_STORE_BYTES = 4 * MIB
 COEFFICIENT_WORKING_BYTES = 32 * KIB
 MIN_PREFETCH_BLOCKS = 2
@@ -56,10 +60,12 @@ class BudgetViolation:
 def check_allocations(allocations):
     """Return every exceeded subregion/physical limit without truncation.
 
-    WSE-STD-BRAM-RAM sections 2.2/6.1: 128 MiB LPDDR, 128 KiB BRAM,
+    WSE-STD-BRAM-RAM sections 2.2/6.1: 128 MiB LPDDR, 56 x 18 Kbit BRAM,
     32 KiB coefficient working partition. WSE-STD-RAM-SUBSYSTEMS section
     2.2: 4 MiB maximum for the wavelet LUT/basis allocation. The two
-    subregion limits do not replace the whole-device totals.
+    subregion limits do not replace the whole-device totals. This is a byte
+    capacity gate; bank geometry, width waste and address overlap need their
+    own checks. Passing it does not establish physical packing.
     """
     totals = {name: 0 for name in
               ('coefficients', 'external_other', 'coefficient_working', 'bram_other')}

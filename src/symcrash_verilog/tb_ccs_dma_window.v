@@ -201,7 +201,7 @@ module tb_ccs_dma_window;
             end
             seal=0;prefetch_valid=0;
             if (!sent_next) $fatal(1,"No N+2 refill admission during decode");
-            if (!STALLS && elapsed!=(expected_miss ? 18 : (K==8 ? 642 : 331))) $fatal(1,"Budget wrapper changed audio latency");
+            if (!STALLS && elapsed!=(expected_miss ? 18 : (K==8 ? 642 : (K==2 ? 183 : 331)))) $fatal(1,"Budget wrapper changed audio latency");
             if (expected_miss) misses=misses+1;else successes=successes+1;
         end
     endtask

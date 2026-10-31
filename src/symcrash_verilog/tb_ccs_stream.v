@@ -2,7 +2,9 @@
 module tb_ccs_stream;
     parameter K=4, HEADROOM_BITS=2, STALLS=1, CASES=36;
     localparam LANES=(K>4)?4:K, GROUPS=K/LANES, BYTES=64*K*2, BEATS=BYTES/16;
-    localparam IDEAL_CYCLES=311*GROUPS+20;
+    localparam IDEAL_CYCLES=(K==2 ? 183 : 311*GROUPS+20);
+    wire [1:0] dma_done_matches=2'b00;
+    wire [127:0] dma_match_descriptors;
     reg clk=0;
     always #5 clk=!clk;
     reg rst_n=0, prefetch_valid=0, block_valid=0, cancel_valid=0;

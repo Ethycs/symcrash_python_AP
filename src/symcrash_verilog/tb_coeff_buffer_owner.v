@@ -2,6 +2,8 @@
 module tb_coeff_buffer_owner;
     parameter K=4, STALLS=1;
     localparam BYTES=64*K*2, BEATS=BYTES/16;
+    wire [1:0] dma_done_matches=2'b00;
+    wire [127:0] dma_match_descriptors;
     reg clk=0;
     always #5 clk=!clk;
     reg rst_n=0, prefetch_valid=0, acquire_valid=0, release_valid=0, release_bank=0, cancel_valid=0;

@@ -55,6 +55,8 @@ module ccs_dma_window #(
 );
     reg seal_pending;
     wire submit_valid, submit_ready, done_valid;
+    wire [127:0] match_descriptors;
+    wire [1:0] done_matches;
     wire [63:0] submit_descriptor, done_descriptor;
     wire [3:0] done_status;
     wire [31:0] done_service_cycles;
@@ -123,6 +125,7 @@ module ccs_dma_window #(
         .deadline_missed(dma_deadline_missed),.initialized(initialized),
         .submit_valid(submit_valid),.submit_ready(submit_ready),.submit_descriptor(submit_descriptor),
         .done_valid(done_valid),.done_descriptor(done_descriptor),.done_status(done_status),
+        .match_descriptors(match_descriptors),.done_matches(done_matches),
         .done_service_cycles(done_service_cycles),.ram_request_valid(ram_request_valid),
         .ram_request_ready(ram_request_ready),.ram_request_write(ram_request_write),
         .ram_request_address(ram_request_address),.ram_request_data(ram_request_data),
@@ -131,7 +134,7 @@ module ccs_dma_window #(
         .bram_enable(dma_bram_enable),.bram_write(dma_bram_write),.bram_address(dma_bram_address),
         .bram_write_data(dma_bram_write_data),.bram_read_data(128'd0)
     );
-    ccs_stream #(.K(K),.HEADROOM_BITS(HEADROOM_BITS),.BASE(BASE)) stream (
+    ccs_stream #(.K(K),.HEADROOM_BITS(HEADROOM_BITS),.BASE(BASE),.MATCHED_COMPLETION(K==2)) stream (
         // The owner's ready already excludes matching cancellation. Passing
         // the direct admission branch avoids a second cancellation gate.
         .clk(clk),.rst_n(rst_n),.prefetch_valid(prefetch_valid && allow_prefetch),
@@ -139,6 +142,7 @@ module ccs_dma_window #(
         .prefetch_class(prefetch_class),.prefetch_bank(prefetch_bank),
         .dma_submit_valid(submit_valid),.dma_submit_ready(submit_ready),.dma_submit_descriptor(submit_descriptor),
         .dma_done_valid(done_valid),.dma_done_descriptor(done_descriptor),.dma_done_status(done_status),
+        .dma_done_matches(done_matches),.dma_match_descriptors(match_descriptors),
         .dma_bram_enable(payload_enable),.dma_bram_write(payload_write),.dma_bram_address(payload_address),
         .dma_bram_write_data(payload_write_data),.block_valid(block_valid),.block_ready(block_ready),.block_tag(block_tag),
         .audio_valid(audio_valid),.audio_ready(audio_ready),.audio_data(audio_data),.audio_last(audio_last),

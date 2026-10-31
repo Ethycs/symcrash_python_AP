@@ -1,0 +1,40 @@
+Symcrash native cache ownership candidate, 2026-10-31
+Status: candidate RTL/proof/mapped/timing gates pass; production adoption and fresh root qualification remain open.
+N64, K2/K4/K8, every int16 slot, wide intermediates, RNE/SAT/headroom and deadlines unchanged.
+One captured readonly/writable lease class selects two logical clients sharing one physical DSP RAM port.
+A separate DMA port retains cross-page ownership. No new physical RAM port or capacity.
+Full u16 identity/u32 context tag/u32 RAM address; sixteen 2,048-byte logical opaque pages.
+Cells LUT4/FF/CCU2C: 6388/5719/522; packed COMB 8,646.
+15 DP16KD (34,560 physical bytes), 160 DPR cells (1,280 physical bytes), 0 DSP.
+Relative to metadata candidate: -28 LUT4; no added FF, carry, RAM or service clock.
+Standalone native cache: 3376 LUT4/1684 FF/12 CCU2C; 15 DP16KD; 0 DPR/DSP.
+Versus qualified phase 61 standalone cache: +871 LUT4/+114 FF; full-width parallel lookup and query/metadata/class state.
+Standalone cache also passes all three 100 MHz routes: 119.474312/115.008629/120.452904 MHz.
+All three prescribed routes pass: 111.719360/106.100792/112.157913 MHz.
+ECP5-25K CSFBGA285 speed 6; headroom 2; 100 MHz; seeds 1/2/3; verified ABC9; out of context.
+Excludes shared DMA queue/window placement, full scheduler/operators/mix and board.
+Ready cached K2/K4/K8 service 185/348/798 clocks; transform compute 99/198/396.
+Inherited two-entry FIFO credit tradeoff adds 124 K8 clocks; no budget relaxation.
+Two clocks at cache acquisition, three through wrapper; registered metadata unchanged.
+Ten RTL profiles pass 454,400 exact samples, including stalls and headroom 0/2/15.
+Six cache/DMA regressions: latency 0/20/100, 8 credits, stalls off/on; normal max 26,603/40,000 clocks.
+Two forced late windows per profile are counted separately. Full scheduled workload remains open.
+Each cache regression adds 128 readonly words with 3 held clocks while non-owner attempts writes/release/consumption.
+Reverse ownership conflicts cover 128 writable-port reads with readonly requests continuously asserted.
+Four native-port and four integration corruptions are rejected with expected failure messages.
+Both mapped profiles pass 16,256 samples total: 20 dense cases, latency 20, stalls off/on.
+Restricted checked DP16KD functional model and pinned LUT/FF/DPR primitives; not vendor timing or board evidence.
+Reusable native-port proof generates the same control model and passes a fresh induction.
+Reusable stream checker passes 20 dense cases at latency 100 with stalls; 24 runner evidence/coverage tests pass.
+
+Source-bound proof scopes:
+- ports_proof: 5 checks. Reset base plus induction of actual dual-client control, with source-guarded physical write predicate and payload cut. Proves captured lease class, readonly cleanliness, mutually exclusive grants, owner-only response consumption/release, full query/metadata identity and DMA ownership/address invariants. Both clients are arbitrary inputs; no nonoverlap assumption.
+- lease_proof: 4 checks. Reset base plus temporal induction of actual cache/control and request/port arbitration. Cache payload is cut and renderer requests are arbitrary inputs. Does not prove decoder arithmetic or renderer temporal protocol.
+- proofs: 6 checks. All-input command range/identity validity and conditional read-address/gather coordinates, with captured-field guards. Not complete temporal cache/decoder equivalence.
+- fifo_proof: 3 checks. Actual renderer control with payload/decoder cut, arbitrary decoder flow control, and the cache one-response ready/valid contract. Proves reservation, group-word accounting and response capacity from reset; no audio arithmetic equivalence claim.
+
+Audited 236 current artifacts; prior 602 artifacts unchanged.
+Both prepared heads/indexes unchanged; signing deferred. Production RTL unchanged.
+Hashes: _voice64_progress.json. Raw evidence: build/hdl-tests/voice_renderer64/ports_candidate/.
+Next: adopt candidate with updated cache API/bench/tools, then fresh root RTL, mapped, timing and regression qualification.
+Open: complete state serializer, shared-client DMA/scheduler/T3, operators/carriers, mix/effects, global Mode A/memory fit, board/PHY.

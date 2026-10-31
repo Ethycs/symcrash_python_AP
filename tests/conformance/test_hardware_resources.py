@@ -15,11 +15,11 @@ from symcrash_python_ap.budgets.hardware_resources import (
 def test_normative_target_and_exact_partition_boundaries():
     assert (COEFFICIENT_STORE_BYTES, COEFFICIENT_WORKING_BYTES) == (4194304, 32768)
     assert (EXTERNAL_RAM_BYTES, BRAM_BYTES, BLOCK_CYCLES, MIN_PREFETCH_BLOCKS) == (
-        134217728, 131072, 133333, 2)
+        134217728, 129024, 133333, 2)
     allocations = [ResourceAllocation('tables', 4194304, 'coefficients'),
         ResourceAllocation('samples/effects/voices', 130023424, 'external_other'),
         ResourceAllocation('working', 32768, 'coefficient_working'),
-        ResourceAllocation('other working', 98304, 'bram_other')]
+        ResourceAllocation('other working', 96256, 'bram_other')]
     assert check_allocations(allocations) == ()
 
 
@@ -27,7 +27,7 @@ def test_normative_target_and_exact_partition_boundaries():
     ('coefficients', 4194304, 'coefficients'),
     ('coefficient_working', 32768, 'coefficient_working'),
     ('external_other', 134217728, 'external_total'),
-    ('bram_other', 131072, 'bram_total'),
+    ('bram_other', 129024, 'bram_total'),
 ])
 def test_one_byte_over_limit_fails(region, limit, expected):
     failures = check_allocations([ResourceAllocation('resource', limit+1, region)])
@@ -41,6 +41,13 @@ def test_images_must_fit_together_even_if_each_fits_alone():
     b = ResourceAllocation('B', 2*1024*1024, 'coefficients')
     assert not check_allocations([a]) and not check_allocations([b])
     assert check_allocations([a, b])[0].excess_bytes == 1024*1024
+
+
+def test_rounded_bram_label_cannot_supply_two_extra_kib():
+    failures = check_allocations([ResourceAllocation('rounded paper total', 131072, 'bram_other')])
+    assert len(failures) == 1
+    assert (failures[0].region, failures[0].limit_bytes, failures[0].excess_bytes) == (
+        'bram_total', 56 * 18432 // 8, 2048)
 
 
 def test_subregion_and_physical_overflow_are_both_reported():
@@ -82,6 +89,10 @@ def test_cli_exit_status_matches_actual_recipe_assessment():
                             capture_output=True, text=True, check=False)
     report = json.loads(result.stdout)
     failures = check_allocations(oscillator_allocations())
-    assert result.returncode == int(bool(failures))
+    assert result.returncode == int(not report['passed'])
     assert report['storage_passed'] == (not failures)
     assert len(report['violations']) == len(failures)
+    assert report['limits']['bram_total'] == 129024
+    assert report['bram_inventory'] == dict(blocks=56, bits_per_block=18432)
+    assert not report['address_maps_passed']
+    assert not report['passed']

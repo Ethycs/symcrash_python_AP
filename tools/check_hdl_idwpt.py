@@ -140,16 +140,24 @@ def check_headroom(simulator=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--quick', action='store_true', help='Use a small impulse subset; not the complete input-position gate')
+    coverage = parser.add_mutually_exclusive_group()
+    coverage.add_argument('--quick', action='store_true', help='Use a small impulse subset; not the complete input-position gate')
+    coverage.add_argument('--all-headrooms', action='store_true', help='Check all 96 K/headroom/stall profiles; full impulse coverage at headroom 0/2/15')
     args = parser.parse_args()
     simulator = Simulator()
     print(check_rounding(simulator), flush=True)
     print(check_headroom(simulator), flush=True)
-    for slots in (2, 4, 8):
-        for stalls in (False, True):
-            print(check(slots, 2, stalls, not args.quick, simulator), flush=True)
-    for headroom in (0, 1, 3, 15):
-        print(check(4, headroom, True, False, simulator), flush=True)
+    if args.all_headrooms:
+        for slots in (2, 4, 8):
+            for headroom in range(16):
+                for stalls in (False, True):
+                    print(check(slots, headroom, stalls, headroom in (0, 2, 15), simulator), flush=True)
+    else:
+        for slots in (2, 4, 8):
+            for stalls in (False, True):
+                print(check(slots, 2, stalls, not args.quick, simulator), flush=True)
+        for headroom in (0, 1, 3, 15):
+            print(check(4, headroom, True, False, simulator), flush=True)
     print('PASS: arithmetic, every tested input position, grouping, reset, stalls and exact cycles.', flush=True)
     print('FPGA placement/timing and whole-system budgets require separate evidence.', flush=True)
 

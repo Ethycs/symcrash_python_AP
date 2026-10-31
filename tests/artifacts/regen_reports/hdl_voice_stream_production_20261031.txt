@@ -1,0 +1,18 @@
+Symcrash production voice cache/shared renderer, 2026-10-31
+Fresh production qualification complete; overall voice-engine completion remains open.
+Cache LUT4/FF/CCU2C = 3376/1684/12; MHz 119.474312/115.008629/120.452904.
+Combined LUT4/FF/CCU2C = 6388/5719/522; MHz 111.719360/106.100792/112.157913.
+Both: 15 DP16KD, 34,560 physical BRAM bytes. Combined: 160 DPR cells, 1,280 physical bytes. No DSP.
+Cache growth versus preceding standalone: 871 LUT4 and 114 FF. Combined owner bit moves into cache; no added combined FF.
+N64, K2/K4/K8, all int16 slots, wide intermediates, RNE/SAT/headroom, full identities and sixteen 2,048-byte pages unchanged.
+Six routes: 100 MHz, ECP5-25K, CSFBGA285, speed 6, seeds 1/2/3, out of context; combined headroom 2, verified ABC9.
+Ten RTL profiles: 454,400 exact samples. Six cache/DMA profiles: normal max 26,603/40,000, 8 credits, latency 0/20/100, stalls off/on.
+Two mapped-cache and two mapped-stream profiles; streamed 16,256 samples. Restricted DP16KD model, pinned primitives; not vendor/board timing.
+66 scoped pytest checks; source-bound native ownership, bounds/gather, FIFO and composed arbitration proofs; corruption controls retained.
+K2/K4/K8 ready service 185/348/798; compute 99/198/396. Inherited 124 K8 FIFO clocks remain explicit.
+Initial redundant-chparam mapping missed seed 3 at 99.730721 MHz; archived; its mapped run intentionally interrupted, not counted.
+Guarded default-headroom-2 recipe reproduces candidate mapped logic exactly except source paths, and passes fresh qualification.
+Legacy base-only induction failed; entry point now selects full captured-query/metadata invariants. Failed evidence retained.
+Audit: 495 source-bound artifacts. Passing candidate checkpoint of 271 files and pre-adoption baseline verified.
+Both prepared Git heads/indexes unchanged; signing deferred. Hashes: _voice65_summary.json.
+Open: complete state layout, shared-client DMA placement, scheduler/T3, operators/carriers, mix/effects, global Mode A/memory fit, full workload, board/PHY.

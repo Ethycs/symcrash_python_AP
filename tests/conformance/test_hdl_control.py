@@ -17,7 +17,7 @@ def test_actual_control_cone(kind, yosys):
 
 
 @pytest.mark.parametrize('kind,old,new', [
-    ('owner', 'next_wait || next_ready || next_discard_wait', 'next_wait || next_ready'),
+    ('owner', 'next_state=expire ? DISCARD_FILL : FILLING', 'next_state=expire ? FILLING : FILLING'),
     ('payload_write', 'payload_address<=dma_bram_address;', "payload_address<=dma_bram_address ^ 16'd16;"),
     ('payload_read', 'payload[{lease_bank,read_index[ADDRESS_BITS-1:0]}];',
                      "payload[{lease_bank,read_index[ADDRESS_BITS-1:0]}] ^ 128'd1;"),

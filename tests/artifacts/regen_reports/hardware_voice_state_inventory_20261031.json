@@ -1,0 +1,2181 @@
+{
+  "scope": "Python CORE v2 fixture sizes and boundary equality; NOT hardware voice-page packing",
+  "vm_k": 4,
+  "field_count": 41,
+  "fixed_page_bytes": 2048,
+  "tests": 62,
+  "checkpoint_fixtures": [
+    {
+      "kind": "fresh",
+      "bytes": 1854,
+      "payload_sha256": "95fbba69e774f088621863418a69c493a8c6e119228bd977dd1e8abe85713880",
+      "coefficient_boundary_equal": true,
+      "fields": [
+        {
+          "name": "voice_id",
+          "offset": 12,
+          "bytes": 8
+        },
+        {
+          "name": "phase",
+          "offset": 20,
+          "bytes": 8
+        },
+        {
+          "name": "phase_inc",
+          "offset": 28,
+          "bytes": 8
+        },
+        {
+          "name": "target_phase_inc",
+          "offset": 36,
+          "bytes": 8
+        },
+        {
+          "name": "pitch_slew_rate",
+          "offset": 44,
+          "bytes": 8
+        },
+        {
+          "name": "last_note",
+          "offset": 52,
+          "bytes": 8
+        },
+        {
+          "name": "last_cents",
+          "offset": 60,
+          "bytes": 8
+        },
+        {
+          "name": "harmonic_amps_q15",
+          "offset": 68,
+          "bytes": 132
+        },
+        {
+          "name": "envelope",
+          "offset": 200,
+          "bytes": 53
+        },
+        {
+          "name": "dc_block_x1",
+          "offset": 253,
+          "bytes": 8
+        },
+        {
+          "name": "dc_block_y1",
+          "offset": 261,
+          "bytes": 8
+        },
+        {
+          "name": "coeff_state",
+          "offset": 269,
+          "bytes": 517
+        },
+        {
+          "name": "tail_previous_coeffs",
+          "offset": 786,
+          "bytes": 517
+        },
+        {
+          "name": "wire_state",
+          "offset": 1303,
+          "bytes": 73
+        },
+        {
+          "name": "prng_state",
+          "offset": 1376,
+          "bytes": 8
+        },
+        {
+          "name": "tree_a_id",
+          "offset": 1384,
+          "bytes": 8
+        },
+        {
+          "name": "tree_b_id",
+          "offset": 1392,
+          "bytes": 8
+        },
+        {
+          "name": "blocks_since_start",
+          "offset": 1400,
+          "bytes": 8
+        },
+        {
+          "name": "wet_ready",
+          "offset": 1408,
+          "bytes": 1
+        },
+        {
+          "name": "eta_prev_q15",
+          "offset": 1409,
+          "bytes": 8
+        },
+        {
+          "name": "gain_prev_q15",
+          "offset": 1417,
+          "bytes": 8
+        },
+        {
+          "name": "mask_state_q15",
+          "offset": 1425,
+          "bytes": 133
+        },
+        {
+          "name": "mask_state_initialized",
+          "offset": 1558,
+          "bytes": 1
+        },
+        {
+          "name": "wet_prev_end",
+          "offset": 1559,
+          "bytes": 8
+        },
+        {
+          "name": "wet_seam_initialized",
+          "offset": 1567,
+          "bytes": 1
+        },
+        {
+          "name": "wet_ola_tail",
+          "offset": 1568,
+          "bytes": 21
+        },
+        {
+          "name": "wet_ola_initialized",
+          "offset": 1589,
+          "bytes": 1
+        },
+        {
+          "name": "ccs_state",
+          "offset": 1590,
+          "bytes": 52
+        },
+        {
+          "name": "use_coeff_osc",
+          "offset": 1642,
+          "bytes": 1
+        },
+        {
+          "name": "_mode_b_state",
+          "offset": 1643,
+          "bytes": 1
+        },
+        {
+          "name": "osc_mode",
+          "offset": 1644,
+          "bytes": 8
+        },
+        {
+          "name": "prev_fm_mod_buffer",
+          "offset": 1652,
+          "bytes": 21
+        },
+        {
+          "name": "_sample_state",
+          "offset": 1673,
+          "bytes": 1
+        },
+        {
+          "name": "_fm6_state",
+          "offset": 1674,
+          "bytes": 1
+        },
+        {
+          "name": "_fm6_morph_state",
+          "offset": 1675,
+          "bytes": 1
+        },
+        {
+          "name": "_wavetable_state",
+          "offset": 1676,
+          "bytes": 1
+        },
+        {
+          "name": "_granular_state",
+          "offset": 1677,
+          "bytes": 1
+        },
+        {
+          "name": "_noise_state",
+          "offset": 1678,
+          "bytes": 1
+        },
+        {
+          "name": "executor_latch",
+          "offset": 1679,
+          "bytes": 69
+        },
+        {
+          "name": "cmmm_memory",
+          "offset": 1748,
+          "bytes": 60
+        },
+        {
+          "name": "mode_switch",
+          "offset": 1808,
+          "bytes": 46
+        }
+      ]
+    },
+    {
+      "kind": "a",
+      "bytes": 1854,
+      "payload_sha256": "42c84dacc1afb9f21898d54d71f028e5bd017f01137979ca01441e3acf6845de",
+      "coefficient_boundary_equal": true,
+      "fields": [
+        {
+          "name": "voice_id",
+          "offset": 12,
+          "bytes": 8
+        },
+        {
+          "name": "phase",
+          "offset": 20,
+          "bytes": 8
+        },
+        {
+          "name": "phase_inc",
+          "offset": 28,
+          "bytes": 8
+        },
+        {
+          "name": "target_phase_inc",
+          "offset": 36,
+          "bytes": 8
+        },
+        {
+          "name": "pitch_slew_rate",
+          "offset": 44,
+          "bytes": 8
+        },
+        {
+          "name": "last_note",
+          "offset": 52,
+          "bytes": 8
+        },
+        {
+          "name": "last_cents",
+          "offset": 60,
+          "bytes": 8
+        },
+        {
+          "name": "harmonic_amps_q15",
+          "offset": 68,
+          "bytes": 132
+        },
+        {
+          "name": "envelope",
+          "offset": 200,
+          "bytes": 53
+        },
+        {
+          "name": "dc_block_x1",
+          "offset": 253,
+          "bytes": 8
+        },
+        {
+          "name": "dc_block_y1",
+          "offset": 261,
+          "bytes": 8
+        },
+        {
+          "name": "coeff_state",
+          "offset": 269,
+          "bytes": 517
+        },
+        {
+          "name": "tail_previous_coeffs",
+          "offset": 786,
+          "bytes": 517
+        },
+        {
+          "name": "wire_state",
+          "offset": 1303,
+          "bytes": 73
+        },
+        {
+          "name": "prng_state",
+          "offset": 1376,
+          "bytes": 8
+        },
+        {
+          "name": "tree_a_id",
+          "offset": 1384,
+          "bytes": 8
+        },
+        {
+          "name": "tree_b_id",
+          "offset": 1392,
+          "bytes": 8
+        },
+        {
+          "name": "blocks_since_start",
+          "offset": 1400,
+          "bytes": 8
+        },
+        {
+          "name": "wet_ready",
+          "offset": 1408,
+          "bytes": 1
+        },
+        {
+          "name": "eta_prev_q15",
+          "offset": 1409,
+          "bytes": 8
+        },
+        {
+          "name": "gain_prev_q15",
+          "offset": 1417,
+          "bytes": 8
+        },
+        {
+          "name": "mask_state_q15",
+          "offset": 1425,
+          "bytes": 133
+        },
+        {
+          "name": "mask_state_initialized",
+          "offset": 1558,
+          "bytes": 1
+        },
+        {
+          "name": "wet_prev_end",
+          "offset": 1559,
+          "bytes": 8
+        },
+        {
+          "name": "wet_seam_initialized",
+          "offset": 1567,
+          "bytes": 1
+        },
+        {
+          "name": "wet_ola_tail",
+          "offset": 1568,
+          "bytes": 21
+        },
+        {
+          "name": "wet_ola_initialized",
+          "offset": 1589,
+          "bytes": 1
+        },
+        {
+          "name": "ccs_state",
+          "offset": 1590,
+          "bytes": 52
+        },
+        {
+          "name": "use_coeff_osc",
+          "offset": 1642,
+          "bytes": 1
+        },
+        {
+          "name": "_mode_b_state",
+          "offset": 1643,
+          "bytes": 1
+        },
+        {
+          "name": "osc_mode",
+          "offset": 1644,
+          "bytes": 8
+        },
+        {
+          "name": "prev_fm_mod_buffer",
+          "offset": 1652,
+          "bytes": 21
+        },
+        {
+          "name": "_sample_state",
+          "offset": 1673,
+          "bytes": 1
+        },
+        {
+          "name": "_fm6_state",
+          "offset": 1674,
+          "bytes": 1
+        },
+        {
+          "name": "_fm6_morph_state",
+          "offset": 1675,
+          "bytes": 1
+        },
+        {
+          "name": "_wavetable_state",
+          "offset": 1676,
+          "bytes": 1
+        },
+        {
+          "name": "_granular_state",
+          "offset": 1677,
+          "bytes": 1
+        },
+        {
+          "name": "_noise_state",
+          "offset": 1678,
+          "bytes": 1
+        },
+        {
+          "name": "executor_latch",
+          "offset": 1679,
+          "bytes": 69
+        },
+        {
+          "name": "cmmm_memory",
+          "offset": 1748,
+          "bytes": 60
+        },
+        {
+          "name": "mode_switch",
+          "offset": 1808,
+          "bytes": 46
+        }
+      ]
+    },
+    {
+      "kind": "b",
+      "bytes": 2184,
+      "payload_sha256": "b4727fd9f7215a6df5334ae6a43a5935dd536561ca8e53832173b1c9215089f1",
+      "coefficient_boundary_equal": true,
+      "fields": [
+        {
+          "name": "voice_id",
+          "offset": 12,
+          "bytes": 8
+        },
+        {
+          "name": "phase",
+          "offset": 20,
+          "bytes": 8
+        },
+        {
+          "name": "phase_inc",
+          "offset": 28,
+          "bytes": 8
+        },
+        {
+          "name": "target_phase_inc",
+          "offset": 36,
+          "bytes": 8
+        },
+        {
+          "name": "pitch_slew_rate",
+          "offset": 44,
+          "bytes": 8
+        },
+        {
+          "name": "last_note",
+          "offset": 52,
+          "bytes": 8
+        },
+        {
+          "name": "last_cents",
+          "offset": 60,
+          "bytes": 8
+        },
+        {
+          "name": "harmonic_amps_q15",
+          "offset": 68,
+          "bytes": 132
+        },
+        {
+          "name": "envelope",
+          "offset": 200,
+          "bytes": 53
+        },
+        {
+          "name": "dc_block_x1",
+          "offset": 253,
+          "bytes": 8
+        },
+        {
+          "name": "dc_block_y1",
+          "offset": 261,
+          "bytes": 8
+        },
+        {
+          "name": "coeff_state",
+          "offset": 269,
+          "bytes": 517
+        },
+        {
+          "name": "tail_previous_coeffs",
+          "offset": 786,
+          "bytes": 517
+        },
+        {
+          "name": "wire_state",
+          "offset": 1303,
+          "bytes": 73
+        },
+        {
+          "name": "prng_state",
+          "offset": 1376,
+          "bytes": 8
+        },
+        {
+          "name": "tree_a_id",
+          "offset": 1384,
+          "bytes": 8
+        },
+        {
+          "name": "tree_b_id",
+          "offset": 1392,
+          "bytes": 8
+        },
+        {
+          "name": "blocks_since_start",
+          "offset": 1400,
+          "bytes": 8
+        },
+        {
+          "name": "wet_ready",
+          "offset": 1408,
+          "bytes": 1
+        },
+        {
+          "name": "eta_prev_q15",
+          "offset": 1409,
+          "bytes": 8
+        },
+        {
+          "name": "gain_prev_q15",
+          "offset": 1417,
+          "bytes": 8
+        },
+        {
+          "name": "mask_state_q15",
+          "offset": 1425,
+          "bytes": 133
+        },
+        {
+          "name": "mask_state_initialized",
+          "offset": 1558,
+          "bytes": 1
+        },
+        {
+          "name": "wet_prev_end",
+          "offset": 1559,
+          "bytes": 8
+        },
+        {
+          "name": "wet_seam_initialized",
+          "offset": 1567,
+          "bytes": 1
+        },
+        {
+          "name": "wet_ola_tail",
+          "offset": 1568,
+          "bytes": 21
+        },
+        {
+          "name": "wet_ola_initialized",
+          "offset": 1589,
+          "bytes": 1
+        },
+        {
+          "name": "ccs_state",
+          "offset": 1590,
+          "bytes": 52
+        },
+        {
+          "name": "use_coeff_osc",
+          "offset": 1642,
+          "bytes": 1
+        },
+        {
+          "name": "_mode_b_state",
+          "offset": 1643,
+          "bytes": 331
+        },
+        {
+          "name": "osc_mode",
+          "offset": 1974,
+          "bytes": 8
+        },
+        {
+          "name": "prev_fm_mod_buffer",
+          "offset": 1982,
+          "bytes": 21
+        },
+        {
+          "name": "_sample_state",
+          "offset": 2003,
+          "bytes": 1
+        },
+        {
+          "name": "_fm6_state",
+          "offset": 2004,
+          "bytes": 1
+        },
+        {
+          "name": "_fm6_morph_state",
+          "offset": 2005,
+          "bytes": 1
+        },
+        {
+          "name": "_wavetable_state",
+          "offset": 2006,
+          "bytes": 1
+        },
+        {
+          "name": "_granular_state",
+          "offset": 2007,
+          "bytes": 1
+        },
+        {
+          "name": "_noise_state",
+          "offset": 2008,
+          "bytes": 1
+        },
+        {
+          "name": "executor_latch",
+          "offset": 2009,
+          "bytes": 69
+        },
+        {
+          "name": "cmmm_memory",
+          "offset": 2078,
+          "bytes": 60
+        },
+        {
+          "name": "mode_switch",
+          "offset": 2138,
+          "bytes": 46
+        }
+      ]
+    },
+    {
+      "kind": "pwm",
+      "bytes": 2140,
+      "payload_sha256": "7e05996aac833abe6a6d7d1a17239f7b49255c7519210abe7ef4164c8be158d2",
+      "coefficient_boundary_equal": true,
+      "fields": [
+        {
+          "name": "voice_id",
+          "offset": 12,
+          "bytes": 8
+        },
+        {
+          "name": "phase",
+          "offset": 20,
+          "bytes": 8
+        },
+        {
+          "name": "phase_inc",
+          "offset": 28,
+          "bytes": 8
+        },
+        {
+          "name": "target_phase_inc",
+          "offset": 36,
+          "bytes": 8
+        },
+        {
+          "name": "pitch_slew_rate",
+          "offset": 44,
+          "bytes": 8
+        },
+        {
+          "name": "last_note",
+          "offset": 52,
+          "bytes": 8
+        },
+        {
+          "name": "last_cents",
+          "offset": 60,
+          "bytes": 8
+        },
+        {
+          "name": "harmonic_amps_q15",
+          "offset": 68,
+          "bytes": 132
+        },
+        {
+          "name": "envelope",
+          "offset": 200,
+          "bytes": 53
+        },
+        {
+          "name": "dc_block_x1",
+          "offset": 253,
+          "bytes": 8
+        },
+        {
+          "name": "dc_block_y1",
+          "offset": 261,
+          "bytes": 8
+        },
+        {
+          "name": "coeff_state",
+          "offset": 269,
+          "bytes": 517
+        },
+        {
+          "name": "tail_previous_coeffs",
+          "offset": 786,
+          "bytes": 517
+        },
+        {
+          "name": "wire_state",
+          "offset": 1303,
+          "bytes": 73
+        },
+        {
+          "name": "prng_state",
+          "offset": 1376,
+          "bytes": 8
+        },
+        {
+          "name": "tree_a_id",
+          "offset": 1384,
+          "bytes": 8
+        },
+        {
+          "name": "tree_b_id",
+          "offset": 1392,
+          "bytes": 8
+        },
+        {
+          "name": "blocks_since_start",
+          "offset": 1400,
+          "bytes": 8
+        },
+        {
+          "name": "wet_ready",
+          "offset": 1408,
+          "bytes": 1
+        },
+        {
+          "name": "eta_prev_q15",
+          "offset": 1409,
+          "bytes": 8
+        },
+        {
+          "name": "gain_prev_q15",
+          "offset": 1417,
+          "bytes": 8
+        },
+        {
+          "name": "mask_state_q15",
+          "offset": 1425,
+          "bytes": 133
+        },
+        {
+          "name": "mask_state_initialized",
+          "offset": 1558,
+          "bytes": 1
+        },
+        {
+          "name": "wet_prev_end",
+          "offset": 1559,
+          "bytes": 8
+        },
+        {
+          "name": "wet_seam_initialized",
+          "offset": 1567,
+          "bytes": 1
+        },
+        {
+          "name": "wet_ola_tail",
+          "offset": 1568,
+          "bytes": 21
+        },
+        {
+          "name": "wet_ola_initialized",
+          "offset": 1589,
+          "bytes": 1
+        },
+        {
+          "name": "ccs_state",
+          "offset": 1590,
+          "bytes": 52
+        },
+        {
+          "name": "use_coeff_osc",
+          "offset": 1642,
+          "bytes": 1
+        },
+        {
+          "name": "_mode_b_state",
+          "offset": 1643,
+          "bytes": 287
+        },
+        {
+          "name": "osc_mode",
+          "offset": 1930,
+          "bytes": 8
+        },
+        {
+          "name": "prev_fm_mod_buffer",
+          "offset": 1938,
+          "bytes": 21
+        },
+        {
+          "name": "_sample_state",
+          "offset": 1959,
+          "bytes": 1
+        },
+        {
+          "name": "_fm6_state",
+          "offset": 1960,
+          "bytes": 1
+        },
+        {
+          "name": "_fm6_morph_state",
+          "offset": 1961,
+          "bytes": 1
+        },
+        {
+          "name": "_wavetable_state",
+          "offset": 1962,
+          "bytes": 1
+        },
+        {
+          "name": "_granular_state",
+          "offset": 1963,
+          "bytes": 1
+        },
+        {
+          "name": "_noise_state",
+          "offset": 1964,
+          "bytes": 1
+        },
+        {
+          "name": "executor_latch",
+          "offset": 1965,
+          "bytes": 69
+        },
+        {
+          "name": "cmmm_memory",
+          "offset": 2034,
+          "bytes": 60
+        },
+        {
+          "name": "mode_switch",
+          "offset": 2094,
+          "bytes": 46
+        }
+      ]
+    },
+    {
+      "kind": "fm6",
+      "bytes": 2925,
+      "payload_sha256": "90c185336bf22ce0d9a4532642256560389d2874dd14c78b8dd1763192fad878",
+      "coefficient_boundary_equal": true,
+      "fields": [
+        {
+          "name": "voice_id",
+          "offset": 12,
+          "bytes": 8
+        },
+        {
+          "name": "phase",
+          "offset": 20,
+          "bytes": 8
+        },
+        {
+          "name": "phase_inc",
+          "offset": 28,
+          "bytes": 8
+        },
+        {
+          "name": "target_phase_inc",
+          "offset": 36,
+          "bytes": 8
+        },
+        {
+          "name": "pitch_slew_rate",
+          "offset": 44,
+          "bytes": 8
+        },
+        {
+          "name": "last_note",
+          "offset": 52,
+          "bytes": 8
+        },
+        {
+          "name": "last_cents",
+          "offset": 60,
+          "bytes": 8
+        },
+        {
+          "name": "harmonic_amps_q15",
+          "offset": 68,
+          "bytes": 132
+        },
+        {
+          "name": "envelope",
+          "offset": 200,
+          "bytes": 53
+        },
+        {
+          "name": "dc_block_x1",
+          "offset": 253,
+          "bytes": 8
+        },
+        {
+          "name": "dc_block_y1",
+          "offset": 261,
+          "bytes": 8
+        },
+        {
+          "name": "coeff_state",
+          "offset": 269,
+          "bytes": 517
+        },
+        {
+          "name": "tail_previous_coeffs",
+          "offset": 786,
+          "bytes": 517
+        },
+        {
+          "name": "wire_state",
+          "offset": 1303,
+          "bytes": 73
+        },
+        {
+          "name": "prng_state",
+          "offset": 1376,
+          "bytes": 8
+        },
+        {
+          "name": "tree_a_id",
+          "offset": 1384,
+          "bytes": 8
+        },
+        {
+          "name": "tree_b_id",
+          "offset": 1392,
+          "bytes": 8
+        },
+        {
+          "name": "blocks_since_start",
+          "offset": 1400,
+          "bytes": 8
+        },
+        {
+          "name": "wet_ready",
+          "offset": 1408,
+          "bytes": 1
+        },
+        {
+          "name": "eta_prev_q15",
+          "offset": 1409,
+          "bytes": 8
+        },
+        {
+          "name": "gain_prev_q15",
+          "offset": 1417,
+          "bytes": 8
+        },
+        {
+          "name": "mask_state_q15",
+          "offset": 1425,
+          "bytes": 133
+        },
+        {
+          "name": "mask_state_initialized",
+          "offset": 1558,
+          "bytes": 1
+        },
+        {
+          "name": "wet_prev_end",
+          "offset": 1559,
+          "bytes": 8
+        },
+        {
+          "name": "wet_seam_initialized",
+          "offset": 1567,
+          "bytes": 1
+        },
+        {
+          "name": "wet_ola_tail",
+          "offset": 1568,
+          "bytes": 21
+        },
+        {
+          "name": "wet_ola_initialized",
+          "offset": 1589,
+          "bytes": 1
+        },
+        {
+          "name": "ccs_state",
+          "offset": 1590,
+          "bytes": 52
+        },
+        {
+          "name": "use_coeff_osc",
+          "offset": 1642,
+          "bytes": 1
+        },
+        {
+          "name": "_mode_b_state",
+          "offset": 1643,
+          "bytes": 1
+        },
+        {
+          "name": "osc_mode",
+          "offset": 1644,
+          "bytes": 8
+        },
+        {
+          "name": "prev_fm_mod_buffer",
+          "offset": 1652,
+          "bytes": 21
+        },
+        {
+          "name": "_sample_state",
+          "offset": 1673,
+          "bytes": 1
+        },
+        {
+          "name": "_fm6_state",
+          "offset": 1674,
+          "bytes": 1072
+        },
+        {
+          "name": "_fm6_morph_state",
+          "offset": 2746,
+          "bytes": 1
+        },
+        {
+          "name": "_wavetable_state",
+          "offset": 2747,
+          "bytes": 1
+        },
+        {
+          "name": "_granular_state",
+          "offset": 2748,
+          "bytes": 1
+        },
+        {
+          "name": "_noise_state",
+          "offset": 2749,
+          "bytes": 1
+        },
+        {
+          "name": "executor_latch",
+          "offset": 2750,
+          "bytes": 69
+        },
+        {
+          "name": "cmmm_memory",
+          "offset": 2819,
+          "bytes": 60
+        },
+        {
+          "name": "mode_switch",
+          "offset": 2879,
+          "bytes": 46
+        }
+      ]
+    },
+    {
+      "kind": "morph",
+      "bytes": 3032,
+      "payload_sha256": "2e76dc51fd986289871a45a99ecbf9c48d22aa57e4ad61169294497758c1adea",
+      "coefficient_boundary_equal": true,
+      "fields": [
+        {
+          "name": "voice_id",
+          "offset": 12,
+          "bytes": 8
+        },
+        {
+          "name": "phase",
+          "offset": 20,
+          "bytes": 8
+        },
+        {
+          "name": "phase_inc",
+          "offset": 28,
+          "bytes": 8
+        },
+        {
+          "name": "target_phase_inc",
+          "offset": 36,
+          "bytes": 8
+        },
+        {
+          "name": "pitch_slew_rate",
+          "offset": 44,
+          "bytes": 8
+        },
+        {
+          "name": "last_note",
+          "offset": 52,
+          "bytes": 8
+        },
+        {
+          "name": "last_cents",
+          "offset": 60,
+          "bytes": 8
+        },
+        {
+          "name": "harmonic_amps_q15",
+          "offset": 68,
+          "bytes": 132
+        },
+        {
+          "name": "envelope",
+          "offset": 200,
+          "bytes": 53
+        },
+        {
+          "name": "dc_block_x1",
+          "offset": 253,
+          "bytes": 8
+        },
+        {
+          "name": "dc_block_y1",
+          "offset": 261,
+          "bytes": 8
+        },
+        {
+          "name": "coeff_state",
+          "offset": 269,
+          "bytes": 517
+        },
+        {
+          "name": "tail_previous_coeffs",
+          "offset": 786,
+          "bytes": 517
+        },
+        {
+          "name": "wire_state",
+          "offset": 1303,
+          "bytes": 73
+        },
+        {
+          "name": "prng_state",
+          "offset": 1376,
+          "bytes": 8
+        },
+        {
+          "name": "tree_a_id",
+          "offset": 1384,
+          "bytes": 8
+        },
+        {
+          "name": "tree_b_id",
+          "offset": 1392,
+          "bytes": 8
+        },
+        {
+          "name": "blocks_since_start",
+          "offset": 1400,
+          "bytes": 8
+        },
+        {
+          "name": "wet_ready",
+          "offset": 1408,
+          "bytes": 1
+        },
+        {
+          "name": "eta_prev_q15",
+          "offset": 1409,
+          "bytes": 8
+        },
+        {
+          "name": "gain_prev_q15",
+          "offset": 1417,
+          "bytes": 8
+        },
+        {
+          "name": "mask_state_q15",
+          "offset": 1425,
+          "bytes": 133
+        },
+        {
+          "name": "mask_state_initialized",
+          "offset": 1558,
+          "bytes": 1
+        },
+        {
+          "name": "wet_prev_end",
+          "offset": 1559,
+          "bytes": 8
+        },
+        {
+          "name": "wet_seam_initialized",
+          "offset": 1567,
+          "bytes": 1
+        },
+        {
+          "name": "wet_ola_tail",
+          "offset": 1568,
+          "bytes": 21
+        },
+        {
+          "name": "wet_ola_initialized",
+          "offset": 1589,
+          "bytes": 1
+        },
+        {
+          "name": "ccs_state",
+          "offset": 1590,
+          "bytes": 52
+        },
+        {
+          "name": "use_coeff_osc",
+          "offset": 1642,
+          "bytes": 1
+        },
+        {
+          "name": "_mode_b_state",
+          "offset": 1643,
+          "bytes": 1
+        },
+        {
+          "name": "osc_mode",
+          "offset": 1644,
+          "bytes": 8
+        },
+        {
+          "name": "prev_fm_mod_buffer",
+          "offset": 1652,
+          "bytes": 21
+        },
+        {
+          "name": "_sample_state",
+          "offset": 1673,
+          "bytes": 1
+        },
+        {
+          "name": "_fm6_state",
+          "offset": 1674,
+          "bytes": 1
+        },
+        {
+          "name": "_fm6_morph_state",
+          "offset": 1675,
+          "bytes": 1179
+        },
+        {
+          "name": "_wavetable_state",
+          "offset": 2854,
+          "bytes": 1
+        },
+        {
+          "name": "_granular_state",
+          "offset": 2855,
+          "bytes": 1
+        },
+        {
+          "name": "_noise_state",
+          "offset": 2856,
+          "bytes": 1
+        },
+        {
+          "name": "executor_latch",
+          "offset": 2857,
+          "bytes": 69
+        },
+        {
+          "name": "cmmm_memory",
+          "offset": 2926,
+          "bytes": 60
+        },
+        {
+          "name": "mode_switch",
+          "offset": 2986,
+          "bytes": 46
+        }
+      ]
+    },
+    {
+      "kind": "sample",
+      "bytes": 10110,
+      "payload_sha256": "a285e8e35ab2171cd8f0145a641ecbbf4e7073b8e6c09bfff928e07c503b0274",
+      "coefficient_boundary_equal": true,
+      "fields": [
+        {
+          "name": "voice_id",
+          "offset": 12,
+          "bytes": 8
+        },
+        {
+          "name": "phase",
+          "offset": 20,
+          "bytes": 8
+        },
+        {
+          "name": "phase_inc",
+          "offset": 28,
+          "bytes": 8
+        },
+        {
+          "name": "target_phase_inc",
+          "offset": 36,
+          "bytes": 8
+        },
+        {
+          "name": "pitch_slew_rate",
+          "offset": 44,
+          "bytes": 8
+        },
+        {
+          "name": "last_note",
+          "offset": 52,
+          "bytes": 8
+        },
+        {
+          "name": "last_cents",
+          "offset": 60,
+          "bytes": 8
+        },
+        {
+          "name": "harmonic_amps_q15",
+          "offset": 68,
+          "bytes": 132
+        },
+        {
+          "name": "envelope",
+          "offset": 200,
+          "bytes": 53
+        },
+        {
+          "name": "dc_block_x1",
+          "offset": 253,
+          "bytes": 8
+        },
+        {
+          "name": "dc_block_y1",
+          "offset": 261,
+          "bytes": 8
+        },
+        {
+          "name": "coeff_state",
+          "offset": 269,
+          "bytes": 517
+        },
+        {
+          "name": "tail_previous_coeffs",
+          "offset": 786,
+          "bytes": 517
+        },
+        {
+          "name": "wire_state",
+          "offset": 1303,
+          "bytes": 73
+        },
+        {
+          "name": "prng_state",
+          "offset": 1376,
+          "bytes": 8
+        },
+        {
+          "name": "tree_a_id",
+          "offset": 1384,
+          "bytes": 8
+        },
+        {
+          "name": "tree_b_id",
+          "offset": 1392,
+          "bytes": 8
+        },
+        {
+          "name": "blocks_since_start",
+          "offset": 1400,
+          "bytes": 8
+        },
+        {
+          "name": "wet_ready",
+          "offset": 1408,
+          "bytes": 1
+        },
+        {
+          "name": "eta_prev_q15",
+          "offset": 1409,
+          "bytes": 8
+        },
+        {
+          "name": "gain_prev_q15",
+          "offset": 1417,
+          "bytes": 8
+        },
+        {
+          "name": "mask_state_q15",
+          "offset": 1425,
+          "bytes": 133
+        },
+        {
+          "name": "mask_state_initialized",
+          "offset": 1558,
+          "bytes": 1
+        },
+        {
+          "name": "wet_prev_end",
+          "offset": 1559,
+          "bytes": 8
+        },
+        {
+          "name": "wet_seam_initialized",
+          "offset": 1567,
+          "bytes": 1
+        },
+        {
+          "name": "wet_ola_tail",
+          "offset": 1568,
+          "bytes": 21
+        },
+        {
+          "name": "wet_ola_initialized",
+          "offset": 1589,
+          "bytes": 1
+        },
+        {
+          "name": "ccs_state",
+          "offset": 1590,
+          "bytes": 52
+        },
+        {
+          "name": "use_coeff_osc",
+          "offset": 1642,
+          "bytes": 1
+        },
+        {
+          "name": "_mode_b_state",
+          "offset": 1643,
+          "bytes": 1
+        },
+        {
+          "name": "osc_mode",
+          "offset": 1644,
+          "bytes": 8
+        },
+        {
+          "name": "prev_fm_mod_buffer",
+          "offset": 1652,
+          "bytes": 21
+        },
+        {
+          "name": "_sample_state",
+          "offset": 1673,
+          "bytes": 8257
+        },
+        {
+          "name": "_fm6_state",
+          "offset": 9930,
+          "bytes": 1
+        },
+        {
+          "name": "_fm6_morph_state",
+          "offset": 9931,
+          "bytes": 1
+        },
+        {
+          "name": "_wavetable_state",
+          "offset": 9932,
+          "bytes": 1
+        },
+        {
+          "name": "_granular_state",
+          "offset": 9933,
+          "bytes": 1
+        },
+        {
+          "name": "_noise_state",
+          "offset": 9934,
+          "bytes": 1
+        },
+        {
+          "name": "executor_latch",
+          "offset": 9935,
+          "bytes": 69
+        },
+        {
+          "name": "cmmm_memory",
+          "offset": 10004,
+          "bytes": 60
+        },
+        {
+          "name": "mode_switch",
+          "offset": 10064,
+          "bytes": 46
+        }
+      ]
+    },
+    {
+      "kind": "sample_coeff",
+      "bytes": 18311,
+      "payload_sha256": "cd945e57ee7d4de44c1bb87d733247b1b6d27489c21bb9168d5f3f453398eeaf",
+      "coefficient_boundary_equal": true,
+      "fields": [
+        {
+          "name": "voice_id",
+          "offset": 12,
+          "bytes": 8
+        },
+        {
+          "name": "phase",
+          "offset": 20,
+          "bytes": 8
+        },
+        {
+          "name": "phase_inc",
+          "offset": 28,
+          "bytes": 8
+        },
+        {
+          "name": "target_phase_inc",
+          "offset": 36,
+          "bytes": 8
+        },
+        {
+          "name": "pitch_slew_rate",
+          "offset": 44,
+          "bytes": 8
+        },
+        {
+          "name": "last_note",
+          "offset": 52,
+          "bytes": 8
+        },
+        {
+          "name": "last_cents",
+          "offset": 60,
+          "bytes": 8
+        },
+        {
+          "name": "harmonic_amps_q15",
+          "offset": 68,
+          "bytes": 132
+        },
+        {
+          "name": "envelope",
+          "offset": 200,
+          "bytes": 53
+        },
+        {
+          "name": "dc_block_x1",
+          "offset": 253,
+          "bytes": 8
+        },
+        {
+          "name": "dc_block_y1",
+          "offset": 261,
+          "bytes": 8
+        },
+        {
+          "name": "coeff_state",
+          "offset": 269,
+          "bytes": 517
+        },
+        {
+          "name": "tail_previous_coeffs",
+          "offset": 786,
+          "bytes": 517
+        },
+        {
+          "name": "wire_state",
+          "offset": 1303,
+          "bytes": 73
+        },
+        {
+          "name": "prng_state",
+          "offset": 1376,
+          "bytes": 8
+        },
+        {
+          "name": "tree_a_id",
+          "offset": 1384,
+          "bytes": 8
+        },
+        {
+          "name": "tree_b_id",
+          "offset": 1392,
+          "bytes": 8
+        },
+        {
+          "name": "blocks_since_start",
+          "offset": 1400,
+          "bytes": 8
+        },
+        {
+          "name": "wet_ready",
+          "offset": 1408,
+          "bytes": 1
+        },
+        {
+          "name": "eta_prev_q15",
+          "offset": 1409,
+          "bytes": 8
+        },
+        {
+          "name": "gain_prev_q15",
+          "offset": 1417,
+          "bytes": 8
+        },
+        {
+          "name": "mask_state_q15",
+          "offset": 1425,
+          "bytes": 133
+        },
+        {
+          "name": "mask_state_initialized",
+          "offset": 1558,
+          "bytes": 1
+        },
+        {
+          "name": "wet_prev_end",
+          "offset": 1559,
+          "bytes": 8
+        },
+        {
+          "name": "wet_seam_initialized",
+          "offset": 1567,
+          "bytes": 1
+        },
+        {
+          "name": "wet_ola_tail",
+          "offset": 1568,
+          "bytes": 21
+        },
+        {
+          "name": "wet_ola_initialized",
+          "offset": 1589,
+          "bytes": 1
+        },
+        {
+          "name": "ccs_state",
+          "offset": 1590,
+          "bytes": 52
+        },
+        {
+          "name": "use_coeff_osc",
+          "offset": 1642,
+          "bytes": 1
+        },
+        {
+          "name": "_mode_b_state",
+          "offset": 1643,
+          "bytes": 1
+        },
+        {
+          "name": "osc_mode",
+          "offset": 1644,
+          "bytes": 8
+        },
+        {
+          "name": "prev_fm_mod_buffer",
+          "offset": 1652,
+          "bytes": 21
+        },
+        {
+          "name": "_sample_state",
+          "offset": 1673,
+          "bytes": 16458
+        },
+        {
+          "name": "_fm6_state",
+          "offset": 18131,
+          "bytes": 1
+        },
+        {
+          "name": "_fm6_morph_state",
+          "offset": 18132,
+          "bytes": 1
+        },
+        {
+          "name": "_wavetable_state",
+          "offset": 18133,
+          "bytes": 1
+        },
+        {
+          "name": "_granular_state",
+          "offset": 18134,
+          "bytes": 1
+        },
+        {
+          "name": "_noise_state",
+          "offset": 18135,
+          "bytes": 1
+        },
+        {
+          "name": "executor_latch",
+          "offset": 18136,
+          "bytes": 69
+        },
+        {
+          "name": "cmmm_memory",
+          "offset": 18205,
+          "bytes": 60
+        },
+        {
+          "name": "mode_switch",
+          "offset": 18265,
+          "bytes": 46
+        }
+      ]
+    },
+    {
+      "kind": "wavetable",
+      "bytes": 5062,
+      "payload_sha256": "8d08ecde8ae412516a3913b1949f047667e4bcffcf172238da1c0107cd75220e",
+      "coefficient_boundary_equal": true,
+      "fields": [
+        {
+          "name": "voice_id",
+          "offset": 12,
+          "bytes": 8
+        },
+        {
+          "name": "phase",
+          "offset": 20,
+          "bytes": 8
+        },
+        {
+          "name": "phase_inc",
+          "offset": 28,
+          "bytes": 8
+        },
+        {
+          "name": "target_phase_inc",
+          "offset": 36,
+          "bytes": 8
+        },
+        {
+          "name": "pitch_slew_rate",
+          "offset": 44,
+          "bytes": 8
+        },
+        {
+          "name": "last_note",
+          "offset": 52,
+          "bytes": 8
+        },
+        {
+          "name": "last_cents",
+          "offset": 60,
+          "bytes": 8
+        },
+        {
+          "name": "harmonic_amps_q15",
+          "offset": 68,
+          "bytes": 132
+        },
+        {
+          "name": "envelope",
+          "offset": 200,
+          "bytes": 53
+        },
+        {
+          "name": "dc_block_x1",
+          "offset": 253,
+          "bytes": 8
+        },
+        {
+          "name": "dc_block_y1",
+          "offset": 261,
+          "bytes": 8
+        },
+        {
+          "name": "coeff_state",
+          "offset": 269,
+          "bytes": 517
+        },
+        {
+          "name": "tail_previous_coeffs",
+          "offset": 786,
+          "bytes": 517
+        },
+        {
+          "name": "wire_state",
+          "offset": 1303,
+          "bytes": 73
+        },
+        {
+          "name": "prng_state",
+          "offset": 1376,
+          "bytes": 8
+        },
+        {
+          "name": "tree_a_id",
+          "offset": 1384,
+          "bytes": 8
+        },
+        {
+          "name": "tree_b_id",
+          "offset": 1392,
+          "bytes": 8
+        },
+        {
+          "name": "blocks_since_start",
+          "offset": 1400,
+          "bytes": 8
+        },
+        {
+          "name": "wet_ready",
+          "offset": 1408,
+          "bytes": 1
+        },
+        {
+          "name": "eta_prev_q15",
+          "offset": 1409,
+          "bytes": 8
+        },
+        {
+          "name": "gain_prev_q15",
+          "offset": 1417,
+          "bytes": 8
+        },
+        {
+          "name": "mask_state_q15",
+          "offset": 1425,
+          "bytes": 133
+        },
+        {
+          "name": "mask_state_initialized",
+          "offset": 1558,
+          "bytes": 1
+        },
+        {
+          "name": "wet_prev_end",
+          "offset": 1559,
+          "bytes": 8
+        },
+        {
+          "name": "wet_seam_initialized",
+          "offset": 1567,
+          "bytes": 1
+        },
+        {
+          "name": "wet_ola_tail",
+          "offset": 1568,
+          "bytes": 21
+        },
+        {
+          "name": "wet_ola_initialized",
+          "offset": 1589,
+          "bytes": 1
+        },
+        {
+          "name": "ccs_state",
+          "offset": 1590,
+          "bytes": 52
+        },
+        {
+          "name": "use_coeff_osc",
+          "offset": 1642,
+          "bytes": 1
+        },
+        {
+          "name": "_mode_b_state",
+          "offset": 1643,
+          "bytes": 1
+        },
+        {
+          "name": "osc_mode",
+          "offset": 1644,
+          "bytes": 8
+        },
+        {
+          "name": "prev_fm_mod_buffer",
+          "offset": 1652,
+          "bytes": 21
+        },
+        {
+          "name": "_sample_state",
+          "offset": 1673,
+          "bytes": 1
+        },
+        {
+          "name": "_fm6_state",
+          "offset": 1674,
+          "bytes": 1
+        },
+        {
+          "name": "_fm6_morph_state",
+          "offset": 1675,
+          "bytes": 1
+        },
+        {
+          "name": "_wavetable_state",
+          "offset": 1676,
+          "bytes": 3209
+        },
+        {
+          "name": "_granular_state",
+          "offset": 4885,
+          "bytes": 1
+        },
+        {
+          "name": "_noise_state",
+          "offset": 4886,
+          "bytes": 1
+        },
+        {
+          "name": "executor_latch",
+          "offset": 4887,
+          "bytes": 69
+        },
+        {
+          "name": "cmmm_memory",
+          "offset": 4956,
+          "bytes": 60
+        },
+        {
+          "name": "mode_switch",
+          "offset": 5016,
+          "bytes": 46
+        }
+      ]
+    },
+    {
+      "kind": "granular",
+      "bytes": 11277,
+      "payload_sha256": "6372eb09a1a907841df346cfea07fb22b25c34b2a27a5106ca2b72dfaf38077b",
+      "coefficient_boundary_equal": true,
+      "fields": [
+        {
+          "name": "voice_id",
+          "offset": 12,
+          "bytes": 8
+        },
+        {
+          "name": "phase",
+          "offset": 20,
+          "bytes": 8
+        },
+        {
+          "name": "phase_inc",
+          "offset": 28,
+          "bytes": 8
+        },
+        {
+          "name": "target_phase_inc",
+          "offset": 36,
+          "bytes": 8
+        },
+        {
+          "name": "pitch_slew_rate",
+          "offset": 44,
+          "bytes": 8
+        },
+        {
+          "name": "last_note",
+          "offset": 52,
+          "bytes": 8
+        },
+        {
+          "name": "last_cents",
+          "offset": 60,
+          "bytes": 8
+        },
+        {
+          "name": "harmonic_amps_q15",
+          "offset": 68,
+          "bytes": 132
+        },
+        {
+          "name": "envelope",
+          "offset": 200,
+          "bytes": 53
+        },
+        {
+          "name": "dc_block_x1",
+          "offset": 253,
+          "bytes": 8
+        },
+        {
+          "name": "dc_block_y1",
+          "offset": 261,
+          "bytes": 8
+        },
+        {
+          "name": "coeff_state",
+          "offset": 269,
+          "bytes": 517
+        },
+        {
+          "name": "tail_previous_coeffs",
+          "offset": 786,
+          "bytes": 517
+        },
+        {
+          "name": "wire_state",
+          "offset": 1303,
+          "bytes": 73
+        },
+        {
+          "name": "prng_state",
+          "offset": 1376,
+          "bytes": 8
+        },
+        {
+          "name": "tree_a_id",
+          "offset": 1384,
+          "bytes": 8
+        },
+        {
+          "name": "tree_b_id",
+          "offset": 1392,
+          "bytes": 8
+        },
+        {
+          "name": "blocks_since_start",
+          "offset": 1400,
+          "bytes": 8
+        },
+        {
+          "name": "wet_ready",
+          "offset": 1408,
+          "bytes": 1
+        },
+        {
+          "name": "eta_prev_q15",
+          "offset": 1409,
+          "bytes": 8
+        },
+        {
+          "name": "gain_prev_q15",
+          "offset": 1417,
+          "bytes": 8
+        },
+        {
+          "name": "mask_state_q15",
+          "offset": 1425,
+          "bytes": 133
+        },
+        {
+          "name": "mask_state_initialized",
+          "offset": 1558,
+          "bytes": 1
+        },
+        {
+          "name": "wet_prev_end",
+          "offset": 1559,
+          "bytes": 8
+        },
+        {
+          "name": "wet_seam_initialized",
+          "offset": 1567,
+          "bytes": 1
+        },
+        {
+          "name": "wet_ola_tail",
+          "offset": 1568,
+          "bytes": 21
+        },
+        {
+          "name": "wet_ola_initialized",
+          "offset": 1589,
+          "bytes": 1
+        },
+        {
+          "name": "ccs_state",
+          "offset": 1590,
+          "bytes": 52
+        },
+        {
+          "name": "use_coeff_osc",
+          "offset": 1642,
+          "bytes": 1
+        },
+        {
+          "name": "_mode_b_state",
+          "offset": 1643,
+          "bytes": 1
+        },
+        {
+          "name": "osc_mode",
+          "offset": 1644,
+          "bytes": 8
+        },
+        {
+          "name": "prev_fm_mod_buffer",
+          "offset": 1652,
+          "bytes": 21
+        },
+        {
+          "name": "_sample_state",
+          "offset": 1673,
+          "bytes": 1
+        },
+        {
+          "name": "_fm6_state",
+          "offset": 1674,
+          "bytes": 1
+        },
+        {
+          "name": "_fm6_morph_state",
+          "offset": 1675,
+          "bytes": 1
+        },
+        {
+          "name": "_wavetable_state",
+          "offset": 1676,
+          "bytes": 1
+        },
+        {
+          "name": "_granular_state",
+          "offset": 1677,
+          "bytes": 9424
+        },
+        {
+          "name": "_noise_state",
+          "offset": 11101,
+          "bytes": 1
+        },
+        {
+          "name": "executor_latch",
+          "offset": 11102,
+          "bytes": 69
+        },
+        {
+          "name": "cmmm_memory",
+          "offset": 11171,
+          "bytes": 60
+        },
+        {
+          "name": "mode_switch",
+          "offset": 11231,
+          "bytes": 46
+        }
+      ]
+    }
+  ],
+  "coefficient_payloads": [
+    {
+      "k": 2,
+      "committed_bytes": 256,
+      "remaining_page_bytes": 1792,
+      "separate_processing_vector_bytes": 256
+    },
+    {
+      "k": 4,
+      "committed_bytes": 512,
+      "remaining_page_bytes": 1536,
+      "separate_processing_vector_bytes": 512
+    },
+    {
+      "k": 8,
+      "committed_bytes": 1024,
+      "remaining_page_bytes": 1024,
+      "separate_processing_vector_bytes": 1024
+    }
+  ],
+  "inputs": {
+    "src/symcrash_python_ap/budgets/hardware_resources.py": "53b5a842288d138b597e8f38b95c97cc0e43c72bfca3ef0250b8b09d5b9ec850",
+    "src/symcrash_python_ap/budgets/hardware_memory_map.py": "e69389572405ea1b3a42998f142c7f6348d0deba0c831ca99bc39ae604d4d18b",
+    "tools/check_hardware_resources.py": "fed15925770888a02bcef53f82754adc142dfedcae1ca248cdd909942768ad5f",
+    "src/symcrash_python_ap/voice/vm_binary_codec.py": "814b1320f298637ea2a6ecfb69173721668eabd935650be7f55fbf76c637922e",
+    "src/symcrash_python_ap/voice/voice_state_codec.py": "ddce13f4585f2f9e16005d20e0ae32134cd28338bbc96f59aa36df0d88579b5c",
+    "src/symcrash_python_ap/vm/state.py": "40502e07701492154222121d7ab1bb5a607dd6e114671189c8478440179457ce",
+    "src/symcrash_python_ap/vm/executor.py": "35d6c92eaa509e3d95f43d7e6c84aadebff39d325f35f1f273d737b101243e37",
+    "src/symcrash_python_ap/vm/coefficient_tail.py": "c0552f04e945fe16da3a6e51a44abf00d58e8b10da5ebb9f500c68744cc4a8df",
+    "src/symcrash_python_ap/vm/lanes.py": "909f162abbcf101fef7e9f217b72c70cee0b537143c976bade07825337d175f4",
+    "src/symcrash_python_ap/vm/tables.py": "d554f319d6c671f736a0e46e04bfb319a2eeec65f415d9ace2ef61f37730f983",
+    "tests/conformance/test_hardware_resources.py": "5b3ba303f2ba2a510c6361cb8a729648cdb0aaf97fb034a12b8649921b3c44c3",
+    "tests/conformance/test_hardware_memory_map.py": "70adf7b0cd726c73c3194182e5d9803c231d0d734bfb1845d2f4213d4b5ea577",
+    "tests/conformance/test_hardware_voice_boundary.py": "f6c2476b504e74bcd5cb7ac2c5763eec5bdcc24dc206e30cc5d6d6bb2b2e578b",
+    "tests/conformance/test_vm_snapshot_replay.py": "eaa641efefab698a49fa2b2e802224dfd92d97d2c3eb30b38a32dc68bc161184",
+    "_state66-memory-tests-bound.log": "0fd05e930cd9634891824c6d74504cf724ef7c74618bc987f939a26da910daca",
+    "_state66-boundary-tests-verified.log": "31c49e246d8a2fdbf6b8421f630507d889b20db9ae75b8b96baf96dc259a6463",
+    "symcrash_docs/05 - Standards/01 - Architecture/WSE-STD-BRAM-RAM.md": "3b43f9536c49615a87929249fc817c7319df521d3b130dd2985385c2af70d339",
+    "symcrash_docs/05 - Standards/01 - Architecture/WSE-STD-RAM-SUBSYSTEMS.md": "a3c821333682e129614111021c255cde21f975cb4b127de8c673f1a624be77f2",
+    "symcrash_docs/05 - Standards/03 - Voice/WSE-STD-VOICE-TIERS.md": "08f8468f7723d9997fb9f358eb402f6a9a5088f36c8d9ca98c35b50b2242d89f",
+    "symcrash_docs/05 - Standards/03 - Voice/WSE-STD-VM-HYBRID.md": "659e1e9523a33c7284c46f4f8053a4006c3021910a6585b874241c921ec7cb36"
+  }
+}

@@ -1,0 +1,46 @@
+Symcrash shared voice-cache query pipeline trials, 2026-10-31
+Status: no candidate passes all prescribed 100 MHz routes; no production adoption.
+N64, K2/K4/K8, int16 coefficient slots, RNE/SAT/headroom and deadline budgets unchanged.
+Each candidate: 16x2048 logical cache bytes; 15 DP16KD (34560 bytes), 160 DPR cells (1280 bytes), no DSP.
+ECP5-25K CSFBGA285 speed6; out-of-context; headroom2; 100 MHz; seeds1/2/3.
+Excludes shared DMA queue/window placement, full scheduling, operators/mix and board.
+
+candidate | LUT4/FF/CCU | RTL profiles/samples | cache normal max clocks | routed MHz1/2/3
+query | 6422/5623/522 | 10/454400 | 26603 | 101.988777/98.697197/107.816719
+reservation | 6687/5623/522 | 1/8128 | None | 85.316956/97.684868/97.361504
+metadata | 6416/5719/522 | 10/454400 | 26603 | 105.374077/104.766891/99.462898
+statecase | 6423/5719/522 | 10/454400 | 26603 | 102.986610/98.434883/98.000778
+admission | 6467/5720/522 | 10/454400 | 26652 | 97.446892/93.335823/98.106544
+
+Ready cached rendering: K2/K4/K8 185/348/798 clocks; compute99/198/396 unchanged.
+These trials inherit the earlier124-clock K8 FIFO-credit penalty; no tier/full-block budget relaxation.
+Query stage: +17 FF and one acquisition clock; two clocks at cache, three at external wrapper.
+Metadata stage: +96 FF for16 enables and full80-bit record; no added rendered-service or DMA-admission clock.
+Admission stage: +1 FF and one DMA-admission clock; normal window26652/40000 including stall alignment.
+Query candidate mapped-model checks: two profiles,16256 exact samples, latency20 with/without stalls.
+Restricted checked DP16KD functional model and pinned LUT/FF/DPR libraries; not vendor timing or board evidence.
+Query/metadata/statecase/admission each pass six cache regressions at latencies0/20/100,8 credits, stalls off/on.
+Forced deadline overruns are separate from reported normal maxima.
+Metadata and statecase each reject four targeted integration corruptions with intended failure messages.
+Reusable checker passes dense20 latency100/stalled profile; eleven coverage/deadline guard tests pass.
+
+Source-bound formal scopes (including positive/negative check counts):
+- query/query_proof: 4 checks. Reset base plus induction of actual cache control with payload cut. Independent full-width accepted lookup, exact two-clock result, pending-page reservation, identity preservation, reset and existing ownership/address invariants.
+- query/lease_proof: 4 checks. Reset base plus temporal induction of actual cache/control and request/port arbitration. Cache payload is cut and renderer requests are arbitrary inputs. Does not prove decoder arithmetic or renderer temporal protocol.
+- query/proofs: 6 checks. All-input command range/identity validity and conditional read-address/gather coordinates, with captured-field guards. Not complete temporal cache/decoder equivalence.
+- query/fifo_proof: 3 checks. Actual renderer control with payload/decoder cut, arbitrary decoder flow control, and the cache one-response ready/valid contract. Proves reservation, group-word accounting and response capacity from reset; no audio arithmetic equivalence claim.
+- reservation/lease_proof: 4 checks. Reset base plus temporal induction of actual cache/control and request/port arbitration. Cache payload is cut and renderer requests are arbitrary inputs. Does not prove decoder arithmetic or renderer temporal protocol.
+- reservation/reservation_proof: 3 checks. Unconditional all-input accepted-prefetch reservation equivalence, preserving renderer priority and both physical slots.
+- metadata/metadata_proof: 4 checks. Reset base plus induction of actual control with payload cut. Every accepted 80-bit metadata record reaches exactly its bank before it becomes usable; pending masks, delayed-query identity and existing DMA/ownership invariants are retained.
+- metadata/lease_proof: 4 checks. Reset base plus temporal induction of actual cache/control and request/port arbitration. Cache payload is cut and renderer requests are arbitrary inputs. Does not prove decoder arithmetic or renderer temporal protocol.
+- statecase/metadata_proof: 4 checks. Reset base plus induction of actual control with payload cut. Every accepted 80-bit metadata record reaches exactly its bank before it becomes usable; pending masks, delayed-query identity and existing DMA/ownership invariants are retained.
+- statecase/lease_proof: 4 checks. Reset base plus temporal induction of actual cache/control and request/port arbitration. Cache payload is cut and renderer requests are arbitrary inputs. Does not prove decoder arithmetic or renderer temporal protocol.
+- statecase/state_equivalence: 2 checks. Sequential equivalence of public cache control and matched internal state; only payload storage is cut. No clock, width or valid-state relaxation.
+- admission/admission_proof: 4 checks. Reset base plus induction of actual control with payload cut. DMA ownership and the complete accepted 64-bit descriptor persist through admission, active transfer and publication. Full metadata, delayed-query identity and DMA/port invariants are retained.
+- admission/lease_proof: 4 checks. Reset base plus temporal induction of actual cache/control and request/port arbitration. Cache payload is cut and renderer requests are arbitrary inputs. Does not prove decoder arithmetic or renderer temporal protocol.
+
+Audit validates 602 current artifacts; 972 preceding artifacts unchanged.
+Both prepared Git heads/indexes unchanged; user deferred signing. Production RTL unchanged.
+Exact hashes: _voice63_progress.json. Raw files: build/hdl-tests/voice_renderer63/.
+Full state packing, shared-client DMA, admission/scheduler workload, operators/mix, Mode A fit and board remain open.
+Next structural option: represent readonly renderer ownership directly inside cache control; never remove release guards without proving the complete ownership contract.

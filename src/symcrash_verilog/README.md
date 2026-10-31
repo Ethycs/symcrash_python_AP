@@ -1,6 +1,148 @@
 # Symcrash RTL components
 
-## Current control-path qualification — 2026-10-31
+## Complete VM core pages — 2026-10-31
+
+`voice/hardware_vm_page.py` prepares an exact 2 KiB page for the existing
+cache/renderer: aligned control fields occupy bytes 0..836, bytes 837..1023
+are reserved, and all coefficient slots start at byte 1024 (word offset 64).
+The current reference bridge is K4. Complete optional engine/resource records
+have explicit external addresses and ownership; the codec rejects overflow.
+
+`pixi run check-hdl-vm-page` checks 18 real VM pages through the unchanged RTL
+with 100-cycle adapter latency, stalls off/on, held reads, eviction, updates,
+failed write/retry and reset. Both runs pass 14,720 samples; K4 service is
+348 clocks ready / 354–357 stalled, max window 1,899/40,000 clocks. 74 Python
+checks establish complete field and future-audio replay. Alignment adds 146
+padding bytes inside the same page to eliminate 12 scalar word crossings.
+
+These tests cover core-page transport/rendering. External engine RTL, shared
+resource ownership, musical voice state, aggregate admission and global fit
+remain open. The opaque cache does not parse the embedded page header; hardware
+header admission is still required. No RTL arithmetic, widths, N/K or timing limits changed, and no
+new route is claimed. See the
+[VM page profile](../../symcrash_docs/05%20-%20Standards/03%20-%20Voice/WSE-IMPL-HARDWARE-VM-PAGE-v1.md)
+and `tests/artifacts/regen_reports/hardware_vm_page_20261031.json`.
+
+## Runtime prepared-frame transport — 2026-10-31
+
+The worktree now includes runtime owner, stream and shared-window modules
+for per-frame K2/K4/K8. N64, every int16 slot, wide intermediates,
+RNE/SAT16/headroom and the existing deadlines remain fixed. Two 1,024-byte
+logical banks support exact 256/512/1,024-byte DMA payloads. The two-entry
+128-bit FIFO gathers adjacent slot pairs from the normative leaf-major
+payload. K4/K8 reread the protected source; internal read traffic is
+256/1,024/4,096 bytes. Ready-frame service is 183/346/672 clocks; fallback 18.
+These counts exclude prefetch and the rest of the voice workload.
+
+Twelve fresh worktree profiles pass with **221,056 exact samples**, as does
+the isolated candidate. **29 scoped regression checks**, both physical
+owner-encoding checks, the mapped FIFO proof and two mapped-owner window
+runs (15,616 samples) pass. All six fresh 100 MHz routes pass: stream
+103.520/101.605/105.053 MHz; window 107.921/102.176/107.365 MHz. ECP5-25K,
+speed 6, CSFBGA285, out of context, seeds 1/2/3; verified ABC9 mapping.
+
+| Top | LUT4 | FF | CCU2C | DP16KD | DPR cells | Packed COMB |
+|---|---:|---:|---:|---:|---:|---:|
+| Runtime stream | 4347 | 4460 | 511 | 4 | 176 | 6671 |
+| Runtime window | 5352 | 5430 | 714 | 6 | 208 | 8362 |
+
+Physical BRAM is 9,216/13,824 bytes; distributed RAM is 1,408/1,664 bytes;
+DSP use is zero. Replay belongs to **one logical stream**. A shared
+multi-voice context/cache, held coefficients, tier admission, T3 playback,
+operators and mixing remain required. Neither the 133,333-clock full
+workload nor global memory fit or board/PHY timing is established here.
+The tests use the unchanged 40,000-clock shared DMA deadline.
+
+[Runtime transport analysis](../../symcrash_docs/08%20-%20Analysis/RUNTIME-TRANSPORT-2026-10-31.md) records interfaces, tradeoffs and proof limits. Evidence:
+`tests/artifacts/regen_reports/hdl_runtime_transport_20261031.txt`.
+Run `pixi run check-hdl-runtime-transport`,
+`check-hdl-runtime-transport-proofs`, and
+`check-hdl-runtime-transport-mapping`; target tasks are
+`synth-hdl-runtime-stream` / `route-hdl-runtime-stream` and
+`synth-hdl-runtime-window` / `route-hdl-runtime-window`.
+Fixed-K RTL and standalone runtime arithmetic remain unchanged. The
+following sections record their separate qualifications. Signing is
+deferred; both prepared indexes remain unchanged.
+
+## Standalone runtime tier decoder — 2026-10-31
+
+`ccs_idwpt_runtime.v` now shares one decoder across per-frame K2/K4/K8.
+It preserves N64, every int16 coefficient slot, wide intermediates,
+RNE/SAT16 and headroom. Thirty-two headroom/stall profiles compare 556,032
+exact samples; 26 scoped regression checks and two complete mapped runs
+(13,824 samples) pass. All three fresh 100 MHz worktree placements pass
+at 126.678/123.047/123.747 MHz, ECP5-25K speed 6, out of context.
+
+The explicit two-slot reuse tradeoff costs 180/343/669 standalone clocks,
+including command, versus fixed-K 179/327/638. Compute is 99/198/396.
+Mapped cost: 3,401 LUT4, 3,633 FF, 499 CCU2C, 160 DPR cells (1,280 physical
+bytes; 640 logical working/output bytes), zero DP16KD/DSP. Output banking
+removes replicated write ports without changing capacity or arithmetic.
+
+The runtime transport qualification above now supplies gathering,
+ownership and shared-window integration. Tier scheduling, ghost playback,
+operators, mixing and the full 133,333-clock workload remain open, as do
+board/PHY, global packing and Mode A storage. The qualified fixed-K
+integration below is unchanged. Signing is deferred.
+
+[Runtime analysis](../../symcrash_docs/08%20-%20Analysis/RUNTIME-DECODER-2026-10-31.md) records proof limits, both candidates and the
+exact costs. Evidence: `tests/artifacts/regen_reports/hdl_runtime_decoder_20261031.txt`.
+Run `pixi run check-hdl-runtime-matrix` for the 32-profile matrix,
+`check-hdl-runtime-output` / `check-hdl-runtime-control` for compositional
+proofs, `check-hdl-runtime-mapping`
+for mapped simulation, and `synth-hdl-idwpt-runtime` /
+`route-hdl-idwpt-runtime` for target mapping/routing.
+
+## Parameterized production integration — 2026-10-31
+
+The worktree now contains the qualified isolated K2/K4/K8 candidate.
+N=64, every coefficient slot, int16 storage, wide intermediates, RNE,
+saturation and headroom 0..15 are unchanged. K2 uses four pair positions
+per clock and takes 99 compute clocks; K4/K8 retain 247 per group.
+No-stall standalone service is 179/327/638 clocks, and integrated
+ready-frame service is 183/331/642; fallback remains 18.
+
+The owner maps its unchanged logical policy to seven state FF per bank
+(+8 FF total). K2 compares all 64 descriptor bits using eight 16-bit
+equality flags captured at the existing callback edge (-56 callback FF
+net). K4/K8 retain direct matching. Per-bank admission removes the shared
+duplicate/selection chain without adding a register or clock.
+
+Both the isolated candidate and production netlists pass all nine
+100 MHz placements at 102.29133..108.36584 MHz. Production validation
+passes 122 scoped pytest checks plus four mapped-owner runs. The final
+five trailing-space removals were resynthesized: all three complete
+netlists are byte-identical, so measured timing is retained explicitly.
+Evidence: `tests/artifacts/regen_reports/hdl_parameterized_production_20261031.txt`.
+Source-matched production synthesis uses LUT4/FF/CCU2C/DPR/DP counts:
+K2 5093/5261/717/272/2; K4 3098/3557/436/64/14;
+K8 3104/3559/434/64/14. Packed utilization is recorded separately.
+
+The [integration analysis](../../symcrash_docs/08%20-%20Analysis/CCS-INTEGRATION-2026-10-31.md)
+records the numerical/resource tradeoffs, proofs, tests and earlier failures.
+Permanent checks include:
+
+```
+pixi run check-hdl-owner-pipeline
+pixi run check-hdl-owner-mapping
+pixi run python tools/check_hdl_idwpt.py --all-headrooms
+pixi run python -m pytest tests/conformance/test_hdl_owner_pipeline.py -q
+```
+
+The mapping check accepts `--library /path/to/ecp5/cells_sim.v` for native
+Yosys installations; the isolated WSL installation is the default.
+It maps only the owner and simulates it with the remaining real RTL.
+Encoding equivalence uses matched proof points; reset-driven RTL and
+mapped tests provide separate evidence. No board timing is implied.
+
+This remains a compile-time K profile, not a runtime mixed-tier engine.
+Full T2 workload cost, 40,000-clock shared DMA service, 133,333-clock block
+admission, global memory packing, Mode A storage, PHY and board clocks/I/O
+still require qualification. The earlier milestone results below retain
+their historical source hashes. Prepared FIFO commit batches are unchanged;
+the new work remains unstaged while signing is deferred.
+
+## Prior FIFO control-path milestone — 2026-10-31
 
 The 2026-10-31 FIFO mapping follow-up preserves every RTL operation;
 removing comments and the memory attribute yields the committed token stream.
@@ -38,8 +180,8 @@ Board I/O/global clocks, PHY, bounded workload admission, full voice/operator
 generation, global memory packing, clock load and board power remain open,
 along with Mode A storage and K2 tier cost.
 
-Earlier milestone measurements below remain historical; this section and
-the linked implementation profiles give the current source-matched results.
+This FIFO section records the preceding staged source. Its evidence is
+preserved independently of the subsequent parameterized worktree changes.
 
 `ccs_idwpt.v` implements the balanced 64-leaf, depth-six polyphase inverse
 transform with K=2/4/8. Stored coefficients/audio remain int16; signed RNE,
@@ -65,7 +207,7 @@ with supported range 0..15. Coefficients are leaf-major; output selection is
 
 ## Pipeline and arithmetic
 
-One source pair enters each clock. Undo-update results and their original
+In K4/K8, one source pair enters each clock. Undo-update results and their original
 details stream directly into undo-predict. A pending register supplies the
 left even, the next result supplies its right neighbor, and node ends repeat
 their own even. The last pair flushes without another coefficient read.
@@ -73,7 +215,16 @@ The former wide-even scratch and second detail-read pass are removed.
 
 Five levels take 32 issue + 10 drain clocks each. The root only needs even
 samples, so its update uses 32+5. Compute is 247 clocks per group, down from
-407. No-stall transactions take 327 clocks (K2/K4) or 638 (K8).
+407 in the prior implementation. K4/K8 transactions take 327/638 clocks.
+
+K2 issues four pairs per clock. Each 64×32 working bank is split into eight
+8×32 banks with `bank={xor(address[5:2]),address[1:0]}` and
+`row=address[5:3]`. All eight pair reads are collision-free. The first
+level's exact symmetric-boundary identity removes its redundant prediction
+division while preserving wide intermediates and node saturation. Compute
+is `(8+6)+4*(8+10)+(8+5)=99`, with 179 total standalone clocks.
+Logical working storage stays 512 bytes and output stays 128 bytes;
+physical distributed RAM has the measured depth-padding cost.
 
 Boundary selection is registered before the sum, outside the block-RAM
 output path. Node saturation checks the sign extension of an 18-bit value;
@@ -116,9 +267,9 @@ This experimental out-of-context mode omits I/O buffers and global clock
 promotion/routing. It has no board pins or external delay constraints, so
 it does not qualify board timing or the complete synthesizer.
 
-## Measured synthesis and cost
+## Prior serial decoder synthesis and cost
 
-Yosys 0.33 (2584903a060), headroom 2:
+These measurements predate the parallel K2 integration above. Yosys 0.33 (2584903a060), headroom 2:
 
 | Primitive / cost | K=2 | K=4 | K=8 |
 |---|---:|---:|---:|
@@ -135,14 +286,15 @@ Yosys 0.33 (2584903a060), headroom 2:
 
 LUT4 alone is not packed usage: carry cells and LUTRAM also use logic.
 Streaming raises K4 FF use 1,512 -> 1,732, while removing 68 LUTRAM cells
-and keeping block RAM unchanged. Current three-seed routing passes all nine
+and keeping block RAM unchanged. That source's three-seed routing passed all nine
 K2/K4/K8 configurations at 108.38..112.51 MHz against the fixed 100 MHz target.
 The prior two-pass pipeline took 487/958 transaction clocks; the unpipelined
 core took 784/1,552 and failed timing at 32.63 MHz. Both reports remain as
 historical evidence with their own source hashes.
 
-K4/K8 decoder compute fits within the T1/T0 estimates of 400/1,000. K2
-still exceeds T2's 100 by 147 clocks. Carrier/operators, transfers and other
+K4/K8 decoder compute fits within the T1/T0 estimates of 400/1,000. This
+older K2 decoder exceeded T2's 100 by 147 clocks; the current K2 compute
+path takes 99. That alone does not qualify the complete T2 workload. Carrier/operators, transfers and other
 voice work need their own budget; these decoder counts do not qualify the
 whole service. DMA/prefetch, bounded stalls, mixing and aggregate BRAM fit
 remain open. No numeric format or documented budget was relaxed.
@@ -247,7 +399,7 @@ memory/timing admission and PHY integration remain open. Evidence is
 ## Prepared coefficient frames to audio
 
 `ccs_stream.v` connects that owner to real payload RAM, a two-word feeder,
-the unchanged CCS decoder, and a 128-byte replay buffer. The
+the parameterized CCS decoder, and a 128-byte replay buffer. The
 [stream profile](../../symcrash_docs/05%20-%20Standards/01%20-%20Architecture/WSE-IMPL-CCS-STREAM-v1.md)
 records the leaf-major layout, K8 slot-group rereads, exact final-input release
 and retained-audio fallback. A cache miss replays the last complete block,
@@ -259,14 +411,14 @@ pixi run synth-hdl-ccs-stream
 pixi run route-hdl-ccs-stream
 ```
 
-Twenty tests pass: eight actual DMA-to-audio workloads and twelve evidence
+The initial stream milestone passed twenty tests: eight actual DMA-to-audio workloads and twelve evidence
 guards. They verify 141,824 samples against independent rational arithmetic,
 all input positions, stalls, source reuse during decoding, misses, errors and
-reset. Ideal ready-frame service is 331 clocks for K2/K4 and 642 for K8;
+reset. Current ready-frame service is 183/331/642 clocks for K2/K4/K8;
 fallback takes 18. DMA prefetch and arbitrary output stalls are additional.
 K2 remains over its tier estimate; full voice/audio admission remains open.
 
-Combined synthesis now includes owner, payload RAM, feeder, decoder and replay:
+That initial source's combined synthesis included owner, payload RAM, feeder, decoder and replay:
 1,796/2,141/2,121 LUT4, 1,289/2,245/2,247 FF and 4/12/12 block RAMs for K2/K4/K8.
 Physical block RAM is 9,216/27,648/27,648 bytes; distributed RAM adds
 1,408/512/512 bytes. Shared DMA and the PHY remain outside this synthesis.
@@ -293,14 +445,45 @@ pixi run synth-hdl-dma-window
 pixi run route-hdl-dma-window
 ```
 
-Twenty-seven tests pass, including full-queue and cumulative deadline probes,
+The initial window milestone passed twenty-seven tests, including full-queue and cumulative deadline probes,
 21,504 exact audio samples, actual payload writes and publication ordering.
 Combined prepared-frame transport/decode/window passes all nine 100 MHz out-of-context placements.
-The full top uses 6/14/14 block RAMs for K2/K4/K8, equivalent to
-13,824/32,256/32,256 physical bytes. It excludes the adapter/PHY and other
-synth engines. Ready-frame service remains 331/331/642 clocks; fallback 18.
+The current full top uses 2/14/14 block RAMs for K2/K4/K8, equivalent to
+4,608/32,256/32,256 physical bytes. It excludes the adapter/PHY and other
+synth engines. Ready-frame service is 183/331/642 clocks; fallback 18.
 Bounded adapter/PHY service, full-workload admission, voice scheduling, global memory packing and the 133,333-clock whole-block deadline remain open. K2 tier cost and Mode A storage remain unresolved.
 Evidence: `tests/artifacts/regen_reports/hdl_dma_window_20261031.txt`.
+
+## Native voice cache and shared renderer — 2026-10-31
+
+The production worktree now shares one decoder across retained voice pages
+through native read-only/writable ownership. N64, K2/K4/K8, all int16 slots,
+wide intermediates, RNE/SAT/headroom, sixteen 2 KiB pages and the existing
+100 MHz / 40,000 / 133,333-clock budgets remain fixed. Cache acquisition is
+two clocks, three through the wrapper; pending requests reserve their page.
+Only the owner may consume a response or release the lease. Dirty stores
+and full-page retries remain required before reuse.
+
+Fresh production qualification: ten RTL profiles (454,400 exact samples),
+six cache profiles, four complete mapped profiles (including 16,256 streamed
+samples), ownership/bounds/FIFO proofs and 66 scoped tests. All six 100 MHz
+placements pass: cache 119.474312/115.008629/120.452904 MHz; combined 111.719360/106.100792/112.157913 MHz.
+These are ECP5-25K speed 6, CSFBGA285, seeds 1/2/3, out-of-context results;
+combined headroom is 2. Shared DMA placement and board timing remain open.
+
+Cache cost is 3,376 LUT4/1,684 FF/12 CCU2C/15 DP16KD; combined cost is
+6,388 LUT4/5,719 FF/522 CCU2C/15 DP16KD/160 DPR cells. Physical memory is
+34,560 BRAM bytes plus 1,280 distributed bytes in the combined top, with
+zero DSP. Standalone cache growth is 871 LUT4/114 FF over its preceding
+qualification. Ready K2/K4/K8 service is 185/348/798 clocks, including the
+explicit inherited 124-clock K8 FIFO penalty. Normal DMA max is 26,603/40,000.
+
+Complete state layout, shared-client DMA, scheduler/T3, operators/mix,
+global memory fit, full workload and board/PHY remain open. Signing is
+deferred and both prepared indexes are unchanged. The rejected `chparam`
+mapping and legacy insufficient proof are retained in the evidence.
+See [production analysis](../../symcrash_docs/08%20-%20Analysis/VOICE-STREAM-PRODUCTION-2026-10-31.md) for interfaces, costs, proof limits and tasks.
+Evidence: `tests/artifacts/regen_reports/hdl_voice_stream_production_20261031.txt`.
 
 ## Tool setup
 

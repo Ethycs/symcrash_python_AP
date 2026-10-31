@@ -66,7 +66,7 @@ def synthesize(slots=(2, 4, 8)):
                   'netlist_sha256': hashlib.sha256(netlist.read_bytes()).hexdigest(),
                   'logical_array_bytes': 2*64*lanes*2 + 16*8,
                   'physical_block_ram_bytes': cells['DP16KD']*18432//8,
-                  'cycles_without_stalls': (64+247)*(k//lanes)+16}
+                  'cycles_without_stalls': (64+(99 if k==2 else 247))*(k//lanes)+16}
         report['configurations'].append(record)
         print(json.dumps(record, sort_keys=True), flush=True)
     destination = directory / 'ccs_idwpt_synthesis.json'

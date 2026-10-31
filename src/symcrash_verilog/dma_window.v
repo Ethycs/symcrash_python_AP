@@ -26,6 +26,8 @@ module dma_window #(
     output wire submit_ready,
     input wire [63:0] submit_descriptor,
     output wire initialized,
+    input wire [127:0] match_descriptors,
+    output wire [1:0] done_matches,
     output wire done_valid,
     output wire [63:0] done_descriptor,
     output wire [3:0] done_status,
@@ -48,6 +50,7 @@ module dma_window #(
     reg [63:0] rejected_descriptor;
     reg callback_valid, callback_queued;
     reg [63:0] callback_descriptor;
+    reg [7:0] callback_matches;
     reg [3:0] callback_status;
     reg [31:0] callback_cycles;
     wire queue_ready, queue_done;
@@ -71,6 +74,21 @@ module dma_window #(
     wire reject=submit_valid && rst_n && initialized && !reject_valid && !window_accepting;
     wire reject_done=rst_n && reject_valid && !queue_done;
     wire next_callback_valid=queue_done || reject_valid;
+    wire [63:0] next_callback_descriptor=queue_done ? queue_descriptor : rejected_descriptor;
+    // Split each full 64-bit equality across the existing callback edge:
+    // four 16-bit equality flags per descriptor, then a four-way AND.
+    // Every descriptor bit participates; callback latency is unchanged.
+    wire [7:0] next_callback_matches={
+        next_callback_descriptor[63:48]==match_descriptors[127:112],
+        next_callback_descriptor[47:32]==match_descriptors[111:96],
+        next_callback_descriptor[31:16]==match_descriptors[95:80],
+        next_callback_descriptor[15:0]==match_descriptors[79:64],
+        next_callback_descriptor[63:48]==match_descriptors[63:48],
+        next_callback_descriptor[47:32]==match_descriptors[47:32],
+        next_callback_descriptor[31:16]==match_descriptors[31:16],
+        next_callback_descriptor[15:0]==match_descriptors[15:0]
+    };
+    assign done_matches={&callback_matches[7:4],&callback_matches[3:0]};
     wire complete=done_valid && callback_queued;
     assign done_valid=rst_n && callback_valid;
     assign done_descriptor=callback_descriptor;
@@ -128,7 +146,7 @@ module dma_window #(
             result_status<=0;
             outstanding_count<=0;reject_valid<=0;rejected_descriptor<=0;
             window_final_cycle<=WINDOW_CYCLES==1;expired<=0;
-            callback_valid<=0;callback_queued<=0;callback_descriptor<=0;callback_status<=0;callback_cycles<=0;
+            callback_valid<=0;callback_queued<=0;callback_descriptor<=0;callback_matches<=0;callback_status<=0;callback_cycles<=0;
         end else begin
             // Isolate completion selection from owner descriptor matching.
             // The callback register is part of the shared deadline: outstanding
@@ -136,7 +154,8 @@ module dma_window #(
             callback_valid<=next_callback_valid;
             if (next_callback_valid) begin
                 callback_queued<=queue_done;
-                callback_descriptor<=queue_done ? queue_descriptor : rejected_descriptor;
+                callback_descriptor<=next_callback_descriptor;
+                callback_matches<=next_callback_matches;
                 callback_status<=queue_done ? queue_status : 4'b1000;
                 callback_cycles<=queue_done ? queue_cycles : 32'd0;
             end

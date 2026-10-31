@@ -3,7 +3,8 @@ module tb_ccs_idwpt;
     parameter K = 4, HEADROOM_BITS = 2, CASES = 1, STALLS = 0;
     localparam LANES = (K > 4) ? 4 : K;
     localparam GROUPS = K / LANES;
-    localparam IDEAL_CYCLES = 311*GROUPS + 16;
+    localparam COMPUTE_CYCLES = (K==2) ? 99 : 247;
+    localparam IDEAL_CYCLES = (K==2) ? 179 : 311*GROUPS + 16;
     reg clk = 0;
     always #5 clk = !clk;
     reg rst_n = 0, coeff_valid = 0, audio_ready = 0;
@@ -16,6 +17,17 @@ module tb_ccs_idwpt;
         .audio_valid(audio_valid), .audio_ready(audio_ready),
         .audio_data(audio_data), .audio_last(audio_last)
     );
+    wire [2:0] monitored_state,monitored_level;
+    wire monitored_group;
+    generate if(K==2) begin
+        assign monitored_state=dut.k2.state;
+        assign monitored_level=dut.k2.level;
+        assign monitored_group=1'b0;
+    end else begin
+        assign monitored_state=dut.serial.state;
+        assign monitored_level=dut.serial.level;
+        assign monitored_group=dut.serial.group_index;
+    end endgenerate
     reg [15:0] coefficients [0:CASES*64*K-1];
     reg [15:0] expected [0:CASES*64-1];
     reg [4095:0] coeff_file, expected_file;
@@ -58,13 +70,13 @@ module tb_ccs_idwpt;
             // levels, root-only update, stalled output and K8's second group.
             case (kind)
                 0: wait_count = 0;
-                11: wait_count = 36;
-                12: wait_count = 38;
-                13: wait_count = 41;
-                14: wait_count = 125;
-                15: wait_count = 247;
+                11: wait_count = (K==2) ? 9 : 36;
+                12: wait_count = (K==2) ? 11 : 38;
+                13: wait_count = (K==2) ? 13 : 41;
+                14: wait_count = (K==2) ? 31 : 125;
+                15: wait_count = (K==2) ? 99 : 247;
                 16: wait_count = 7;
-                17: wait_count = 212;
+                17: wait_count = (K==2) ? 88 : 212;
                 default: wait_count = kind;
             endcase
             repeat (wait_count) @(posedge clk);
@@ -72,10 +84,10 @@ module tb_ccs_idwpt;
             if (kind == 15 && !audio_valid) $fatal(1, "Output reset probe missed output state");
             if (kind != 0 && kind != 15 && (audio_valid || coeff_ready))
                 $fatal(1, "Pipeline reset probe missed computation");
-            if (kind >= 11 && kind <= 14 && dut.state != dut.UPDATE_DRAIN)
+            if (kind >= 11 && kind <= 14 && monitored_state != 3'd2)
                 $fatal(1, "Missed stream drain");
-            if (kind == 17 && dut.level != 5) $fatal(1, "Missed root-only update");
-            if (kind == 16 && K == 8 && dut.group_index != 1) $fatal(1, "Missed second group");
+            if (kind == 17 && monitored_level != 5) $fatal(1, "Missed root-only update");
+            if (kind == 16 && K == 8 && monitored_group != 1) $fatal(1, "Missed second group");
             reset_device;
         end
     endtask
@@ -132,7 +144,7 @@ module tb_ccs_idwpt;
                 end
                 #1;
                 if (awaiting_group && (coeff_ready || audio_valid)) begin
-                    if (cycles-group_last_cycle != 247)
+                    if (cycles-group_last_cycle != COMPUTE_CYCLES)
                         $fatal(1, "Wrong compute latency: %0d", cycles-group_last_cycle);
                     awaiting_group = 0;
                 end
@@ -147,8 +159,8 @@ module tb_ccs_idwpt;
             // First output of the next frame must not inherit valid/last.
             if (audio_valid || !coeff_ready) $fatal(1, "Output did not drain");
         end
-        $display("PASS cases=%0d K=%0d headroom=%0d stalls=%0d compute_group=247 min=%0d max=%0d",
-                 CASES, K, HEADROOM_BITS, STALLS, min_cycles, max_cycles);
+        $display("PASS cases=%0d K=%0d headroom=%0d stalls=%0d compute_group=%0d min=%0d max=%0d",
+                 CASES, K, HEADROOM_BITS, STALLS, COMPUTE_CYCLES, min_cycles, max_cycles);
         $finish;
     end
     initial begin

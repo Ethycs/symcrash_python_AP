@@ -1,0 +1,659 @@
+{
+  "status": "complete K4 VM page codec and core-page RTL transport verified; wider hardware state execution/fit open",
+  "layout": {
+    "version": 1,
+    "page_bytes": 2048,
+    "header_bytes": 32,
+    "metadata_end": 837,
+    "coefficient_offset": 1024,
+    "fields": [
+      {
+        "field": "VMState.phase",
+        "offset": 32,
+        "bytes": 4,
+        "storage": "I"
+      },
+      {
+        "field": "VMState.phase_inc",
+        "offset": 36,
+        "bytes": 4,
+        "storage": "I"
+      },
+      {
+        "field": "VMState.target_phase_inc",
+        "offset": 40,
+        "bytes": 4,
+        "storage": "I"
+      },
+      {
+        "field": "VMState.pitch_slew_rate",
+        "offset": 44,
+        "bytes": 4,
+        "storage": "I"
+      },
+      {
+        "field": "VMState.last_note",
+        "offset": 48,
+        "bytes": 2,
+        "storage": "h"
+      },
+      {
+        "field": "VMState.last_cents",
+        "offset": 56,
+        "bytes": 8,
+        "storage": "q"
+      },
+      {
+        "field": "VMState.harmonic_amps_q15",
+        "offset": 64,
+        "bytes": 32,
+        "storage": [
+          "list",
+          "h",
+          16
+        ]
+      },
+      {
+        "field": "VMState.envelope",
+        "offset": 96,
+        "bytes": 56,
+        "storage": [
+          "record",
+          "EnvelopeState"
+        ]
+      },
+      {
+        "field": "VMState.envelope.phase",
+        "offset": 96,
+        "bytes": 1,
+        "storage": "phase"
+      },
+      {
+        "field": "VMState.envelope.phase_sample",
+        "offset": 104,
+        "bytes": 8,
+        "storage": "q"
+      },
+      {
+        "field": "VMState.envelope.level_q15",
+        "offset": 112,
+        "bytes": 2,
+        "storage": "h"
+      },
+      {
+        "field": "VMState.envelope.attack_samples",
+        "offset": 120,
+        "bytes": 8,
+        "storage": "q"
+      },
+      {
+        "field": "VMState.envelope.decay_samples",
+        "offset": 128,
+        "bytes": 8,
+        "storage": "q"
+      },
+      {
+        "field": "VMState.envelope.sustain_level_q15",
+        "offset": 136,
+        "bytes": 2,
+        "storage": "h"
+      },
+      {
+        "field": "VMState.envelope.release_samples",
+        "offset": 144,
+        "bytes": 8,
+        "storage": "q"
+      },
+      {
+        "field": "VMState.dc_block_x1",
+        "offset": 152,
+        "bytes": 4,
+        "storage": "i"
+      },
+      {
+        "field": "VMState.dc_block_y1",
+        "offset": 156,
+        "bytes": 4,
+        "storage": "i"
+      },
+      {
+        "field": "VMState.wire_state",
+        "offset": 160,
+        "bytes": 64,
+        "storage": [
+          "record",
+          "WireExecutionState"
+        ]
+      },
+      {
+        "field": "VMState.wire_state.program_id",
+        "offset": 160,
+        "bytes": 8,
+        "storage": "q"
+      },
+      {
+        "field": "VMState.wire_state.frame_seq",
+        "offset": 168,
+        "bytes": 8,
+        "storage": "q"
+      },
+      {
+        "field": "VMState.wire_state.forced_on",
+        "offset": 176,
+        "bytes": 4,
+        "storage": "I"
+      },
+      {
+        "field": "VMState.wire_state.forced_off",
+        "offset": 180,
+        "bytes": 4,
+        "storage": "I"
+      },
+      {
+        "field": "VMState.wire_state.tree_held",
+        "offset": 184,
+        "bytes": 1,
+        "storage": "bool"
+      },
+      {
+        "field": "VMState.wire_state.tree_blend_q15",
+        "offset": 186,
+        "bytes": 2,
+        "storage": "h"
+      },
+      {
+        "field": "VMState.wire_state.carrier_role",
+        "offset": 192,
+        "bytes": 8,
+        "storage": "q"
+      },
+      {
+        "field": "VMState.wire_state.carrier_model",
+        "offset": 200,
+        "bytes": 8,
+        "storage": "q"
+      },
+      {
+        "field": "VMState.wire_state.pulse_width_q15",
+        "offset": 208,
+        "bytes": 8,
+        "storage": "q"
+      },
+      {
+        "field": "VMState.wire_state.events",
+        "offset": 216,
+        "bytes": 8,
+        "storage": [
+          "external",
+          8
+        ]
+      },
+      {
+        "field": "VMState.prng_state",
+        "offset": 224,
+        "bytes": 4,
+        "storage": "I"
+      },
+      {
+        "field": "VMState.tree_a_id",
+        "offset": 232,
+        "bytes": 8,
+        "storage": "q"
+      },
+      {
+        "field": "VMState.tree_b_id",
+        "offset": 240,
+        "bytes": 8,
+        "storage": "q"
+      },
+      {
+        "field": "VMState.blocks_since_start",
+        "offset": 248,
+        "bytes": 8,
+        "storage": "q"
+      },
+      {
+        "field": "VMState.wet_ready",
+        "offset": 256,
+        "bytes": 1,
+        "storage": "bool"
+      },
+      {
+        "field": "VMState.eta_prev_q15",
+        "offset": 258,
+        "bytes": 2,
+        "storage": "h"
+      },
+      {
+        "field": "VMState.gain_prev_q15",
+        "offset": 260,
+        "bytes": 2,
+        "storage": "h"
+      },
+      {
+        "field": "VMState.mask_state_q15",
+        "offset": 272,
+        "bytes": 128,
+        "storage": [
+          "array",
+          64
+        ]
+      },
+      {
+        "field": "VMState.mask_state_initialized",
+        "offset": 400,
+        "bytes": 1,
+        "storage": "bool"
+      },
+      {
+        "field": "VMState.wet_prev_end",
+        "offset": 402,
+        "bytes": 2,
+        "storage": "h"
+      },
+      {
+        "field": "VMState.wet_seam_initialized",
+        "offset": 404,
+        "bytes": 1,
+        "storage": "bool"
+      },
+      {
+        "field": "VMState.wet_ola_tail",
+        "offset": 416,
+        "bytes": 16,
+        "storage": [
+          "array",
+          8
+        ]
+      },
+      {
+        "field": "VMState.wet_ola_initialized",
+        "offset": 432,
+        "bytes": 1,
+        "storage": "bool"
+      },
+      {
+        "field": "VMState.ccs_state",
+        "offset": 448,
+        "bytes": 32,
+        "storage": [
+          "record",
+          "CCSState"
+        ]
+      },
+      {
+        "field": "VMState.ccs_state.phase",
+        "offset": 448,
+        "bytes": 4,
+        "storage": "I"
+      },
+      {
+        "field": "VMState.ccs_state.phase_inc",
+        "offset": 452,
+        "bytes": 4,
+        "storage": "I"
+      },
+      {
+        "field": "VMState.ccs_state.target_phase_inc",
+        "offset": 456,
+        "bytes": 4,
+        "storage": "I"
+      },
+      {
+        "field": "VMState.ccs_state.phase_slew_rate",
+        "offset": 460,
+        "bytes": 4,
+        "storage": "I"
+      },
+      {
+        "field": "VMState.ccs_state.note",
+        "offset": 464,
+        "bytes": 8,
+        "storage": "q"
+      },
+      {
+        "field": "VMState.ccs_state.wave_id",
+        "offset": 472,
+        "bytes": 8,
+        "storage": "q"
+      },
+      {
+        "field": "VMState.use_coeff_osc",
+        "offset": 480,
+        "bytes": 1,
+        "storage": "bool"
+      },
+      {
+        "field": "VMState._mode_b_state",
+        "offset": 488,
+        "bytes": 8,
+        "storage": [
+          "external",
+          1
+        ]
+      },
+      {
+        "field": "VMState.osc_mode",
+        "offset": 496,
+        "bytes": 1,
+        "storage": "B"
+      },
+      {
+        "field": "VMState.prev_fm_mod_buffer",
+        "offset": 512,
+        "bytes": 16,
+        "storage": [
+          "array",
+          8
+        ]
+      },
+      {
+        "field": "VMState._sample_state",
+        "offset": 528,
+        "bytes": 8,
+        "storage": [
+          "external",
+          2
+        ]
+      },
+      {
+        "field": "VMState._fm6_state",
+        "offset": 536,
+        "bytes": 8,
+        "storage": [
+          "external",
+          3
+        ]
+      },
+      {
+        "field": "VMState._fm6_morph_state",
+        "offset": 544,
+        "bytes": 8,
+        "storage": [
+          "external",
+          4
+        ]
+      },
+      {
+        "field": "VMState._wavetable_state",
+        "offset": 552,
+        "bytes": 8,
+        "storage": [
+          "external",
+          5
+        ]
+      },
+      {
+        "field": "VMState._granular_state",
+        "offset": 560,
+        "bytes": 8,
+        "storage": [
+          "external",
+          6
+        ]
+      },
+      {
+        "field": "VMState._noise_state",
+        "offset": 568,
+        "bytes": 8,
+        "storage": [
+          "external",
+          7
+        ]
+      },
+      {
+        "field": "VMState.executor_latch",
+        "offset": 576,
+        "bytes": 40,
+        "storage": [
+          "record",
+          "ExecutorLatch"
+        ]
+      },
+      {
+        "field": "VMState.executor_latch.node_mask_u32",
+        "offset": 576,
+        "bytes": 4,
+        "storage": "I"
+      },
+      {
+        "field": "VMState.executor_latch.tail_mode",
+        "offset": 580,
+        "bytes": 1,
+        "storage": "B"
+      },
+      {
+        "field": "VMState.executor_latch.traction_q15",
+        "offset": 582,
+        "bytes": 2,
+        "storage": "h"
+      },
+      {
+        "field": "VMState.executor_latch.symbol_mode",
+        "offset": 584,
+        "bytes": 1,
+        "storage": "B"
+      },
+      {
+        "field": "VMState.executor_latch.mode_dwell_blocks",
+        "offset": 592,
+        "bytes": 8,
+        "storage": "q"
+      },
+      {
+        "field": "VMState.executor_latch.phrase_quantize_pending",
+        "offset": 600,
+        "bytes": 1,
+        "storage": "bool"
+      },
+      {
+        "field": "VMState.executor_latch.timbral_mode",
+        "offset": 601,
+        "bytes": 1,
+        "storage": "B"
+      },
+      {
+        "field": "VMState.executor_latch.timbral_target",
+        "offset": 602,
+        "bytes": 1,
+        "storage": "B"
+      },
+      {
+        "field": "VMState.executor_latch.timbral_ramp_blocks",
+        "offset": 608,
+        "bytes": 8,
+        "storage": "q"
+      },
+      {
+        "field": "VMState.cmmm_memory",
+        "offset": 624,
+        "bytes": 40,
+        "storage": [
+          "record",
+          "CMMMemory"
+        ]
+      },
+      {
+        "field": "VMState.cmmm_memory.tension_q15",
+        "offset": 624,
+        "bytes": 2,
+        "storage": "h"
+      },
+      {
+        "field": "VMState.cmmm_memory.fatigue_q15",
+        "offset": 626,
+        "bytes": 2,
+        "storage": "h"
+      },
+      {
+        "field": "VMState.cmmm_memory.harmonic_memory_q15",
+        "offset": 628,
+        "bytes": 2,
+        "storage": "h"
+      },
+      {
+        "field": "VMState.cmmm_memory.blocks_since_transition",
+        "offset": 632,
+        "bytes": 8,
+        "storage": "q"
+      },
+      {
+        "field": "VMState.cmmm_memory.TENSION_DECAY",
+        "offset": 640,
+        "bytes": 8,
+        "storage": "q"
+      },
+      {
+        "field": "VMState.cmmm_memory.FATIGUE_DECAY",
+        "offset": 648,
+        "bytes": 8,
+        "storage": "q"
+      },
+      {
+        "field": "VMState.cmmm_memory.HARMONIC_DECAY",
+        "offset": 656,
+        "bytes": 8,
+        "storage": "q"
+      },
+      {
+        "field": "VMState.mode_switch",
+        "offset": 672,
+        "bytes": 165,
+        "storage": [
+          "record",
+          "ModeSwitchState"
+        ]
+      },
+      {
+        "field": "VMState.mode_switch.initialized",
+        "offset": 672,
+        "bytes": 1,
+        "storage": "bool"
+      },
+      {
+        "field": "VMState.mode_switch.mix_b_q16",
+        "offset": 676,
+        "bytes": 4,
+        "storage": "I"
+      },
+      {
+        "field": "VMState.mode_switch.start_mix_b_q16",
+        "offset": 680,
+        "bytes": 4,
+        "storage": "I"
+      },
+      {
+        "field": "VMState.mode_switch.remaining_blocks",
+        "offset": 684,
+        "bytes": 1,
+        "storage": "B"
+      },
+      {
+        "field": "VMState.mode_switch.b_harmonic_gains",
+        "offset": 688,
+        "bytes": 144,
+        "storage": [
+          "gains"
+        ]
+      },
+      {
+        "field": "VMState.mode_switch.b_gain_bound",
+        "offset": 832,
+        "bytes": 4,
+        "storage": "I"
+      },
+      {
+        "field": "VMState.mode_switch.b_fm_source",
+        "offset": 836,
+        "bytes": 1,
+        "storage": "B"
+      }
+    ]
+  },
+  "compact_metadata_end": 691,
+  "compact_scalar_crossings": 12,
+  "aligned_scalar_crossings": 0,
+  "added_padding_bytes": 146,
+  "tests": 74,
+  "rtl_profiles": 2,
+  "rtl_samples": 14720,
+  "service_cycles": [
+    [
+      348,
+      348
+    ],
+    [
+      354,
+      357
+    ]
+  ],
+  "max_window": 1899,
+  "footprints": [
+    {
+      "kind": "a",
+      "page_bytes": 2048,
+      "external_bytes": 0,
+      "total_bytes": 2048,
+      "external_beats": 0
+    },
+    {
+      "kind": "b",
+      "page_bytes": 2048,
+      "external_bytes": 352,
+      "total_bytes": 2400,
+      "external_beats": 22
+    },
+    {
+      "kind": "pwm",
+      "page_bytes": 2048,
+      "external_bytes": 304,
+      "total_bytes": 2352,
+      "external_beats": 19
+    },
+    {
+      "kind": "fm6",
+      "page_bytes": 2048,
+      "external_bytes": 1088,
+      "total_bytes": 3136,
+      "external_beats": 68
+    },
+    {
+      "kind": "morph",
+      "page_bytes": 2048,
+      "external_bytes": 1200,
+      "total_bytes": 3248,
+      "external_beats": 75
+    },
+    {
+      "kind": "sample",
+      "page_bytes": 2048,
+      "external_bytes": 8288,
+      "total_bytes": 10336,
+      "external_beats": 518
+    },
+    {
+      "kind": "sample_coeff",
+      "page_bytes": 2048,
+      "external_bytes": 16480,
+      "total_bytes": 18528,
+      "external_beats": 1030
+    },
+    {
+      "kind": "wavetable",
+      "page_bytes": 2048,
+      "external_bytes": 3232,
+      "total_bytes": 5280,
+      "external_beats": 202
+    },
+    {
+      "kind": "granular",
+      "page_bytes": 2048,
+      "external_bytes": 9440,
+      "total_bytes": 11488,
+      "external_beats": 590
+    }
+  ],
+  "source_sha256": "758023ca1af82f437602d25720b25b6ad7ba04a0ffdf6c43774ce63f1701cd90",
+  "tests_sha256": "7b2b45b0dcb0ef587027cf77e662ebeaebe8becc6cdc55aa3862d689792b6382",
+  "runner_sha256": "e0f136a3d07d17f34ffc982811b1b2c310b4c0082b489d93db6e564bfae374d9"
+}

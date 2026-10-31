@@ -1,0 +1,50 @@
+Complete VM boundary page v1 -- 2026-10-31
+
+Current K4 reference VM: all 41 root fields retained, including inactive
+engines, resources, wire events, Q32/Q15 domains and retained i64 counters.
+Page size 2048; header/control end 837; spare bytes 187; coefficients at
+1024 (word64), fixed 1024-byte reservation. No transform/datatype changes.
+Seven optional engines/noise and wire events have bounded external records.
+Overflow, mismatched ownership, malformed references/padding and differing
+committed coefficient/tail history fail without mutating live state.
+
+Alignment tradeoff: compact end691 -> aligned end837, +146 padding bytes;
+12 -> 0 scalar crossings of 128-bit words. Fixed vectors are word aligned.
+Page transfer size/capacity unchanged. Compact candidate and its test/RTL
+results are retained in _state67_unaligned/manifest.json (57 files).
+
+Tests: 74 passed (_state67-tests-aligned.log, 14.77 s).
+Includes nine oscillator paths x Python/JIT, complete state/future audio,
+held/pitch/release, all loaded engines together, noise, eight wire events,
+fresh-process resource restore, literal bytes/extreme widths, all truncations,
+external capacity/address/owner guards and alignment/padding rejection.
+
+Core-page RTL: two profiles, 18 cases each, headroom2, latency100, stalls0/1.
+Each: 115 frames / 7360 samples, reads2304, writes160, resets4,
+one lease collision and one pending-prefetch collision.
+Total: 14720 exact samples, 4608 reads, 320 writes.
+Ready K4 service348; stalled354..357 clocks. Max windows1874/1899 <=40000.
+Unexecuted K2/K8 bench counters are excluded from the K4 bridge claim.
+All RTL bytes are unchanged from the production cache/renderer qualification.
+
+External bytes (actual padded storage, includes embedded fixture assets):
+  A0, B352, PWM304, FM61088, morph1200, sample8288,
+  coefficient-sample16480, wavetable3232, granular9440.
+Add 2048 bytes for each core page. No resource-sharing saving is assumed.
+
+Reproduce:
+  pixi run python -m pytest tests/conformance/test_hardware_vm_page.py -q
+  pixi run check-hdl-vm-page
+
+The JSON companion freezes the full 84-entry offset layout, source hashes,
+measured footprints and service counts. Source-bound RTL inventories are in
+build/hdl-tests/vm_page; aligned trial outputs remain in vm_page_aligned.
+The verified aligned artifacts were copied byte-for-byte to the default
+runner directory; this is not an additional simulation invocation.
+
+External engine RTL/DMA, resource deduplication, musical voice state, global
+memory layout/admission, scheduler/T3, operators/mix and board qualification
+remain open. Existing map/storage failures remain explicit; the whole
+133333-clock deadline is not established. No signing/staging/commit/push.
+The cache is opaque and does not parse/bind the embedded header. That hardware
+admission path remains required; generic bench rebinds do not test header rejection.

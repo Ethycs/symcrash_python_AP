@@ -6,6 +6,7 @@
  */
 module ccs_stream #(
     parameter K=4,
+    parameter MATCHED_COMPLETION=0,
     parameter HEADROOM_BITS=2,
     parameter [15:0] BASE=16'h8000
 ) (
@@ -18,6 +19,8 @@ module ccs_stream #(
     output wire dma_submit_valid,
     input wire dma_submit_ready,
     output wire [63:0] dma_submit_descriptor,
+    input wire [1:0] dma_done_matches,
+    output wire [127:0] dma_match_descriptors,
     input wire dma_done_valid,
     input wire [63:0] dma_done_descriptor,
     input wire [3:0] dma_done_status,
@@ -55,13 +58,14 @@ module ccs_stream #(
     assign block_ready=rst_n && state==IDLE && acquire_ready;
     assign acquire_valid=block_valid && block_ready;
 
-    coeff_buffer_owner #(.K(K), .BASE(BASE)) owner (
+    coeff_buffer_owner #(.K(K), .BASE(BASE), .MATCHED_COMPLETION(MATCHED_COMPLETION)) owner (
         .clk(clk), .rst_n(rst_n), .prefetch_valid(prefetch_valid), .prefetch_ready(prefetch_ready),
         .prefetch_tag(prefetch_tag), .prefetch_ram_address(prefetch_ram_address),
         .prefetch_class(prefetch_class), .prefetch_bank(prefetch_bank),
         .dma_submit_valid(dma_submit_valid), .dma_submit_ready(dma_submit_ready),
         .dma_submit_descriptor(dma_submit_descriptor), .dma_done_valid(dma_done_valid),
         .dma_done_descriptor(dma_done_descriptor), .dma_done_status(dma_done_status),
+        .dma_done_matches(dma_done_matches), .dma_match_descriptors(dma_match_descriptors),
         .acquire_valid(acquire_valid), .acquire_ready(acquire_ready), .acquire_tag(block_tag),
         .acquire_result_valid(acquire_result_valid), .acquire_hit(acquire_hit),
         .acquire_bank(acquire_bank), .acquire_address(acquire_address),
