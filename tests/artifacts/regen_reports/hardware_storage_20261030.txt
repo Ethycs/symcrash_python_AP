@@ -1,0 +1,45 @@
+Hardware storage audit of b6e901d defaults
+Normative limits: WSE-STD-BRAM-RAM sections 2.2/6.1; WSE-STD-RAM-SUBSYSTEMS section 2.2.
+No audio changes or regenerated golden traces.
+Command: pixi run python tools/check_hardware_resources.py --json
+Exit status: 1 (current resources exceed target memory)
+
+{
+  "target": "OrangeCrab ECP5-25F",
+  "scope": "Default oscillator image storage; other allocations and timing are not qualified",
+  "allocations": [
+    {
+      "name": "Mode A default image",
+      "bytes": 2081284256,
+      "region": "coefficients"
+    },
+    {
+      "name": "Mode B default image",
+      "bytes": 301500612,
+      "region": "coefficients"
+    }
+  ],
+  "limits": {
+    "coefficients": 4194304,
+    "external_total": 134217728,
+    "coefficient_working": 32768,
+    "bram_total": 131072
+  },
+  "violations": [
+    {
+      "region": "coefficients",
+      "used_bytes": 2382784868,
+      "limit_bytes": 4194304,
+      "excess_bytes": 2378590564
+    },
+    {
+      "region": "external_total",
+      "used_bytes": 2382784868,
+      "limit_bytes": 134217728,
+      "excess_bytes": 2248567140
+    }
+  ],
+  "storage_passed": false
+}
+
+Checker validation: 15 passed in 4.68 seconds.

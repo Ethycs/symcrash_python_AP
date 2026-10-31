@@ -2,6 +2,14 @@
 
 A deterministic, real-time audio synthesis engine with hardware control support.
 
+The target is the documented OrangeCrab ECP5-25F with 128 MB LPDDR3 and
+128 KB BRAM. The current exhaustive oscillator images **exceed that target's
+memory limits** and need replacement. Run `pixi run check-hardware-resources`
+to check their packed storage; it currently exits with a failure. Passing the
+Python audio tests does not establish hardware conformance. The
+[hardware requirement mapping](symcrash_docs/05%20-%20Standards/01%20-%20Architecture/WSE-IMPL-HARDWARE-CONSTRAINTS-v1.md)
+links the existing normative budgets and the unresolved implementation work.
+
 ## Quick Start
 
 ```bash
@@ -35,7 +43,7 @@ Mode A uses an exact integer-cent pitch image: 63,508 tables in about
 Its tables follow the shared Q32 pitch law and cap source harmonics below
 0.9 Nyquist; cache misses only create views of immutable data. The
 [pitch/resource profile](symcrash_docs/05%20-%20Standards/06%20-%20CCS/WSE-IMPL-MODE-A-RESOURCE-v2.md)
-documents the desktop storage tradeoff and remaining qualification limits.
+records the arithmetic correction and its unacceptable target storage cost.
 
 ## Project Structure
 
