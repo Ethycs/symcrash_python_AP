@@ -1,0 +1,628 @@
+{
+  "status": "Full regression passed; sustained realtime remains open",
+  "roadmap": "AUTHORING-IMPROVEMENT-PLAN WS4 Phase C / AGENT-HANDOFF E3",
+  "specification": "WSE-IMPL-BASIS-RESOURCE-v3; WSE-STD-210 section 5",
+  "baseline_vm_log": "_e3-vm-baseline-20261031.log",
+  "profile_directory": "build\\e3_vm_20261031",
+  "candidate_tests": {
+    "passed": 23,
+    "log": "_e3-interpolated-candidate-tests.log",
+    "seconds": 4.49
+  },
+  "candidate_integration": {
+    "passed": 17,
+    "deselected": 33,
+    "log": "_e3-interpolated-integration.log",
+    "seconds": 5.78
+  },
+  "paired": {
+    "report": "build/e3_vm_20261031/paired/report.json",
+    "exact_samples": 512000,
+    "results": [
+      {
+        "repeat": 1,
+        "case": "detuned",
+        "before_mean_us": 513.3706000000001,
+        "after_mean_us": 442.5613000000001,
+        "median_paired_saving_us": 68.79999999999998,
+        "before_p99_us": 625.8,
+        "after_p99_us": 515.403,
+        "before_max_us": 813.1,
+        "after_max_us": 772.9,
+        "before_misses": 0,
+        "after_misses": 0,
+        "audio_sha256": "73063f565abe58d013273b159107abff613f44c37b807ecea8dbd97a5e023b31"
+      },
+      {
+        "repeat": 1,
+        "case": "pitch-sweep",
+        "before_mean_us": 587.9153999999999,
+        "after_mean_us": 509.9161,
+        "median_paired_saving_us": 77.4,
+        "before_p99_us": 1004.2159999999996,
+        "after_p99_us": 887.3289999999997,
+        "before_max_us": 1371.7,
+        "after_max_us": 1898.5,
+        "before_misses": 1,
+        "after_misses": 2,
+        "audio_sha256": "9743ce12185b4b9549fc273547be91ca20d9252d3e460a641f9bc4e9475ba39e"
+      },
+      {
+        "repeat": 1,
+        "case": "continuous-fades",
+        "before_mean_us": 684.3419,
+        "after_mean_us": 603.4094,
+        "median_paired_saving_us": 73.10000000000002,
+        "before_p99_us": 1148.5549999999998,
+        "after_p99_us": 933.1049999999999,
+        "before_max_us": 2072.8,
+        "after_max_us": 1501.8,
+        "before_misses": 4,
+        "after_misses": 2,
+        "audio_sha256": "00c5bec42e3b5eafc08049d7abe744ce808acb617cabb0ebc3661d401425b6f1"
+      },
+      {
+        "repeat": 1,
+        "case": "pwm-control",
+        "before_mean_us": 300.2218,
+        "after_mean_us": 300.2339,
+        "median_paired_saving_us": -0.1999999999999602,
+        "before_p99_us": 497.65299999999996,
+        "after_p99_us": 463.82399999999984,
+        "before_max_us": 895.7,
+        "after_max_us": 950.9,
+        "before_misses": 0,
+        "after_misses": 0,
+        "audio_sha256": "48497eb5703e214890d6945933d79412dd57910a81284b9ba6187e11ac052ae4"
+      },
+      {
+        "repeat": 2,
+        "case": "detuned",
+        "before_mean_us": 536.7174,
+        "after_mean_us": 458.6349,
+        "median_paired_saving_us": 70.9,
+        "before_p99_us": 1012.4079999999998,
+        "after_p99_us": 752.9019999999999,
+        "before_max_us": 1429.7,
+        "after_max_us": 1172.4,
+        "before_misses": 1,
+        "after_misses": 0,
+        "audio_sha256": "73063f565abe58d013273b159107abff613f44c37b807ecea8dbd97a5e023b31"
+      },
+      {
+        "repeat": 2,
+        "case": "pitch-sweep",
+        "before_mean_us": 557.9203999999999,
+        "after_mean_us": 478.524,
+        "median_paired_saving_us": 76.70000000000002,
+        "before_p99_us": 688.244,
+        "after_p99_us": 631.514,
+        "before_max_us": 791.2,
+        "after_max_us": 755.9,
+        "before_misses": 0,
+        "after_misses": 0,
+        "audio_sha256": "9743ce12185b4b9549fc273547be91ca20d9252d3e460a641f9bc4e9475ba39e"
+      },
+      {
+        "repeat": 2,
+        "case": "continuous-fades",
+        "before_mean_us": 666.7221,
+        "after_mean_us": 588.7852999999999,
+        "median_paired_saving_us": 74.59999999999997,
+        "before_p99_us": 812.2330000000001,
+        "after_p99_us": 716.21,
+        "before_max_us": 931.0,
+        "after_max_us": 1131.6,
+        "before_misses": 0,
+        "after_misses": 0,
+        "audio_sha256": "00c5bec42e3b5eafc08049d7abe744ce808acb617cabb0ebc3661d401425b6f1"
+      },
+      {
+        "repeat": 2,
+        "case": "pwm-control",
+        "before_mean_us": 297.793,
+        "after_mean_us": 297.75829999999996,
+        "median_paired_saving_us": 1.450000000000017,
+        "before_p99_us": 391.4609999999999,
+        "after_p99_us": 380.904,
+        "before_max_us": 691.7,
+        "after_max_us": 894.8,
+        "before_misses": 0,
+        "after_misses": 0,
+        "audio_sha256": "48497eb5703e214890d6945933d79412dd57910a81284b9ba6187e11ac052ae4"
+      }
+    ]
+  },
+  "preserved": "N64, K4 profile, H limits, int16 stored basis/audio/coefficient widths, int32 Q30 weights, Q32 phases, every RNE/SAT boundary and harmonic addition order, 128-entry descriptor cache, all budgets",
+  "scratch": "64*K int64 accumulators only at H>=32; smaller H retains 2*H*K int64 rotations. 2048 bytes for both at H32/K4. Source read/product counts unchanged; no FPGA cost reduction claimed.",
+  "production_sha256": {
+    "src\\symcrash_python_ap\\vm\\hotpath_jit.py": "3246ae1c6f707ba1d53595ef84609ba42d5cc77f1d83f73ea2a7c8f9448962b9",
+    "tests\\conformance\\test_mode_b_interpolated_jit.py": "ef8e5e299b22b1e82d3bc6567423380a9dce945cec4e3a552b811dd352453e03"
+  },
+  "production_tests": {
+    "exit_code": 0,
+    "passed": 82,
+    "seconds": 35.89,
+    "log": "_e3-vm-production-tests.log",
+    "includes": "Existing fresh-process no-audio-compilation and pitch budget checks"
+  },
+  "production_vm": {
+    "exit_code": 0,
+    "command": [
+      "tools/benchmark_vm_step_block.py",
+      "--skip-reference"
+    ],
+    "log": "_e3-vm-production-benchmark.log",
+    "log_sha256": "31652d813c09537ce8cc1af3b0a9ef005c9a442cb2c6cc6b0ed945ca32676117"
+  },
+  "production_live": {
+    "exit_code": 1,
+    "command": [
+      "tools/benchmark_live_workloads.py",
+      "--workloads",
+      "controls",
+      "note-turnover",
+      "material-0",
+      "material-1",
+      "material-2",
+      "--voices",
+      "1",
+      "4",
+      "--output",
+      "build\\e3_vm_20261031\\production-live"
+    ],
+    "log": "_e3-vm-production-live.log",
+    "log_sha256": "0786465bf9da97a1a7ce456f86f27552b9bcdbe523dedb796ec11bcf37de454b",
+    "report": "build\\e3_vm_20261031\\production-live\\report.json",
+    "unchanged_measured_samples": 960000,
+    "reference_jit_samples": 122880,
+    "deadline_misses": 3773,
+    "measured_blocks": 7500,
+    "results": [
+      {
+        "workload": "controls",
+        "voices": 1,
+        "warmup_blocks": 100,
+        "first_block_us": 1227.5,
+        "blocks": 750,
+        "mean_us": 993.8001333333333,
+        "p95_us": 1218.7999999999997,
+        "p99_us": 1458.0669999999998,
+        "max_us": 1662.4,
+        "deadline_misses": 15,
+        "mean_within_budget": true,
+        "no_observed_deadline_misses": false,
+        "witnesses": {
+          "minimum_rendered_voices": 1,
+          "distinct_rendered_pitches": 850,
+          "note_turnovers": 0,
+          "started_note_frames": 1,
+          "material_id": 9,
+          "material_name": "SVF",
+          "peak": 22515,
+          "slew": 1126
+        },
+        "audio_sha256": "80bee3f9e3189543e3c61259c34bd52341354e9f549355dfa6736e36f3ba4b8e",
+        "reference_jit": {
+          "blocks": 96,
+          "audio_sha256": "2365588b24535cce5fd76bf308df94a5cbb798778407b607eb3e2dffb3f65c9b",
+          "minimum_rendered_voices": 1,
+          "distinct_rendered_pitches": 96,
+          "note_turnovers": 0,
+          "started_note_frames": 1,
+          "material_id": 9,
+          "material_name": "SVF",
+          "peak": 22515,
+          "slew": 1126
+        },
+        "status": "measured"
+      },
+      {
+        "workload": "controls",
+        "voices": 4,
+        "warmup_blocks": 100,
+        "first_block_us": 2979.2,
+        "blocks": 750,
+        "mean_us": 2453.534533333333,
+        "p95_us": 2805.7999999999993,
+        "p99_us": 3564.355,
+        "max_us": 4299.7,
+        "deadline_misses": 750,
+        "mean_within_budget": false,
+        "no_observed_deadline_misses": false,
+        "witnesses": {
+          "minimum_rendered_voices": 4,
+          "distinct_rendered_pitches": 3400,
+          "note_turnovers": 0,
+          "started_note_frames": 4,
+          "material_id": 9,
+          "material_name": "SVF",
+          "peak": 27275,
+          "slew": 2000
+        },
+        "audio_sha256": "3cda5f8b8498e90c68906beb52d2071218b704ea5dd7c8feb0d636400fe2e9dd",
+        "reference_jit": {
+          "blocks": 96,
+          "audio_sha256": "d82f249072d0c5a1516b3715d4b722a3436416c67159452a01f81602e039c0db",
+          "minimum_rendered_voices": 4,
+          "distinct_rendered_pitches": 384,
+          "note_turnovers": 0,
+          "started_note_frames": 4,
+          "material_id": 9,
+          "material_name": "SVF",
+          "peak": 27275,
+          "slew": 2000
+        },
+        "status": "measured"
+      },
+      {
+        "workload": "note-turnover",
+        "voices": 1,
+        "warmup_blocks": 100,
+        "first_block_us": 1263.3,
+        "blocks": 750,
+        "mean_us": 700.6174666666666,
+        "p95_us": 840.9099999999997,
+        "p99_us": 1077.36,
+        "max_us": 1674.0,
+        "deadline_misses": 1,
+        "mean_within_budget": true,
+        "no_observed_deadline_misses": false,
+        "witnesses": {
+          "minimum_rendered_voices": 1,
+          "distinct_rendered_pitches": 104,
+          "note_turnovers": 106,
+          "started_note_frames": 107,
+          "material_id": 9,
+          "material_name": "SVF",
+          "peak": 31999,
+          "slew": 1974
+        },
+        "audio_sha256": "428c20d4bb41e73be4443b5f391df4947d7159f3e489761b097fb06593fe38ae",
+        "reference_jit": {
+          "blocks": 96,
+          "audio_sha256": "00753da6093b1b27eab967a923da47da2977d8fa480b24e8c6a09d81c824723b",
+          "minimum_rendered_voices": 1,
+          "distinct_rendered_pitches": 12,
+          "note_turnovers": 11,
+          "started_note_frames": 12,
+          "material_id": 9,
+          "material_name": "SVF",
+          "peak": 19653,
+          "slew": 1150
+        },
+        "status": "measured"
+      },
+      {
+        "workload": "note-turnover",
+        "voices": 4,
+        "warmup_blocks": 100,
+        "first_block_us": 3008.0,
+        "blocks": 750,
+        "mean_us": 1627.1627999999998,
+        "p95_us": 1766.22,
+        "p99_us": 1936.483,
+        "max_us": 2191.7,
+        "deadline_misses": 750,
+        "mean_within_budget": false,
+        "no_observed_deadline_misses": false,
+        "witnesses": {
+          "minimum_rendered_voices": 4,
+          "distinct_rendered_pitches": 104,
+          "note_turnovers": 106,
+          "started_note_frames": 110,
+          "material_id": 9,
+          "material_name": "SVF",
+          "peak": 32000,
+          "slew": 2000
+        },
+        "audio_sha256": "d74826e235a6882441be9ad1210a7dff435bf629df7ad2a2f8170997143e475a",
+        "reference_jit": {
+          "blocks": 96,
+          "audio_sha256": "4cc5736454cf1fb8a868feb7213a0abce5b6693a206f9dfd94319d5ebc4afd2c",
+          "minimum_rendered_voices": 4,
+          "distinct_rendered_pitches": 15,
+          "note_turnovers": 11,
+          "started_note_frames": 15,
+          "material_id": 9,
+          "material_name": "SVF",
+          "peak": 31999,
+          "slew": 2000
+        },
+        "status": "measured"
+      },
+      {
+        "workload": "material-0",
+        "voices": 1,
+        "warmup_blocks": 100,
+        "first_block_us": 890.8,
+        "blocks": 750,
+        "mean_us": 641.3196,
+        "p95_us": 785.015,
+        "p99_us": 910.8199999999999,
+        "max_us": 2150.7,
+        "deadline_misses": 1,
+        "mean_within_budget": true,
+        "no_observed_deadline_misses": false,
+        "witnesses": {
+          "minimum_rendered_voices": 1,
+          "distinct_rendered_pitches": 1,
+          "note_turnovers": 0,
+          "started_note_frames": 1,
+          "material_id": 0,
+          "material_name": "Clean Glue",
+          "peak": 4918,
+          "slew": 763
+        },
+        "audio_sha256": "0af706aaa7eb5c12ffeca9c409d49148edfa7a2976da608ef227e0129eb57dfd",
+        "reference_jit": {
+          "blocks": 96,
+          "audio_sha256": "651a1bafc2683457514d44fdf59a8bfc1febdafccbaaefec06cf69431b3ed2c2",
+          "minimum_rendered_voices": 1,
+          "distinct_rendered_pitches": 1,
+          "note_turnovers": 0,
+          "started_note_frames": 1,
+          "material_id": 0,
+          "material_name": "Clean Glue",
+          "peak": 4918,
+          "slew": 763
+        },
+        "status": "measured"
+      },
+      {
+        "workload": "material-0",
+        "voices": 4,
+        "warmup_blocks": 100,
+        "first_block_us": 2318.7,
+        "blocks": 750,
+        "mean_us": 1570.3289333333337,
+        "p95_us": 1641.07,
+        "p99_us": 1812.348999999999,
+        "max_us": 2270.1,
+        "deadline_misses": 750,
+        "mean_within_budget": false,
+        "no_observed_deadline_misses": false,
+        "witnesses": {
+          "minimum_rendered_voices": 4,
+          "distinct_rendered_pitches": 4,
+          "note_turnovers": 0,
+          "started_note_frames": 4,
+          "material_id": 0,
+          "material_name": "Clean Glue",
+          "peak": 14644,
+          "slew": 2000
+        },
+        "audio_sha256": "79bf1e9067d22dfabcd5e9c2e2a0963392c1768b87da73ab607b68d91b52161e",
+        "reference_jit": {
+          "blocks": 96,
+          "audio_sha256": "b0753a38152d47c1426e8e2474d89fdb86f2a64af0f1cdbacdf063153b37bf05",
+          "minimum_rendered_voices": 4,
+          "distinct_rendered_pitches": 4,
+          "note_turnovers": 0,
+          "started_note_frames": 4,
+          "material_id": 0,
+          "material_name": "Clean Glue",
+          "peak": 14644,
+          "slew": 1620
+        },
+        "status": "measured"
+      },
+      {
+        "workload": "material-1",
+        "voices": 1,
+        "warmup_blocks": 100,
+        "first_block_us": 935.3,
+        "blocks": 750,
+        "mean_us": 674.2453333333333,
+        "p95_us": 721.955,
+        "p99_us": 876.9599999999999,
+        "max_us": 1275.8,
+        "deadline_misses": 0,
+        "mean_within_budget": true,
+        "no_observed_deadline_misses": true,
+        "witnesses": {
+          "minimum_rendered_voices": 1,
+          "distinct_rendered_pitches": 1,
+          "note_turnovers": 0,
+          "started_note_frames": 1,
+          "material_id": 1,
+          "material_name": "Tape Bus",
+          "peak": 5026,
+          "slew": 785
+        },
+        "audio_sha256": "445d4b13434bc944106fc2110873525b7bc91b8eeeece07dfd4a783aee28767d",
+        "reference_jit": {
+          "blocks": 96,
+          "audio_sha256": "746cbeb8632d127c935e780819cfd3548a907efc08d48c487499deed8664f2f5",
+          "minimum_rendered_voices": 1,
+          "distinct_rendered_pitches": 1,
+          "note_turnovers": 0,
+          "started_note_frames": 1,
+          "material_id": 1,
+          "material_name": "Tape Bus",
+          "peak": 5026,
+          "slew": 785
+        },
+        "status": "measured"
+      },
+      {
+        "workload": "material-1",
+        "voices": 4,
+        "warmup_blocks": 100,
+        "first_block_us": 2466.1,
+        "blocks": 750,
+        "mean_us": 1619.384266666667,
+        "p95_us": 1694.315,
+        "p99_us": 1810.501,
+        "max_us": 2489.9,
+        "deadline_misses": 750,
+        "mean_within_budget": false,
+        "no_observed_deadline_misses": false,
+        "witnesses": {
+          "minimum_rendered_voices": 4,
+          "distinct_rendered_pitches": 4,
+          "note_turnovers": 0,
+          "started_note_frames": 4,
+          "material_id": 1,
+          "material_name": "Tape Bus",
+          "peak": 12914,
+          "slew": 2000
+        },
+        "audio_sha256": "a8c04c1e8df39ddcb8926105255a8c068fa766034d1daa9e753ecf33f4b62e5b",
+        "reference_jit": {
+          "blocks": 96,
+          "audio_sha256": "0845c5d10ba2dd95a673b07ec6f69ebb79607cd5ceb35da3b3c0f453beb65c1b",
+          "minimum_rendered_voices": 4,
+          "distinct_rendered_pitches": 4,
+          "note_turnovers": 0,
+          "started_note_frames": 4,
+          "material_id": 1,
+          "material_name": "Tape Bus",
+          "peak": 12914,
+          "slew": 1440
+        },
+        "status": "measured"
+      },
+      {
+        "workload": "material-2",
+        "voices": 1,
+        "warmup_blocks": 100,
+        "first_block_us": 965.5,
+        "blocks": 750,
+        "mean_us": 724.3524000000001,
+        "p95_us": 933.42,
+        "p99_us": 1242.9599999999998,
+        "max_us": 1545.0,
+        "deadline_misses": 6,
+        "mean_within_budget": true,
+        "no_observed_deadline_misses": false,
+        "witnesses": {
+          "minimum_rendered_voices": 1,
+          "distinct_rendered_pitches": 1,
+          "note_turnovers": 0,
+          "started_note_frames": 1,
+          "material_id": 2,
+          "material_name": "Rank Grit",
+          "peak": 4686,
+          "slew": 636
+        },
+        "audio_sha256": "c5343c9b25e30f8156a8716c418d409996b31484ea27cb6ed24c4fc8e5970519",
+        "reference_jit": {
+          "blocks": 96,
+          "audio_sha256": "0233ba6f20a56825ab8bc1bd95fa93e41921c6755cf490ff5ad2ba8165cbc3a8",
+          "minimum_rendered_voices": 1,
+          "distinct_rendered_pitches": 1,
+          "note_turnovers": 0,
+          "started_note_frames": 1,
+          "material_id": 2,
+          "material_name": "Rank Grit",
+          "peak": 4686,
+          "slew": 636
+        },
+        "status": "measured"
+      },
+      {
+        "workload": "material-2",
+        "voices": 4,
+        "warmup_blocks": 100,
+        "first_block_us": 2348.9,
+        "blocks": 750,
+        "mean_us": 1726.7233333333334,
+        "p95_us": 1973.1999999999998,
+        "p99_us": 2148.959,
+        "max_us": 2629.6,
+        "deadline_misses": 750,
+        "mean_within_budget": false,
+        "no_observed_deadline_misses": false,
+        "witnesses": {
+          "minimum_rendered_voices": 4,
+          "distinct_rendered_pitches": 4,
+          "note_turnovers": 0,
+          "started_note_frames": 4,
+          "material_id": 2,
+          "material_name": "Rank Grit",
+          "peak": 14128,
+          "slew": 1741
+        },
+        "audio_sha256": "ff3e9bf603df41d539fb5b720fd1575b409797e0bf176d059de7fe36f88ac8d8",
+        "reference_jit": {
+          "blocks": 96,
+          "audio_sha256": "fddeb102ebba79ce86bed9a98f04d7247d859859c5320d3552fa42d21536058a",
+          "minimum_rendered_voices": 4,
+          "distinct_rendered_pitches": 4,
+          "note_turnovers": 0,
+          "started_note_frames": 4,
+          "material_id": 2,
+          "material_name": "Rank Grit",
+          "peak": 14128,
+          "slew": 1277
+        },
+        "status": "measured"
+      }
+    ],
+    "by_voice_count": {
+      "1": {
+        "deadline_misses": 23,
+        "measured_blocks": 3750
+      },
+      "4": {
+        "deadline_misses": 3750,
+        "measured_blocks": 3750
+      }
+    }
+  },
+  "full_regression": {
+    "status": "passed",
+    "exit_code": 0,
+    "summary": "6600 passed, 14 skipped, 7 warnings in 1286.50s (0:21:26)",
+    "passed": 6600,
+    "skipped": 14,
+    "warnings": 7,
+    "unchanged_inputs": 1011,
+    "inputs": "_e3_full_inputs_20261031.json",
+    "inputs_sha256": "d694a855b3133957897770c8e998611988957fba6b738bce55c20980cc7e360e",
+    "log": "_e3-full-tests-20261031.log",
+    "log_sha256": "8f1d0c05a17793671b59bc32050cdce688f6c9256fa9e3202c1c99772605abbe",
+    "protected_git": {
+      "root": {
+        "head": "23377cc6b31e90f6d03ad63ee332beb6fb88143a",
+        "staged_patch_sha256": "ad4bf3ccbe8a590a7048b3fc38a37dff3681762dd7d6c79bde0d6f25852945b9"
+      },
+      "docs": {
+        "head": "86514812c317f4b4c7eb0a26a70e017eac0335f5",
+        "staged_patch_sha256": "76a1af380934cc163e477265a5a6847e51248cff08f447e26a45f8fe319acc1b"
+      }
+    },
+    "interpretation": "Full production regression after E3 VM and Tape/Rank changes. Realtime deadlines and hardware fit remain separate open gates."
+  },
+  "post_regression_format_only": {
+    "status": "Applied after full regression terminal; all AST values and source locations identical",
+    "reason": "Restore the 97 pre-existing LF lines outside the new kernel; no syntax/tree/location change",
+    "tested_source_sha256": "ab34f3d444cacdef13347af62f0b71cfa173caea9ea79ce37ba666b25da55b36",
+    "preserved_source_sha256": "3246ae1c6f707ba1d53595ef84609ba42d5cc77f1d83f73ea2a7c8f9448962b9",
+    "ast_and_locations_identical": true,
+    "fresh_startup_check": {
+      "status": "passed",
+      "exit_code": 0,
+      "passed": 1,
+      "seconds": 11.51,
+      "test": "tests/conformance/test_basis_resource.py::test_fresh_preparation_compiles_detuned_kernels_before_first_audio_block",
+      "log": "_e3-final-startup-check.log",
+      "log_sha256": "866098ac09f8bcce1777558230b04dad4643ccbe5cd3d758f8897a965ce268d1"
+    }
+  },
+  "committed_full_regression_evidence": {
+    "_e3-full-tests-20261031.log": {
+      "path": "tests/artifacts/regen_reports/e3_full_regression_20261031.txt",
+      "sha256": "8f1d0c05a17793671b59bc32050cdce688f6c9256fa9e3202c1c99772605abbe"
+    },
+    "_e3_full_inputs_20261031.json": {
+      "path": "tests/artifacts/regen_reports/e3_full_inputs_20261031.json",
+      "sha256": "d694a855b3133957897770c8e998611988957fba6b738bce55c20980cc7e360e"
+    },
+    "_e3_full_result_20261031.json": {
+      "path": "tests/artifacts/regen_reports/e3_full_result_20261031.json",
+      "sha256": "15d410e06a2b98ecf961693c83c82653fddc500ee1800ecf5174190d6374ba69"
+    }
+  }
+}

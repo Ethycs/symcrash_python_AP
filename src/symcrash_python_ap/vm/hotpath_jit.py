@@ -753,7 +753,7 @@ def mode_b_coefficients(lut, a_h, b_h, dc, phases, dc_frame, sin_basis,
 # =============================================================================
 
 @njit(cache=True)
-def mode_b_interpolated_coefficients(lut, a_h, b_h, dc, phases, dc_frame,
+def _mode_b_interpolated_coefficients_leaf_order(lut, a_h, b_h, dc, phases, dc_frame,
                                     coefficients, source_offsets, interpolation_weights, output):
     """Stream four mapped anchors into the MAC; never materialize a pitch bank.
 
@@ -787,6 +787,60 @@ def mode_b_interpolated_coefficients(lut, a_h, b_h, dc, phases, dc_frame,
                 accumulator += _rshift_rne(w_sin[h,k]*sine_basis, 15)
                 accumulator += _rshift_rne(w_cos[h,k]*cosine_basis, 15)
             output[leaf*slots+k] = _clamp16(accumulator)
+
+
+@njit(cache=True)
+def mode_b_interpolated_coefficients(lut, a_h, b_h, dc, phases, dc_frame,
+                 coefficients, source_offsets, interpolation_weights, output):
+    """Reuse mapped anchors across leaves without changing coefficient arithmetic.
+
+    Each output retains DC -> ascending harmonic sine/cosine RNE additions.
+    At H>=32, 64*K int64 accumulator scratch replaces 2*H*K int64 rotation
+    scratch, never increasing its size (both 2048 bytes at H32/K4). For lower
+    H, retain the original traversal and smaller rotation scratch. Stored
+    int16 anchors/output, Q30 weights, Q32 phases and capacities are unchanged.
+    Prepared read-only basis inputs and the separate VM output retain their
+    existing ownership; no full detuned bank or additional cache is created.
+    """
+    harmonics, slots = len(a_h), len(phases)
+    if harmonics < NUM_LEAVES // 2:
+        _mode_b_interpolated_coefficients_leaf_order(lut, a_h, b_h, dc, phases, dc_frame,
+                 coefficients, source_offsets, interpolation_weights, output)
+        return
+    accumulators = np.empty((NUM_LEAVES, slots), dtype=np.int64)
+    for leaf in range(NUM_LEAVES):
+        for k in range(slots):
+            accumulators[leaf, k] = _rshift_rne(dc * np.int64(dc_frame[leaf, k]), 15)
+    for h in range(harmonics):
+        w0, w1 = np.int64(interpolation_weights[h, 0]), np.int64(interpolation_weights[h, 1])
+        w2, w3 = np.int64(interpolation_weights[h, 2]), np.int64(interpolation_weights[h, 3])
+        c0, s0 = source_offsets[h, 0, 0], source_offsets[h, 0, 1]
+        c1, s1 = source_offsets[h, 1, 0], source_offsets[h, 1, 1]
+        c2, s2 = source_offsets[h, 2, 0], source_offsets[h, 2, 1]
+        c3, s3 = source_offsets[h, 3, 0], source_offsets[h, 3, 1]
+        for k in range(slots):
+            phase = (phases[k] * (h + 1)) & 0xffffffff
+            sine = _sine_q15_k(lut, phase)
+            cosine = _sine_q15_k(lut, (phase + 0x40000000) & 0xffffffff)
+            rotated_sine = _rshift_rne(a_h[h] * cosine - b_h[h] * sine, 15)
+            rotated_cosine = _rshift_rne(a_h[h] * sine + b_h[h] * cosine, 15)
+            for leaf in range(NUM_LEAVES):
+                at = leaf * slots + k
+                sine_basis = w0 * np.int64(coefficients[s0 + at])
+                sine_basis += w1 * np.int64(coefficients[s1 + at])
+                sine_basis += w2 * np.int64(coefficients[s2 + at])
+                sine_basis += w3 * np.int64(coefficients[s3 + at])
+                cosine_basis = w0 * np.int64(coefficients[c0 + at])
+                cosine_basis += w1 * np.int64(coefficients[c1 + at])
+                cosine_basis += w2 * np.int64(coefficients[c2 + at])
+                cosine_basis += w3 * np.int64(coefficients[c3 + at])
+                sine_basis = _clamp16(_rshift_rne(sine_basis, 30))
+                cosine_basis = _clamp16(_rshift_rne(cosine_basis, 30))
+                accumulators[leaf, k] += _rshift_rne(rotated_sine * sine_basis, 15)
+                accumulators[leaf, k] += _rshift_rne(rotated_cosine * cosine_basis, 15)
+    for leaf in range(NUM_LEAVES):
+        for k in range(slots):
+            output[leaf * slots + k] = _clamp16(accumulators[leaf, k])
 
 
 # =============================================================================

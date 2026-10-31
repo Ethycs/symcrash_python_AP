@@ -1,0 +1,24 @@
+{
+  "status": "passed",
+  "exit_code": 0,
+  "summary": "6600 passed, 14 skipped, 7 warnings in 1286.50s (0:21:26)",
+  "passed": 6600,
+  "skipped": 14,
+  "warnings": 7,
+  "unchanged_inputs": 1011,
+  "inputs": "_e3_full_inputs_20261031.json",
+  "inputs_sha256": "d694a855b3133957897770c8e998611988957fba6b738bce55c20980cc7e360e",
+  "log": "_e3-full-tests-20261031.log",
+  "log_sha256": "8f1d0c05a17793671b59bc32050cdce688f6c9256fa9e3202c1c99772605abbe",
+  "protected_git": {
+    "root": {
+      "head": "23377cc6b31e90f6d03ad63ee332beb6fb88143a",
+      "staged_patch_sha256": "ad4bf3ccbe8a590a7048b3fc38a37dff3681762dd7d6c79bde0d6f25852945b9"
+    },
+    "docs": {
+      "head": "86514812c317f4b4c7eb0a26a70e017eac0335f5",
+      "staged_patch_sha256": "76a1af380934cc163e477265a5a6847e51248cff08f447e26a45f8fe319acc1b"
+    }
+  },
+  "interpretation": "Full production regression after E3 VM and Tape/Rank changes. Realtime deadlines and hardware fit remain separate open gates."
+}
