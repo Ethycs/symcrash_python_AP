@@ -12,7 +12,18 @@ from dataclasses import dataclass, replace
 from .fixed import RSHIFT_RNE, mul_q15_sat, sat16
 from .frames import ParamFrame
 from .material.material_engine import MaterialEngine
-from .primitives import Q15_ONE
+from .primitives import Q15_ONE, Q15_NEG_ONE
+from .vm.hotpath_jit import jit_enabled
+
+
+def _saturate_bus(values):
+    # SAT16 is identity for these ordinary values; still detach the output.
+    # Custom containers/scalars retain the reference's per-element behavior.
+    if (jit_enabled() and type(values) is list
+            and set(map(type, values)) <= {int}
+            and (not values or min(values) >= Q15_NEG_ONE and max(values) <= Q15_ONE)):
+        return values.copy()
+    return [sat16(x) for x in values]
 
 
 @dataclass(frozen=True)
@@ -113,7 +124,7 @@ class AuxiliaryReturns:
                 out_r[i] += mul_q15_sat(int(right[i]), amount)
 
     def process(self, inputs):
-        self.last_inputs = {name: ([sat16(x) for x in left], [sat16(x) for x in right])
+        self.last_inputs = {name: (_saturate_bus(left), _saturate_bus(right))
                             for name, (left, right) in inputs.items()}
         out_l, out_r = [0] * self.block_size, [0] * self.block_size
         for name, bus in self.buses.items():

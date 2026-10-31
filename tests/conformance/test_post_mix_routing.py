@@ -133,6 +133,46 @@ def test_aux_inputs_use_wide_sums_and_independent_q15_rounding():
     assert buses.last_inputs['A'][0][0] == 29999  # Clipping each addition would fail.
 
 
+@pytest.mark.parametrize('samples', [[], [-32768, 32767, 0], [-32769, 32768, 1 << 80]])
+def test_aux_input_clamp_detaches_and_preserves_boundary_values(samples):
+    from symcrash_python_ap.audio_routing import _saturate_bus
+    from symcrash_python_ap.vm import hotpath_jit as hot
+    old = hot.jit_enabled()
+    try:
+        hot.set_jit_enabled(True)
+        before = samples.copy()
+        result = _saturate_bus(samples)
+        assert result == [clamp(x) for x in samples]
+        assert result is not samples
+        result.append(123)
+        assert samples == before
+    finally:
+        hot.set_jit_enabled(old)
+
+
+def test_aux_custom_scalars_keep_reference_access_and_conversion():
+    from symcrash_python_ap.audio_routing import _saturate_bus
+    from symcrash_python_ap.vm import hotpath_jit as hot
+    calls = []
+
+    class Observed(int):
+        def __int__(self):
+            calls.append(int.__int__(self))
+            return int.__int__(self)
+
+    old = hot.jit_enabled()
+    try:
+        traces = []
+        for enabled in (False, True):
+            hot.set_jit_enabled(enabled)
+            calls.clear()
+            assert _saturate_bus([Observed(-3), Observed(7)]) == [-3, 7]
+            traces.append(calls.copy())
+        assert traces == [[-3, 7], [-3, 7]]
+    finally:
+        hot.set_jit_enabled(old)
+
+
 def test_aux_engines_are_independent_configuration_is_detached_and_reconfigure_keeps_state():
     buses = AuxiliaryReturns()
     params = ParamFrame(drive_q15=1000)

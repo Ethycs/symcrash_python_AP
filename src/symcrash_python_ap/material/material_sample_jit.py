@@ -110,14 +110,13 @@ def _audio(source, count):
     if type(source) not in (list, tuple):
         raise ValueError('Non-Python containers retain reference arithmetic and access order')
     values = source[:count]
-    if any(type(x) not in (int, bool) for x in values):
+    if not set(map(type, values)) <= {int, bool}:
         raise ValueError('Custom scalar conversion retains the reference path')
-    array = np.asarray(values)
-    if array.shape != (count,) or array.dtype.kind not in 'biu':
+    if len(values) != count:
         raise ValueError('Complete integer audio block required')
-    if np.any(array < Q15_NEG_ONE) or np.any(array > Q15_ONE):
+    if values and (min(values) < Q15_NEG_ONE or max(values) > Q15_ONE):
         raise ValueError('Wide audio retains the reference path')
-    return np.array(array, dtype=np.int16, order='C', copy=True)
+    return np.array(values, dtype=np.int16, order='C', copy=True)
 
 
 def try_tape(engine, left, right):

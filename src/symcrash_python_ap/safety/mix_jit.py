@@ -103,7 +103,9 @@ def try_finish_output(left, right, returns, mono, gain):
         if type(row) not in (list, tuple) or len(row) != n:
             return None
         lower, upper = (Q15_NEG_ONE, Q15_ONE) if index < 2 else (-(1 << 31), (1 << 31) - 1)
-        if not all(type(x) is int and lower <= x <= upper for x in row):
+        if not set(map(type, row)) <= {int}:
+            return None
+        if row and (min(row) < lower or max(row) > upper):
             return None
     audio = np.zeros((4, n), dtype=np.int64)
     for index, row in enumerate(rows):

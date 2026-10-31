@@ -719,6 +719,22 @@ def sincos_hk(lut, h_phases, sin_out, cos_out):
 # MODE B COEFFICIENT ACCUMULATION
 # =============================================================================
 
+@njit(cache=True, inline='always')
+def _mode_b_rne(x, shift):
+    """WSE-STD-001 RNE using a floor quotient and nonnegative remainder.
+
+    Mode B products/sums fit signed int64 (four int32*int16 anchor terms
+    are bounded by 2**48). No abs(), biased addition or precision change.
+    Negative ties use the same even quotient rule as positive ties.
+    Only existing Q15/Q30 reduction points use this scalar helper.
+    """
+    quotient = x >> shift
+    remainder = x & ((1 << shift) - 1)
+    half = 1 << (shift - 1)
+    increment = int(remainder > half) | (int(remainder == half) & (quotient & 1))
+    return quotient + increment
+
+
 @njit(cache=True)
 def mode_b_coefficients(lut, a_h, b_h, dc, phases, dc_frame, sin_basis,
                         cos_basis, output):
@@ -737,14 +753,14 @@ def mode_b_coefficients(lut, a_h, b_h, dc, phases, dc_frame, sin_basis,
             phase = (phases[k] * (h + 1)) & 0xFFFFFFFF
             sine = _sine_q15_k(lut, phase)
             cosine = _sine_q15_k(lut, (phase + 0x40000000) & 0xFFFFFFFF)
-            w_sin[h, k] = _rshift_rne(a_h[h] * cosine - b_h[h] * sine, 15)
-            w_cos[h, k] = _rshift_rne(a_h[h] * sine + b_h[h] * cosine, 15)
+            w_sin[h, k] = _mode_b_rne(a_h[h] * cosine - b_h[h] * sine, 15)
+            w_cos[h, k] = _mode_b_rne(a_h[h] * sine + b_h[h] * cosine, 15)
     for leaf in range(NUM_LEAVES):
         for k in range(slots):
-            acc = _rshift_rne(dc * np.int64(dc_frame[leaf, k]), 15)
+            acc = _mode_b_rne(dc * np.int64(dc_frame[leaf, k]), 15)
             for h in range(harmonics):
-                acc += _rshift_rne(w_sin[h, k] * np.int64(sin_basis[h, leaf, k]), 15)
-                acc += _rshift_rne(w_cos[h, k] * np.int64(cos_basis[h, leaf, k]), 15)
+                acc += _mode_b_rne(w_sin[h, k] * np.int64(sin_basis[h, leaf, k]), 15)
+                acc += _mode_b_rne(w_cos[h, k] * np.int64(cos_basis[h, leaf, k]), 15)
             output[leaf * slots + k] = _clamp16(acc)
 
 

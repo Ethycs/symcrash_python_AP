@@ -79,3 +79,18 @@ def test_scratch_and_arithmetic_bounds():
     assert 2 * (1 << 15) ** 2 < 1 << 32
     assert (1 << 16) * (1 << 15) < 1 << 32
     assert (1 << 15) + 2 * 64 * (1 << 16) < 1 << 63
+
+
+@pytest.mark.parametrize('shift', [15, 30])
+def test_mode_b_rounding_matches_fraction_at_signed_ties_and_product_bounds(shift):
+    values = {0, -(1 << 48), (1 << 48) - 1}
+    for quotient in (-65536, -32768, -3, -2, -1, 0, 1, 2, 3, 32767, 65535):
+        for remainder in (0, 1, (1 << (shift - 1)) - 1,
+                          1 << (shift - 1), (1 << (shift - 1)) + 1, (1 << shift) - 1):
+            values.add((quotient << shift) + remainder)
+    rng = np.random.default_rng(9821 + shift)
+    values.update(int(x) for x in rng.integers(-(1 << 48), 1 << 48, 500))
+    for value in values:
+        expected = round(Fraction(value, 1 << shift))
+        assert hot._mode_b_rne(value, shift) == expected
+        assert hot._rshift_rne(value, shift) == expected
