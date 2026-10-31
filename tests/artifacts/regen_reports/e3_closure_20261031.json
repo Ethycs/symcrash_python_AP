@@ -1,5 +1,5 @@
 {
-  "status": "E3 open; output arithmetic substep qualified; Material costs next",
+  "status": "E3 open; output and Reverb substeps qualified; remaining Material programs and sustained misses next",
   "base_commit": "d6d30d8",
   "baseline": {
     "report": "build/e3_closure_baseline/report.json",
@@ -630,5 +630,90 @@
     ],
     "scratch": "One private 4*N int64 array: 2048 bytes at N64; persistent formats and capacities unchanged",
     "full_regression": "Required after remaining E3 changes; not yet run for this source"
+  },
+  "reverb": {
+    "tests": [
+      {
+        "passed": 116,
+        "seconds": 63.05,
+        "log": "_e3-reverb-focused.log",
+        "exit_code": 0
+      },
+      {
+        "passed": 42,
+        "seconds": 6.82,
+        "log": "_e3-reverb-guard-tests.log",
+        "exit_code": 0
+      }
+    ],
+    "initial_sustained_run": {
+      "report": "build/e3_reverb_production/report.json",
+      "exit_code": 1,
+      "blocks": 7500,
+      "deadline_misses": 1221,
+      "mean_us": 1152.36884,
+      "note": "Before replacing per-cell Python guard predicates with builtin scans; retain failure."
+    },
+    "paired_final_guard": [
+      {
+        "repeat": 1,
+        "before": {
+          "blocks": 1000,
+          "mean_us": 2249.0143,
+          "p95_us": 2659.8599999999997,
+          "p99_us": 2998.007,
+          "max_us": 3977.3,
+          "deadline_misses": 1000,
+          "mean_within_budget": false,
+          "no_observed_deadline_misses": false
+        },
+        "after": {
+          "blocks": 1000,
+          "mean_us": 988.1202000000001,
+          "p95_us": 1251.8349999999998,
+          "p99_us": 1718.1419999999998,
+          "max_us": 2304.7,
+          "deadline_misses": 33,
+          "mean_within_budget": true,
+          "no_observed_deadline_misses": false
+        },
+        "median_paired_saving_us": 1236.2999999999997,
+        "exact_samples": 128000,
+        "all_reverb_state_exact": true
+      },
+      {
+        "repeat": 2,
+        "before": {
+          "blocks": 1000,
+          "mean_us": 2217.5161,
+          "p95_us": 2561.43,
+          "p99_us": 2931.632,
+          "max_us": 3251.0,
+          "deadline_misses": 1000,
+          "mean_within_budget": false,
+          "no_observed_deadline_misses": false
+        },
+        "after": {
+          "blocks": 1000,
+          "mean_us": 957.5412,
+          "p95_us": 1193.4399999999996,
+          "p99_us": 1459.685,
+          "max_us": 2114.0,
+          "deadline_misses": 25,
+          "mean_within_budget": true,
+          "no_observed_deadline_misses": false
+        },
+        "median_paired_saving_us": 1235.8000000000002,
+        "exact_samples": 128000,
+        "all_reverb_state_exact": true
+      }
+    ],
+    "numeric_contract": "Unchanged six ring delays, Q15 cells, indices, shifts and individual RNE/SAT operations. Original Python lists remain authoritative; at most N cells per ring copied. No new persistent buffer.",
+    "source_sha256": {
+      "src/symcrash_python_ap/material/material_engine.py": "9b28f8915bee44d0957c25b6c538e05a9dfba22a02f300e0a944aad22730c469",
+      "src/symcrash_python_ap/material/material_ring_jit.py": "2c305914198303fa424de4538b96e51ba38d939adb55b3703fdab49bb301b908",
+      "tests/conformance/test_material_ring_jit.py": "8ac66ff09311ab32012d74b88f3cc8cd50c14d452b136ff971b009c0c2c545ed"
+    },
+    "full_regression": "Pending after remaining E3 changes"
   }
 }

@@ -223,6 +223,8 @@ class MaterialEngine:
         prepare()
         from .material_sample_jit import prepare as prepare_samples
         prepare_samples()
+        from .material_ring_jit import prepare as prepare_rings
+        prepare_rings()
         self._exciter_prng = PCG32(state=seed)
 
         # Stereo state pairs using StereoState wrapper
@@ -866,6 +868,16 @@ class MaterialEngine:
         outL = []
         outR = []
 
+        if (type(self) is MaterialEngine
+                and type(self.reverb_L) is ReverbState and type(self.reverb_R) is ReverbState
+                and getattr(self._reverb_sample, '__func__', None) is _REVERB_SAMPLE_REFERENCE
+                and getattr(self._comb_filter, '__func__', None) is _COMB_FILTER_REFERENCE
+                and getattr(self._allpass_filter, '__func__', None) is _ALLPASS_FILTER_REFERENCE):
+            from .material_ring_jit import try_reverb
+            result = try_reverb(self, L, R)
+            if result is not None:
+                return result
+
         # Map parameters
         decay_q15 = self.params.drive_q15
         damping_q15 = self.params.tone_q15
@@ -1103,3 +1115,7 @@ class MaterialEngine:
 _TAPE_SAMPLE_REFERENCE = MaterialEngine._tape_sample
 _TONE_FILTER_REFERENCE = MaterialEngine._tone_filter
 _RANK_SAMPLE_REFERENCE = MaterialEngine._rank_sample
+
+_REVERB_SAMPLE_REFERENCE = MaterialEngine._reverb_sample
+_COMB_FILTER_REFERENCE = MaterialEngine._comb_filter
+_ALLPASS_FILTER_REFERENCE = MaterialEngine._allpass_filter
