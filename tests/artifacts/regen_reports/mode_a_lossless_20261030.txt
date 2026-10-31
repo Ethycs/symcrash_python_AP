@@ -1,0 +1,229 @@
+Mode A lossless full-domain storage experiment - 2026-10-30
+Diagnostic only. No live codec/resource adoption or Python audio changes.
+Source: current RNE Mode A image, validated before read. N64/K4/P64 and
+stored int16 precision fixed. Sixteen tables per compression batch is a
+transport/prediction checkpoint choice, not a transform dimension.
+
+Reproduction:
+pixi run python tools/audit_mode_a_lossless.py --output _mode_a_lossless.json
+pixi run python -m pytest tests/conformance/test_mode_a_lossless_audit.py -q
+19 passed in 2.70s; full audit process exit 0 (successful measurement).
+Both candidate STORAGE gates FAIL. A successful audit process is not a fit.
+All 63,508 tables / 1,040,515,072 coefficients compare exactly after decoding.
+Per-wave decoded/source SHA-256 also match; no lossy residuals are accepted.
+
+Mixed predictor bound: -131070..131070 (18 signed bits); zigzag0..262140.
+Differences widen before arithmetic; cumulative sums use int64 in this
+Python diagnostic. Reconstruction checks int16 bounds before conversion.
+No low bits, transform leaves, lanes, phase bins or pitch entries are lost.
+
+Candidate metadata: 80-byte header + 16-byte block records; no production
+format change. Whole 16-table output alone is 524,288 bytes, before predictor
+and entropy scratch. No hardware decoder, DMA/prefetch, BRAM fit or realtime
+qualification is claimed. Host decode measurements are offline observations.
+The normative 4 MiB combined allocation / 128 MiB external capacity stay fixed.
+
+This rejects two concrete lossless encodings, not every possible representation.
+The paper's Mode A pitch-storage mechanism remains unresolved: STD-210 3.1
+is pitch-dependent; RAM-SUBSYSTEMS 3.2 budgets per waveform without a pitch
+axis. Clarification is pending; no silent Mode B or nominal-anchor substitution.
+
+Full measured report:
+
+{
+  "scope": "Lossless storage experiment; no live adoption or hardware decoder/timing qualification",
+  "full_domain": true,
+  "block_tables": 16,
+  "table_count": 63508,
+  "coefficient_count": 1040515072,
+  "zlib_version": "1.3.1",
+  "source": {
+    "path": "mode_a_lut_a2c43975afbdad5c.bin",
+    "bytes": 2081284256,
+    "version": 2,
+    "tables": 63508,
+    "recipe_sha256": "a2c43975afbdad5cfc4d827d841a288ebb4df182f3d5c2cdec7ef6341961b156",
+    "directory_data_sha256": "7c8f85cfe83eac5ad09038b02c43ae84970c32b51dd468c452e031479f93eed9"
+  },
+  "limits": {
+    "coefficients": 4194304,
+    "external_ram": 134217728,
+    "mode_b_bytes": 3124940
+  },
+  "candidate_metadata": "80-byte header plus 16-byte independently addressable block descriptors",
+  "block_raw_bytes": 524288,
+  "rows": [
+    {
+      "wave": "sine",
+      "tables": 12701,
+      "blocks": 794,
+      "source_bytes": 416186368,
+      "source_sha256": "9905a5ada01dc98999fffd673930aa2dc4cd8d850ad95d0496a28adf01e55b7c",
+      "candidates": {
+        "raw_deflate": {
+          "payload_bytes": 237888990,
+          "largest_block_bytes": 493068,
+          "encode_seconds": 22.703171094879508,
+          "decode_seconds": 1.746596199227497,
+          "largest_decode_seconds": 0.005291299894452095,
+          "roundtrip_sha256": "9905a5ada01dc98999fffd673930aa2dc4cd8d850ad95d0496a28adf01e55b7c"
+        },
+        "pitch_phase_delta": {
+          "payload_bytes": 95157235,
+          "largest_block_bytes": 193359,
+          "encode_seconds": 34.109441603533924,
+          "decode_seconds": 18.901602101046592,
+          "largest_decode_seconds": 0.0364888000767678,
+          "roundtrip_sha256": "9905a5ada01dc98999fffd673930aa2dc4cd8d850ad95d0496a28adf01e55b7c"
+        }
+      }
+    },
+    {
+      "wave": "saw",
+      "tables": 12701,
+      "blocks": 794,
+      "source_bytes": 416186368,
+      "source_sha256": "05ac1c91bc340c85b782bc64b54eb3685a590ec2c9655feff8b4e14ae4627d73",
+      "candidates": {
+        "raw_deflate": {
+          "payload_bytes": 292879177,
+          "largest_block_bytes": 499803,
+          "encode_seconds": 23.39747380022891,
+          "decode_seconds": 1.9079430003184825,
+          "largest_decode_seconds": 0.0052987998351454735,
+          "roundtrip_sha256": "05ac1c91bc340c85b782bc64b54eb3685a590ec2c9655feff8b4e14ae4627d73"
+        },
+        "pitch_phase_delta": {
+          "payload_bytes": 151880973,
+          "largest_block_bytes": 282793,
+          "encode_seconds": 26.840722902677953,
+          "decode_seconds": 18.624304705066606,
+          "largest_decode_seconds": 0.0348703998606652,
+          "roundtrip_sha256": "05ac1c91bc340c85b782bc64b54eb3685a590ec2c9655feff8b4e14ae4627d73"
+        }
+      }
+    },
+    {
+      "wave": "square",
+      "tables": 12701,
+      "blocks": 794,
+      "source_bytes": 416186368,
+      "source_sha256": "e5b341bc75933edf911d488879874ec1ce7be9a9a19d26cc34ba35664b097340",
+      "candidates": {
+        "raw_deflate": {
+          "payload_bytes": 289000070,
+          "largest_block_bytes": 489272,
+          "encode_seconds": 23.126717903185636,
+          "decode_seconds": 1.85305609786883,
+          "largest_decode_seconds": 0.004317200044170022,
+          "roundtrip_sha256": "e5b341bc75933edf911d488879874ec1ce7be9a9a19d26cc34ba35664b097340"
+        },
+        "pitch_phase_delta": {
+          "payload_bytes": 144134043,
+          "largest_block_bytes": 266375,
+          "encode_seconds": 25.906301100039855,
+          "decode_seconds": 18.66174080222845,
+          "largest_decode_seconds": 0.03877749992534518,
+          "roundtrip_sha256": "e5b341bc75933edf911d488879874ec1ce7be9a9a19d26cc34ba35664b097340"
+        }
+      }
+    },
+    {
+      "wave": "triangle",
+      "tables": 12701,
+      "blocks": 794,
+      "source_bytes": 416186368,
+      "source_sha256": "eb7f5c94d4d7495cd8927e38abb1f9dda54830cf3b3277beb498da9e7448c746",
+      "candidates": {
+        "raw_deflate": {
+          "payload_bytes": 250404393,
+          "largest_block_bytes": 490418,
+          "encode_seconds": 23.892896002624184,
+          "decode_seconds": 1.7731466989498585,
+          "largest_decode_seconds": 0.004583399975672364,
+          "roundtrip_sha256": "eb7f5c94d4d7495cd8927e38abb1f9dda54830cf3b3277beb498da9e7448c746"
+        },
+        "pitch_phase_delta": {
+          "payload_bytes": 110391436,
+          "largest_block_bytes": 200319,
+          "encode_seconds": 29.709909102646634,
+          "decode_seconds": 18.641560304677114,
+          "largest_decode_seconds": 0.039214499993249774,
+          "roundtrip_sha256": "eb7f5c94d4d7495cd8927e38abb1f9dda54830cf3b3277beb498da9e7448c746"
+        }
+      }
+    },
+    {
+      "wave": "pulse",
+      "tables": 12701,
+      "blocks": 794,
+      "source_bytes": 416186368,
+      "source_sha256": "7982ae202465208b5c5e36caf11b979a3859cfa807701f3199f3b2c80be318c5",
+      "candidates": {
+        "raw_deflate": {
+          "payload_bytes": 292097694,
+          "largest_block_bytes": 492706,
+          "encode_seconds": 24.522648298414424,
+          "decode_seconds": 1.9059970963280648,
+          "largest_decode_seconds": 0.004273099824786186,
+          "roundtrip_sha256": "7982ae202465208b5c5e36caf11b979a3859cfa807701f3199f3b2c80be318c5"
+        },
+        "pitch_phase_delta": {
+          "payload_bytes": 143914250,
+          "largest_block_bytes": 268884,
+          "encode_seconds": 25.77761809923686,
+          "decode_seconds": 18.89827600494027,
+          "largest_decode_seconds": 0.044691900024190545,
+          "roundtrip_sha256": "7982ae202465208b5c5e36caf11b979a3859cfa807701f3199f3b2c80be318c5"
+        }
+      }
+    },
+    {
+      "wave": "legacy",
+      "tables": 3,
+      "blocks": 1,
+      "source_bytes": 98304,
+      "source_sha256": "a47371796973b2e5b6526a5e41bd36b8a95381116b3569549fe7a60deed0195a",
+      "candidates": {
+        "raw_deflate": {
+          "payload_bytes": 67896,
+          "largest_block_bytes": 67896,
+          "encode_seconds": 0.005689899902790785,
+          "decode_seconds": 0.0006115001160651445,
+          "largest_decode_seconds": 0.0006115001160651445,
+          "roundtrip_sha256": "a47371796973b2e5b6526a5e41bd36b8a95381116b3569549fe7a60deed0195a"
+        },
+        "pitch_phase_delta": {
+          "payload_bytes": 50332,
+          "largest_block_bytes": 50332,
+          "encode_seconds": 0.004734500078484416,
+          "decode_seconds": 0.0019316000398248434,
+          "largest_decode_seconds": 0.0019316000398248434,
+          "roundtrip_sha256": "a47371796973b2e5b6526a5e41bd36b8a95381116b3569549fe7a60deed0195a"
+        }
+      }
+    }
+  ],
+  "totals": {
+    "raw_deflate": {
+      "payload_bytes": 1362338220,
+      "directory_bytes": 63536,
+      "candidate_image_bytes": 1362401836,
+      "combined_with_mode_b_bytes": 1365526776,
+      "coefficient_budget_passed": false,
+      "external_capacity_passed": false
+    },
+    "pitch_phase_delta": {
+      "payload_bytes": 645528269,
+      "directory_bytes": 63536,
+      "candidate_image_bytes": 645591885,
+      "combined_with_mode_b_bytes": 648716825,
+      "coefficient_budget_passed": false,
+      "external_capacity_passed": false
+    }
+  }
+}
+
+Diagnostic source SHA-256:
+da8fc8fb9e154667669b8b2d9c4ccc50ed5fdc68db5d61d496fd17e330fb9cf5  tools/audit_mode_a_lossless.py
+cf77ab952ee15e22fe26f4af0c2788d258326d55e39dff45e78d76bf7b1a24ae  tests/conformance/test_mode_a_lossless_audit.py
