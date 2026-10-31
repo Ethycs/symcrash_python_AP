@@ -77,7 +77,7 @@ def _validated_keys(keys):
 def recipe_digest():
     from .hotpath_jit import _get_sine_lut_np
     digest = hashlib.sha256(b'ModeA-v2/Fs48000/N64/K4/P64/headroom1/half-scale-floor/'
-        b'integer-cent-Q32-RNE/Hmin32-floor9x2^31-div10inc/legacy-C4-H16/SineCore-RNE/FWPT-RNE')
+        b'integer-cent-Q32-RNE/Hmin32-floor9x2^31-div10inc/legacy-C4-H16/SineCore-RNE/FWPT-RNE-v2-wide-interstep-SAT16-node')
     for values, dtype in [(_get_sine_lut_np(), '<i4'), (PITCH_FREQUENCIES_HZ, '<f8'),
             (MIDI_CENT_PHASE_Q32, '<u4'), (PULSE_AMPLITUDES, '<f8')]:
         digest.update(np.asarray(values, dtype=dtype).tobytes())

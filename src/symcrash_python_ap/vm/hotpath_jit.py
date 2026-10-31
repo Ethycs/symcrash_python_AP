@@ -575,7 +575,7 @@ def _idwpt_core_k(coeffs, headroom_bits, output_buf, inv_levels, temp_s, temp_d)
                 else:
                     d_left = inv_levels[level + 1, detail_start]
                 d_right = inv_levels[level + 1, detail_start + i]
-                update = (d_left + d_right + 2) >> 2
+                update = _rshift_rne(d_left + d_right, 2)
                 temp_s[i] = s_val - update
 
             for i in range(half):
@@ -584,7 +584,7 @@ def _idwpt_core_k(coeffs, headroom_bits, output_buf, inv_levels, temp_s, temp_d)
                     even_right = temp_s[i + 1]
                 else:
                     even_right = temp_s[i]
-                avg = (even_left + even_right + 1) >> 1
+                avg = _rshift_rne(even_left + even_right, 1)
                 temp_d[i] = inv_levels[level + 1, detail_start + i] + avg
 
             for i in range(half):
@@ -832,7 +832,7 @@ def fwpt_64(input_buf, headroom_bits, output_coeffs):
                 else:
                     even_right = even_left
                 odd = fwd_levels[level, idx + 1]
-                avg = (even_left + even_right + 1) >> 1
+                avg = _rshift_rne(even_left + even_right, 1)
                 temp_d[i] = odd - avg
 
             for i in range(half):
@@ -841,7 +841,7 @@ def fwpt_64(input_buf, headroom_bits, output_coeffs):
                 else:
                     d_left = temp_d[0]
                 d_right = temp_d[i]
-                update = (d_left + d_right + 2) >> 2
+                update = _rshift_rne(d_left + d_right, 2)
                 temp_s[i] = fwd_levels[level, start + 2 * i] + update
 
             approx_start = node * 2 * half

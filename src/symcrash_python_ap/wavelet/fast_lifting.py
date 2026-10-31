@@ -1,22 +1,9 @@
-"""
-Fast CDF 5/3 Lifting for Real-Time Audio
-=========================================
+"""CDF 5/3 lifting with signed nearest-even reductions (WSE-STD-001).
 
-Optimized lifting transform for the audio render path.
-Uses simplified arithmetic (no bit-exact RSHIFT_RNE) for speed.
-
-For bit-exact Verilog-compatible code, use wavelet_packet_trees.py.
-
-Performance comparison (64-sample blocks):
-- Standard (bit-exact): ~1200 µs/block
-- Fast path (this): ~650 µs/block
-- Fused path: ~350 µs/block
-
-The difference is in rounding mode:
-- Standard: RSHIFT_RNE (round-to-nearest, ties-to-even) - 15+ branches per call
-- Fast: (x + bias) >> n - single operation
-
-For audio, the rounding difference is inaudible (max 1 LSB).
+CCS and fused kernels retain wide predict/update intermediates and saturate
+each tree-node result. FastCDF53 retains the older scalar lift's per-step
+saturation; it is not an overflow oracle for CCS. N=64, depth=6 and existing
+headroom scaling are unchanged. See WSE-IMPL-LIFTING-ARITHMETIC-v1.
 """
 
 from typing import List, Tuple, Optional
@@ -25,6 +12,7 @@ from ..primitives import Q15_HALF, Q15_NEG_ONE, Q15_ONE
 
 try:
     from numba import njit
+    from numba.extending import register_jitable
     NUMBA_AVAILABLE = True
 except ImportError:
     NUMBA_AVAILABLE = False
@@ -51,11 +39,25 @@ def _sat16(x: int) -> int:
     return x
 
 
+def _rshift_lift_rne(x: int, bits: int) -> int:
+    """RNE for bounded lifting sums/Q15 products, with bits in {1, 2, 15}.
+
+    The bias cannot overflow the existing int32/int64 intermediates: lifting
+    sums fit signed 18 bits; the largest mask product is 2**30. The retained
+    quotient parity handles positive and negative ties without a sign branch.
+    """
+    return (x + ((1 << (bits - 1)) - 1) + ((x >> bits) & 1)) >> bits
+
+
+if NUMBA_AVAILABLE:
+    _rshift_lift_rne = register_jitable(inline='always')(_rshift_lift_rne)
+
+
 class FastCDF53:
     """
-    Fast CDF 5/3 lifting with simplified rounding.
+    CDF 5/3 scalar lifting with RNE and per-step saturation.
 
-    For real-time audio only. Use CDF53Lifting for bit-exact paths.
+    Matches CDF53Lifting; CCS kernels use node-boundary saturation instead.
     """
 
     @staticmethod
@@ -76,14 +78,14 @@ class FastCDF53:
         for i in range(n):
             left = x[2 * i]
             right = x[2 * i + 2] if 2 * i + 2 < len(x) else x[2 * i]
-            avg = (left + right + 1) >> 1  # Round-to-nearest (fast)
+            avg = _rshift_lift_rne(left + right, 1)
             d[i] = _sat16(x[2 * i + 1] - avg)
 
         # Update: s[i] = x[2i] + (d[i-1] + d[i]) / 4
         for i in range(n):
             d_left = d[i - 1] if i > 0 else d[0]
             d_right = d[i]
-            update = (d_left + d_right + 2) >> 2  # Round-to-nearest (fast)
+            update = _rshift_lift_rne(d_left + d_right, 2)
             s[i] = _sat16(x[2 * i] + update)
 
         return s, d
@@ -121,14 +123,14 @@ class FastCDF53:
         for i in range(n):
             d_left = d[i - 1] if i > 0 else d[0]
             d_right = d[i]
-            update = (d_left + d_right + 2) >> 2
+            update = _rshift_lift_rne(d_left + d_right, 2)
             x[2 * i] = _sat16(s[i] - update)
 
         # Undo predict: x[2i+1] = d[i] + (x[2i] + x[2i+2]) / 2
         for i in range(n):
             left = x[2 * i]
             right = x[2 * i + 2] if 2 * i + 2 < 2 * n else x[2 * i]
-            avg = (left + right + 1) >> 1
+            avg = _rshift_lift_rne(left + right, 1)
             x[2 * i + 1] = _sat16(d[i] + avg)
 
         return x
@@ -198,8 +200,7 @@ def effect_mode_fast(
     """
     Fast effect mode: carrier -> FWPT -> mask -> IDWPT.
 
-    This is the fast path for real-time audio. Uses simplified
-    rounding for speed while maintaining audio-quality accuracy.
+    This scalar effect path uses RNE and per-step saturation.
 
     Args:
         carrier: 64-sample carrier audio (Q15)
@@ -221,7 +222,7 @@ def effect_mode_fast(
             if i < len(mask_q15):
                 mask_val = mask_q15[i]
                 # Scale each coefficient by mask (Q15 multiply)
-                leaves[i] = [_sat16((c * mask_val) >> 15) for c in leaf]
+                leaves[i] = [_sat16(_rshift_lift_rne(c * mask_val, 15)) for c in leaf]
 
     # IDWPT
     result = idwpt_balanced(leaves, depth=6)
@@ -311,14 +312,14 @@ class FusedWPT:
                     even_left = src[idx]
                     even_right = src[idx + 2] if idx + 2 < start + node_size else even_left
                     odd = src[idx + 1]
-                    avg = (even_left + even_right + 1) >> 1
+                    avg = _rshift_lift_rne(even_left + even_right, 1)
                     temp_d[i] = odd - avg
 
                 # Update: s[i] = even[i] + (d[i-1] + d[i]) / 4
                 for i in range(half):
                     d_left = temp_d[i - 1] if i > 0 else temp_d[0]
                     d_right = temp_d[i]
-                    update = (d_left + d_right + 2) >> 2
+                    update = _rshift_lift_rne(d_left + d_right, 2)
                     temp_s[i] = src[start + 2 * i] + update
 
                 # Write to next level
@@ -338,7 +339,7 @@ class FusedWPT:
         if mask_q15 is not None:
             for i in range(block_size):
                 mask_val = mask_q15[i] if i < len(mask_q15) else 0
-                v = (leaves[i] * mask_val) >> 15
+                v = _rshift_lift_rne(leaves[i] * mask_val, 15)
                 inv_leaves[i] = Q15_NEG_ONE if v < Q15_NEG_ONE else (Q15_ONE if v > Q15_ONE else v)
         else:
             for i in range(block_size):
@@ -367,14 +368,14 @@ class FusedWPT:
                     s_val = src[approx_start + i]
                     d_left = src[detail_start + i - 1] if i > 0 else src[detail_start]
                     d_right = src[detail_start + i]
-                    update = (d_left + d_right + 2) >> 2
+                    update = _rshift_lift_rne(d_left + d_right, 2)
                     temp_s[i] = s_val - update
 
                 # Undo predict
                 for i in range(half):
                     even_left = temp_s[i]
                     even_right = temp_s[i + 1] if i + 1 < half else temp_s[i]
-                    avg = (even_left + even_right + 1) >> 1
+                    avg = _rshift_lift_rne(even_left + even_right, 1)
                     temp_d[i] = src[detail_start + i] + avg
 
                 # Interleave to output
@@ -423,7 +424,7 @@ def effect_mode_fused(
 # NUMBA JIT VERSION
 # =============================================================================
 
-@njit(cache=True, fastmath=True)
+@njit(cache=True)
 def _sat16_jit(x: int) -> int:
     """Saturate to int16 range (JIT version)."""
     if x > Q15_ONE:
@@ -433,7 +434,7 @@ def _sat16_jit(x: int) -> int:
     return x
 
 
-@njit(cache=True, fastmath=True)
+@njit(cache=True)
 def _effect_mode_jit_core(
     carrier: np.ndarray,
     mask_q15: np.ndarray,
@@ -479,7 +480,7 @@ def _effect_mode_jit_core(
                 else:
                     even_right = even_left
                 odd = fwd_levels[level, idx + 1]
-                avg = (even_left + even_right + 1) >> 1
+                avg = _rshift_lift_rne(even_left + even_right, 1)
                 temp_d[i] = odd - avg
 
             # Update: s[i] = even[i] + (d[i-1] + d[i]) / 4
@@ -489,7 +490,7 @@ def _effect_mode_jit_core(
                 else:
                     d_left = temp_d[0]
                 d_right = temp_d[i]
-                update = (d_left + d_right + 2) >> 2
+                update = _rshift_lift_rne(d_left + d_right, 2)
                 temp_s[i] = fwd_levels[level, start + 2 * i] + update
 
             # Write to next level with saturation
@@ -513,8 +514,8 @@ def _effect_mode_jit_core(
     # ===== APPLY MASK AT LEAVES =====
     if use_mask:
         for i in range(block_size):
-            # Add rounding (+16384) to avoid systematic negative bias from truncation
-            v = (fwd_levels[depth, i] * mask_q15[i] + Q15_HALF) >> 15
+            # Widen the product and reduce with signed nearest-even rounding.
+            v = _rshift_lift_rne(np.int64(fwd_levels[depth, i]) * mask_q15[i], 15)
             if v < Q15_NEG_ONE:
                 v = -32768
             elif v > Q15_ONE:
@@ -540,7 +541,7 @@ def _effect_mode_jit_core(
             detail_start = approx_start + half
 
             # Undo update (MUST match forward rounding for perfect reconstruction)
-            # Forward used: update = (d_left + d_right + 2) >> 2
+            # Forward used: update = _rshift_lift_rne(d_left + d_right, 2)
             # Inverse must use SAME rounding to avoid cumulative error
             for i in range(half):
                 s_val = inv_levels[level + 1, approx_start + i]
@@ -549,11 +550,11 @@ def _effect_mode_jit_core(
                 else:
                     d_left = inv_levels[level + 1, detail_start]
                 d_right = inv_levels[level + 1, detail_start + i]
-                update = (d_left + d_right + 2) >> 2  # +2 matches forward transform
+                update = _rshift_lift_rne(d_left + d_right, 2)
                 temp_s[i] = s_val - update
 
             # Undo predict (MUST match forward rounding for perfect reconstruction)
-            # Forward used: avg = (even_left + even_right + 1) >> 1
+            # Forward used: avg = _rshift_lift_rne(even_left + even_right, 1)
             # Inverse must use SAME rounding to avoid cumulative error
             for i in range(half):
                 even_left = temp_s[i]
@@ -561,7 +562,7 @@ def _effect_mode_jit_core(
                     even_right = temp_s[i + 1]
                 else:
                     even_right = temp_s[i]
-                avg = (even_left + even_right + 1) >> 1  # +1 matches forward transform
+                avg = _rshift_lift_rne(even_left + even_right, 1)
                 temp_d[i] = inv_levels[level + 1, detail_start + i] + avg
 
             # Interleave to output with saturation
@@ -692,7 +693,7 @@ def effect_mode_jit(
 # FWPT is now only used for analysis (not critical path).
 # IDWPT is used by CoeffOsc to convert coefficients directly to audio.
 
-@njit(cache=True, fastmath=True)
+@njit(cache=True)
 def _fwpt_jit_core(
     input_buf: np.ndarray,
     headroom_bits: int,
@@ -740,7 +741,7 @@ def _fwpt_jit_core(
                 else:
                     even_right = even_left
                 odd = fwd_levels[level, idx + 1]
-                avg = (even_left + even_right + 1) >> 1
+                avg = _rshift_lift_rne(even_left + even_right, 1)
                 temp_d[i] = odd - avg
 
             # Update: s[i] = even[i] + (d[i-1] + d[i]) / 4
@@ -750,7 +751,7 @@ def _fwpt_jit_core(
                 else:
                     d_left = temp_d[0]
                 d_right = temp_d[i]
-                update = (d_left + d_right + 2) >> 2
+                update = _rshift_lift_rne(d_left + d_right, 2)
                 temp_s[i] = fwd_levels[level, start + 2 * i] + update
 
             # Write to next level with saturation
@@ -776,7 +777,7 @@ def _fwpt_jit_core(
         output_coeffs[i] = fwd_levels[depth, i]
 
 
-@njit(cache=True, fastmath=True)
+@njit(cache=True)
 def _idwpt_jit_core(
     input_coeffs: np.ndarray,
     headroom_bits: int,
@@ -826,7 +827,7 @@ def _idwpt_jit_core(
                 else:
                     d_left = inv_levels[level + 1, detail_start]
                 d_right = inv_levels[level + 1, detail_start + i]
-                update = (d_left + d_right + 2) >> 2
+                update = _rshift_lift_rne(d_left + d_right, 2)
                 temp_s[i] = s_val - update
 
             # Undo predict (MUST match forward rounding for perfect reconstruction)
@@ -836,7 +837,7 @@ def _idwpt_jit_core(
                     even_right = temp_s[i + 1]
                 else:
                     even_right = temp_s[i]
-                avg = (even_left + even_right + 1) >> 1
+                avg = _rshift_lift_rne(even_left + even_right, 1)
                 temp_d[i] = inv_levels[level + 1, detail_start + i] + avg
 
             # Interleave to output with saturation
@@ -903,7 +904,8 @@ class SeparatedWaveletProcessor:
         for i in range(self.block_size):
             self._input_buf[i] = samples[i]
 
-        _fwpt_jit_core(
+        kernel = _fwpt_jit_core if NUMBA_AVAILABLE else getattr(_fwpt_jit_core, 'py_func', _fwpt_jit_core)
+        kernel(
             self._input_buf,
             headroom_bits,
             self._coeff_buf,
@@ -928,7 +930,8 @@ class SeparatedWaveletProcessor:
         for i in range(min(len(coeffs), self.block_size)):
             self._coeff_buf[i] = coeffs[i]
 
-        _idwpt_jit_core(
+        kernel = _idwpt_jit_core if NUMBA_AVAILABLE else getattr(_idwpt_jit_core, 'py_func', _idwpt_jit_core)
+        kernel(
             self._coeff_buf,
             headroom_bits,
             self.output,
@@ -968,12 +971,7 @@ def fwpt_jit(samples: List[int], headroom_bits: int = 1) -> List[int]:
     """
     if len(samples) != 64:
         raise ValueError('FWPT requires exactly 64 input samples')
-    if NUMBA_AVAILABLE:
-        return _get_separated_processor().fwpt(samples, headroom_bits)
-    else:
-        # Fallback to fwpt_balanced
-        leaves = fwpt_balanced(samples, depth=6)
-        return [leaf[0] if leaf else 0 for leaf in leaves]
+    return _get_separated_processor().fwpt(samples, headroom_bits)
 
 
 def idwpt_jit(coeffs: List[int], headroom_bits: int = 1) -> List[int]:
@@ -990,12 +988,7 @@ def idwpt_jit(coeffs: List[int], headroom_bits: int = 1) -> List[int]:
     Returns:
         64 audio samples (int16 range)
     """
-    if NUMBA_AVAILABLE:
-        return _get_separated_processor().idwpt(coeffs, headroom_bits)
-    else:
-        # Fallback to idwpt_balanced
-        leaves = [[c] for c in coeffs]
-        return idwpt_balanced(leaves, depth=6)
+    return _get_separated_processor().idwpt(coeffs, headroom_bits)
 
 
 def idwpt_polyphase_streaming(

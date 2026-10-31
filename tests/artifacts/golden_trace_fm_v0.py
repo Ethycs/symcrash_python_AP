@@ -145,25 +145,28 @@ def generate_golden_sequence() -> List['VoiceFrame']:
 
 # SHA-256 hash of concatenated block outputs
 # IMPORTANT: Update these ONLY when intentional behavior change occurs
+# Regenerated 2026-10-30: signed-RNE lifting; dimensions/headroom unchanged.
+# Prior commit reproduced; Fraction oracle verifies new audio.
+# Audit: regen_reports/lifting_arithmetic_20261030.txt
 FROZEN_BLOCK_HASHES: List[str] = [
-    "67f52a1349c3ed0de2663a97c14cbebca3d6b19a32cb1179aafe23e9105a49f6",
-    "6661b951571c701de797455a3be0d46679af8776e3973ccce6ef5ad8927509b7",
+    "379f5feaa0234e2d02dd1d18059cbf4f2870c018e7edcc2dbbeeef1ae1a0ec8f",
+    "78a82d085c5dbfa85da52cbad85129b8e23234701d8882db56537c5ea0d3306d",
     "3a3d330c4123b19cea33232796c5d7e9448d879ff99b23a843b1ee94ba744b8e",
-    "532daf5df0d5d0a9f71b3420e9a6c0502c90718e213d2a3942e1c6d88e6a9dd4",
+    "ae0fb93acc0a69f29885206b0f7c666b37d2acc9f46b98ad0b37a03e4411ae8c",
     "b2523049cd3438228203233b46284256aa04693a6970090d9c21a691e6700f66",
-    "da5ec8a10769b39259935b7a1c613683c4547ae9071822243354a1f0b429bc48",
+    "31ece1831ef5a1d8d0c592470aa6c39805e3d478feabf2fe461975bc4427561d",
     "e884409eb57eb7b1c44c55d2c6d2084d7287d895e8be8aca8540e9aac8029522",
     "75d0f2d9224118535d9989fd25d5e19cfa8e0fb7b75b89286cc87f73f0bda1e4",
-    "af0e1da8eb70c257959b140075dc5487e7759c9389d8c326eb27a76bdfa700c7",
+    "14e20c33b840d93dfe8b78955dd66718308640bbac335835819cd0088c0cfb2f",
     "b53868050abcce87a90b52bb4a3cac1b7e5c06e13b12d0d4b0a7947ec2221e93",
     "1edc406131ea0482fa2fe62924a7ccd27d67315d1e561be8ca4364d71de6e3bb",
     "6c38f2f3e29e2de2daf306cdd4d44863d1d88ee95c47cb897a1c497b7dfa440f",
-    "ec5218c3189bcc6fcbd33d21cfce7a3b9c3182d1dd3865518b0acc83c056341e",
+    "b591c977f3b33383d29ead4aa702c7cf2f4dd951ecd36e03080776fa945c7b81",
     "36a8f271f4316404b700f61ce1489ab27470963f721c4f71feb86c67560f4a0a",
     "81047dbf773dd52e6fe319e49e166b523cdfdbb5325dc56fa21a4f60b00b71d6",
     "bdb6c9b7868a6b0eb20ffbf613c246b46d972932a827adf265a22c1aeaf1b263",
     "823a07f61510a2017e58fa7aca0a03d2a5338eb677fce2a8dfb93009bc151a56",
-    "add50d1acb2182dc549c60b6077627d63d395b8a0f93cbed2e2748ab2b44c2f3",
+    "49fa020a5758849bb496de653952241d713b47b6f503eaae1caa7da6cc1127ca",
     "587400ad49932c3dc75f312e8a65fd1f08bf8474a1e14d24949311d7e0dd760a",
     "54a28586bba46b533b712035ecaaf52d83b2f47dcc7ba9b7d59a6832f7d95ef6",
     "16167367e18a0f240800b3d97c520e3bf434a50d98e40a87a584f8ef5807d511",
@@ -202,7 +205,7 @@ FROZEN_BLOCK_HASHES: List[str] = [
 # tests/test_fm_algorithms_dx7_conformance.py). This trace uses alg 1,
 # whose topology legitimately changed (old 6-op chain -> canonical pair+stack).
 # Reviewed CCS tail profile; audit: regen_reports/coefficient_tail_20261030.txt
-FROZEN_TRACE_HASH = "94075a86a764fb85f896651c72e8827978f54ee2ec9c69871670c6e632699ccb"
+FROZEN_TRACE_HASH = "08acdd2b5aa5a416875acb0362468b315dd9d9d5fade0436c6e7d64b9c2903a8"
 
 
 # =============================================================================

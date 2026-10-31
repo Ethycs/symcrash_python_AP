@@ -1,0 +1,373 @@
+Lifting arithmetic correction audit, 2026-10-30
+
+Baseline: signed root commit 34b8fc6 and its preserved prepared images.
+Only lifting reductions and mask multiplication rounding change.
+N/K/P, int16 storage, headroom and production node saturation stay fixed.
+No-Numba fallback now uses that same production headroom/saturation policy.
+Before: 469/736 rational transform cases differed; max delta 64.
+After: 736 rational transform cases match exactly.
+Mode A: 2081284256 bytes; recipe a2c43975afbdad5cfc4d827d841a288ebb4df182f3d5c2cdec7ef6341961b156; data 7c8f85cfe83eac5ad09038b02c43ae84970c32b51dd468c452e031479f93eed9
+Mode B: 3124940 bytes; recipe ef8175e77eda385f0149e0d0c09fd9b19c16f342c1ccb10c40a48ff298005563; data 012f3bb2c6694260cb9df2cf0c8633e74be8813bc54c9098029b7728b2f7dee7
+acid_bass_v0 raw: 1837 changed samples, maximum delta 20
+  before 4cba0b4697d119f53cbd549d2fa5b340aa64859510e581755096e2c6cbfa9ae4
+  after  57e6edf27bf6db5b476c4edf3732dcfddc71ce3bebc3afade31c13baad89a556
+acid_bass_v0 host: 2450 changed samples, maximum delta 11
+  before b5f435c03d26a820a0d008cf773d9086292b4c9617453e52070f6609d8c51462
+  after  7715679f607febf3e1a97659f60db667f956e7eea5e6e851398df93e42f584ea
+acoustic_marimba_v0 raw: 0 changed samples, maximum delta 0
+  before 8b074c1486ec456dd81054be1927fda1fe876dae2922b6a8d295240be9f1937f
+  after  8b074c1486ec456dd81054be1927fda1fe876dae2922b6a8d295240be9f1937f
+acoustic_marimba_v0 host: 0 changed samples, maximum delta 0
+  before 63a08da5bd72211f104521a53fe566fbee1be016eb6e007129d52dd2fef605c8
+  after  63a08da5bd72211f104521a53fe566fbee1be016eb6e007129d52dd2fef605c8
+analog_strings_v0 raw: 1233 changed samples, maximum delta 5
+  before 5598fdf0f4555b76debefe7f53b0959218b7179602962684050abffefd28c3b2
+  after  b8add1ba135d297ddc597bb1290e4d0d3ad100eef4023b3b30a9268294150d4d
+analog_strings_v0 host: 2082 changed samples, maximum delta 4
+  before 9965530c9e187ca1f09cafb3e5721d0ca152c5d97c339131eb4165a3e8c68138
+  after  18728c826d370c19d53f70009ddee7896e0ab5ddd39d3251adf53c6cba47a8ea
+bass_cheap_v0 raw: 0 changed samples, maximum delta 0
+  before 1c3e0e8eb226a227459acd33ef07322de5adf155cf11d0ecf68d706797187b5d
+  after  1c3e0e8eb226a227459acd33ef07322de5adf155cf11d0ecf68d706797187b5d
+bass_cheap_v0 host: 0 changed samples, maximum delta 0
+  before afcc62ef95fee60d7a54d8161eb40590365801089c002725579efd04ac230af6
+  after  afcc62ef95fee60d7a54d8161eb40590365801089c002725579efd04ac230af6
+brass_cheap_v0 raw: 0 changed samples, maximum delta 0
+  before 4a961c4521625ffe43b7b08852e3a4df75ae9765ca4ddaaaa5e97a91ddd8060e
+  after  4a961c4521625ffe43b7b08852e3a4df75ae9765ca4ddaaaa5e97a91ddd8060e
+brass_cheap_v0 host: 0 changed samples, maximum delta 0
+  before 1602674faa5de94d5fd589826af292bf09b407574c321618c5d39ef575d8c995
+  after  1602674faa5de94d5fd589826af292bf09b407574c321618c5d39ef575d8c995
+brass_stab_v0 raw: 0 changed samples, maximum delta 0
+  before 80ac9745771bd69ce6082c0548fe5c1721adca8a48de901b200662055758d908
+  after  80ac9745771bd69ce6082c0548fe5c1721adca8a48de901b200662055758d908
+brass_stab_v0 host: 0 changed samples, maximum delta 0
+  before 0bce78391f3065961fbe422d1e0ca1db90606f76b1ea0a397869839ac7067e5c
+  after  0bce78391f3065961fbe422d1e0ca1db90606f76b1ea0a397869839ac7067e5c
+brass_stab_v1 raw: 236 changed samples, maximum delta 6
+  before 4cbf1c78e236dea642c9e9406023293b57cc5e85d86650facb1cd3fadc046fe7
+  after  6bb737e0c1821bbe4848765f7ab10ffc86884b504aef62df70e9cddcb62e5d7c
+brass_stab_v1 host: 448 changed samples, maximum delta 5
+  before 9482db831b7a74db402d08bb8e49f1c3f3b8a0848b4e90ecef88e441070ab542
+  after  e0ab06057d72bce4a08aa06afe81e5cd9155f9f65fc64df8b9a1b4e07b0b6fb9
+detroit_bass_v0 raw: 1861 changed samples, maximum delta 21
+  before bda0c6932d839405439f4b1c83a500609c9414039b202d3336c08b5dd190d1b6
+  after  c6bac04319d7f9f2613dd7a761ee79c6efc3aa4d280cd82fe3140b8a813de171
+detroit_bass_v0 host: 3766 changed samples, maximum delta 9
+  before ebe8468782689e3ad247cf7ae20b99f49857e574a5c757150ddf859053850610
+  after  4fd16cbd9d9b7fc15fd35752a83ac562f105bafcfb6853b0b012783263df5b44
+dream_marimba_v0 raw: 0 changed samples, maximum delta 0
+  before 012f9ec8e23761bdfa4202463d7ef5c48338fea5e44082ad62115001558b0b4e
+  after  012f9ec8e23761bdfa4202463d7ef5c48338fea5e44082ad62115001558b0b4e
+dream_marimba_v0 host: 0 changed samples, maximum delta 0
+  before 28ad0bbf08859236c70a970ca6ca718dc78e8de7569aac99476d0ef155ffdfa5
+  after  28ad0bbf08859236c70a970ca6ca718dc78e8de7569aac99476d0ef155ffdfa5
+dx7_bass_1_v0 raw: 0 changed samples, maximum delta 0
+  before c3f0248cd7ff15d0c384381df732dab2aed3f9d4fe6a44b51047c726f2be352c
+  after  c3f0248cd7ff15d0c384381df732dab2aed3f9d4fe6a44b51047c726f2be352c
+dx7_bass_1_v0 host: 0 changed samples, maximum delta 0
+  before a3f10a01f15b07a18dc216bf8477c3829e168dd8af1d4b66f37980047ceb4312
+  after  a3f10a01f15b07a18dc216bf8477c3829e168dd8af1d4b66f37980047ceb4312
+dx7_brass_1_v0 raw: 0 changed samples, maximum delta 0
+  before 46556b8ee0d7b1c0a41582595ca16bb9a23227527c0ee71018c346e79fe7b7a0
+  after  46556b8ee0d7b1c0a41582595ca16bb9a23227527c0ee71018c346e79fe7b7a0
+dx7_brass_1_v0 host: 0 changed samples, maximum delta 0
+  before aa7bd8b19b042a687ea293983f3bc6a686bd81116cfbec00ce294aae676653f1
+  after  aa7bd8b19b042a687ea293983f3bc6a686bd81116cfbec00ce294aae676653f1
+dx7_e_piano_1_v0 raw: 0 changed samples, maximum delta 0
+  before 3abf2c2448e86d7198f40b8f04a928ffa5834ad2823362b3b68cea58f51ee8ab
+  after  3abf2c2448e86d7198f40b8f04a928ffa5834ad2823362b3b68cea58f51ee8ab
+dx7_e_piano_1_v0 host: 0 changed samples, maximum delta 0
+  before c4c8a36b83950c9266f49e68c6bfd30e4053405c6356f1ae0d97c4dc6258f2e6
+  after  c4c8a36b83950c9266f49e68c6bfd30e4053405c6356f1ae0d97c4dc6258f2e6
+dx7_harpsich_1_v0 raw: 0 changed samples, maximum delta 0
+  before adc5633e68171f1fd8be104d7d3b4263e3943ad27aa35e46a360c39173c3deb1
+  after  adc5633e68171f1fd8be104d7d3b4263e3943ad27aa35e46a360c39173c3deb1
+dx7_harpsich_1_v0 host: 0 changed samples, maximum delta 0
+  before 20c2c994f117d5d77b51a1c5e0ab2390d4b02076ee8d5fe6973ce5c88adb5025
+  after  20c2c994f117d5d77b51a1c5e0ab2390d4b02076ee8d5fe6973ce5c88adb5025
+dx7_marimba_v0 raw: 0 changed samples, maximum delta 0
+  before 400094a8317fef9b88db25ada53b0557969fff66e22cd7f9e47f0c7a7d928f6a
+  after  400094a8317fef9b88db25ada53b0557969fff66e22cd7f9e47f0c7a7d928f6a
+dx7_marimba_v0 host: 0 changed samples, maximum delta 0
+  before aa2a3dfdeba9c7e4f03691621e8696e71ad8853f1f79e4d1c2ea8e2b40584ff8
+  after  aa2a3dfdeba9c7e4f03691621e8696e71ad8853f1f79e4d1c2ea8e2b40584ff8
+dx7_strings_1_v0 raw: 0 changed samples, maximum delta 0
+  before f57d5fae1d3bf028a2376389c7ef3ea157f96610b93c8273d6a42416910a514f
+  after  f57d5fae1d3bf028a2376389c7ef3ea157f96610b93c8273d6a42416910a514f
+dx7_strings_1_v0 host: 0 changed samples, maximum delta 0
+  before d7370c3f4223e7b90f08de2df3aa3aa8d0ffc30279da1d68fc77fc45d6d61f50
+  after  d7370c3f4223e7b90f08de2df3aa3aa8d0ffc30279da1d68fc77fc45d6d61f50
+dx7_tub_bells_v0 raw: 0 changed samples, maximum delta 0
+  before 4c4f7a31415c993e08e26637e0dcc1e3528f41614a95a1a785ca747a3f5754b1
+  after  4c4f7a31415c993e08e26637e0dcc1e3528f41614a95a1a785ca747a3f5754b1
+dx7_tub_bells_v0 host: 0 changed samples, maximum delta 0
+  before a1eb2a56067d227afaa1e70374266a341458b20e3720fc77d4c2e12768583fe6
+  after  a1eb2a56067d227afaa1e70374266a341458b20e3720fc77d4c2e12768583fe6
+dx7_vibe_1_v0 raw: 0 changed samples, maximum delta 0
+  before c42356c29838283f8a9decd442ceea49b31c92f0101cef1eccd433af8201a83e
+  after  c42356c29838283f8a9decd442ceea49b31c92f0101cef1eccd433af8201a83e
+dx7_vibe_1_v0 host: 0 changed samples, maximum delta 0
+  before 2ea409a0418df93422f76a319572965099138d94ec8a18fe01572a110737fcb7
+  after  2ea409a0418df93422f76a319572965099138d94ec8a18fe01572a110737fcb7
+dx_clav_v0 raw: 0 changed samples, maximum delta 0
+  before 5ee766da874a1c2b556836e0a123714fb0913bc0ac3e9c6966052921598987db
+  after  5ee766da874a1c2b556836e0a123714fb0913bc0ac3e9c6966052921598987db
+dx_clav_v0 host: 0 changed samples, maximum delta 0
+  before affae58f6944cc26dc72fdf2ac4d7e01795cd711e242347d4dd1198e096fc65f
+  after  affae58f6944cc26dc72fdf2ac4d7e01795cd711e242347d4dd1198e096fc65f
+dx_epiano_v0 raw: 0 changed samples, maximum delta 0
+  before 013547abdc91e509d9e0d3690367ac9fc6fe3c037dd5baa36586949f4ce0f323
+  after  013547abdc91e509d9e0d3690367ac9fc6fe3c037dd5baa36586949f4ce0f323
+dx_epiano_v0 host: 0 changed samples, maximum delta 0
+  before 7d3b19ea01ad90ea4b569a4e568521709be4bafa47b9085c604f928b34e49322
+  after  7d3b19ea01ad90ea4b569a4e568521709be4bafa47b9085c604f928b34e49322
+dx_lately_bass_v0 raw: 0 changed samples, maximum delta 0
+  before 09085ae75725ceefa5fb2c722a71c32bc8d2b597067082a496e0767e04fe427e
+  after  09085ae75725ceefa5fb2c722a71c32bc8d2b597067082a496e0767e04fe427e
+dx_lately_bass_v0 host: 0 changed samples, maximum delta 0
+  before 0bcf333a262adb995292351165a00be8610aa8d2219e0855164261874d67e615
+  after  0bcf333a262adb995292351165a00be8610aa8d2219e0855164261874d67e615
+dx_marimba_v0 raw: 0 changed samples, maximum delta 0
+  before 93e1ab555606bb61cf4f0e7d329822300036fa6b77bedfe6b1b5f4e42df3b667
+  after  93e1ab555606bb61cf4f0e7d329822300036fa6b77bedfe6b1b5f4e42df3b667
+dx_marimba_v0 host: 0 changed samples, maximum delta 0
+  before 3f9a0122118b35b87458856aade189894507d99a1aa05ae6714447fea1251d03
+  after  3f9a0122118b35b87458856aade189894507d99a1aa05ae6714447fea1251d03
+fm_bell_v0 raw: 0 changed samples, maximum delta 0
+  before a9695ae36f0953dfbc58916ad62a34972ad751ef85789e2413e9488900b2fa04
+  after  a9695ae36f0953dfbc58916ad62a34972ad751ef85789e2413e9488900b2fa04
+fm_bell_v0 host: 0 changed samples, maximum delta 0
+  before 4b3eadf857a064b796da109a9a1eb064e7b687aeeeb9921c17d7f0c45ed38be4
+  after  4b3eadf857a064b796da109a9a1eb064e7b687aeeeb9921c17d7f0c45ed38be4
+fm_brass_v0 raw: 0 changed samples, maximum delta 0
+  before 42e70067c500910b2d40d26c6ba7dfca4e0dce5efae530cef1f055c1fca633e5
+  after  42e70067c500910b2d40d26c6ba7dfca4e0dce5efae530cef1f055c1fca633e5
+fm_brass_v0 host: 0 changed samples, maximum delta 0
+  before 1b3f0d4ad91031028dfbacfbf12b9f4bd626710e0b32d3439c353d0c2537a0c7
+  after  1b3f0d4ad91031028dfbacfbf12b9f4bd626710e0b32d3439c353d0c2537a0c7
+fm_horn_v0 raw: 0 changed samples, maximum delta 0
+  before 2345a9b850e6b90890fa73e21385a43da3c39f38ef45fc97741de3eaea11c80f
+  after  2345a9b850e6b90890fa73e21385a43da3c39f38ef45fc97741de3eaea11c80f
+fm_horn_v0 host: 0 changed samples, maximum delta 0
+  before 08a3b66695c31a52b2d8d8cef1558c833348d760635604f15aa710696a44de2d
+  after  08a3b66695c31a52b2d8d8cef1558c833348d760635604f15aa710696a44de2d
+fm_trumpet_v0 raw: 0 changed samples, maximum delta 0
+  before 4224f4c2afadd0497f0bcf061256fa738c8945781d64cc60e9fac7650d42432c
+  after  4224f4c2afadd0497f0bcf061256fa738c8945781d64cc60e9fac7650d42432c
+fm_trumpet_v0 host: 0 changed samples, maximum delta 0
+  before a3d209d0be658c97bda54f61447ef77006345f977d3645c851efc1b826c209ff
+  after  a3d209d0be658c97bda54f61447ef77006345f977d3645c851efc1b826c209ff
+fold_drone_v0 raw: 240 changed samples, maximum delta 1
+  before 3ebebc0f5a2536b3d069f60d428303f809b8f8d68c0332b1023b29c25343ef28
+  after  4085be4eeeb3d274a6cd381b196fc843738ab42fcd013d0cd65281d2316a26dd
+fold_drone_v0 host: 456 changed samples, maximum delta 2
+  before 3a2df4f096d7702901cbed02914e1baae349a671850e597b7df3885c94af1e94
+  after  c1c4395a4b9e40fd686f57953e67d722fd36059a174c402d070d7cd8e5cf98e6
+glitch_lead_v0 raw: 1648 changed samples, maximum delta 16
+  before 400b127580398073fea0e03b446c60b803293cfb5b349d5476ad9a29059ce68d
+  after  9c895a3b41280fd4159d4da8e9d86cf46950de1deabc66c504aba6d3fd76b4d7
+glitch_lead_v0 host: 3756 changed samples, maximum delta 11
+  before ea84dd43f0164d6f87f439ad7d7575ab8263b608a359c6c2be6169be6acd0d39
+  after  5aa241710b5f380427ce2ae10ee2bc33da66a55759897a83dcf41af884a7af2c
+jump_brass_v0 raw: 0 changed samples, maximum delta 0
+  before f2ce14ab8f50452fbfd299684e9be4aea7539c250101f31e481169d3792cd45b
+  after  f2ce14ab8f50452fbfd299684e9be4aea7539c250101f31e481169d3792cd45b
+jump_brass_v0 host: 0 changed samples, maximum delta 0
+  before ae4560c4d11df8d1576411de7d6c3878e56ecfb30f7ae4aeb5a4d8942a57b3d6
+  after  ae4560c4d11df8d1576411de7d6c3878e56ecfb30f7ae4aeb5a4d8942a57b3d6
+oeis_bass_v0 raw: 1758 changed samples, maximum delta 19
+  before 637eac851397e86a6467e0daa83ba14d1a047d174f772852aa2b5b74f5b8de5b
+  after  6054de1126b562a58ecf80ff50f11fee643490ff6640cb8c3cbd92ba5f67b1a1
+oeis_bass_v0 host: 3902 changed samples, maximum delta 14
+  before ccf1f12135eefc41439a379847a3550a050c6533d098d115f7835c3068a0634e
+  after  021b0bd45e7d3f80fbbaf5baed2db32fb66ad70b8087db07c037d39ddcdf23de
+oeis_bell_v0 raw: 1782 changed samples, maximum delta 20
+  before 4f283ce7a7e51efa4261f93404ff4065c1def9723f6cc48ad9a51cf3421b0572
+  after  e5782ce66797124d4f15236ad1bf82307e31eb971df95f6b2bcb47dbecc7e1e2
+oeis_bell_v0 host: 4036 changed samples, maximum delta 12
+  before a6e628ecd5a34e803e3422f315145d3115e50fccca08557996336e182c4b51ab
+  after  0ce515b374001a5708a42bea8dbd9dd854641933218e21ef397a92fac36a9243
+oeis_pad_v0 raw: 624 changed samples, maximum delta 2
+  before 7a95c1e75567e84cd2a4ecf19b9e6ff42cb752f3060440352e83c5214db8fcfd
+  after  cadafc059789fbaef23f2270f09d504364f7a443aba8909222b567461f416f76
+oeis_pad_v0 host: 1128 changed samples, maximum delta 2
+  before 996d651ab61537c9dc0f1da807eaf3ceeb3b15f0aae452406657aec4403ade71
+  after  7ca84f06493dcd439ee0cc52aecc31291d7d288c91e9303995aa58af075979a2
+pad_cheap_v0 raw: 0 changed samples, maximum delta 0
+  before 5d5aac69990a4cd1e31b462572a7872195580731bb8c470932416b7e66d1abba
+  after  5d5aac69990a4cd1e31b462572a7872195580731bb8c470932416b7e66d1abba
+pad_cheap_v0 host: 0 changed samples, maximum delta 0
+  before 5a30b8e4ffb4b12ae9f7b4d8273be47dd47ac74e6a7c8d1af258ac207df6bbe5
+  after  5a30b8e4ffb4b12ae9f7b4d8273be47dd47ac74e6a7c8d1af258ac207df6bbe5
+pluck_bell_v0 raw: 1862 changed samples, maximum delta 21
+  before 648f8a2e1eede0031efd705b76a9b2a0e9832d5dd726ced0d2046d057789ebc8
+  after  80b75fa4cc1b01ea2e6162bd188cdc3e3678d7e3e0be2a90b86b297ef1fa73b2
+pluck_bell_v0 host: 4132 changed samples, maximum delta 13
+  before bca0ca4c341009206064e307f15044333a885666b5ccf80741d938216f246598
+  after  80e1e9b049f3d13ff130e0f92a31981bc8c23004ba1f5ac98d5ac17b00d93b49
+pluck_cheap_v0 raw: 0 changed samples, maximum delta 0
+  before ab221d9599f14c6d2db4fe727a4940657cb5b539a4adf824aeb40cbfee7f887c
+  after  ab221d9599f14c6d2db4fe727a4940657cb5b539a4adf824aeb40cbfee7f887c
+pluck_cheap_v0 host: 0 changed samples, maximum delta 0
+  before 7d7d3b109b0972c7190c184fb5f9c025af4313be3a6167d9001db117017989aa
+  after  7d7d3b109b0972c7190c184fb5f9c025af4313be3a6167d9001db117017989aa
+pluck_v0 raw: 1793 changed samples, maximum delta 17
+  before ffc1d0b2d804f8382be9c18979150a350557ad1d714ca251f29da91ceebe1c13
+  after  e43cf28986eb64399878617edc085bfa2e6d314ce6d54a2b2c08cf0a7c331c98
+pluck_v0 host: 3968 changed samples, maximum delta 11
+  before 9d8aa971d51df558d30bb183684ebfb3a5d55992893949defda68db08adcd08c
+  after  1fe71971ea7a184ee1ede3f75133e5c431c5b1cc27ebb7bd70290a8ad4fe61b1
+prime_storm_v0 raw: 1823 changed samples, maximum delta 22
+  before 5ef00f7b71db41562a67ff0973356c89f0a4ff5eceae7ffdbe2666d87696947e
+  after  f5c016596cee0e6786b1c1e0015e5b70015f86061a2a25b18f387050b28e382c
+prime_storm_v0 host: 3986 changed samples, maximum delta 13
+  before f44ff76994f4bb1a1f203f1bc36ac63f34a44ee71b940dc75220cd77adcb7875
+  after  e3aa2f19b6c3b45f5eadc4e787e3223489ff181191f5b15090ecc01d81ac1233
+pwm_pad_v0 raw: 1299 changed samples, maximum delta 5
+  before 91beaa39677b3611ee14569af5baafb18bf5454d463db5ed2a3e34bf4b2078a8
+  after  d4534b8dfaa70e9da476de72dfa67858c694195fa64e14c2259d3fbf12465783
+pwm_pad_v0 host: 2134 changed samples, maximum delta 4
+  before 8ab0b7f373904e06c70531a3ff412f828d3721685b04ef0805fc963c9252c850
+  after  84d0b780029b64cb8a3560e15bbb058ca7f48d68a4f2e1b13093f53ba0b7301d
+pwm_string_v0 raw: 1451 changed samples, maximum delta 7
+  before b24a127a4d050e259c38725792ee9995cd87d5abd0622d06e13f970e9077e336
+  after  c6be8d50d8f2799f8e7c7157c82a700e6a6024483642ceb4d892cacb620880bf
+pwm_string_v0 host: 2536 changed samples, maximum delta 5
+  before e376aa89ffc4c3f8f460d5a73ba94f6cea422b4e35885e87cc7c15aa352e0bbe
+  after  e27da034ff10190db84db8cb9584b4879208c6ffc49eed4b0d0500ecb3c375bb
+quasi_glass_v0 raw: 1814 changed samples, maximum delta 29
+  before 4a8b861ede3118f2c9068cfcccfeb85ccdd4ee65604cd9c99c388b97e292b1fd
+  after  5b8b72d1d624f33da75e736b10972e38c671a71f911357a57678fbe05a291068
+quasi_glass_v0 host: 4084 changed samples, maximum delta 16
+  before f3316e970f6317f2fb1786b4523c5af45cee66e1ff6375db5692324201133916
+  after  243b646a84c710eeeadfc42b288fae9fea3c1a1d5d68ae3d8f8298310ffac9d0
+rnb_slide_v0 raw: 1723 changed samples, maximum delta 24
+  before e9fcf9518a9b0fb5b97476078cbedbccdfc847a6baeaa353283008ab0f64d6a8
+  after  71b109dc3a0cd932e3758fd23f1483a6142efaa6b23c0d3f30c6f90c614b3308
+rnb_slide_v0 host: 3858 changed samples, maximum delta 15
+  before f92b276e496e4e97e734052ba2b2b0106a3b20fd65ba885304586ac2499d53d2
+  after  34bc9dfc471c8f117ca03156f5c7b9ffbd856c1d96ad43676171f482bda67eac
+saw_lead_v0 raw: 1740 changed samples, maximum delta 18
+  before 6096cc7f778ec10de2197e55c1644d74394779b2b04fd01249b3c29006e4e911
+  after  884a3d2faedae50b17bbd551b930719e3a4a0029a16c2efa861228e61a73c971
+saw_lead_v0 host: 3822 changed samples, maximum delta 10
+  before 470301c2afa52b7bcc62978e364b2b9ec685fc6d98826a61a0a134fec3982793
+  after  de4a0cdd10ea523fd660f290fa624a68861fda972139558de2df410b78baa6dd
+shear_vox_v0 raw: 1473 changed samples, maximum delta 11
+  before cd7e15e80a14c3863fc4737bc2f45ef0155f6b48dbfc1bc1a2b670b7c93014b4
+  after  0f2e6e410869eeba9a9f3e4a87275d2ab1c8a3002822f6c0b34e795835bb7237
+shear_vox_v0 host: 2742 changed samples, maximum delta 5
+  before 0deb42f543741a6340a3a3e2f120ce814d2560ecca61a3d66384268688830ffe
+  after  1bdec57c3dc61d35de6cd3cc2985e834f34f571af4134dcbfff772946dfb5c5b
+square_bass_v0 raw: 1745 changed samples, maximum delta 17
+  before 48ecf257e57f3c1064164fce7ef54e4abfef3cda5a61206fe8c319bcc3ebe607
+  after  ce6c8380e742f71bcbac9cab3bfe710dee67290739b0ff8888e45a75c5a6ac4f
+square_bass_v0 host: 3756 changed samples, maximum delta 12
+  before 5cae6bb46509a31041a9ff499892013e23f21ffbc75f21fd41333c575f302818
+  after  c20582541cd788efab7008fba83bad026cb16900586b9d70d047a465b3d89158
+string_pad_v0 raw: 1017 changed samples, maximum delta 4
+  before 7d31c038186e2212998efb9616b1c35ecd3e7060517faf36b6dcdf63bcb0eb8f
+  after  7f8d6b9be15f30612c0fb2495d32cde5c025f2e41194499cada74c831f23d669
+string_pad_v0 host: 1548 changed samples, maximum delta 3
+  before 48e82738d2218ddcf341342ecd7440f6ff5edcb62e102e346e8e719384afea95
+  after  3aefb69f4cb67dc8b6c7a56daec48c0e6cdede7265388cc5ec38ad6646dd9d5f
+sub_bass_v0 raw: 1756 changed samples, maximum delta 18
+  before 914881a5537bf8d7a2772cb72260e18d3e14642e50e55230f8ac314c5b901b81
+  after  064fc3d484d876c2b0fa65664e687f3a1726af0e4f820d4bdc385014690fd1d8
+sub_bass_v0 host: 3946 changed samples, maximum delta 13
+  before 3953ebe9faa7ab6792e88020b0928167d8f4f3deb5532542a497ad9ee7d5c3cf
+  after  6c7329f79ca696911cd7c7367ac06e45577794f27d06f3a7d1e9b65295f368f4
+super_saw_v0 raw: 1704 changed samples, maximum delta 19
+  before b98d7dcbdb125a11c6d384a88a587dcdd6dc456af3d0ca71005a7da36997413a
+  after  dfd20fb608d9c3d935ac4b1e8993624998718283644d7770fceb587006ff0afe
+super_saw_v0 host: 3823 changed samples, maximum delta 14
+  before 3f30623c182a2e46d3d6dd0cffcaf78bb3a70435542eb8daa1b9d37b90faeb35
+  after  ecd7020f43bc6c3910cb05a3c36cdb1a30fe4980c09d551bc8d8be872161df48
+sync_lead_v0 raw: 1793 changed samples, maximum delta 18
+  before 5a2fa8ee40ba2a780e64310c1987956d6446f1bfc40439234d266110fc5b159d
+  after  26e30ce2701afb627f55c188164cb732ce2fd5bb5c09bb95af6c20bd167090d4
+sync_lead_v0 host: 3884 changed samples, maximum delta 11
+  before 4b94f3f244de41d918dba2983396a1d42d9539c8277cd075445a75cab4916edf
+  after  281c7192011112b23b9d3dd405b269906d21a5aff2fb9fe57e74e3ce0caa0a3e
+theremin_lead_v0 raw: 1582 changed samples, maximum delta 13
+  before ec349e253a82aa7e537b8231e28dc50cace01a722f2face5d5144132f7d7a1b8
+  after  26663c0b225c20e125c7e48815264eb05d35e99a91f11f7cc49d2ca945932786
+theremin_lead_v0 host: 2962 changed samples, maximum delta 7
+  before ef47a868930208a699d6829df49eeaeff9d9da0af13465ed005f909a8206fc8d
+  after  9debc468c7d258a799b539dcda683fa410bc0d5ff74c65fd5b82a65c25878f14
+violin_ir_v1 raw: 1664 changed samples, maximum delta 23
+  before 6d9cbf506316d52efb9ee5d80aee32e6d2599a453aa5e68272e31e63e84aba78
+  after  e9bfa1c1ca36e1fbc6726ea0a09349a0196c0ceac07b8fccdeefb98805c77094
+violin_ir_v1 host: 3520 changed samples, maximum delta 13
+  before c445ce8fa85d7f204243cf882e2eda454bfb6a266c46c3a9a4565cfb83b77c29
+  after  37ea035cd3f770843a7152f599b774db3da4c5df564fc65c4f0542359224cfb9
+violin_opt_v0 raw: 1243 changed samples, maximum delta 5
+  before 55a84273a3d50974a6715227cbd3c3f9fc9a24dd823df543097ca9a1a80f57a9
+  after  33b937bbffdcacf1027c767fc5a314144c6c23eee570b6294305ec55ad76f9d5
+violin_opt_v0 host: 2056 changed samples, maximum delta 3
+  before 11bbd0b1692d59b4a0d9e8b3621252ec126ad4bc04eaf2fe95edc51da756cc11
+  after  39ae70721dfe288997a13125f0606aae7dd7ce195a77e9091461d6d5dfbf50fe
+warm_pad_v0 raw: 743 changed samples, maximum delta 2
+  before 6e4b4d5d083df8ec13ba241a7ef27813ebfbfafd75880ecc3d3a7d4ed69bb6b7
+  after  27c3e3a529e40ce7ec6b12da2bcda509bfacd5a266f165964112121268956afc
+warm_pad_v0 host: 1194 changed samples, maximum delta 3
+  before 67d895efc9848ec330a137f9f24eea5c6627e3e8dd43cdc440a652b059d5e5d5
+  after  b395bcb194a113bfe8a0cf9d51735f2f1f533f003a7f9a218a2f48721e01c4b7
+wobble_bass_v0 raw: 1745 changed samples, maximum delta 18
+  before 29bdd03e986e7ecbb98775941f8bb5fa899e7da878c4373ce101e099ac3303e1
+  after  5e89bf91741743a102cab291786abf1833c90afcee464ecccf4f0642295cb0f1
+wobble_bass_v0 host: 3862 changed samples, maximum delta 12
+  before 106f154a156cee5dc3c073675feaa17d58f45d7feb3faedb2672ac29c0038a78
+  after  4846cd6427e049c178b1fd97b18b19c5c74b382c1214b4cdd743fae9cd36cda9
+golden_trace_v0: 2240 changed samples; max delta 28
+  before 0227619e63795fbafddc6ae9a697c1074a90d47fb7108489472acd4974e5becd
+  after  eba64067358f8fe4d24f9702ba1180347562ea25b3b478e7ac62e67655825863
+golden_trace_subtractive_v0: 2331 changed samples; max delta 28
+  before d8a46aab67e7984565eda84a6225b211ddf06ea3e5fddfc4b387dfe04cabc4f5
+  after  40de4aec84d47b7c2b691a46e02519456e6a021d6e84a40ced1cbdeef7493c7e
+golden_trace_fm_v0: 163 changed samples; max delta 8
+  before 94075a86a764fb85f896651c72e8827978f54ee2ec9c69871670c6e632699ccb
+  after  08acdd2b5aa5a416875acb0362468b315dd9d9d5fade0436c6e7d64b9c2903a8
+golden_trace_stress_v0: 3138 changed samples; max delta 23
+  before fe3e3419b8f5b439a27eb142b0724575f8198eb6f64179d463026587551d5cc8
+  after  2b41d4ab4560def2d2c9815ed6b889dbf082e2dae9970e3281da45ad683d9ad6
+string_pad_v0 workbench: 18019 changed samples; max delta 24
+  before e9364a814acab013b10ab1715402231b664ab4ae76fb12d5b754dee2a281c268
+  after  92a0e7babc35d6eac5c8cd154f13bc9e31bde18798734b41982860e96ca03e1d
+dx_marimba_v0 workbench: 0 changed samples; max delta 0
+  before 7a549167a0fb5bb7f461aa265ff624a375dd551921c3715c8b11d2b724b59eac
+  after  7a549167a0fb5bb7f461aa265ff624a375dd551921c3715c8b11d2b724b59eac
+raw: 28/52 traces changed; maximum delta 29
+host: 28/52 traces changed; maximum delta 16
+All prior captures reproduced; all corrected traces match independent Fraction lifting,
+including separately generated Mode A and Mode B coefficient sources. Emitted frames unchanged.
+Full route/JIT regression and realtime results recorded separately; hardware storage/timing remain open.
+
+Final validation:
+- Initial transform/resource/backend selection: 283 passed, 1 existing warning, 83.82s.
+- Final lifting module contains 118 cases, including old-image recipe guards,
+  independent legacy C4 tables, all signed 18-bit sums and mask-product extremes.
+- Full root run: 5766 passed, 14 skipped, 102 existing warnings, 4 failures, 629.26s.
+- Two new recipe-guard fixtures lacked explicit subset coverage; corrected to
+  reach recipe validation rather than fail at the earlier image-size guard.
+- Two existing Mode B MAC tests regenerated their tie-case basis through the
+  changed FWPT. The original values at two positions are now literal data;
+  expected RNE (54,-26) is preserved, and half-up (55,-25) is explicitly checked.
+- Final affected selection: 203 passed, 22.19s. Includes all four corrected
+  cases, every lifting test, Mode B arithmetic, VM goldens and workbench hashes.
+- No production changes followed the full run. It was not repeated after
+  these test-only fixture repairs; no known failures remain from that run.
+
+Realtime/control selection (unchanged thresholds): 8 passed, 18.59s.
+Sustained detune: mean 845.4 us, p95 1425.9, p99 2326.5, maximum 5798.9;
+  47/750 observed deadline misses.
+Continuous pitch changes: mean 928.9 us, p95 1434.4, p99 4755.6, maximum 16866.2;
+  47/750 observed deadline misses.
+Continuous A/B fades: mean 1155.7 us, p95 1879.7, p99 2873.6, maximum 5395.8;
+  167/750 observed deadline misses.
+These desktop observations do not isolate scheduling noise from arithmetic
+cost, qualify a worst-case deadline, or establish FPGA timing. At K4 the
+inverse lift has 1536 rounded reductions per block. Target tie handling,
+intermediate widths, memory, streaming and integrated scheduling remain open.
+The combined resource footprint remains 2084409196 bytes and fails the target.

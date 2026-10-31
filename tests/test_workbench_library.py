@@ -37,9 +37,11 @@ PRESET_DIR = PRESET_INSTRUMENTS_DIR
 # The former matrix generator reproduces the old hash; independent weight laws
 # and Fraction coefficients reproduce the new Python/JIT stream. See
 # artifacts/regen_reports/carrier_spectrum_20261030.txt. FM remains unchanged.
+# Signed-RNE lifting refresh: independently verified in
+# artifacts/regen_reports/lifting_arithmetic_20261030.txt. FM stays unchanged.
 GOLDEN_MONO = {
     "string_pad_v0":
-        "e9364a814acab013b10ab1715402231b664ab4ae76fb12d5b754dee2a281c268",
+        "92a0e7babc35d6eac5c8cd154f13bc9e31bde18798734b41982860e96ca03e1d",
     "dx_marimba_v0":
         "7a549167a0fb5bb7f461aa265ff624a375dd551921c3715c8b11d2b724b59eac",
 }

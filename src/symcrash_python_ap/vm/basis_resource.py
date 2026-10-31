@@ -51,7 +51,7 @@ def recipe_digest() -> bytes:
     """
     from .hotpath_jit import _get_sine_lut_np
     digest = hashlib.sha256(b'ModeB-basis-v3/Fs48000/N64/K4/stride1/H32/headroom2/'
-        b'SineCore-RNE/FWPT-RNE/shared-harmonic-frequency-anchors/'
+        b'SineCore-RNE/FWPT-RNE-v2-wide-interstep-SAT16-node/shared-harmonic-frequency-anchors/'
         b'cluster64/outer-span/Lagrange4-Q30-ratio-product-RNE/unity-largest-tie-first')
     digest.update(_get_sine_lut_np().astype('<i4').tobytes())
     digest.update(np.asarray(supported_pitch_increments(), dtype='<u4').tobytes())

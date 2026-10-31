@@ -95,17 +95,32 @@ def test_zero_harmonics_retains_dc(dc, execution_path):
         np.testing.assert_array_equal(generate(kind, state, basis), reference(state, basis))
 
 
-def test_recorded_halfway_fixture_matches_exact_rounding(execution_path):
-    # Reproduce the deterministic pre-fix probe without importing generated data.
+def test_recorded_halfway_fixture_matches_exact_rounding(execution_path, monkeypatch):
+    # Preserve the original MAC tie cases independently of future FWPT recipes.
+    # These two coefficient positions come from the pre-lifting-fix A4 atlas
+    # (root 34b8fc6). Unrelated positions are zero; no image is needed here.
     rng = np.random.default_rng(210)
     for harmonics in [1, 2, 7, 16]:
         for _ in range(4):
             state = bank.ModeBState(phase=int(rng.integers(0, 2**32)), H_active=harmonics)
             state.weights.set_custom([int(x) for x in rng.integers(1, 20001, size=harmonics)], 18345)
     assert state.phase == 3788812303
-    basis = bank.get_basis_for_note(69)
+    basis = synthetic_basis()
+    basis.DC_frame.fill(0)
+    basis.Ucos_h[:, 17, 3] = [-86, -195, 399, -120, 524, 1351, 430, 704,
+                             2224, 343, 794, 723, -350, 185, 2374, 594]
+    basis.Ucos_h[:, 28, 2] = [71, -250, 436, -588, 31, 188, 4283, -1344,
+                             -2876, 51, -1458, -1176, 885, -1319, 981, -4275]
+    basis.Usin_h[:, 17, 3] = [0, -383, -355, -256, -1031, -169, 347, -735,
+                             287, 1709, -80, 1682, 702, -552, 520, 1923]
+    basis.Usin_h[:, 28, 2] = [-114, 127, 26, -343, 658, -3319, 2746, 3210,
+                             452, -272, 12, -228, -1039, 389, 2010, -1874]
     expected = reference(state, basis)
     assert (int(expected[71]), int(expected[114])) == (54, -26)
+    with monkeypatch.context() as context:
+        context.setitem(globals(), 'rounded', lambda value: (int(value) + 16384) // 32768)
+        biased = reference(state, basis)
+    assert (int(biased[71]), int(biased[114])) == (55, -25)
     for kind in ('scalar', 'vector', 'hw'):
         np.testing.assert_array_equal(generate(kind, state, basis), expected)
 

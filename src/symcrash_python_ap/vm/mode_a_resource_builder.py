@@ -49,6 +49,7 @@ def _wave_sample(lut, phase, wave, legacy, pulse, harmonic_count):
 
 @njit(cache=True, nogil=True)
 def _generate_table(lut, phase_inc, wave, legacy, pulse):
+    """Generate with signed-RNE lifting and the existing node saturation."""
     result = np.empty((64, SLOTS, PHASES), dtype=np.int16)
     block = np.empty(64, dtype=np.int16)
     coeffs = np.empty(64, dtype=np.int16)

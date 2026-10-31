@@ -16,7 +16,7 @@ from .basis_anchors import capacity_for_anchor, frequency_directory
 
 @njit(cache=True)
 def _generate_pitch(lut, phase_inc, count):
-    """Same SineCore/64-point lifting arithmetic as the scalar reference."""
+    """SineCore and signed-RNE lifting with wide inter-step intermediates."""
     result = np.zeros((2, count, 64, 4), dtype=np.int16)
     cosine = np.zeros(64, dtype=np.int16)
     sine = np.zeros(64, dtype=np.int16)
