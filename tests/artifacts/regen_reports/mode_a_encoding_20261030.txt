@@ -1,0 +1,161 @@
+Mode A encoding proposal audit, 2026-10-30
+
+Implementation baseline: root 497aaeb / documentation 88a15a7.
+Reproduce: pixi run python tools/audit_mode_a_encoding.py
+Requires the existing full, validated SYMLUT02 image; does not build it.
+
+Governing requirements:
+- WSE-STD-210 sections 1.3 and 3.1: int16 coefficients and matching Q32 generation.
+- WSE-STD-RAM-SUBSYSTEMS section 2.2: shared 4 MiB maximum LUT/basis allocation.
+- CCS-BRAM-128KB-32VOICE: older int8/half-phase storage proposal under audit.
+
+Measurement scope:
+640 source tables: five native waves at all 128 nominal MIDI notes, each
+64 leaves x K4 x P64. No detuned-pitch table or reconstructed-audio sweep.
+Difference calculations widen to int64 before arithmetic. Half-phase error
+is abs(LUT[leaf,k,p] + LUT[leaf,k,p+32]) before any output saturation.
+It is a coefficient discrepancy, not an audio-error measurement.
+
+The proposed floor codec is separately checked over all 65,536 int16 values.
+The scalar identity source - 256*floor(source/256) independently gives 0..255.
+Zero mean and periodicity do not imply half-wave antisymmetry; even harmonic
+content violates that condition. Integer source/transform arithmetic also
+prevents exact negation in the otherwise approximately symmetric waves.
+
+Storage figures for hypothetical compressed pitch tables count native payload
+only: no directory, legacy tables, Mode B, caches, staging or other resources.
+Half-phase figures deliberately grant the invalid all-wave symmetry assumption
+to show that this saving would still leave the exhaustive image over budget.
+The older recommended K4 four-wave component is 32,768 bytes, not 16 KiB.
+WSE-STD-210 does not require a stored table for every integer-cent pitch;
+these large totals describe the current exhaustive implementation choice.
+
+No production arithmetic, datatypes, N/K/P, resource image, pitch behavior,
+golden hash or test threshold changed. No codec has been adopted. The current
+Mode A memory failure remains open, along with target-wide realtime costs.
+The unused HalfPhaseLUT prototype in composite_osc.py is not the current VM
+playback path; no quality qualification is claimed for that prototype.
+
+Validation:
+- Repeated scan matches every prior captured extremum and worst-case location.
+- Independent scalar division identity agrees with the full-int16-domain bound.
+- CLI help works; a missing image fails without generating an image.
+- Relative Markdown links in the five changed documentation files resolve.
+- Full synth regression was not repeated for this diagnostic/docs-only change.
+  Last runtime baseline remains 5,579 passed / 14 skipped at root 497aaeb.
+
+Measured result:
+{
+  "scope": "Coefficient errors only; no codec adoption, audio or realtime qualification",
+  "source": {
+    "version": 2,
+    "table_count": 63508,
+    "image_bytes": 2081284256,
+    "recipe_sha256": "8ae2ef3aed32a634f4377d803cabd2c7c121e1b39243e82c6e799bbfb7aecb36",
+    "directory_data_sha256": "86dca7e771ea507027a122afa5f9a8af6eeb962fbd3604bfd9f2685a0e1679d8"
+  },
+  "coverage": {
+    "waves": 5,
+    "nominal_notes_per_wave": 128,
+    "tables": 640,
+    "leaves": 64,
+    "lanes": 4,
+    "phases": 64,
+    "detuned_tables_scanned": false
+  },
+  "floor_codec_int16_domain": {
+    "error_definition": "source - decoded",
+    "error_min": 0,
+    "error_max": 255
+  },
+  "cases": [
+    {
+      "wave": "sine",
+      "floor_codec_error_min": 0,
+      "floor_codec_error_max": 255,
+      "half_phase_worst": {
+        "absolute_error": 9,
+        "note": 97,
+        "first_location": [
+          63,
+          1,
+          13
+        ],
+        "first": 1480,
+        "second": -1471
+      }
+    },
+    {
+      "wave": "saw",
+      "floor_codec_error_min": 0,
+      "floor_codec_error_max": 255,
+      "half_phase_worst": {
+        "absolute_error": 65170,
+        "note": 119,
+        "first_location": [
+          63,
+          3,
+          0
+        ],
+        "first": 32403,
+        "second": 32767
+      }
+    },
+    {
+      "wave": "square",
+      "floor_codec_error_min": 0,
+      "floor_codec_error_max": 255,
+      "half_phase_worst": {
+        "absolute_error": 10,
+        "note": 30,
+        "first_location": [
+          63,
+          0,
+          1
+        ],
+        "first": 20,
+        "second": -10
+      }
+    },
+    {
+      "wave": "triangle",
+      "floor_codec_error_min": 0,
+      "floor_codec_error_max": 255,
+      "half_phase_worst": {
+        "absolute_error": 10,
+        "note": 47,
+        "first_location": [
+          63,
+          0,
+          19
+        ],
+        "first": -82,
+        "second": 92
+      }
+    },
+    {
+      "wave": "pulse",
+      "floor_codec_error_min": 0,
+      "floor_codec_error_max": 255,
+      "half_phase_worst": {
+        "absolute_error": 65338,
+        "note": 119,
+        "first_location": [
+          63,
+          3,
+          0
+        ],
+        "first": -32768,
+        "second": -32570
+      }
+    }
+  ],
+  "storage": {
+    "bytes_per_full_int16_table": 32768,
+    "bytes_per_half_int8_table": 8192,
+    "four_wave_half_int8_bytes": 32768,
+    "five_wave_complete_cent_full_int8_bytes": 1040465920,
+    "five_wave_complete_cent_half_int8_bytes": 520232960,
+    "caveat": "Native payload only; half-phase assumes unproven symmetry and excludes metadata"
+  }
+}
