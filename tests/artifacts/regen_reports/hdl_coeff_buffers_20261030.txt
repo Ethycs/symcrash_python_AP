@@ -1,0 +1,1383 @@
+Coefficient buffer ownership evidence - 2026-10-30
+
+Requirements: WSE-STD-BRAM-RAM sections 3.1, 5.3, 8.1 and 11.
+Two complete coefficient frames, publication only after successful consumed
+DMA completion, exclusive DSP lease, and no reuse until outstanding writes
+drain. Existing N=64, K=2/4/8, signed 16-bit coefficients and 64-bit DMA
+descriptor are unchanged. Service classes 0..3 map to wire priorities 15..12.
+
+Payload is external: 512/1,024/2,048 bytes for two frames, starting at 0x8000
+inside the original 32 KiB partition. This does not count physical RAM or
+establish aggregate packing. Control stores 32-bit identity tags and complete
+descriptors; tags do not change pitch or phase precision. Duplicate live tags
+backpressure admission. Only one DSP lease is allowed; invalid release is
+diagnosed without freeing a different buffer.
+
+One pending descriptor register precedes the shared queue. It is stable under
+backpressure, even after cancellation. Miss/cancel retains queued/active
+ownership until completion; late data is discarded. READY cancellation frees
+the bank; cancellation cannot free a leased bank. Full descriptor matching
+ignores other clients' completions. Failed status emits a tagged fault pulse.
+Reset must flush owner, queue and RAM adapter together; no epoch/replay tags
+were added to the descriptor. Exactly-once completion remains required.
+
+Accepted acquisition registers its result at that edge, without waiting for
+RAM. A completion on the same edge is too late for that acquisition. Explicit
+cancellation wins over acquiring a READY frame. Missing data returns no lease;
+actual fallback audio is the DSP caller's responsibility and remains open.
+
+Six simulation configurations cover K=2/4/8 with independent request/response
+stalls enabled/disabled, using the actual unchanged dma_priority and dma_burst.
+They check full payload through a synchronous DSP port, reserved addresses,
+exact frame lengths/priorities, duplicate tags, full admission, queued/partial/
+ready/leased cancellation, completion races, unrelated completions, invalid
+releases, first/middle/last response errors, invalid alignment and overdue
+service. Ten resets per workload include eight interrupted ownership stages.
+Memory outside both reserved buffers is checked unchanged.
+
+A 256-block stream per configuration primes N and N+1, consumes all N input,
+releases its source bank, then prefetches N+2 while N+1 remains ready. Tags
+wrap through zero. This demonstrates the ownership sequence; the production
+caller still supplies the schedule and must connect release to actual decoder
+input acceptance. Decoder computation/audio is not simulated by this harness.
+
+Realtime scope: pending submission adds one clock before queue acceptance.
+Acquire/publish/release are single-edge state transitions. Queue wait, dispatch,
+bus service and completion backpressure remain additional. Deliberate overdue
+service reaches 40,028..40,092 clocks; those are fault cases, not deadline passes.
+The 40,000-clock shared DMA window and 133,333-clock audio budget are unchanged.
+No aggregate admission or device/PHY latency bound is claimed.
+
+Validation:
+pixi run python -m pytest tests/conformance/test_hdl_coeff_buffers.py tests/conformance/test_hdl_coeff_buffers_evidence.py -q
+
+13 passed in 19.87s
+
+Totals:
+{
+  "admitted": 1674,
+  "completed": 1638,
+  "hits": 1560,
+  "misses": 132,
+  "faults": 30,
+  "resets": 60,
+  "written_bytes": 979936,
+  "read_bytes": 931840
+}
+
+Seven evidence guards reject changed source/netlist/base, missing or duplicate
+K configurations and substituted filenames before routing tool discovery.
+All tools must exist for standalone commands; optional pytest skips do not
+count as successful acceptance.
+
+Synthesis: pixi run synth-hdl-coeff-buffers; check -assert passes for K=2/4/8.
+Ownership control alone: 902/902/906 LUT4, 184 FF, 253/253/257 PFUMX,
+122/122/123 L6MUX21; zero DSP/BRAM. Payload memory, shared queue/engine,
+decoder scratch and other subsystems are additional. No per-voice replication
+or complete working-set fit is claimed.
+
+Routing: pixi run route-hdl-coeff-buffers. All nine current K/seed combinations
+return zero and pass 100 MHz at 101.11..110.14 MHz, ECP5-25K speed 6 CSFBGA285.
+Out-of-context excludes I/O and global clock routing, combined-path timing,
+board/PHY behavior and mapped-netlist equivalence. Final testbench checks were
+added after routing; all six simulations were rerun with the unchanged RTL.
+
+Existing decoder/DMA RTL, Python synthesis, resource images, goldens and
+realtime thresholds are unchanged. Their independent suites were not rerun.
+Actual decoder/fallback integration, all-stream prefetch, shared-pool allocation,
+aggregate DMA/audio admission, physical packing and PHY remain open. Mode A
+storage and K2 decoder budget remain unresolved.
+
+Simulation:
+[
+  {
+    "sources": {
+      "coeff_buffer_owner.v": "bcdbbcb06064356d2cee4e0398edbd28939c7c1466f2182a317a259105e7ce43",
+      "dma_priority.v": "d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3",
+      "dma_burst.v": "799eb5e7dae6f85404892c3a99cf45b5d5b3e6cbb1520077aa92fc34b433af6e"
+    },
+    "fingerprint": "e24d992aeb31ccadb342e14b1f1e1bac1e00f444ccf08e204ffba32101783769",
+    "K": 2,
+    "stalls": false,
+    "testbench_sha256": "6e51e42727a89d4a111e7b13bb277da16905dfa59494e305c7bdb73508d4a1e1",
+    "runner_sha256": "8088a06f7ea47e7b513d6051d8dbeab2bcceb683488274504ea4da06dbb4b52d",
+    "summary": "PASS ownership K=2 stalls=0 admitted=279 completed=273 hits=260 misses=22 faults=5 resets=10 written_bytes=69968 read_bytes=66560 max_service=40028"
+  },
+  {
+    "sources": {
+      "coeff_buffer_owner.v": "bcdbbcb06064356d2cee4e0398edbd28939c7c1466f2182a317a259105e7ce43",
+      "dma_priority.v": "d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3",
+      "dma_burst.v": "799eb5e7dae6f85404892c3a99cf45b5d5b3e6cbb1520077aa92fc34b433af6e"
+    },
+    "fingerprint": "e24d992aeb31ccadb342e14b1f1e1bac1e00f444ccf08e204ffba32101783769",
+    "K": 2,
+    "stalls": true,
+    "testbench_sha256": "6e51e42727a89d4a111e7b13bb277da16905dfa59494e305c7bdb73508d4a1e1",
+    "runner_sha256": "8088a06f7ea47e7b513d6051d8dbeab2bcceb683488274504ea4da06dbb4b52d",
+    "summary": "PASS ownership K=2 stalls=1 admitted=279 completed=273 hits=260 misses=22 faults=5 resets=10 written_bytes=69968 read_bytes=66560 max_service=40031"
+  },
+  {
+    "sources": {
+      "coeff_buffer_owner.v": "bcdbbcb06064356d2cee4e0398edbd28939c7c1466f2182a317a259105e7ce43",
+      "dma_priority.v": "d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3",
+      "dma_burst.v": "799eb5e7dae6f85404892c3a99cf45b5d5b3e6cbb1520077aa92fc34b433af6e"
+    },
+    "fingerprint": "e24d992aeb31ccadb342e14b1f1e1bac1e00f444ccf08e204ffba32101783769",
+    "K": 4,
+    "stalls": false,
+    "testbench_sha256": "6e51e42727a89d4a111e7b13bb277da16905dfa59494e305c7bdb73508d4a1e1",
+    "runner_sha256": "8088a06f7ea47e7b513d6051d8dbeab2bcceb683488274504ea4da06dbb4b52d",
+    "summary": "PASS ownership K=4 stalls=0 admitted=279 completed=273 hits=260 misses=22 faults=5 resets=10 written_bytes=139984 read_bytes=133120 max_service=40044"
+  },
+  {
+    "sources": {
+      "coeff_buffer_owner.v": "bcdbbcb06064356d2cee4e0398edbd28939c7c1466f2182a317a259105e7ce43",
+      "dma_priority.v": "d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3",
+      "dma_burst.v": "799eb5e7dae6f85404892c3a99cf45b5d5b3e6cbb1520077aa92fc34b433af6e"
+    },
+    "fingerprint": "e24d992aeb31ccadb342e14b1f1e1bac1e00f444ccf08e204ffba32101783769",
+    "K": 4,
+    "stalls": true,
+    "testbench_sha256": "6e51e42727a89d4a111e7b13bb277da16905dfa59494e305c7bdb73508d4a1e1",
+    "runner_sha256": "8088a06f7ea47e7b513d6051d8dbeab2bcceb683488274504ea4da06dbb4b52d",
+    "summary": "PASS ownership K=4 stalls=1 admitted=279 completed=273 hits=260 misses=22 faults=5 resets=10 written_bytes=139984 read_bytes=133120 max_service=40052"
+  },
+  {
+    "sources": {
+      "coeff_buffer_owner.v": "bcdbbcb06064356d2cee4e0398edbd28939c7c1466f2182a317a259105e7ce43",
+      "dma_priority.v": "d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3",
+      "dma_burst.v": "799eb5e7dae6f85404892c3a99cf45b5d5b3e6cbb1520077aa92fc34b433af6e"
+    },
+    "fingerprint": "e24d992aeb31ccadb342e14b1f1e1bac1e00f444ccf08e204ffba32101783769",
+    "K": 8,
+    "stalls": false,
+    "testbench_sha256": "6e51e42727a89d4a111e7b13bb277da16905dfa59494e305c7bdb73508d4a1e1",
+    "runner_sha256": "8088a06f7ea47e7b513d6051d8dbeab2bcceb683488274504ea4da06dbb4b52d",
+    "summary": "PASS ownership K=8 stalls=0 admitted=279 completed=273 hits=260 misses=22 faults=5 resets=10 written_bytes=280016 read_bytes=266240 max_service=40076"
+  },
+  {
+    "sources": {
+      "coeff_buffer_owner.v": "bcdbbcb06064356d2cee4e0398edbd28939c7c1466f2182a317a259105e7ce43",
+      "dma_priority.v": "d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3",
+      "dma_burst.v": "799eb5e7dae6f85404892c3a99cf45b5d5b3e6cbb1520077aa92fc34b433af6e"
+    },
+    "fingerprint": "e24d992aeb31ccadb342e14b1f1e1bac1e00f444ccf08e204ffba32101783769",
+    "K": 8,
+    "stalls": true,
+    "testbench_sha256": "6e51e42727a89d4a111e7b13bb277da16905dfa59494e305c7bdb73508d4a1e1",
+    "runner_sha256": "8088a06f7ea47e7b513d6051d8dbeab2bcceb683488274504ea4da06dbb4b52d",
+    "summary": "PASS ownership K=8 stalls=1 admitted=279 completed=273 hits=260 misses=22 faults=5 resets=10 written_bytes=280016 read_bytes=266240 max_service=40092"
+  }
+]
+Synthesis:
+{
+  "source_sha256": "bcdbbcb06064356d2cee4e0398edbd28939c7c1466f2182a317a259105e7ce43",
+  "tool": "Yosys 0.33 (git sha1 2584903a060)",
+  "base": 32768,
+  "scope": "Ownership control only; shared DMA, payload memory, decoder and PHY excluded",
+  "configurations": [
+    {
+      "K": 2,
+      "netlist": "coeff_buffer_owner_bcdbbcb06064_k2_ecp5.json",
+      "netlist_sha256": "27ee94853179745a709f96b6512c22db85176a002599c989d374151c41c2820f",
+      "cells": {
+        "L6MUX21": 122,
+        "LUT4": 902,
+        "PFUMX": 253,
+        "TRELLIS_FF": 184
+      },
+      "external_payload_bytes": 512
+    },
+    {
+      "K": 4,
+      "netlist": "coeff_buffer_owner_bcdbbcb06064_k4_ecp5.json",
+      "netlist_sha256": "e9af6e9eadf9ca3763fdde56b884cc0a9142b37d5e7d78cb79eed5959a55c44c",
+      "cells": {
+        "L6MUX21": 122,
+        "LUT4": 902,
+        "PFUMX": 253,
+        "TRELLIS_FF": 184
+      },
+      "external_payload_bytes": 1024
+    },
+    {
+      "K": 8,
+      "netlist": "coeff_buffer_owner_bcdbbcb06064_k8_ecp5.json",
+      "netlist_sha256": "8522865cef7c46c87ec75612ddd4f3f65ff8156246b10c1b079a18e8512957cc",
+      "cells": {
+        "L6MUX21": 123,
+        "LUT4": 906,
+        "PFUMX": 257,
+        "TRELLIS_FF": 184
+      },
+      "external_payload_bytes": 2048
+    }
+  ]
+}
+Routing:
+{
+  "source_sha256": "bcdbbcb06064356d2cee4e0398edbd28939c7c1466f2182a317a259105e7ce43",
+  "base": 32768,
+  "tool": "\"nextpnr-ecp5\" -- Next Generation Place and Route (Version 0.6-3build5)",
+  "device": "ECP5-25K",
+  "package": "CSFBGA285",
+  "speed_grade": 6,
+  "clock_mhz": 100,
+  "scope": "Ownership control only; out-of-context excludes I/O and global clocks",
+  "runs": [
+    {
+      "K": 2,
+      "seed": 1,
+      "exit_code": 0,
+      "passed": true,
+      "netlist_sha256": "27ee94853179745a709f96b6512c22db85176a002599c989d374151c41c2820f",
+      "fmax": {
+        "clk": {
+          "achieved": 105.10826110839844,
+          "constraint": 100
+        }
+      },
+      "utilization": {
+        "ALU54B": {
+          "available": 14,
+          "used": 0
+        },
+        "CLKDIVF": {
+          "available": 4,
+          "used": 0
+        },
+        "DCCA": {
+          "available": 56,
+          "used": 0
+        },
+        "DCSC": {
+          "available": 2,
+          "used": 0
+        },
+        "DCUA": {
+          "available": 1,
+          "used": 0
+        },
+        "DDRDLL": {
+          "available": 4,
+          "used": 0
+        },
+        "DLLDELD": {
+          "available": 8,
+          "used": 0
+        },
+        "DP16KD": {
+          "available": 56,
+          "used": 0
+        },
+        "DQSBUFM": {
+          "available": 8,
+          "used": 0
+        },
+        "DTR": {
+          "available": 1,
+          "used": 0
+        },
+        "ECLKBRIDGECS": {
+          "available": 2,
+          "used": 0
+        },
+        "ECLKSYNCB": {
+          "available": 10,
+          "used": 0
+        },
+        "EHXPLLL": {
+          "available": 2,
+          "used": 0
+        },
+        "EXTREFB": {
+          "available": 1,
+          "used": 0
+        },
+        "GSR": {
+          "available": 1,
+          "used": 0
+        },
+        "IOLOGIC": {
+          "available": 128,
+          "used": 0
+        },
+        "JTAGG": {
+          "available": 1,
+          "used": 0
+        },
+        "MULT18X18D": {
+          "available": 28,
+          "used": 0
+        },
+        "OSCG": {
+          "available": 1,
+          "used": 0
+        },
+        "PCSCLKDIV": {
+          "available": 2,
+          "used": 0
+        },
+        "SEDGA": {
+          "available": 1,
+          "used": 0
+        },
+        "SIOLOGIC": {
+          "available": 69,
+          "used": 0
+        },
+        "TRELLIS_COMB": {
+          "available": 24288,
+          "used": 904
+        },
+        "TRELLIS_ECLKBUF": {
+          "available": 8,
+          "used": 0
+        },
+        "TRELLIS_FF": {
+          "available": 24288,
+          "used": 184
+        },
+        "TRELLIS_IO": {
+          "available": 197,
+          "used": 0
+        },
+        "TRELLIS_RAMW": {
+          "available": 3036,
+          "used": 0
+        },
+        "USRMCLK": {
+          "available": 1,
+          "used": 0
+        }
+      }
+    },
+    {
+      "K": 2,
+      "seed": 2,
+      "exit_code": 0,
+      "passed": true,
+      "netlist_sha256": "27ee94853179745a709f96b6512c22db85176a002599c989d374151c41c2820f",
+      "fmax": {
+        "clk": {
+          "achieved": 110.14427947998047,
+          "constraint": 100
+        }
+      },
+      "utilization": {
+        "ALU54B": {
+          "available": 14,
+          "used": 0
+        },
+        "CLKDIVF": {
+          "available": 4,
+          "used": 0
+        },
+        "DCCA": {
+          "available": 56,
+          "used": 0
+        },
+        "DCSC": {
+          "available": 2,
+          "used": 0
+        },
+        "DCUA": {
+          "available": 1,
+          "used": 0
+        },
+        "DDRDLL": {
+          "available": 4,
+          "used": 0
+        },
+        "DLLDELD": {
+          "available": 8,
+          "used": 0
+        },
+        "DP16KD": {
+          "available": 56,
+          "used": 0
+        },
+        "DQSBUFM": {
+          "available": 8,
+          "used": 0
+        },
+        "DTR": {
+          "available": 1,
+          "used": 0
+        },
+        "ECLKBRIDGECS": {
+          "available": 2,
+          "used": 0
+        },
+        "ECLKSYNCB": {
+          "available": 10,
+          "used": 0
+        },
+        "EHXPLLL": {
+          "available": 2,
+          "used": 0
+        },
+        "EXTREFB": {
+          "available": 1,
+          "used": 0
+        },
+        "GSR": {
+          "available": 1,
+          "used": 0
+        },
+        "IOLOGIC": {
+          "available": 128,
+          "used": 0
+        },
+        "JTAGG": {
+          "available": 1,
+          "used": 0
+        },
+        "MULT18X18D": {
+          "available": 28,
+          "used": 0
+        },
+        "OSCG": {
+          "available": 1,
+          "used": 0
+        },
+        "PCSCLKDIV": {
+          "available": 2,
+          "used": 0
+        },
+        "SEDGA": {
+          "available": 1,
+          "used": 0
+        },
+        "SIOLOGIC": {
+          "available": 69,
+          "used": 0
+        },
+        "TRELLIS_COMB": {
+          "available": 24288,
+          "used": 904
+        },
+        "TRELLIS_ECLKBUF": {
+          "available": 8,
+          "used": 0
+        },
+        "TRELLIS_FF": {
+          "available": 24288,
+          "used": 184
+        },
+        "TRELLIS_IO": {
+          "available": 197,
+          "used": 0
+        },
+        "TRELLIS_RAMW": {
+          "available": 3036,
+          "used": 0
+        },
+        "USRMCLK": {
+          "available": 1,
+          "used": 0
+        }
+      }
+    },
+    {
+      "K": 2,
+      "seed": 3,
+      "exit_code": 0,
+      "passed": true,
+      "netlist_sha256": "27ee94853179745a709f96b6512c22db85176a002599c989d374151c41c2820f",
+      "fmax": {
+        "clk": {
+          "achieved": 101.15315246582031,
+          "constraint": 100
+        }
+      },
+      "utilization": {
+        "ALU54B": {
+          "available": 14,
+          "used": 0
+        },
+        "CLKDIVF": {
+          "available": 4,
+          "used": 0
+        },
+        "DCCA": {
+          "available": 56,
+          "used": 0
+        },
+        "DCSC": {
+          "available": 2,
+          "used": 0
+        },
+        "DCUA": {
+          "available": 1,
+          "used": 0
+        },
+        "DDRDLL": {
+          "available": 4,
+          "used": 0
+        },
+        "DLLDELD": {
+          "available": 8,
+          "used": 0
+        },
+        "DP16KD": {
+          "available": 56,
+          "used": 0
+        },
+        "DQSBUFM": {
+          "available": 8,
+          "used": 0
+        },
+        "DTR": {
+          "available": 1,
+          "used": 0
+        },
+        "ECLKBRIDGECS": {
+          "available": 2,
+          "used": 0
+        },
+        "ECLKSYNCB": {
+          "available": 10,
+          "used": 0
+        },
+        "EHXPLLL": {
+          "available": 2,
+          "used": 0
+        },
+        "EXTREFB": {
+          "available": 1,
+          "used": 0
+        },
+        "GSR": {
+          "available": 1,
+          "used": 0
+        },
+        "IOLOGIC": {
+          "available": 128,
+          "used": 0
+        },
+        "JTAGG": {
+          "available": 1,
+          "used": 0
+        },
+        "MULT18X18D": {
+          "available": 28,
+          "used": 0
+        },
+        "OSCG": {
+          "available": 1,
+          "used": 0
+        },
+        "PCSCLKDIV": {
+          "available": 2,
+          "used": 0
+        },
+        "SEDGA": {
+          "available": 1,
+          "used": 0
+        },
+        "SIOLOGIC": {
+          "available": 69,
+          "used": 0
+        },
+        "TRELLIS_COMB": {
+          "available": 24288,
+          "used": 904
+        },
+        "TRELLIS_ECLKBUF": {
+          "available": 8,
+          "used": 0
+        },
+        "TRELLIS_FF": {
+          "available": 24288,
+          "used": 184
+        },
+        "TRELLIS_IO": {
+          "available": 197,
+          "used": 0
+        },
+        "TRELLIS_RAMW": {
+          "available": 3036,
+          "used": 0
+        },
+        "USRMCLK": {
+          "available": 1,
+          "used": 0
+        }
+      }
+    },
+    {
+      "K": 4,
+      "seed": 1,
+      "exit_code": 0,
+      "passed": true,
+      "netlist_sha256": "e9af6e9eadf9ca3763fdde56b884cc0a9142b37d5e7d78cb79eed5959a55c44c",
+      "fmax": {
+        "clk": {
+          "achieved": 105.10826110839844,
+          "constraint": 100
+        }
+      },
+      "utilization": {
+        "ALU54B": {
+          "available": 14,
+          "used": 0
+        },
+        "CLKDIVF": {
+          "available": 4,
+          "used": 0
+        },
+        "DCCA": {
+          "available": 56,
+          "used": 0
+        },
+        "DCSC": {
+          "available": 2,
+          "used": 0
+        },
+        "DCUA": {
+          "available": 1,
+          "used": 0
+        },
+        "DDRDLL": {
+          "available": 4,
+          "used": 0
+        },
+        "DLLDELD": {
+          "available": 8,
+          "used": 0
+        },
+        "DP16KD": {
+          "available": 56,
+          "used": 0
+        },
+        "DQSBUFM": {
+          "available": 8,
+          "used": 0
+        },
+        "DTR": {
+          "available": 1,
+          "used": 0
+        },
+        "ECLKBRIDGECS": {
+          "available": 2,
+          "used": 0
+        },
+        "ECLKSYNCB": {
+          "available": 10,
+          "used": 0
+        },
+        "EHXPLLL": {
+          "available": 2,
+          "used": 0
+        },
+        "EXTREFB": {
+          "available": 1,
+          "used": 0
+        },
+        "GSR": {
+          "available": 1,
+          "used": 0
+        },
+        "IOLOGIC": {
+          "available": 128,
+          "used": 0
+        },
+        "JTAGG": {
+          "available": 1,
+          "used": 0
+        },
+        "MULT18X18D": {
+          "available": 28,
+          "used": 0
+        },
+        "OSCG": {
+          "available": 1,
+          "used": 0
+        },
+        "PCSCLKDIV": {
+          "available": 2,
+          "used": 0
+        },
+        "SEDGA": {
+          "available": 1,
+          "used": 0
+        },
+        "SIOLOGIC": {
+          "available": 69,
+          "used": 0
+        },
+        "TRELLIS_COMB": {
+          "available": 24288,
+          "used": 904
+        },
+        "TRELLIS_ECLKBUF": {
+          "available": 8,
+          "used": 0
+        },
+        "TRELLIS_FF": {
+          "available": 24288,
+          "used": 184
+        },
+        "TRELLIS_IO": {
+          "available": 197,
+          "used": 0
+        },
+        "TRELLIS_RAMW": {
+          "available": 3036,
+          "used": 0
+        },
+        "USRMCLK": {
+          "available": 1,
+          "used": 0
+        }
+      }
+    },
+    {
+      "K": 4,
+      "seed": 2,
+      "exit_code": 0,
+      "passed": true,
+      "netlist_sha256": "e9af6e9eadf9ca3763fdde56b884cc0a9142b37d5e7d78cb79eed5959a55c44c",
+      "fmax": {
+        "clk": {
+          "achieved": 110.14427947998047,
+          "constraint": 100
+        }
+      },
+      "utilization": {
+        "ALU54B": {
+          "available": 14,
+          "used": 0
+        },
+        "CLKDIVF": {
+          "available": 4,
+          "used": 0
+        },
+        "DCCA": {
+          "available": 56,
+          "used": 0
+        },
+        "DCSC": {
+          "available": 2,
+          "used": 0
+        },
+        "DCUA": {
+          "available": 1,
+          "used": 0
+        },
+        "DDRDLL": {
+          "available": 4,
+          "used": 0
+        },
+        "DLLDELD": {
+          "available": 8,
+          "used": 0
+        },
+        "DP16KD": {
+          "available": 56,
+          "used": 0
+        },
+        "DQSBUFM": {
+          "available": 8,
+          "used": 0
+        },
+        "DTR": {
+          "available": 1,
+          "used": 0
+        },
+        "ECLKBRIDGECS": {
+          "available": 2,
+          "used": 0
+        },
+        "ECLKSYNCB": {
+          "available": 10,
+          "used": 0
+        },
+        "EHXPLLL": {
+          "available": 2,
+          "used": 0
+        },
+        "EXTREFB": {
+          "available": 1,
+          "used": 0
+        },
+        "GSR": {
+          "available": 1,
+          "used": 0
+        },
+        "IOLOGIC": {
+          "available": 128,
+          "used": 0
+        },
+        "JTAGG": {
+          "available": 1,
+          "used": 0
+        },
+        "MULT18X18D": {
+          "available": 28,
+          "used": 0
+        },
+        "OSCG": {
+          "available": 1,
+          "used": 0
+        },
+        "PCSCLKDIV": {
+          "available": 2,
+          "used": 0
+        },
+        "SEDGA": {
+          "available": 1,
+          "used": 0
+        },
+        "SIOLOGIC": {
+          "available": 69,
+          "used": 0
+        },
+        "TRELLIS_COMB": {
+          "available": 24288,
+          "used": 904
+        },
+        "TRELLIS_ECLKBUF": {
+          "available": 8,
+          "used": 0
+        },
+        "TRELLIS_FF": {
+          "available": 24288,
+          "used": 184
+        },
+        "TRELLIS_IO": {
+          "available": 197,
+          "used": 0
+        },
+        "TRELLIS_RAMW": {
+          "available": 3036,
+          "used": 0
+        },
+        "USRMCLK": {
+          "available": 1,
+          "used": 0
+        }
+      }
+    },
+    {
+      "K": 4,
+      "seed": 3,
+      "exit_code": 0,
+      "passed": true,
+      "netlist_sha256": "e9af6e9eadf9ca3763fdde56b884cc0a9142b37d5e7d78cb79eed5959a55c44c",
+      "fmax": {
+        "clk": {
+          "achieved": 101.15315246582031,
+          "constraint": 100
+        }
+      },
+      "utilization": {
+        "ALU54B": {
+          "available": 14,
+          "used": 0
+        },
+        "CLKDIVF": {
+          "available": 4,
+          "used": 0
+        },
+        "DCCA": {
+          "available": 56,
+          "used": 0
+        },
+        "DCSC": {
+          "available": 2,
+          "used": 0
+        },
+        "DCUA": {
+          "available": 1,
+          "used": 0
+        },
+        "DDRDLL": {
+          "available": 4,
+          "used": 0
+        },
+        "DLLDELD": {
+          "available": 8,
+          "used": 0
+        },
+        "DP16KD": {
+          "available": 56,
+          "used": 0
+        },
+        "DQSBUFM": {
+          "available": 8,
+          "used": 0
+        },
+        "DTR": {
+          "available": 1,
+          "used": 0
+        },
+        "ECLKBRIDGECS": {
+          "available": 2,
+          "used": 0
+        },
+        "ECLKSYNCB": {
+          "available": 10,
+          "used": 0
+        },
+        "EHXPLLL": {
+          "available": 2,
+          "used": 0
+        },
+        "EXTREFB": {
+          "available": 1,
+          "used": 0
+        },
+        "GSR": {
+          "available": 1,
+          "used": 0
+        },
+        "IOLOGIC": {
+          "available": 128,
+          "used": 0
+        },
+        "JTAGG": {
+          "available": 1,
+          "used": 0
+        },
+        "MULT18X18D": {
+          "available": 28,
+          "used": 0
+        },
+        "OSCG": {
+          "available": 1,
+          "used": 0
+        },
+        "PCSCLKDIV": {
+          "available": 2,
+          "used": 0
+        },
+        "SEDGA": {
+          "available": 1,
+          "used": 0
+        },
+        "SIOLOGIC": {
+          "available": 69,
+          "used": 0
+        },
+        "TRELLIS_COMB": {
+          "available": 24288,
+          "used": 904
+        },
+        "TRELLIS_ECLKBUF": {
+          "available": 8,
+          "used": 0
+        },
+        "TRELLIS_FF": {
+          "available": 24288,
+          "used": 184
+        },
+        "TRELLIS_IO": {
+          "available": 197,
+          "used": 0
+        },
+        "TRELLIS_RAMW": {
+          "available": 3036,
+          "used": 0
+        },
+        "USRMCLK": {
+          "available": 1,
+          "used": 0
+        }
+      }
+    },
+    {
+      "K": 8,
+      "seed": 1,
+      "exit_code": 0,
+      "passed": true,
+      "netlist_sha256": "8522865cef7c46c87ec75612ddd4f3f65ff8156246b10c1b079a18e8512957cc",
+      "fmax": {
+        "clk": {
+          "achieved": 103.55183410644531,
+          "constraint": 100
+        }
+      },
+      "utilization": {
+        "ALU54B": {
+          "available": 14,
+          "used": 0
+        },
+        "CLKDIVF": {
+          "available": 4,
+          "used": 0
+        },
+        "DCCA": {
+          "available": 56,
+          "used": 0
+        },
+        "DCSC": {
+          "available": 2,
+          "used": 0
+        },
+        "DCUA": {
+          "available": 1,
+          "used": 0
+        },
+        "DDRDLL": {
+          "available": 4,
+          "used": 0
+        },
+        "DLLDELD": {
+          "available": 8,
+          "used": 0
+        },
+        "DP16KD": {
+          "available": 56,
+          "used": 0
+        },
+        "DQSBUFM": {
+          "available": 8,
+          "used": 0
+        },
+        "DTR": {
+          "available": 1,
+          "used": 0
+        },
+        "ECLKBRIDGECS": {
+          "available": 2,
+          "used": 0
+        },
+        "ECLKSYNCB": {
+          "available": 10,
+          "used": 0
+        },
+        "EHXPLLL": {
+          "available": 2,
+          "used": 0
+        },
+        "EXTREFB": {
+          "available": 1,
+          "used": 0
+        },
+        "GSR": {
+          "available": 1,
+          "used": 0
+        },
+        "IOLOGIC": {
+          "available": 128,
+          "used": 0
+        },
+        "JTAGG": {
+          "available": 1,
+          "used": 0
+        },
+        "MULT18X18D": {
+          "available": 28,
+          "used": 0
+        },
+        "OSCG": {
+          "available": 1,
+          "used": 0
+        },
+        "PCSCLKDIV": {
+          "available": 2,
+          "used": 0
+        },
+        "SEDGA": {
+          "available": 1,
+          "used": 0
+        },
+        "SIOLOGIC": {
+          "available": 69,
+          "used": 0
+        },
+        "TRELLIS_COMB": {
+          "available": 24288,
+          "used": 908
+        },
+        "TRELLIS_ECLKBUF": {
+          "available": 8,
+          "used": 0
+        },
+        "TRELLIS_FF": {
+          "available": 24288,
+          "used": 184
+        },
+        "TRELLIS_IO": {
+          "available": 197,
+          "used": 0
+        },
+        "TRELLIS_RAMW": {
+          "available": 3036,
+          "used": 0
+        },
+        "USRMCLK": {
+          "available": 1,
+          "used": 0
+        }
+      }
+    },
+    {
+      "K": 8,
+      "seed": 2,
+      "exit_code": 0,
+      "passed": true,
+      "netlist_sha256": "8522865cef7c46c87ec75612ddd4f3f65ff8156246b10c1b079a18e8512957cc",
+      "fmax": {
+        "clk": {
+          "achieved": 102.40654754638672,
+          "constraint": 100
+        }
+      },
+      "utilization": {
+        "ALU54B": {
+          "available": 14,
+          "used": 0
+        },
+        "CLKDIVF": {
+          "available": 4,
+          "used": 0
+        },
+        "DCCA": {
+          "available": 56,
+          "used": 0
+        },
+        "DCSC": {
+          "available": 2,
+          "used": 0
+        },
+        "DCUA": {
+          "available": 1,
+          "used": 0
+        },
+        "DDRDLL": {
+          "available": 4,
+          "used": 0
+        },
+        "DLLDELD": {
+          "available": 8,
+          "used": 0
+        },
+        "DP16KD": {
+          "available": 56,
+          "used": 0
+        },
+        "DQSBUFM": {
+          "available": 8,
+          "used": 0
+        },
+        "DTR": {
+          "available": 1,
+          "used": 0
+        },
+        "ECLKBRIDGECS": {
+          "available": 2,
+          "used": 0
+        },
+        "ECLKSYNCB": {
+          "available": 10,
+          "used": 0
+        },
+        "EHXPLLL": {
+          "available": 2,
+          "used": 0
+        },
+        "EXTREFB": {
+          "available": 1,
+          "used": 0
+        },
+        "GSR": {
+          "available": 1,
+          "used": 0
+        },
+        "IOLOGIC": {
+          "available": 128,
+          "used": 0
+        },
+        "JTAGG": {
+          "available": 1,
+          "used": 0
+        },
+        "MULT18X18D": {
+          "available": 28,
+          "used": 0
+        },
+        "OSCG": {
+          "available": 1,
+          "used": 0
+        },
+        "PCSCLKDIV": {
+          "available": 2,
+          "used": 0
+        },
+        "SEDGA": {
+          "available": 1,
+          "used": 0
+        },
+        "SIOLOGIC": {
+          "available": 69,
+          "used": 0
+        },
+        "TRELLIS_COMB": {
+          "available": 24288,
+          "used": 908
+        },
+        "TRELLIS_ECLKBUF": {
+          "available": 8,
+          "used": 0
+        },
+        "TRELLIS_FF": {
+          "available": 24288,
+          "used": 184
+        },
+        "TRELLIS_IO": {
+          "available": 197,
+          "used": 0
+        },
+        "TRELLIS_RAMW": {
+          "available": 3036,
+          "used": 0
+        },
+        "USRMCLK": {
+          "available": 1,
+          "used": 0
+        }
+      }
+    },
+    {
+      "K": 8,
+      "seed": 3,
+      "exit_code": 0,
+      "passed": true,
+      "netlist_sha256": "8522865cef7c46c87ec75612ddd4f3f65ff8156246b10c1b079a18e8512957cc",
+      "fmax": {
+        "clk": {
+          "achieved": 101.11222839355469,
+          "constraint": 100
+        }
+      },
+      "utilization": {
+        "ALU54B": {
+          "available": 14,
+          "used": 0
+        },
+        "CLKDIVF": {
+          "available": 4,
+          "used": 0
+        },
+        "DCCA": {
+          "available": 56,
+          "used": 0
+        },
+        "DCSC": {
+          "available": 2,
+          "used": 0
+        },
+        "DCUA": {
+          "available": 1,
+          "used": 0
+        },
+        "DDRDLL": {
+          "available": 4,
+          "used": 0
+        },
+        "DLLDELD": {
+          "available": 8,
+          "used": 0
+        },
+        "DP16KD": {
+          "available": 56,
+          "used": 0
+        },
+        "DQSBUFM": {
+          "available": 8,
+          "used": 0
+        },
+        "DTR": {
+          "available": 1,
+          "used": 0
+        },
+        "ECLKBRIDGECS": {
+          "available": 2,
+          "used": 0
+        },
+        "ECLKSYNCB": {
+          "available": 10,
+          "used": 0
+        },
+        "EHXPLLL": {
+          "available": 2,
+          "used": 0
+        },
+        "EXTREFB": {
+          "available": 1,
+          "used": 0
+        },
+        "GSR": {
+          "available": 1,
+          "used": 0
+        },
+        "IOLOGIC": {
+          "available": 128,
+          "used": 0
+        },
+        "JTAGG": {
+          "available": 1,
+          "used": 0
+        },
+        "MULT18X18D": {
+          "available": 28,
+          "used": 0
+        },
+        "OSCG": {
+          "available": 1,
+          "used": 0
+        },
+        "PCSCLKDIV": {
+          "available": 2,
+          "used": 0
+        },
+        "SEDGA": {
+          "available": 1,
+          "used": 0
+        },
+        "SIOLOGIC": {
+          "available": 69,
+          "used": 0
+        },
+        "TRELLIS_COMB": {
+          "available": 24288,
+          "used": 908
+        },
+        "TRELLIS_ECLKBUF": {
+          "available": 8,
+          "used": 0
+        },
+        "TRELLIS_FF": {
+          "available": 24288,
+          "used": 184
+        },
+        "TRELLIS_IO": {
+          "available": 197,
+          "used": 0
+        },
+        "TRELLIS_RAMW": {
+          "available": 3036,
+          "used": 0
+        },
+        "USRMCLK": {
+          "available": 1,
+          "used": 0
+        }
+      }
+    }
+  ]
+}
+Source hashes:
+bcdbbcb06064356d2cee4e0398edbd28939c7c1466f2182a317a259105e7ce43  src/symcrash_verilog/coeff_buffer_owner.v
+6e51e42727a89d4a111e7b13bb277da16905dfa59494e305c7bdb73508d4a1e1  src/symcrash_verilog/tb_coeff_buffer_owner.v
+799eb5e7dae6f85404892c3a99cf45b5d5b3e6cbb1520077aa92fc34b433af6e  src/symcrash_verilog/dma_burst.v
+d1735039589df27d7538aeb8c98239ca035b48943b392d6f0c1f396b6939c3d3  src/symcrash_verilog/dma_priority.v
+8088a06f7ea47e7b513d6051d8dbeab2bcceb683488274504ea4da06dbb4b52d  tools/check_hdl_coeff_buffers.py
+db750b8a6c5e4304f7de7d561d7ab7258ad0b91ad1711bf8c0e390a5325810ff  tools/build_hdl_coeff_buffers.py
+11bdf7caa3c4fb5e1012c377d68f1497d5fdc6091ef1194f5e750b1eb7cec945  tools/build_hdl_dma.py
+caeb7df3e27dcfee4130c25100151a1c64a0c5ee8ebe78afc5de4b52dc4fbf23  tools/check_hdl_idwpt.py
+51c1c58f77d871e2f065be24f9c373e537344bbdfb974c20df89701c87489d81  tests/conformance/test_hdl_coeff_buffers.py
+ddc3ffcceb0dc803840fabcd734cf74062b199845b5622aa2eb315f28a5275b0  tests/conformance/test_hdl_coeff_buffers_evidence.py
