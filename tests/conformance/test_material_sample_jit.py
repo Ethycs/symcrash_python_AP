@@ -284,7 +284,7 @@ namespace=runpy.run_path(sys.argv[1])
 hot=namespace['hot']; hot.set_jit_enabled(True)
 engine=namespace['MaterialEngine']()
 accelerator=namespace['accelerator']
-kernels=(accelerator.tape_channel,accelerator.rank_channel)
+kernels=(accelerator.tape_channel,accelerator.rank_channel,accelerator.catastrophe_channel)
 signatures=[list(kernel.signatures) for kernel in kernels]
 assert all(len(s)==1 for s in signatures)
 def forbidden(*args,**kwargs):
@@ -293,13 +293,64 @@ for kernel in kernels:
     kernel.compile=forbidden
 for name in ('sin','cos','tan','log','log2','exp'):
     setattr(math,name,forbidden)
-for program in (1,2,1,2):
+for program in (1,2,4,5,1,2):
     result=engine.step_block([32767,-32768]*32,[-32768,32767]*32,namespace['ParamFrame'](),program)
     assert all(len(ch)==64 for ch in result)
 assert [list(kernel.signatures) for kernel in kernels]==signatures
-print('Cold process prepared both signatures before audio')
+print('Cold process prepared sample signatures before audio')
 '''
     result = subprocess.run([sys.executable,'-c',code,str(Path(__file__).resolve())],
         env=dict(os.environ,NUMBA_CACHE_DIR=str(cache)),capture_output=True,text=True,timeout=180)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert 'prepared both signatures before audio' in result.stdout
+    assert 'prepared sample signatures before audio' in result.stdout
+
+
+@pytest.mark.parametrize('cusp', [False, True])
+@pytest.mark.parametrize('pressure,bias', [(-32768,-32768), (32767,32767), (0,0), (-12345,6789), (16384,-1)])
+@pytest.mark.parametrize('initial', [-32768, 0, 32767])
+def test_catastrophe_matches_fraction_oracle_and_reference_state(cusp, pressure, bias, initial):
+    actual, reference = MaterialEngine(), ReferenceMaterial()
+    for engine in (actual, reference):
+        engine.params.pressure_q15, engine.params.bias_q15 = pressure, bias
+        # Both recurrences leave the regime metadata untouched.
+        states = (engine.cusp_L, engine.cusp_R) if cusp else (engine.cat_L, engine.cat_R)
+        for state in states:
+            state.s, state.regime = initial, 7
+    method = '_cat_cusp' if cusp else '_cat_fold'
+    expected_state = [initial, initial]
+    rng = np.random.default_rng(7801)
+    signatures = list(accelerator.catastrophe_channel.signatures)
+    for _ in range(3):
+        channels = rng.integers(-32768,32768,(2,64)).tolist()
+        expected=[]
+        for ch, samples in enumerate(channels):
+            state=expected_state[ch]; values=[]
+            for sample in samples:
+                square=multiply(state,state); cube=multiply(square,state)
+                force=(-4*cube-2*multiply(pressure,state)-bias if cusp else -cube-multiply(pressure,state)) + sample//4
+                delta=multiply(16384,clip(force))
+                state=clip(state+(delta if cusp else delta//4))
+                value=state
+                if abs(state)>24576:
+                    value=(1 if state>=0 else -1)*min(32767,24576+(abs(state)-24576)//2)
+                values.append(value)
+            expected.append(values); expected_state[ch]=state
+        result=getattr(actual,method)(*channels)
+        assert result==tuple(expected)==getattr(reference,method)(*channels)
+        states=(actual.cusp_L,actual.cusp_R) if cusp else (actual.cat_L,actual.cat_R)
+        assert [x.s for x in states]==expected_state
+        assert [x.regime for x in states]==[7,7]
+    assert accelerator.catastrophe_channel.signatures==signatures
+
+
+@pytest.mark.parametrize('cusp', [False, True])
+def test_catastrophe_alias_and_numpy_guards_do_not_mutate(cusp):
+    engine=MaterialEngine()
+    before=structural(engine)
+    assert accelerator.try_catastrophe(engine,np.ones(64,dtype=np.int16),[0]*64,cusp) is None
+    assert structural(engine)==before
+    if cusp:engine.cusp_R=engine.cusp_L
+    else:engine.cat_R=engine.cat_L
+    before=structural(engine)
+    assert accelerator.try_catastrophe(engine,[0]*64,[0]*64,cusp) is None
+    assert structural(engine)==before

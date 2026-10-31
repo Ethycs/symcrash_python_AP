@@ -516,6 +516,14 @@ class MaterialEngine:
     
     def _cat_fold(self, L: List[int], R: List[int]) -> Tuple[List[int], List[int]]:
         """Fold catastrophe processing."""
+        if (type(self) is MaterialEngine
+                and type(self.cat_L) is CatastropheState and type(self.cat_R) is CatastropheState
+                and getattr(self._cat_fold_sample, '__func__', None) is _FOLD_SAMPLE_REFERENCE
+                and soft_clip_q15 is _SOFT_CLIP_REFERENCE):
+            from .material_sample_jit import try_catastrophe
+            result = try_catastrophe(self, L, R, False)
+            if result is not None:
+                return result
         outL = []
         outR = []
         
@@ -534,6 +542,15 @@ class MaterialEngine:
     
     def _cat_cusp(self, L: List[int], R: List[int]) -> Tuple[List[int], List[int]]:
         """Cusp catastrophe processing."""
+        if (type(self) is MaterialEngine
+                and type(self.cusp_L) is CatastropheState and type(self.cusp_R) is CatastropheState
+                and getattr(self._cat_cusp_sample, '__func__', None) is _CUSP_SAMPLE_REFERENCE
+                and soft_clip_q15 is _SOFT_CLIP_REFERENCE
+                and catastrophe_cusp_sample is _CUSP_HELPER_REFERENCE):
+            from .material_sample_jit import try_catastrophe
+            result = try_catastrophe(self, L, R, True)
+            if result is not None:
+                return result
         outL = []
         outR = []
         
@@ -1119,3 +1136,8 @@ _RANK_SAMPLE_REFERENCE = MaterialEngine._rank_sample
 _REVERB_SAMPLE_REFERENCE = MaterialEngine._reverb_sample
 _COMB_FILTER_REFERENCE = MaterialEngine._comb_filter
 _ALLPASS_FILTER_REFERENCE = MaterialEngine._allpass_filter
+
+_FOLD_SAMPLE_REFERENCE = MaterialEngine._cat_fold_sample
+_CUSP_SAMPLE_REFERENCE = MaterialEngine._cat_cusp_sample
+_SOFT_CLIP_REFERENCE = soft_clip_q15
+_CUSP_HELPER_REFERENCE = catastrophe_cusp_sample

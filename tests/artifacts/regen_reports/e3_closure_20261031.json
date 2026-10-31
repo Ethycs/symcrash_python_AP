@@ -1,5 +1,5 @@
 {
-  "status": "E3 open; output and Reverb substeps qualified; remaining Material programs and sustained misses next",
+  "status": "E3 open; output, Reverb and Fold/Cusp substeps qualified; delay-based programs and sustained misses next",
   "base_commit": "d6d30d8",
   "baseline": {
     "report": "build/e3_closure_baseline/report.json",
@@ -715,5 +715,130 @@
       "tests/conformance/test_material_ring_jit.py": "8ac66ff09311ab32012d74b88f3cc8cd50c14d452b136ff971b009c0c2c545ed"
     },
     "full_regression": "Pending after remaining E3 changes"
+  },
+  "catastrophe": {
+    "tests": {
+      "passed": 107,
+      "seconds": 52.02,
+      "exit_code": 0,
+      "log": "_e3-catastrophe-tests.log"
+    },
+    "paired": [
+      {
+        "repeat": 1,
+        "workload": "material-4",
+        "before": {
+          "blocks": 1000,
+          "mean_us": 1232.2376000000002,
+          "p95_us": 1539.1999999999996,
+          "p99_us": 2231.878999999999,
+          "max_us": 4032.4,
+          "deadline_misses": 158,
+          "mean_within_budget": true,
+          "no_observed_deadline_misses": false
+        },
+        "after": {
+          "blocks": 1000,
+          "mean_us": 746.7400000000001,
+          "p95_us": 996.1599999999999,
+          "p99_us": 1518.2819999999992,
+          "max_us": 2385.8,
+          "deadline_misses": 13,
+          "mean_within_budget": true,
+          "no_observed_deadline_misses": false
+        },
+        "median_paired_saving_us": 465.59999999999997,
+        "exact_samples": 128000,
+        "all_catastrophe_state_exact": true
+      },
+      {
+        "repeat": 1,
+        "workload": "material-5",
+        "before": {
+          "blocks": 1000,
+          "mean_us": 1314.4556,
+          "p95_us": 1785.1649999999995,
+          "p99_us": 2252.7299999999987,
+          "max_us": 4180.6,
+          "deadline_misses": 262,
+          "mean_within_budget": true,
+          "no_observed_deadline_misses": false
+        },
+        "after": {
+          "blocks": 1000,
+          "mean_us": 791.0064,
+          "p95_us": 1180.3899999999999,
+          "p99_us": 1771.1939999999993,
+          "max_us": 3711.5,
+          "deadline_misses": 30,
+          "mean_within_budget": true,
+          "no_observed_deadline_misses": false
+        },
+        "median_paired_saving_us": 499.09999999999997,
+        "exact_samples": 128000,
+        "all_catastrophe_state_exact": true
+      },
+      {
+        "repeat": 2,
+        "workload": "material-4",
+        "before": {
+          "blocks": 1000,
+          "mean_us": 1264.5096,
+          "p95_us": 1662.4499999999998,
+          "p99_us": 2215.9749999999995,
+          "max_us": 2804.6,
+          "deadline_misses": 198,
+          "mean_within_budget": true,
+          "no_observed_deadline_misses": false
+        },
+        "after": {
+          "blocks": 1000,
+          "mean_us": 769.1961,
+          "p95_us": 1071.85,
+          "p99_us": 1439.802,
+          "max_us": 2019.3,
+          "deadline_misses": 16,
+          "mean_within_budget": true,
+          "no_observed_deadline_misses": false
+        },
+        "median_paired_saving_us": 471.5,
+        "exact_samples": 128000,
+        "all_catastrophe_state_exact": true
+      },
+      {
+        "repeat": 2,
+        "workload": "material-5",
+        "before": {
+          "blocks": 1000,
+          "mean_us": 1220.2347,
+          "p95_us": 1460.77,
+          "p99_us": 1614.209,
+          "max_us": 2123.6,
+          "deadline_misses": 119,
+          "mean_within_budget": true,
+          "no_observed_deadline_misses": false
+        },
+        "after": {
+          "blocks": 1000,
+          "mean_us": 719.1933999999999,
+          "p95_us": 911.3249999999999,
+          "p99_us": 1105.5329999999997,
+          "max_us": 1505.9,
+          "deadline_misses": 3,
+          "mean_within_budget": true,
+          "no_observed_deadline_misses": false
+        },
+        "median_paired_saving_us": 492.59999999999997,
+        "exact_samples": 128000,
+        "all_catastrophe_state_exact": true
+      }
+    ],
+    "contract": "Original signed-Q15 state, independent RNE/SAT products, force clamps and fold/cusp integration rates; 512 bytes stereo input/output numeric scratch at N64; no added persistent state",
+    "source_sha256": {
+      "src/symcrash_python_ap/material/material_engine.py": "e78d4556f8503f007c42e07d7224bfd431bb8151c03475e8e7b973d6bf4d3abb",
+      "src/symcrash_python_ap/material/material_sample_jit.py": "ddbdfad2bf7a65406f5b5c92179cccb20499fb1fc5dbb9033496ded9cfcb5aec",
+      "tests/conformance/test_material_sample_jit.py": "9d82d58474963f40330bb6b82301b7a21bc71649e2517e11c88a6ae60dca3c4a"
+    },
+    "full_regression": "Pending final E3 source"
   }
 }

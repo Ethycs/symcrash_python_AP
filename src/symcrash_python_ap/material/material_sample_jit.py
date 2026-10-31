@@ -20,7 +20,7 @@ import operator
 import numpy as np
 
 from symcrash_python_ap.vm.hotpath_jit import njit, jit_enabled, _rshift_rne, _clamp16
-from symcrash_python_ap.primitives import Q15_ONE, Q15_NEG_ONE, Q15_HALF
+from symcrash_python_ap.primitives import Q15_ONE, Q15_NEG_ONE, Q15_HALF, Q15_3_4
 from symcrash_python_ap.fixed_rom import TANH_Q15
 from symcrash_python_ap import primitives as arithmetic
 
@@ -92,6 +92,7 @@ def prepare():
         audio = np.zeros(1, dtype=np.int16)
         tape_channel(audio, 0, 0, 0, 0, 0)
         rank_channel(audio, 0, np.zeros(17, dtype=np.int16), 0)
+        catastrophe_channel(audio, 0, 0, 0, False)
         _prepared = True
 
 
@@ -166,4 +167,54 @@ def try_rank(engine, left, right):
     out_r, ri = rank_channel(right, drive, rh, ri)
     lstate.buffer[:], rstate.buffer[:] = lh.tolist(), rh.tolist()
     lstate.idx, rstate.idx = int(li), int(ri)
+    return out_l.tolist(), out_r.tolist()
+
+
+@njit(cache=True)
+def catastrophe_channel(source, pressure, bias, state, cusp):
+    """Existing Fold/Cusp recurrence; every product retains separate RNE/SAT."""
+    result = np.empty(len(source), dtype=np.int16)
+    for i in range(len(source)):
+        sample = np.int64(source[i])
+        square = _multiply(state, state)
+        cube = _multiply(square, state)
+        pressure_state = _multiply(pressure, state)
+        if cusp:
+            force = _clamp16(-4 * cube - 2 * pressure_state - bias + (sample >> 2))
+            state = _clamp16(state + _multiply(Q15_HALF, force))
+        else:
+            force = _clamp16(-cube - pressure_state + (sample >> 2))
+            delta = _multiply(Q15_HALF, force)
+            state = _clamp16(state + (delta >> 2))
+        absolute = abs(state)
+        value = state
+        if absolute > Q15_3_4:
+            compressed = min(Q15_3_4 + ((absolute - Q15_3_4) >> 1), Q15_ONE)
+            value = compressed if state >= 0 else -compressed
+        result[i] = value
+    return result, state
+
+
+def try_catastrophe(engine, left, right, cusp):
+    """No added persistent state; stereo input/output scratch is 512 B at N64.
+
+    Signed-Q15 samples/state/parameters bound the force below 2**18 and all
+    products below 2**31 in magnitude. int64 intermediates reproduce Python
+    arithmetic; only existing int16 state writes saturate. No format change.
+    """
+    if not jit_enabled() or not _prepared:
+        return None
+    try:
+        count = operator.index(engine.B)
+        states = (engine.cusp_L, engine.cusp_R) if cusp else (engine.cat_L, engine.cat_R)
+        if count <= 0 or states[0] is states[1]:
+            return None
+        pressure, bias, sl, sr = map(_scalar, (engine.params.pressure_q15,
+            engine.params.bias_q15, states[0].s, states[1].s))
+        sources = (_audio(left, count), _audio(right, count))
+    except (OverflowError, TypeError, ValueError):
+        return None
+    out_l, sl = catastrophe_channel(sources[0], pressure, bias, sl, bool(cusp))
+    out_r, sr = catastrophe_channel(sources[1], pressure, bias, sr, bool(cusp))
+    states[0].s, states[1].s = int(sl), int(sr)
     return out_l.tolist(), out_r.tolist()
