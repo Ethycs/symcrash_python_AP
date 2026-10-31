@@ -98,3 +98,51 @@ def test_outside_compiled_domain_falls_back_without_modifying_input(samples):
 def test_reference_switch_disables_compiled_mixing():
     hot.set_jit_enabled(False)
     assert mix_jit.try_mix([], 64) is None
+
+
+@pytest.mark.parametrize('n', [1, 7, 64])
+@pytest.mark.parametrize('gain', [-32768, -1, 0, 1, 16384, 32766, 32767])
+@pytest.mark.parametrize('mono', [False, True])
+def test_final_return_mono_gain_order_matches_independent_oracle(n, gain, mono):
+    rng = np.random.default_rng(7600 + n)
+    left = rng.integers(-32768, 32768, n).tolist()
+    right = rng.integers(-32768, 32768, n).tolist()
+    left[0], right[0] = -32768, 32767
+    returns = (rng.integers(-(1 << 31), 1 << 31, n).tolist(),
+               rng.integers(-(1 << 31), 1 << 31, n).tolist())
+    before = [x.copy() for x in (left, right, *returns)]
+    clip = lambda x: max(-32768, min(32767, x))
+    for aux in (None, returns):
+        expected_l, expected_r = [], []
+        for i in range(n):
+            l = clip(left[i] + (aux[0][i] if aux else 0))
+            r = clip(right[i] + (aux[1][i] if aux else 0))
+            if mono:
+                l = r = round(Fraction(l + r, 2))
+            expected_l.append(l if gain == 32767 else multiply(l, gain))
+            expected_r.append(r if gain == 32767 else multiply(r, gain))
+        signatures = list(mix_jit.finish_output.signatures)
+        assert mix_jit.try_finish_output(left, right, aux, mono, gain) == (expected_l, expected_r)
+        assert mix_jit.finish_output.signatures == signatures
+    assert before == [left, right, *returns]
+
+
+def test_final_half_lsb_ties_and_unity_bypass():
+    left, right = [-3, -1, 1, 3, 32767], [0] * 5
+    assert mix_jit.try_finish_output(left, right, None, True, 32767) == (
+        [-2, 0, 0, 2, 16384], [-2, 0, 0, 2, 16384])
+    assert mix_jit.try_finish_output([32767], [32767], None, False, 32767) == ([32767], [32767])
+
+
+@pytest.mark.parametrize('value', [np.int16(1), np.uint16(1), 0.5, 1 << 80, True])
+def test_final_custom_or_out_of_range_arithmetic_keeps_reference(value):
+    assert mix_jit.try_finish_output([value], [0], None, False, 32767) is None
+    assert mix_jit.try_finish_output([0], [0], ([value], [0]), False, 32767) is None
+    assert mix_jit.try_finish_output([0], [0], None, False, value) is None
+
+
+def test_final_reference_switch_and_malformed_inputs_keep_fallback():
+    assert mix_jit.try_finish_output([0], [], None, False, 1) is None
+    assert mix_jit.try_finish_output([0], [0], ([1 << 31], [0]), False, 1) is None
+    hot.set_jit_enabled(False)
+    assert mix_jit.try_finish_output([0], [0], None, False, 1) is None

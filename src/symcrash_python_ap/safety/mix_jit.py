@@ -41,6 +41,7 @@ def prepare():
     global _prepared
     if not _prepared and jit_enabled():
         mix_one(np.zeros(1, dtype=np.int64), 0, 0, 0, 0, np.zeros((6, 1), dtype=np.int64))
+        finish_output(np.zeros((4, 1), dtype=np.int64), False, Q15_ONE)
         _prepared = True
 
 
@@ -66,3 +67,46 @@ def try_mix(rendered, block_size):
     np.clip(mixed[:2], Q15_NEG_ONE, Q15_ONE, out=mixed[:2])
     left, right, a_left, a_right, b_left, b_right = mixed.tolist()
     return left, right, {'A': (a_left, a_right), 'B': (b_left, b_right)}
+
+
+@njit(cache=True)
+def finish_output(audio, mono, gain):
+    """Return clamp -> optional mono RNE -> optional Q15 gain, in that order."""
+    for i in range(audio.shape[1]):
+        left = _clamp16(audio[0, i] + audio[2, i])
+        right = _clamp16(audio[1, i] + audio[3, i])
+        if mono:
+            left = _rshift_rne(left + right, 1)
+            right = left
+        if gain != Q15_ONE:
+            left = _clamp16(_rshift_rne(left * gain, 15))
+            right = _clamp16(_rshift_rne(right * gain, 15))
+        audio[0, i], audio[1, i] = left, right
+
+
+def try_finish_output(left, right, returns, mono, gain):
+    """Exact optional output arithmetic; no Material/Safety state is bypassed.
+
+    Plain Python int sequences only: custom/NumPy scalar arithmetic keeps its
+    reference path. Main audio and gain fit signed Q15; return sums fit int32.
+    Sums and products fit int64 without overflow. One private 4*N int64 array
+    (2048 bytes at N64) replaces Python loop intermediates. Persistent formats,
+    buffers, effect lengths and device/hardware budgets are unchanged.
+    """
+    if not jit_enabled() or type(gain) is not int or not Q15_NEG_ONE <= gain <= Q15_ONE:
+        return None
+    rows = (left, right) if returns is None else (left, right, *returns)
+    if len(rows) not in (2, 4):
+        return None
+    n = len(left)
+    for index, row in enumerate(rows):
+        if type(row) not in (list, tuple) or len(row) != n:
+            return None
+        lower, upper = (Q15_NEG_ONE, Q15_ONE) if index < 2 else (-(1 << 31), (1 << 31) - 1)
+        if not all(type(x) is int and lower <= x <= upper for x in row):
+            return None
+    audio = np.zeros((4, n), dtype=np.int64)
+    for index, row in enumerate(rows):
+        audio[index] = row
+    finish_output(audio, bool(mono), gain)
+    return audio[0].tolist(), audio[1].tolist()

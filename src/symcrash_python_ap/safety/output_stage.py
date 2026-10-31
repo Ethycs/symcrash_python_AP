@@ -186,6 +186,7 @@ class StereoOutputMixin:
         self.last_post_mix_params = param_frame
 
         # Apply post-processing if enabled (Stages 9-10)
+        returns = None
         if self._enable_material:
             # Use material_id=9 (SVF filter) if filter is enabled, otherwise use configured material
             material_id = 9 if filter_enabled else self._material_id
@@ -195,25 +196,32 @@ class StereoOutputMixin:
                 filter_reso_q15=filter_reso_q15,
                 filter_mode=filter_mode
             )
-            aux_l, aux_r = self.auxiliary_returns.process(send_inputs)
-            L = [max(Q15_NEG_ONE, min(Q15_ONE, x + y)) for x, y in zip(L, aux_l)]
-            R = [max(Q15_NEG_ONE, min(Q15_ONE, x + y)) for x, y in zip(R, aux_r)]
+            returns = self.auxiliary_returns.process(send_inputs)
         else:
             # The debug bypass freezes effect DSP state but still exposes buses.
             self.auxiliary_returns.last_inputs = {
                 name: ([max(Q15_NEG_ONE, min(Q15_ONE, x)) for x in left],
                        [max(Q15_NEG_ONE, min(Q15_ONE, x)) for x in right])
                 for name, (left, right) in send_inputs.items()}
-        # Device mono conversion precedes Safety, so rounding cannot invalidate
-        # the final slew/DC guarantees. The stereo effects still run only once.
-        if mono:
-            L = [RSHIFT_RNE(int(left) + int(right), 1) for left, right in zip(L, R)]
-            R = list(L)
-        # Master gain belongs to the final output path, including effect tails.
-        # Material/Safety do not consume ParamFrame.gate_q15 themselves.
-        if param_frame.gate_q15 != Q15_ONE:
-            L = [mul_q15_sat(int(s), param_frame.gate_q15) for s in L]
-            R = [mul_q15_sat(int(s), param_frame.gate_q15) for s in R]
+        # Return saturation, mono rounding and master gain precede Safety.
+        from .mix_jit import try_finish_output
+        # Conversion pays for itself when mono/gain work is present. Unity
+        # stereo keeps the lighter reference return-add loop.
+        finished = (try_finish_output(L, R, returns, mono, param_frame.gate_q15)
+                    if mono or param_frame.gate_q15 != Q15_ONE else None)
+        if finished is not None:
+            L, R = finished
+        else:
+            if returns is not None:
+                aux_l, aux_r = returns
+                L = [max(Q15_NEG_ONE, min(Q15_ONE, x + y)) for x, y in zip(L, aux_l)]
+                R = [max(Q15_NEG_ONE, min(Q15_ONE, x + y)) for x, y in zip(R, aux_r)]
+            if mono:
+                L = [RSHIFT_RNE(int(left) + int(right), 1) for left, right in zip(L, R)]
+                R = list(L)
+            if param_frame.gate_q15 != Q15_ONE:
+                L = [mul_q15_sat(int(s), param_frame.gate_q15) for s in L]
+                R = [mul_q15_sat(int(s), param_frame.gate_q15) for s in R]
         if self._enable_safety:
             # A debug bypass freezes DSP state, but output history belongs to
             # the stream. Re-enabling must connect to what was actually emitted.
