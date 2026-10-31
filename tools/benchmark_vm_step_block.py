@@ -23,6 +23,7 @@ Usage:
 import argparse
 import sys
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -82,6 +83,17 @@ def _scenario_mode_b_pwm():
     )
 
 
+def _scenario_mode_b_detuned():
+    return replace(_scenario_mode_b_saw(), cents=50)
+
+
+def _scenario_mode_b_pitch_sweep():
+    # 300 different pitches exceed the 128-entry basis cache. Continuing the
+    # sequence after warmup exercises lookup misses on every measured block.
+    return [replace(_scenario_mode_b_saw(), note=48 + cent // 100,
+                    cents=cent % 100, legato_mode=True) for cent in range(300)]
+
+
 def _scenario_fm6():
     return VoiceFrame(
         voice_id=1, note=57, cents=0, f0_hz=220.0,
@@ -97,7 +109,9 @@ def _scenario_fm6():
 SCENARIOS = [
     ("Mode A (LUT sine + partials)", _scenario_mode_a, 60),
     ("Mode B (12 partials + 2 ops)", _scenario_mode_b_partials_ops, 69),
-    ("Mode B (saw, matrix LUT)", _scenario_mode_b_saw, 48),
+    ("Mode B (saw, 32 harmonics)", _scenario_mode_b_saw, 48),
+    ("Mode B (detuned saw, 32 harmonics)", _scenario_mode_b_detuned, 48),
+    ("Mode B (pitch sweep, basis cache misses)", _scenario_mode_b_pitch_sweep, 48),
     ("Mode B (PWM, harmonic bank)", _scenario_mode_b_pwm, 52),
     ("Mode FM6 (alg 5 + feedback)", _scenario_fm6, 57),
 ]
@@ -112,14 +126,15 @@ def bench_scenario(frame, note, use_jit, num_blocks, warmup):
     hot.set_jit_enabled(use_jit)
     state = VMState.create(1)
     state.reset_for_note_on(note=note, cents=0)
+    commands = frame if isinstance(frame, (list, tuple)) else (frame,)
 
-    for _ in range(warmup):
-        state, _ = vm_step_block(state, frame)
+    for index in range(warmup):
+        state, _ = vm_step_block(state, commands[index % len(commands)])
 
     times = np.empty(num_blocks, dtype=np.float64)
     for i in range(num_blocks):
         t0 = time.perf_counter()
-        state, _ = vm_step_block(state, frame)
+        state, _ = vm_step_block(state, commands[(warmup + i) % len(commands)])
         times[i] = time.perf_counter() - t0
     return times * 1e6
 
@@ -127,13 +142,14 @@ def bench_scenario(frame, note, use_jit, num_blocks, warmup):
 def verify_bit_exact(frame, note, num_blocks=48):
     """Render both paths from identical state; require identical output."""
     outputs = {}
+    commands = frame if isinstance(frame, (list, tuple)) else (frame,)
     for use_jit in (False, True):
         hot.set_jit_enabled(use_jit)
         state = VMState.create(1)
         state.reset_for_note_on(note=note, cents=0)
         blocks = []
-        for _ in range(num_blocks):
-            state, out = vm_step_block(state, frame)
+        for index in range(num_blocks):
+            state, out = vm_step_block(state, commands[index % len(commands)])
             blocks.append(out.copy())
         outputs[use_jit] = (blocks, state.coeff_state.copy())
 
@@ -153,7 +169,9 @@ def fmt_row(label, times):
     pct = mean / BUDGET_US * 100
     status = "OK " if mean < BUDGET_US else "OVER"
     return (f"  {label:11s} mean={mean:8.1f} us  p95={p95:8.1f} us  "
-            f"({pct:6.1f}% of budget) [{status}]")
+            f"p99={np.percentile(times, 99):8.1f} us  max={times.max():8.1f} us\n"
+            f"              {np.count_nonzero(times > BUDGET_US)}/{len(times)} "
+            f"observed deadline misses; mean {pct:6.1f}% of budget [{status}]")
 
 
 def main():
@@ -210,7 +228,9 @@ def main():
     if any_over:
         print("RESULT: FAIL (over budget or bit-exactness mismatch)")
         return 1
-    print("RESULT: PASS (all scenarios bit-exact and under budget on jit path)")
+    print("RESULT: PASS (all scenarios bit-exact; mean JIT time under budget)")
+    print("Observed deadline misses above are not excused by a passing mean. "
+          "Desktop timing does not establish FPGA cycle or device deadline conformance.")
     return 0
 
 

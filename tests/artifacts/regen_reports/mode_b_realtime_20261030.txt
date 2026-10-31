@@ -1,0 +1,71 @@
+Mode B realtime workload audit, 2026-10-30
+
+Scope: the uncommitted fixed-anchor resource candidate, not hardware acceptance.
+The benchmark/test milestone adds coverage without committing that candidate.
+No block length, leaf count, lane count, coefficient dtype, phase precision,
+headroom rule, rounding boundary, or existing timing threshold was reduced.
+
+Workload: single VM voice, 32-harmonic saw, 48 kHz, 64 samples/block.
+100 warmup blocks followed by 750 measured blocks. The pitch sweep cycles
+through 300 integer-cent pitches, continuing after warmup, so all 750 measured
+lookups miss the 128-entry basis cache. Sustained detune uses cache hits.
+The total lookup misses including warmup are asserted: 850 sweep, 1 sustained.
+
+Before compiled descriptor construction:
+  paired previous exhaustive bank sweep means: 490.334 / 469.448 us
+  paired pending compact bank sweep means: 1926.610 / 1978.221 us
+  compact bank exceeded 1333.333 us in 742/750 blocks in both paired runs
+  newly added pytest gate: 2461.357 us mean, 3671.600 us p95; correctly FAILED
+The four pre-existing stream/control timing tests passed this candidate,
+demonstrating that the changing-pitch workload was missing from coverage.
+
+Optimization: compile the SAME descriptor selection and integer Q30 weight
+formula. Do not change anchors, Q formats, RNE stages, or final SAT16.
+Prepare compilation before playback and reuse the prepared frequency grid.
+The complete 12,701-pitch supported domain compares every descriptor offset
+and weight against the Python path; each Python intermediate is checked for
+signed-64-bit range. Independent Fraction/coefficient/resource checks pass:
+  95 passed in 73.37 seconds
+This does not establish exact between-anchor equality with the old exhaustive
+bank. Ten old tests assuming that equality remain unresolved in the candidate.
+
+Final focused realtime run (new pitch gates plus existing stream/control):
+  sustained detune: mean 817.9 us; p95 1456.2; p99 2086.9; max 4637.2
+    48/750 observed deadline misses
+  continuous pitch: mean 797.0 us; p95 1231.4; p99 1987.6; max 3287.2
+    29/750 observed deadline misses
+  cockpit tick 8.73 us; emitter 24.92 us; full control pipeline 57.66 us
+  7 passed in 9.01 seconds
+The mean <1333.333 us / p95 <2666.667 us smoke-test gates are unchanged.
+
+Standalone benchmark, --skip-reference --blocks 750 (100 warmup):
+  workload                   mean us   p95 us   p99 us    max us   misses/750
+  Mode A                        328.0     549.8     753.8    1498.8     1
+  Mode B 12 partials + 2 ops     381.4     593.1    1060.9    1763.3     3
+  Mode B saw H32                463.0     717.6    1192.1    2141.7     6
+  Mode B detuned saw H32        711.9    1022.4    1275.6    1656.9     7
+  Mode B pitch sweep            875.3    1263.5    1995.1    5220.7    28
+  Mode B PWM                    563.8     862.7    1298.2    2267.7     6
+  FM6 algorithm 5               429.8     715.7    1471.8    6749.5     9
+Every scenario matches reference audio and final coefficient state exactly.
+The CLI now reports p99, maximum and deadline misses, and labels its passing
+result as a MEAN timing check. Misses remain visible even when the mean passes.
+
+Unresolved hardware costs of the candidate:
+  At H32/K4, interpolating both sine/cosine from four anchors adds
+  32*64*4*2*4 = 65,536 coefficient-by-weight products per block.
+  It performs 65,536 int16 source reads (131,072 logical bytes/block), before
+  any cache/reuse optimization. This is not measured external DMA traffic.
+  Weight construction uses up to 32*4*3 = 384 variable-denominator divisions
+  per newly selected pitch, plus fixed-power-of-two product reductions.
+  The new signed Q30 interpolation weights occupy 32 bits. These are new
+  interpolation intermediates, not changes to int16 stored/audio coefficients.
+  Their cost on 18x18 DSP blocks still needs explicit mapping and scheduling.
+  Python/JIT speed does not establish that mapping or its cycle count.
+
+The total hardware deadline remains 133,333 cycles/block at 100 MHz, including
+admitted voices, transfers, control, tails, effects and mixing. Neither the
+existing operator-chain tick model nor these single-voice host measurements
+prove that complete bound. Shared memory, two-block prefetch, working buffers,
+voice tiers, and actual FPGA timing remain required. The compact candidate
+must not be accepted solely because its file fits in the coefficient partition.
