@@ -117,13 +117,13 @@ def test_reconstruction_accuracy():
 
         if abs(norm_corr) > 0.5:
             print("[OK] Good correlation with reference\n")
-            return True
+            return
         else:
             print("[WARN] Low correlation\n")
-            return False
+            raise AssertionError('test_reconstruction_accuracy reported failure; see diagnostic output')
     else:
         print("[FAIL] Zero RMS\n")
-        return False
+        raise AssertionError('test_reconstruction_accuracy reported failure; see diagnostic output')
 
 
 def test_frequency_sweep():
@@ -191,14 +191,14 @@ def test_frequency_sweep():
 
         if all(results):
             print("\n[OK] All frequencies within 50 cents\n")
-            return True
+            return
         else:
             print("\n[WARN] Some frequencies off\n")
-            return False
+            raise AssertionError('test_frequency_sweep reported failure; see diagnostic output')
 
     except ImportError:
         print("  (scipy not available)\n")
-        return True
+        return
 
 
 def test_block_continuity():
@@ -258,10 +258,10 @@ def test_block_continuity():
 
     if ratio < 3.0:
         print("[OK] Boundary discontinuities acceptable\n")
-        return True
+        return
     else:
         print("[WARN] Boundary discontinuities larger than expected\n")
-        return False
+        raise AssertionError('test_block_continuity reported failure; see diagnostic output')
 
 
 def test_k_dimension_variation():
@@ -301,10 +301,10 @@ def test_k_dimension_variation():
 
     if nonzero_var > NUM_LEAVES // 2:
         print("\n[OK] K dimension has time variation\n")
-        return True
+        return
     else:
         print("\n[WARN] K dimension lacks variation\n")
-        return False
+        raise AssertionError('test_k_dimension_variation reported failure; see diagnostic output')
 
 
 def test_phase_advance_continuity():
@@ -371,10 +371,10 @@ def test_phase_advance_continuity():
     # Allow 2x margin for filterbank effects
     if max_jump < max_expected * 3:
         print("[OK] Phase advances are reasonably continuous\n")
-        return True
+        return
     else:
         print("[WARN] Jumps larger than expected for sinusoid\n")
-        return False
+        raise AssertionError('test_phase_advance_continuity reported failure; see diagnostic output')
 
 
 if __name__ == '__main__':
@@ -383,11 +383,11 @@ if __name__ == '__main__':
     print()
 
     results = []
-    results.append(("Reconstruction Accuracy", test_reconstruction_accuracy()))
-    results.append(("Frequency Sweep", test_frequency_sweep()))
-    results.append(("Block Continuity", test_block_continuity()))
-    results.append(("K Dimension Variation", test_k_dimension_variation()))
-    results.append(("Phase Advance Continuity", test_phase_advance_continuity()))
+    results.append(("Reconstruction Accuracy", (test_reconstruction_accuracy() is None)))
+    results.append(("Frequency Sweep", (test_frequency_sweep() is None)))
+    results.append(("Block Continuity", (test_block_continuity() is None)))
+    results.append(("K Dimension Variation", (test_k_dimension_variation() is None)))
+    results.append(("Phase Advance Continuity", (test_phase_advance_continuity() is None)))
 
     print("=" * 60)
     print("SUMMARY")

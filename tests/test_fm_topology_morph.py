@@ -43,7 +43,7 @@ def test_archetype_definitions():
         print(f"  [{arch_id}] {arch.name}: {len(arch.edges)} edges, carriers={bin(arch.carrier_mask)}")
 
     print("[PASS] All 8 archetypes defined")
-    return True
+    return
 
 
 def test_dx7_mapping():
@@ -66,7 +66,7 @@ def test_dx7_mapping():
         print(f"  {arch.name}: {counts[arch_id]} algorithms")
 
     print("[PASS] All 32 DX7 algorithms mapped")
-    return True
+    return
 
 
 def test_edge_weight_interpolation():
@@ -97,7 +97,7 @@ def test_edge_weight_interpolation():
     print(f"  Fade in: {result}")
 
     print("[PASS] Edge weight interpolation works")
-    return True
+    return
 
 
 def test_carrier_fade_interpolation():
@@ -138,7 +138,7 @@ def test_carrier_fade_interpolation():
     print(f"  Neither: {result}")
 
     print("[PASS] Carrier fade interpolation works")
-    return True
+    return
 
 
 def test_blended_matrix():
@@ -171,7 +171,7 @@ def test_blended_matrix():
     print(f"    Op2->Op1 weight: {chain_edge} -> {mid_edge} (fading)")
 
     print("[PASS] Blended matrix computation works")
-    return True
+    return
 
 
 def test_blended_carriers():
@@ -203,7 +203,7 @@ def test_blended_carriers():
         assert 0 < fades_mid[op] < Q15_ONE, f"Op{op+1} should fade in mid"
 
     print("[PASS] Blended carriers computation works")
-    return True
+    return
 
 
 def test_morph_state_creation():
@@ -232,7 +232,7 @@ def test_morph_state_creation():
     print(f"  DX7 compat: Alg 5 -> Archetype {state.topo_a_id}")
 
     print("[PASS] Morph state creation works")
-    return True
+    return
 
 
 def test_morphed_audio_generation():
@@ -268,7 +268,7 @@ def test_morphed_audio_generation():
     assert rms_mid > 100, "Should have audible output"
 
     print("[PASS] Morphed audio generation works")
-    return True
+    return
 
 
 def test_continuous_morph():
@@ -305,7 +305,7 @@ def test_continuous_morph():
         assert rms > 100, f"Dropout at step {i}: RMS={rms}"
 
     print("[PASS] Continuous morph produces output throughout")
-    return True
+    return
 
 
 def test_all_archetype_pairs():
@@ -330,7 +330,7 @@ def test_all_archetype_pairs():
     assert working_pairs >= 56, f"Most pairs should produce audio, got {working_pairs}"
 
     print("[PASS] Most archetype pairs produce audio")
-    return True
+    return
 
 
 def main():
@@ -341,16 +341,16 @@ def main():
 
     results = []
 
-    results.append(("Archetype Definitions", test_archetype_definitions()))
-    results.append(("DX7 Mapping", test_dx7_mapping()))
-    results.append(("Edge Weight Interpolation", test_edge_weight_interpolation()))
-    results.append(("Carrier Fade Interpolation", test_carrier_fade_interpolation()))
-    results.append(("Blended Matrix", test_blended_matrix()))
-    results.append(("Blended Carriers", test_blended_carriers()))
-    results.append(("Morph State Creation", test_morph_state_creation()))
-    results.append(("Morphed Audio Generation", test_morphed_audio_generation()))
-    results.append(("Continuous Morph", test_continuous_morph()))
-    results.append(("All Archetype Pairs", test_all_archetype_pairs()))
+    results.append(("Archetype Definitions", (test_archetype_definitions() is None)))
+    results.append(("DX7 Mapping", (test_dx7_mapping() is None)))
+    results.append(("Edge Weight Interpolation", (test_edge_weight_interpolation() is None)))
+    results.append(("Carrier Fade Interpolation", (test_carrier_fade_interpolation() is None)))
+    results.append(("Blended Matrix", (test_blended_matrix() is None)))
+    results.append(("Blended Carriers", (test_blended_carriers() is None)))
+    results.append(("Morph State Creation", (test_morph_state_creation() is None)))
+    results.append(("Morphed Audio Generation", (test_morphed_audio_generation() is None)))
+    results.append(("Continuous Morph", (test_continuous_morph() is None)))
+    results.append(("All Archetype Pairs", (test_all_archetype_pairs() is None)))
 
     # Summary
     print("\n" + "=" * 60)

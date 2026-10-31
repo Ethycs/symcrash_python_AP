@@ -74,7 +74,7 @@ def test_modulator_extraction_method_0():
     assert np.all(np.abs(fm_mod) < 10000), "Values out of range"
 
     print("[PASS] Method 0 extraction works")
-    return True
+    return
 
 
 def test_modulator_extraction_method_1():
@@ -98,7 +98,7 @@ def test_modulator_extraction_method_1():
         assert fm_mod[k] == expected, f"k={k}: expected {expected}, got {fm_mod[k]}"
 
     print("[PASS] Method 1 extraction works")
-    return True
+    return
 
 
 def test_modulator_extraction_method_2():
@@ -119,7 +119,7 @@ def test_modulator_extraction_method_2():
     assert np.any(fm_mod > 0), "Energy should be positive for non-zero input"
 
     print("[PASS] Method 2 extraction works")
-    return True
+    return
 
 
 def test_fm_affects_spectrum():
@@ -188,7 +188,7 @@ def test_fm_affects_spectrum():
     assert np.std(audio_fm) > 100, "FM audio too quiet"
 
     print("[PASS] FM affects output")
-    return True
+    return
 
 
 def test_feedback_delay():
@@ -237,7 +237,7 @@ def test_feedback_delay():
     assert non_zero_count > 0, "Feedback loop not working"
 
     print("[PASS] Feedback delay works")
-    return True
+    return
 
 
 def main():
@@ -247,11 +247,11 @@ def main():
 
     results = []
 
-    results.append(("Modulator Extraction Method 0", test_modulator_extraction_method_0()))
-    results.append(("Modulator Extraction Method 1", test_modulator_extraction_method_1()))
-    results.append(("Modulator Extraction Method 2", test_modulator_extraction_method_2()))
-    results.append(("FM Affects Spectrum", test_fm_affects_spectrum()))
-    results.append(("Feedback Delay", test_feedback_delay()))
+    results.append(("Modulator Extraction Method 0", (test_modulator_extraction_method_0() is None)))
+    results.append(("Modulator Extraction Method 1", (test_modulator_extraction_method_1() is None)))
+    results.append(("Modulator Extraction Method 2", (test_modulator_extraction_method_2() is None)))
+    results.append(("FM Affects Spectrum", (test_fm_affects_spectrum() is None)))
+    results.append(("Feedback Delay", (test_feedback_delay() is None)))
 
     # Summary
     print("\n" + "=" * 60)

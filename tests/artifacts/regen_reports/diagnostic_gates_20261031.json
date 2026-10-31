@@ -1,0 +1,260 @@
+{
+  "status": "Adopted; all 94 diagnostics pass within 517 focused production checks",
+  "audited_diagnostics": 94,
+  "baseline_diagnostics_returning_true": 94,
+  "candidate_tests_passed": 94,
+  "candidate_test_exit_code": 0,
+  "failure_probe": "Injected zero-RMS reference: one expected pytest failure; probe exits zero",
+  "standalone_runner_checks": 14,
+  "standalone_check_exit_code": 0,
+  "source_and_candidate": {
+    "tests/test_ccs_frequency.py": {
+      "source_sha256": "b2e27d5ea40a17360292813135951a3fd8f30b165e8f21503be362590e8ec6db",
+      "changes": 15,
+      "diagnostics": [
+        "test_cents_detuning",
+        "test_direct_sine_frequency",
+        "test_full_range_pitch_table",
+        "test_mode_b_frequency",
+        "test_pitch_table_accuracy"
+      ],
+      "candidate_sha256": "7899c1dbd72de0c55732c25610cf3ba9c9cea4252c8b2e7e8f115ac84cf44694"
+    },
+    "tests/test_fm6_synthesis.py": {
+      "source_sha256": "325098e0d50c4025536d8569f61269308304cdc99a8dc4d4692c4b0b050bf682",
+      "changes": 19,
+      "diagnostics": [
+        "test_algorithm_table",
+        "test_fm6_coefficient_format",
+        "test_fm6_executor_integration",
+        "test_fm6_feedback",
+        "test_fm6_modulation",
+        "test_fm6_pitch_tracking",
+        "test_fm6_presets",
+        "test_fm6_single_operator",
+        "test_fm6_state_creation"
+      ],
+      "candidate_sha256": "c2590934b78b8ce6c9b692dbed4d8e3e8e74f4c1d302f8e66f77f29879cfae70"
+    },
+    "tests/test_fm_feedback.py": {
+      "source_sha256": "b8399d4beb706699407c810197ef4b413d0c44d004aaded7709d7ce4132dffb4",
+      "changes": 10,
+      "diagnostics": [
+        "test_feedback_delay",
+        "test_fm_affects_spectrum",
+        "test_modulator_extraction_method_0",
+        "test_modulator_extraction_method_1",
+        "test_modulator_extraction_method_2"
+      ],
+      "candidate_sha256": "b41136bc8c86de38ee36b1635ffa20d72d22c3dfaa4fecc305c2ba31a2538b71"
+    },
+    "tests/test_fm_topology_morph.py": {
+      "source_sha256": "dd233190454ff088b94b97c60518e67d557934c4bac492a3b0e23487d25551da",
+      "changes": 20,
+      "diagnostics": [
+        "test_all_archetype_pairs",
+        "test_archetype_definitions",
+        "test_blended_carriers",
+        "test_blended_matrix",
+        "test_carrier_fade_interpolation",
+        "test_continuous_morph",
+        "test_dx7_mapping",
+        "test_edge_weight_interpolation",
+        "test_morph_state_creation",
+        "test_morphed_audio_generation"
+      ],
+      "candidate_sha256": "3e89f64755575bec8cb56cece093252bc7c46fa8ddf2893e55027a838d41462b"
+    },
+    "tests/test_fx_material.py": {
+      "source_sha256": "91e6498ad857e997751c2dc01b18a087b2959f7b28f5fcc37b5792a08637b165",
+      "changes": 14,
+      "diagnostics": [
+        "test_chorus_basic",
+        "test_chorus_determinism",
+        "test_chorus_modulation",
+        "test_delay_basic",
+        "test_delay_determinism",
+        "test_delay_feedback",
+        "test_material_id_routing"
+      ],
+      "candidate_sha256": "c9ddf6b556bc5a261ace58eff9c7691da1ead0999df9af562fc2d2a57fe30e9f"
+    },
+    "tests/test_granular_engine.py": {
+      "source_sha256": "6e918402d41d35dcee2a1bffe8f4b625671f74b738b7bd6dd0a10fca8e06c3ff",
+      "changes": 20,
+      "diagnostics": [
+        "test_full_synthesis",
+        "test_grain_envelope",
+        "test_grain_lifecycle",
+        "test_grain_scheduling",
+        "test_loop_wrap",
+        "test_multiple_grains",
+        "test_pitch_shifting",
+        "test_scan_position",
+        "test_source_loading",
+        "test_spray_randomization"
+      ],
+      "candidate_sha256": "d44495519719554b1dbe251205dbdd4f6f4fb602cc0752d7f6ba27c6fe79fe9c"
+    },
+    "tests/test_polyphase_k4.py": {
+      "source_sha256": "2dc95061fcd1268e04bd565204d8ee5063c2e386caff9ad989fd8f1e93307b76",
+      "changes": 13,
+      "diagnostics": [
+        "test_basic_polyphase_output",
+        "test_boundary_continuity",
+        "test_various_frequencies",
+        "test_waveform_shape"
+      ],
+      "candidate_sha256": "ecbc08844624117ae76075ce5d30a18e2344489b27e10d27e55d36cc3a069c7a"
+    },
+    "tests/test_sample_mode_integration.py": {
+      "source_sha256": "79d5b2b1bf75f5aa50f64628777f33b3bc9b1630d73f17a9dc93c478c91f8bd2",
+      "changes": 12,
+      "diagnostics": [
+        "test_sample_mode_activation",
+        "test_sample_pitch_shifting",
+        "test_sample_playback_through_executor",
+        "test_sample_rate_override",
+        "test_sample_with_loop",
+        "test_sample_with_precomputed_coeffs"
+      ],
+      "candidate_sha256": "7dd3b1e44dcd870d0fee3d6e43928074f8de495860b5f49b5fa1cd7fa9d1ccca"
+    },
+    "tests/test_sample_morphing.py": {
+      "source_sha256": "5c1398206c420264edc2b5e638059ffebfec816a08c8b4b2813eef54b89d2087",
+      "changes": 8,
+      "diagnostics": [
+        "test_sample_drone_mode",
+        "test_sample_pitch_with_morphing",
+        "test_sample_with_noiseband",
+        "test_sample_with_tilt"
+      ],
+      "candidate_sha256": "c799d3ec829d02f74df93ce96f1558838c6283634d6c9ac756bf6e166c198353"
+    },
+    "tests/test_sample_playback.py": {
+      "source_sha256": "8b06594996dcde3ab1fc28817fbbf4857fb71898e01896f0293ade528f8b5642",
+      "changes": 20,
+      "diagnostics": [
+        "test_basic_sample_loading",
+        "test_coeff_interpolation",
+        "test_compute_playback_rate",
+        "test_looping",
+        "test_one_shot_vs_loop",
+        "test_pitch_shifting",
+        "test_precomputed_coefficients",
+        "test_round_trip_quality",
+        "test_sample_generate_coeffs",
+        "test_sample_playback"
+      ],
+      "candidate_sha256": "da1d878fe72b76f1c3c6fc21e203a7dccbe4c39e00eed8a51fb48c27c1c7523c"
+    },
+    "tests/test_seam_stitching.py": {
+      "source_sha256": "a8dc640c722b4f2f9c8dcd480171abd066724639d7dfc4e6b5fd7818b4ef166e",
+      "changes": 14,
+      "diagnostics": [
+        "test_click_detection",
+        "test_frequency_stability",
+        "test_k0_vs_polyphase_discontinuity",
+        "test_long_stream_stability",
+        "test_seam_stitching_necessity"
+      ],
+      "candidate_sha256": "daae658e520907cf360ed5a68dbbc59fb05e7f349e58ffa049f718060a940fc7"
+    },
+    "tests/test_tail_operators.py": {
+      "source_sha256": "cf054e3b5c19ab780f738e5ee727bb662db1891818e483b6ac55ca0c945f3f72",
+      "changes": 12,
+      "diagnostics": [
+        "test_excessive_energy_limited",
+        "test_lane_tail_ccs_mode",
+        "test_no_clipping_artifacts",
+        "test_normal_energy_passthrough",
+        "test_repeated_limiting",
+        "test_signal_shape_preserved"
+      ],
+      "candidate_sha256": "37181b44a18fdde6e8a346dd37a2bae3265e0b3e9cf526eb26e2ddeb0db2536c"
+    },
+    "tests/test_voice_manager.py": {
+      "source_sha256": "02d11e9b61cf7a2831a0c12b835325d4b97aec8e19609b51f3172b70f419382b",
+      "changes": 16,
+      "diagnostics": [
+        "test_basic_allocation",
+        "test_full_polyphony",
+        "test_mix_clipping",
+        "test_mix_outputs",
+        "test_mono_mode",
+        "test_release_note",
+        "test_update_slot_states",
+        "test_voice_stealing"
+      ],
+      "candidate_sha256": "cb86bcbf51f0c72c6c8556a50af64374386d4b15e89db24c71a9e241abe8e1c1"
+    },
+    "tests/unit/test_lut_verification.py": {
+      "source_sha256": "a87515400a7b5cbcbb7ef27c9d5e827c56dc4577357429a15eea1d353aa565c1",
+      "changes": 17,
+      "diagnostics": [
+        "test_block_continuity",
+        "test_frequency_sweep",
+        "test_k_dimension_variation",
+        "test_phase_advance_continuity",
+        "test_reconstruction_accuracy"
+      ],
+      "candidate_sha256": "478f6e3c46971a0e63bf22130a687e50cb046fc464bcdd2034f4906d49e1c036"
+    },
+    "pyproject.toml": {
+      "source_sha256": "c4c6f1f9475e84f647134e48b0e35a7b2f6c4135578d39fc55255ef2a13271d5",
+      "candidate_sha256": "1275f1fce0f66138c5ab3557424e8e1ca43aa1e0e4caeaa66a4e4bd97081f81f"
+    }
+  },
+  "evidence": {
+    "_diagnostics71-candidate-tests.log": "f1ecee91113d4439d14b452ffaa669c06cdab589fe0a5351d9fbc5180073e325",
+    "_diagnostics71-failure-probe.log": "c865a7af13a89c07d901ef5c12d03170d8e9f0b9a56d277c505741ceed2ee616",
+    "_diagnostics71-standalone-check.log": "01b3b36b6631abe146db8a47eb63d7220a1abdf7b0ced96fbc3d6c18521263f9",
+    "build\\realtime70\\legacy_boolean_diagnostic_results.json": "3be6787bd807716a1eb3fd9a5d97c18768830aa310ee916fc82010a67ab41bde",
+    "_maturity70-legacy-boolean-audit.log": "49d5a9196ed0f270e6aef69a8935126e25415dc3f896d53d247a79f4c7653222"
+  },
+  "pending": "Broader standard coverage and engine maturity; diagnostic return-value repair verified",
+  "production_focused_tests": 517,
+  "adopted_source_sha256": {
+    "tests/test_ccs_frequency.py": "7899c1dbd72de0c55732c25610cf3ba9c9cea4252c8b2e7e8f115ac84cf44694",
+    "tests/test_fm6_synthesis.py": "c2590934b78b8ce6c9b692dbed4d8e3e8e74f4c1d302f8e66f77f29879cfae70",
+    "tests/test_fm_feedback.py": "b41136bc8c86de38ee36b1635ffa20d72d22c3dfaa4fecc305c2ba31a2538b71",
+    "tests/test_fm_topology_morph.py": "3e89f64755575bec8cb56cece093252bc7c46fa8ddf2893e55027a838d41462b",
+    "tests/test_fx_material.py": "c9ddf6b556bc5a261ace58eff9c7691da1ead0999df9af562fc2d2a57fe30e9f",
+    "tests/test_granular_engine.py": "d44495519719554b1dbe251205dbdd4f6f4fb602cc0752d7f6ba27c6fe79fe9c",
+    "tests/test_polyphase_k4.py": "ecbc08844624117ae76075ce5d30a18e2344489b27e10d27e55d36cc3a069c7a",
+    "tests/test_sample_mode_integration.py": "7dd3b1e44dcd870d0fee3d6e43928074f8de495860b5f49b5fa1cd7fa9d1ccca",
+    "tests/test_sample_morphing.py": "c799d3ec829d02f74df93ce96f1558838c6283634d6c9ac756bf6e166c198353",
+    "tests/test_sample_playback.py": "da1d878fe72b76f1c3c6fc21e203a7dccbe4c39e00eed8a51fb48c27c1c7523c",
+    "tests/test_seam_stitching.py": "daae658e520907cf360ed5a68dbbc59fb05e7f349e58ffa049f718060a940fc7",
+    "tests/test_tail_operators.py": "37181b44a18fdde6e8a346dd37a2bae3265e0b3e9cf526eb26e2ddeb0db2536c",
+    "tests/test_voice_manager.py": "cb86bcbf51f0c72c6c8556a50af64374386d4b15e89db24c71a9e241abe8e1c1",
+    "tests/unit/test_lut_verification.py": "478f6e3c46971a0e63bf22130a687e50cb046fc464bcdd2034f4906d49e1c036",
+    "pyproject.toml": "1275f1fce0f66138c5ab3557424e8e1ca43aa1e0e4caeaa66a4e4bd97081f81f"
+  },
+  "full_post_change_regression": {
+    "status": "passed",
+    "exit_code": 0,
+    "summary": "6432 passed, 14 skipped, 7 warnings in 1615.24s (0:26:55)",
+    "passed": 6432,
+    "skipped": 14,
+    "warnings": 7,
+    "elapsed_seconds": 1615.24,
+    "failures": [],
+    "log": "_maturity70-post-tests.log",
+    "log_sha256": "792f21f3b91ea74c7ccbbcb7887afecb4c0442814279c9a02ce8465198fe01cc",
+    "inputs": "_maturity70_full_inputs.json",
+    "inputs_sha256": "665bac4819dcbfdb9d302a0021ea2b5556e7fdecf738ef482cb1f20333cc9155",
+    "unchanged_inputs": 707,
+    "protected_git": {
+      "root": {
+        "head": "23377cc6b31e90f6d03ad63ee332beb6fb88143a",
+        "staged_patch_sha256": "ad4bf3ccbe8a590a7048b3fc38a37dff3681762dd7d6c79bde0d6f25852945b9"
+      },
+      "docs": {
+        "head": "86514812c317f4b4c7eb0a26a70e017eac0335f5",
+        "staged_patch_sha256": "76a1af380934cc163e477265a5a6847e51248cff08f447e26a45f8fe319acc1b"
+      }
+    },
+    "interpretation": "Full source-matched regression; no competing tests/benchmarks. Full-live deadline, hardware fit and broader functional contracts remain open."
+  }
+}

@@ -48,7 +48,7 @@ def test_basic_allocation():
     print(f"Allocated 4 voices: {[s.note for s in slots]}")
     print(f"Active: {pool.get_active_count()}, Free: {pool.get_free_count()}")
     print("[PASS] Basic allocation works")
-    return True
+    return
 
 
 def test_voice_stealing():
@@ -77,7 +77,7 @@ def test_voice_stealing():
     assert 60 not in [s.note for s in pool.slots], "Oldest voice was not stolen"
 
     print("[PASS] Voice stealing works (oldest-first)")
-    return True
+    return
 
 
 def test_release_note():
@@ -101,7 +101,7 @@ def test_release_note():
 
     print(f"Released note 62, envelope phase: {released[0].state.envelope.phase.name}")
     print("[PASS] Note release works")
-    return True
+    return
 
 
 def test_mix_outputs():
@@ -129,7 +129,7 @@ def test_mix_outputs():
 
     print(f"Mixed 3 voices: {mixed[0]} (expected {expected_sum})")
     print("[PASS] Output mixing works")
-    return True
+    return
 
 
 def test_mix_clipping():
@@ -153,7 +153,7 @@ def test_mix_clipping():
 
     print(f"Mixed 2 loud voices: {mixed[0]} (clipped from {30000 + 30000})")
     print("[PASS] Clipping works")
-    return True
+    return
 
 
 def test_mono_mode():
@@ -178,7 +178,7 @@ def test_mono_mode():
     print(f"Channel 0: first note 60, second note 64")
     print(f"Same slot reused: {slot1.voice_id == slot2.voice_id}")
     print("[PASS] Mono mode works")
-    return True
+    return
 
 
 def test_full_polyphony():
@@ -208,7 +208,7 @@ def test_full_polyphony():
 
     print(f"Stole oldest voice for note 100")
     print("[PASS] Full 32-voice polyphony works")
-    return True
+    return
 
 
 def test_update_slot_states():
@@ -231,7 +231,7 @@ def test_update_slot_states():
     assert slot.note == -1
 
     print("[PASS] Slot state updates work")
-    return True
+    return
 
 
 def main():
@@ -241,14 +241,14 @@ def main():
 
     results = []
 
-    results.append(("Basic Allocation", test_basic_allocation()))
-    results.append(("Voice Stealing", test_voice_stealing()))
-    results.append(("Note Release", test_release_note()))
-    results.append(("Mix Outputs", test_mix_outputs()))
-    results.append(("Mix Clipping", test_mix_clipping()))
-    results.append(("Mono Mode", test_mono_mode()))
-    results.append(("Full Polyphony", test_full_polyphony()))
-    results.append(("Slot State Update", test_update_slot_states()))
+    results.append(("Basic Allocation", (test_basic_allocation() is None)))
+    results.append(("Voice Stealing", (test_voice_stealing() is None)))
+    results.append(("Note Release", (test_release_note() is None)))
+    results.append(("Mix Outputs", (test_mix_outputs() is None)))
+    results.append(("Mix Clipping", (test_mix_clipping() is None)))
+    results.append(("Mono Mode", (test_mono_mode() is None)))
+    results.append(("Full Polyphony", (test_full_polyphony() is None)))
+    results.append(("Slot State Update", (test_update_slot_states() is None)))
 
     # Summary
     print("\n" + "=" * 60)

@@ -90,7 +90,7 @@ def test_sample_with_tilt():
     # TILT should modify the spectrum
     # Note: effect depends on operator implementation
     print("[PASS] Sample + TILT works (spectrum modified)")
-    return True
+    return
 
 
 def test_sample_with_noiseband():
@@ -151,7 +151,7 @@ def test_sample_with_noiseband():
     else:
         print("[INFO] NoiseBand effect subtle (may depend on noise params)")
 
-    return True
+    return
 
 
 def test_sample_drone_mode():
@@ -199,7 +199,7 @@ def test_sample_drone_mode():
 
     assert diff > 0, "Drone mode should produce different coefficients"
     print("[PASS] Sample + drone mode works")
-    return True
+    return
 
 
 def test_sample_pitch_with_morphing():
@@ -246,7 +246,7 @@ def test_sample_pitch_with_morphing():
     assert freq_error < 50, f"Pitch shift error too large: {freq_error}"
 
     print("[PASS] Pitch-shifted sample + morphing works")
-    return True
+    return
 
 
 def main():
@@ -256,10 +256,10 @@ def main():
 
     results = []
 
-    results.append(("Sample + TILT", test_sample_with_tilt()))
-    results.append(("Sample + NoiseBand", test_sample_with_noiseband()))
-    results.append(("Sample + Drone Mode", test_sample_drone_mode()))
-    results.append(("Pitch-Shifted + Morphing", test_sample_pitch_with_morphing()))
+    results.append(("Sample + TILT", (test_sample_with_tilt() is None)))
+    results.append(("Sample + NoiseBand", (test_sample_with_noiseband() is None)))
+    results.append(("Sample + Drone Mode", (test_sample_drone_mode() is None)))
+    results.append(("Pitch-Shifted + Morphing", (test_sample_pitch_with_morphing() is None)))
 
     # Summary
     print("\n" + "=" * 60)

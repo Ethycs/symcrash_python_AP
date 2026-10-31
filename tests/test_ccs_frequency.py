@@ -162,10 +162,10 @@ def test_pitch_table_accuracy():
 
     if max_error_cents < 1.0:
         print("[PASS] All notes within 1 cent tolerance")
-        return True
+        return
     else:
         print("[FAIL] Some notes exceed 1 cent tolerance")
-        return False
+        raise AssertionError('test_pitch_table_accuracy reported failure; see diagnostic output')
 
 
 def test_direct_sine_frequency():
@@ -203,10 +203,10 @@ def test_direct_sine_frequency():
 
     if max_error_cents < 1.0:
         print("[PASS] Direct sine within 1 cent tolerance")
-        return True
+        return
     else:
         print("[FAIL] Direct sine exceeds 1 cent tolerance")
-        return False
+        raise AssertionError('test_direct_sine_frequency reported failure; see diagnostic output')
 
 
 def test_mode_b_frequency():
@@ -244,10 +244,10 @@ def test_mode_b_frequency():
 
     if max_error_cents < 1.0:
         print("[PASS] Mode B within 1 cent tolerance")
-        return True
+        return
     else:
         print("[FAIL] Mode B exceeds 1 cent tolerance")
-        return False
+        raise AssertionError('test_mode_b_frequency reported failure; see diagnostic output')
 
 
 def test_full_range_pitch_table():
@@ -275,10 +275,10 @@ def test_full_range_pitch_table():
 
     if max_error_cents < 1.0:
         print("[PASS] All notes within 1 cent tolerance")
-        return True
+        return
     else:
         print("[FAIL] Some notes exceed 1 cent tolerance")
-        return False
+        raise AssertionError('test_full_range_pitch_table reported failure; see diagnostic output')
 
 
 def test_cents_detuning():
@@ -307,10 +307,10 @@ def test_cents_detuning():
 
     if max_error_cents < 1.0:
         print("[PASS] Cents detuning within 1 cent tolerance")
-        return True
+        return
     else:
         print("[FAIL] Cents detuning exceeds 1 cent tolerance")
-        return False
+        raise AssertionError('test_cents_detuning reported failure; see diagnostic output')
 
 
 def main():
@@ -321,11 +321,11 @@ def main():
     results = []
 
     # Run tests
-    results.append(("Pitch Table Accuracy", test_pitch_table_accuracy()))
-    results.append(("Full Range Pitch Table", test_full_range_pitch_table()))
-    results.append(("Cents Detuning", test_cents_detuning()))
-    results.append(("Direct SineCore Frequency", test_direct_sine_frequency()))
-    results.append(("Mode B Frequency", test_mode_b_frequency()))
+    results.append(("Pitch Table Accuracy", (test_pitch_table_accuracy() is None)))
+    results.append(("Full Range Pitch Table", (test_full_range_pitch_table() is None)))
+    results.append(("Cents Detuning", (test_cents_detuning() is None)))
+    results.append(("Direct SineCore Frequency", (test_direct_sine_frequency() is None)))
+    results.append(("Mode B Frequency", (test_mode_b_frequency() is None)))
 
     # Summary
     print("\n" + "=" * 60)

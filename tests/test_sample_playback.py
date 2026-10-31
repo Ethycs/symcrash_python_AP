@@ -55,7 +55,7 @@ def test_basic_sample_loading():
     assert state.position_q16 == 0
 
     print("[PASS] Basic sample loading works")
-    return True
+    return
 
 
 def test_sample_playback():
@@ -87,7 +87,7 @@ def test_sample_playback():
     assert rms > 1000, f"Audio too quiet: RMS={rms}"
 
     print("[PASS] Sample playback works")
-    return True
+    return
 
 
 def test_pitch_shifting():
@@ -131,7 +131,7 @@ def test_pitch_shifting():
     assert state.is_finished, "Should have finished playback"
 
     print("[PASS] Pitch shifting works")
-    return True
+    return
 
 
 def test_looping():
@@ -168,7 +168,7 @@ def test_looping():
     assert rms_end > 1000, f"Loop audio too quiet: RMS={rms_end}"
 
     print("[PASS] Looping works")
-    return True
+    return
 
 
 def test_precomputed_coefficients():
@@ -206,7 +206,7 @@ def test_precomputed_coefficients():
     print(f"Read {blocks_read} coefficient blocks")
 
     print("[PASS] Pre-computed coefficients work")
-    return True
+    return
 
 
 def test_coeff_interpolation():
@@ -246,7 +246,7 @@ def test_coeff_interpolation():
     assert abs(actual_position - expected_position) < 2, "Position advancement wrong"
 
     print("[PASS] Coefficient interpolation works")
-    return True
+    return
 
 
 def test_sample_generate_coeffs():
@@ -279,7 +279,7 @@ def test_sample_generate_coeffs():
     assert rms_coeff > 100, f"Coeff mode output too quiet: {rms_coeff}"
 
     print("[PASS] sample_generate_coeffs works in both modes")
-    return True
+    return
 
 
 def test_round_trip_quality():
@@ -313,7 +313,7 @@ def test_round_trip_quality():
     assert snr_db > 60, f"Round-trip SNR too low: {snr_db} dB"
 
     print("[PASS] Round-trip quality is good")
-    return True
+    return
 
 
 def test_compute_playback_rate():
@@ -339,7 +339,7 @@ def test_compute_playback_rate():
         assert error < 0.01, f"Rate computation error too large: {error}%"
 
     print("[PASS] Playback rate computation works")
-    return True
+    return
 
 
 def test_one_shot_vs_loop():
@@ -372,7 +372,7 @@ def test_one_shot_vs_loop():
     assert state_loop.is_playing, "Loop should still be playing"
 
     print("[PASS] One-shot vs loop modes work correctly")
-    return True
+    return
 
 
 def main():
@@ -382,16 +382,16 @@ def main():
 
     results = []
 
-    results.append(("Basic Sample Loading", test_basic_sample_loading()))
-    results.append(("Sample Playback", test_sample_playback()))
-    results.append(("Pitch Shifting", test_pitch_shifting()))
-    results.append(("Looping", test_looping()))
-    results.append(("Pre-computed Coefficients", test_precomputed_coefficients()))
-    results.append(("Coefficient Interpolation", test_coeff_interpolation()))
-    results.append(("sample_generate_coeffs", test_sample_generate_coeffs()))
-    results.append(("Round-Trip Quality", test_round_trip_quality()))
-    results.append(("Playback Rate Computation", test_compute_playback_rate()))
-    results.append(("One-Shot vs Loop", test_one_shot_vs_loop()))
+    results.append(("Basic Sample Loading", (test_basic_sample_loading() is None)))
+    results.append(("Sample Playback", (test_sample_playback() is None)))
+    results.append(("Pitch Shifting", (test_pitch_shifting() is None)))
+    results.append(("Looping", (test_looping() is None)))
+    results.append(("Pre-computed Coefficients", (test_precomputed_coefficients() is None)))
+    results.append(("Coefficient Interpolation", (test_coeff_interpolation() is None)))
+    results.append(("sample_generate_coeffs", (test_sample_generate_coeffs() is None)))
+    results.append(("Round-Trip Quality", (test_round_trip_quality() is None)))
+    results.append(("Playback Rate Computation", (test_compute_playback_rate() is None)))
+    results.append(("One-Shot vs Loop", (test_one_shot_vs_loop() is None)))
 
     # Summary
     print("\n" + "=" * 60)

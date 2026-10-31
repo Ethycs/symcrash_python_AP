@@ -65,7 +65,7 @@ def test_source_loading():
     assert rms > 100, f"Coefficients too quiet: {rms}"
 
     print("[PASS] Source loading works")
-    return True
+    return
 
 
 def test_grain_lifecycle():
@@ -108,7 +108,7 @@ def test_grain_lifecycle():
     print(f"Grain completed after {grain.blocks_played} blocks")
 
     print("[PASS] Grain lifecycle works")
-    return True
+    return
 
 
 def test_grain_envelope():
@@ -139,7 +139,7 @@ def test_grain_envelope():
     assert envelope_values[-1] < envelope_values[-3], "Release should ramp down"
 
     print("[PASS] Grain envelope works")
-    return True
+    return
 
 
 def test_multiple_grains():
@@ -180,7 +180,7 @@ def test_multiple_grains():
     print(f"Active grains after one block: {still_active}")
 
     print("[PASS] Multiple grains work")
-    return True
+    return
 
 
 def test_grain_scheduling():
@@ -227,7 +227,7 @@ def test_grain_scheduling():
     assert spawned_count >= 5, f"Too few grains spawned: {spawned_count}"
 
     print("[PASS] Grain scheduling works")
-    return True
+    return
 
 
 def test_spray_randomization():
@@ -255,7 +255,7 @@ def test_spray_randomization():
     # Actual randomization is probabilistic and hard to test deterministically
 
     print("[PASS] Spray parameters work")
-    return True
+    return
 
 
 def test_pitch_shifting():
@@ -296,7 +296,7 @@ def test_pitch_shifting():
     assert abs(rate_blocks - 2.0) < 0.01, f"Rate wrong: {rate_blocks}"
 
     print("[PASS] Pitch shifting works")
-    return True
+    return
 
 
 def test_full_synthesis():
@@ -344,7 +344,7 @@ def test_full_synthesis():
     print(f"RMS variation: start={rms_start:.1f}, end={rms_end:.1f}")
 
     print("[PASS] Full synthesis works")
-    return True
+    return
 
 
 def test_scan_position():
@@ -379,7 +379,7 @@ def test_scan_position():
     assert 5 < total_movement < 15, f"Scan movement wrong: {total_movement}"
 
     print("[PASS] Scan position works")
-    return True
+    return
 
 
 def test_loop_wrap():
@@ -413,7 +413,7 @@ def test_loop_wrap():
     assert wrapped, "Scan should wrap around"
 
     print("[PASS] Loop wrap works")
-    return True
+    return
 
 
 def main():
@@ -423,16 +423,16 @@ def main():
 
     results = []
 
-    results.append(("Source Loading", test_source_loading()))
-    results.append(("Grain Lifecycle", test_grain_lifecycle()))
-    results.append(("Grain Envelope", test_grain_envelope()))
-    results.append(("Multiple Grains", test_multiple_grains()))
-    results.append(("Grain Scheduling", test_grain_scheduling()))
-    results.append(("Spray Randomization", test_spray_randomization()))
-    results.append(("Pitch Shifting", test_pitch_shifting()))
-    results.append(("Full Synthesis", test_full_synthesis()))
-    results.append(("Scan Position", test_scan_position()))
-    results.append(("Loop Wrap", test_loop_wrap()))
+    results.append(("Source Loading", (test_source_loading() is None)))
+    results.append(("Grain Lifecycle", (test_grain_lifecycle() is None)))
+    results.append(("Grain Envelope", (test_grain_envelope() is None)))
+    results.append(("Multiple Grains", (test_multiple_grains() is None)))
+    results.append(("Grain Scheduling", (test_grain_scheduling() is None)))
+    results.append(("Spray Randomization", (test_spray_randomization() is None)))
+    results.append(("Pitch Shifting", (test_pitch_shifting() is None)))
+    results.append(("Full Synthesis", (test_full_synthesis() is None)))
+    results.append(("Scan Position", (test_scan_position() is None)))
+    results.append(("Loop Wrap", (test_loop_wrap() is None)))
 
     # Summary
     print("\n" + "=" * 60)

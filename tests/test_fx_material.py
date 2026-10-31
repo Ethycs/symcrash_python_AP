@@ -96,7 +96,7 @@ def test_delay_basic():
     assert all_abs[peak_idx] > 500, "Echo too quiet"
 
     print("[PASS] Basic delay works")
-    return True
+    return
 
 
 def test_delay_feedback():
@@ -159,7 +159,7 @@ def test_delay_feedback():
         assert max(peaks) < 35000, "Output should not clip"
 
     print("[PASS] Delay feedback is stable")
-    return True
+    return
 
 
 def test_delay_determinism():
@@ -190,7 +190,7 @@ def test_delay_determinism():
     assert match, "Delay should be deterministic"
 
     print("[PASS] Delay is deterministic")
-    return True
+    return
 
 
 def test_chorus_basic():
@@ -243,7 +243,7 @@ def test_chorus_basic():
     assert diff > 0, "Chorus should have stereo difference"
 
     print("[PASS] Basic chorus works")
-    return True
+    return
 
 
 def test_chorus_modulation():
@@ -277,7 +277,7 @@ def test_chorus_modulation():
     assert std_dev > 100, "Chorus should modulate the signal"
 
     print("[PASS] Chorus modulates signal")
-    return True
+    return
 
 
 def test_chorus_determinism():
@@ -308,7 +308,7 @@ def test_chorus_determinism():
     assert match, "Chorus should be deterministic"
 
     print("[PASS] Chorus is deterministic")
-    return True
+    return
 
 
 def test_material_id_routing():
@@ -342,7 +342,7 @@ def test_material_id_routing():
     print(f"Chorus peak: {max(abs(x) for x in out_chorus)}")
 
     print("[PASS] Material ID routing works")
-    return True
+    return
 
 
 def main():
@@ -352,13 +352,13 @@ def main():
 
     results = []
 
-    results.append(("Delay Basic", test_delay_basic()))
-    results.append(("Delay Feedback", test_delay_feedback()))
-    results.append(("Delay Determinism", test_delay_determinism()))
-    results.append(("Chorus Basic", test_chorus_basic()))
-    results.append(("Chorus Modulation", test_chorus_modulation()))
-    results.append(("Chorus Determinism", test_chorus_determinism()))
-    results.append(("Material ID Routing", test_material_id_routing()))
+    results.append(("Delay Basic", (test_delay_basic() is None)))
+    results.append(("Delay Feedback", (test_delay_feedback() is None)))
+    results.append(("Delay Determinism", (test_delay_determinism() is None)))
+    results.append(("Chorus Basic", (test_chorus_basic() is None)))
+    results.append(("Chorus Modulation", (test_chorus_modulation() is None)))
+    results.append(("Chorus Determinism", (test_chorus_determinism() is None)))
+    results.append(("Material ID Routing", (test_material_id_routing() is None)))
 
     # Summary
     print("\n" + "=" * 60)

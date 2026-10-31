@@ -71,7 +71,7 @@ def test_normal_energy_passthrough():
     else:
         print("[SKIP] Random coefficients exceeded threshold")
 
-    return True
+    return
 
 
 def test_excessive_energy_limited():
@@ -97,7 +97,7 @@ def test_excessive_energy_limited():
     assert rms_after <= _CCS_MAX_RMS_Q15 * 1.1, f"RMS not sufficiently reduced: {rms_after}"
 
     print("[PASS] Excessive energy is limited")
-    return True
+    return
 
 
 def test_signal_shape_preserved():
@@ -131,7 +131,7 @@ def test_signal_shape_preserved():
         print(f"Ratio preservation: {ratio_orig:.4f} vs {ratio_lim:.4f} (diff: {ratio_diff:.6f})")
 
     print("[PASS] Signal shape is preserved")
-    return True
+    return
 
 
 def test_no_clipping_artifacts():
@@ -157,7 +157,7 @@ def test_no_clipping_artifacts():
     assert max_val < 30000, f"Values too close to clip: {max_val}"
 
     print("[PASS] No clipping artifacts")
-    return True
+    return
 
 
 def test_lane_tail_ccs_mode():
@@ -184,7 +184,7 @@ def test_lane_tail_ccs_mode():
     assert rms_after <= _CCS_MAX_RMS_Q15 * 1.1, f"RMS not limited: {rms_after}"
 
     print("[PASS] lane_tail uses CCS soft limit in CCS mode")
-    return True
+    return
 
 
 def test_repeated_limiting():
@@ -215,7 +215,7 @@ def test_repeated_limiting():
     assert drift < 100, f"Excessive drift: {drift}"
 
     print("[PASS] No drift from repeated limiting")
-    return True
+    return
 
 
 def main():
@@ -225,12 +225,12 @@ def main():
 
     results = []
 
-    results.append(("Normal Energy Passthrough", test_normal_energy_passthrough()))
-    results.append(("Excessive Energy Limited", test_excessive_energy_limited()))
-    results.append(("Signal Shape Preserved", test_signal_shape_preserved()))
-    results.append(("No Clipping Artifacts", test_no_clipping_artifacts()))
-    results.append(("lane_tail CCS Mode", test_lane_tail_ccs_mode()))
-    results.append(("Repeated Limiting", test_repeated_limiting()))
+    results.append(("Normal Energy Passthrough", (test_normal_energy_passthrough() is None)))
+    results.append(("Excessive Energy Limited", (test_excessive_energy_limited() is None)))
+    results.append(("Signal Shape Preserved", (test_signal_shape_preserved() is None)))
+    results.append(("No Clipping Artifacts", (test_no_clipping_artifacts() is None)))
+    results.append(("lane_tail CCS Mode", (test_lane_tail_ccs_mode() is None)))
+    results.append(("Repeated Limiting", (test_repeated_limiting() is None)))
 
     # Summary
     print("\n" + "=" * 60)

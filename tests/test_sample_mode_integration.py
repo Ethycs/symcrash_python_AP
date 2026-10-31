@@ -62,7 +62,7 @@ def test_sample_mode_activation():
 
     assert rms > 100, f"Sample mode output too quiet: {rms}"
     print("[PASS] Sample mode activation works")
-    return True
+    return
 
 
 def test_sample_pitch_shifting():
@@ -112,7 +112,7 @@ def test_sample_pitch_shifting():
     assert abs(rate_octave_down - 32768) < 100, f"Rate octave down should be ~0.5x, got {rate_octave_down}"
 
     print("[PASS] Sample pitch shifting works")
-    return True
+    return
 
 
 def test_sample_playback_through_executor():
@@ -157,7 +157,7 @@ def test_sample_playback_through_executor():
     assert state.sample_state.is_finished, "Sample should have finished"
 
     print("[PASS] Sample playback through executor works")
-    return True
+    return
 
 
 def test_sample_with_loop():
@@ -198,7 +198,7 @@ def test_sample_with_loop():
     assert rms_end > 100, f"Loop end too quiet: {rms_end}"
 
     print("[PASS] Sample loop works")
-    return True
+    return
 
 
 def test_sample_with_precomputed_coeffs():
@@ -235,7 +235,7 @@ def test_sample_with_precomputed_coeffs():
     assert rms > 500, f"Precomputed mode too quiet: {rms}"
 
     print("[PASS] Precomputed coefficients work")
-    return True
+    return
 
 
 def test_sample_rate_override():
@@ -265,7 +265,7 @@ def test_sample_rate_override():
     assert rate == 98304, f"Rate should be 1.5x override, got {rate}"
 
     print("[PASS] Sample rate override works")
-    return True
+    return
 
 
 def main():
@@ -275,12 +275,12 @@ def main():
 
     results = []
 
-    results.append(("Sample Mode Activation", test_sample_mode_activation()))
-    results.append(("Sample Pitch Shifting", test_sample_pitch_shifting()))
-    results.append(("Sample Playback Through Executor", test_sample_playback_through_executor()))
-    results.append(("Sample Loop", test_sample_with_loop()))
-    results.append(("Precomputed Coefficients", test_sample_with_precomputed_coeffs()))
-    results.append(("Sample Rate Override", test_sample_rate_override()))
+    results.append(("Sample Mode Activation", (test_sample_mode_activation() is None)))
+    results.append(("Sample Pitch Shifting", (test_sample_pitch_shifting() is None)))
+    results.append(("Sample Playback Through Executor", (test_sample_playback_through_executor() is None)))
+    results.append(("Sample Loop", (test_sample_with_loop() is None)))
+    results.append(("Precomputed Coefficients", (test_sample_with_precomputed_coeffs() is None)))
+    results.append(("Sample Rate Override", (test_sample_rate_override() is None)))
 
     # Summary
     print("\n" + "=" * 60)

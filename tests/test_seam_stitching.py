@@ -156,10 +156,10 @@ def test_k0_vs_polyphase_discontinuity():
 
     if k0_ok and k4_ok:
         print("[PASS] Both methods have acceptable boundary continuity")
-        return True
+        return
     else:
         print("[WARN] Some discontinuity detected")
-        return True  # Still pass, this is evaluation not requirement
+        return  # Still pass, this is evaluation not requirement
 
 
 def test_click_detection():
@@ -188,10 +188,10 @@ def test_click_detection():
     # 200 blocks = 199 boundaries, so < 2 clicks expected
     if total_clicks < 10:
         print("[PASS] Minimal clicks detected")
-        return True
+        return
     else:
         print("[WARN] Some clicks detected, seam stitching may help")
-        return True  # Still pass, this is evaluation
+        return  # Still pass, this is evaluation
 
 
 def test_long_stream_stability():
@@ -224,10 +224,10 @@ def test_long_stream_stability():
     # Expect stable RMS (variation < 10%)
     if rms_variation < 0.1:
         print("[PASS] Audio amplitude is stable")
-        return True
+        return
     else:
         print("[WARN] Audio amplitude varies")
-        return True  # Still pass
+        return  # Still pass
 
 
 def test_frequency_stability():
@@ -258,10 +258,10 @@ def test_frequency_stability():
 
     if abs(freq_error_cents) < 10:  # Within 10 cents
         print("[PASS] Frequency is stable")
-        return True
+        return
     else:
         print("[WARN] Frequency drift detected")
-        return True
+        return
 
 
 def test_seam_stitching_necessity():
@@ -303,7 +303,7 @@ def test_seam_stitching_necessity():
         result = "recommended"
 
     print("\n[PASS] Seam stitching evaluation complete")
-    return True
+    return
 
 
 def main():
@@ -313,11 +313,11 @@ def main():
 
     results = []
 
-    results.append(("k=0 vs K=4 Discontinuity", test_k0_vs_polyphase_discontinuity()))
-    results.append(("Click Detection", test_click_detection()))
-    results.append(("Long Stream Stability", test_long_stream_stability()))
-    results.append(("Frequency Stability", test_frequency_stability()))
-    results.append(("Seam Stitching Necessity", test_seam_stitching_necessity()))
+    results.append(("k=0 vs K=4 Discontinuity", (test_k0_vs_polyphase_discontinuity() is None)))
+    results.append(("Click Detection", (test_click_detection() is None)))
+    results.append(("Long Stream Stability", (test_long_stream_stability() is None)))
+    results.append(("Frequency Stability", (test_frequency_stability() is None)))
+    results.append(("Seam Stitching Necessity", (test_seam_stitching_necessity() is None)))
 
     # Summary
     print("\n" + "=" * 60)

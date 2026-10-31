@@ -136,10 +136,10 @@ def test_basic_polyphase_output():
 
     if 0.5 < ratio < 2.0 and k4_rms > 1000:
         print("[PASS] Basic polyphase output valid")
-        return True
+        return
     else:
         print("[FAIL] Basic polyphase output invalid")
-        return False
+        raise AssertionError('test_basic_polyphase_output reported failure; see diagnostic output')
 
 
 def test_boundary_continuity():
@@ -165,13 +165,13 @@ def test_boundary_continuity():
     # (with correct phase-aligned LUT, both should be good)
     if disc_k0 < 0.1 and disc_k4 < 0.1:
         print("[PASS] Both methods have good boundary continuity")
-        return True
+        return
     elif disc_k4 <= disc_k0 * 1.5:  # Allow K=4 to be up to 50% worse (still acceptable)
         print(f"[PASS] K=4 continuity acceptable (ratio: {disc_k4/disc_k0:.2f}x)")
-        return True
+        return
     else:
         print("[FAIL] Boundary continuity issues")
-        return False
+        raise AssertionError('test_boundary_continuity reported failure; see diagnostic output')
 
 
 def test_waveform_shape():
@@ -218,10 +218,10 @@ def test_waveform_shape():
     # Allow up to 2% frequency error (FFT bin resolution) and 5% THD
     if freq_error_percent < 2.0 and thd < 5.0:
         print("[PASS] Waveform shape is correct sinusoid")
-        return True
+        return
     else:
         print("[FAIL] Waveform shape issues")
-        return False
+        raise AssertionError('test_waveform_shape reported failure; see diagnostic output')
 
 
 def test_various_frequencies():
@@ -253,10 +253,10 @@ def test_various_frequencies():
 
     if all_pass:
         print("\n[PASS] All frequencies produce valid output")
-        return True
+        return
     else:
         print("\n[FAIL] Some frequencies have issues")
-        return False
+        raise AssertionError('test_various_frequencies reported failure; see diagnostic output')
 
 
 def main():
@@ -266,10 +266,10 @@ def main():
 
     results = []
 
-    results.append(("Basic Polyphase Output", test_basic_polyphase_output()))
-    results.append(("Boundary Continuity", test_boundary_continuity()))
-    results.append(("Waveform Shape", test_waveform_shape()))
-    results.append(("Various Frequencies", test_various_frequencies()))
+    results.append(("Basic Polyphase Output", (test_basic_polyphase_output() is None)))
+    results.append(("Boundary Continuity", (test_boundary_continuity() is None)))
+    results.append(("Waveform Shape", (test_waveform_shape() is None)))
+    results.append(("Various Frequencies", (test_various_frequencies() is None)))
 
     # Summary
     print("\n" + "=" * 60)

@@ -128,3 +128,6 @@ soundfile = "*"
 [tool.pixi.environments]
 scoring = { features = ["scoring"], no-default-feature = true }
 dexed = { features = ["dexed"], no-default-feature = true }
+
+[tool.pytest.ini_options]
+filterwarnings = ["error::pytest.PytestReturnNotNoneWarning"]

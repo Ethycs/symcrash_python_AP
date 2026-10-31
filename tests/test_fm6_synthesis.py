@@ -46,7 +46,7 @@ def test_algorithm_table():
 
     if missing:
         print(f"[FAIL] Missing algorithms: {missing}")
-        return False
+        raise AssertionError('test_algorithm_table reported failure; see diagnostic output')
 
     print("[PASS] All 32 algorithms defined")
 
@@ -68,7 +68,7 @@ def test_algorithm_table():
         assert alg.feedback_op >= -1 and alg.feedback_op < 6, f"Alg {alg_id}: Invalid feedback op"
 
     print("[PASS] All algorithm topologies valid")
-    return True
+    return
 
 
 def test_fm6_state_creation():
@@ -108,7 +108,7 @@ def test_fm6_state_creation():
     assert np.all(state.op_outputs == 0)
 
     print("[PASS] State reset works")
-    return True
+    return
 
 
 def test_fm6_single_operator():
@@ -150,7 +150,7 @@ def test_fm6_single_operator():
     assert peak_energy > 1000, "Peak should be significant"
 
     print("[PASS] Single operator produces audio")
-    return True
+    return
 
 
 def test_fm6_modulation():
@@ -199,7 +199,7 @@ def test_fm6_modulation():
     assert harmonics_mod >= harmonics_car, "Modulation should add harmonics"
 
     print("[PASS] FM modulation adds harmonics")
-    return True
+    return
 
 
 def test_fm6_feedback():
@@ -234,7 +234,7 @@ def test_fm6_feedback():
         assert rms < 35000, f"Unstable at feedback level {fb_level}"
 
     print("[PASS] All feedback levels stable")
-    return True
+    return
 
 
 def test_fm6_presets():
@@ -266,7 +266,7 @@ def test_fm6_presets():
         print(f"[PASS] {name} preset: RMS={rms:.1f}")
 
     print("[PASS] All presets produce audio")
-    return True
+    return
 
 
 def test_fm6_executor_integration():
@@ -301,7 +301,7 @@ def test_fm6_executor_integration():
     assert rms > 100, f"FM6 executor output too quiet: {rms}"
 
     print("[PASS] FM6 executor integration works")
-    return True
+    return
 
 
 def test_fm6_coefficient_format():
@@ -333,7 +333,7 @@ def test_fm6_coefficient_format():
                 f"Mismatch at leaf={leaf}, k={k}"
 
     print("[PASS] Coefficient format correct")
-    return True
+    return
 
 
 def test_fm6_pitch_tracking():
@@ -372,7 +372,7 @@ def test_fm6_pitch_tracking():
         assert abs(error_cents) < 200, f"Note {note}: Pitch error too large"
 
     print("[PASS] Pitch tracking works")
-    return True
+    return
 
 
 def main():
@@ -382,15 +382,15 @@ def main():
 
     results = []
 
-    results.append(("Algorithm Table", test_algorithm_table()))
-    results.append(("FM6State Creation", test_fm6_state_creation()))
-    results.append(("Single Operator", test_fm6_single_operator()))
-    results.append(("FM Modulation", test_fm6_modulation()))
-    results.append(("Feedback Stability", test_fm6_feedback()))
-    results.append(("Presets", test_fm6_presets()))
-    results.append(("Executor Integration", test_fm6_executor_integration()))
-    results.append(("Coefficient Format", test_fm6_coefficient_format()))
-    results.append(("Pitch Tracking", test_fm6_pitch_tracking()))
+    results.append(("Algorithm Table", (test_algorithm_table() is None)))
+    results.append(("FM6State Creation", (test_fm6_state_creation() is None)))
+    results.append(("Single Operator", (test_fm6_single_operator() is None)))
+    results.append(("FM Modulation", (test_fm6_modulation() is None)))
+    results.append(("Feedback Stability", (test_fm6_feedback() is None)))
+    results.append(("Presets", (test_fm6_presets() is None)))
+    results.append(("Executor Integration", (test_fm6_executor_integration() is None)))
+    results.append(("Coefficient Format", (test_fm6_coefficient_format() is None)))
+    results.append(("Pitch Tracking", (test_fm6_pitch_tracking() is None)))
 
     # Summary
     print("\n" + "=" * 60)
