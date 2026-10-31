@@ -183,7 +183,7 @@ def fmt_row(label, times):
             f"observed deadline misses; mean {pct:6.1f}% of budget [{status}]")
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--blocks", type=int, default=1000,
                         help="measured blocks per scenario (default 1000)")
@@ -193,7 +193,11 @@ def main():
                         help="skip the (slow) pure-Python reference timing")
     parser.add_argument("--skip-verify", action="store_true",
                         help="skip the bit-exactness cross-check")
-    args = parser.parse_args()
+    parser.add_argument("--verify-blocks", type=int, default=320,
+                        help="reference/JIT replay blocks per scenario (default 320, covers pitch cycle)")
+    args = parser.parse_args(argv)
+    if args.blocks <= 0 or args.warmup < 0 or args.verify_blocks <= 0:
+        parser.error("blocks and verify-blocks must be positive; warmup must be nonnegative")
 
     print("=" * 76)
     print("vm_step_block sustained single-voice benchmark")
@@ -210,14 +214,14 @@ def main():
             print(f"\n{name}")
 
             if not args.skip_verify:
-                ok, msg = verify_bit_exact(factory(), note)
+                ok, msg = verify_bit_exact(factory(), note, args.verify_blocks)
                 print(f"  bit-exact vs reference: {msg}")
                 if not ok:
                     any_over = True
 
             jit_times = bench_scenario(frame, note, True, args.blocks, args.warmup)
             print(fmt_row("jit:", jit_times))
-            if jit_times.mean() >= BUDGET_US:
+            if np.any(jit_times > BUDGET_US) or not np.all(np.isfinite(jit_times)):
                 any_over = True
 
             if not args.skip_reference:
@@ -235,11 +239,13 @@ def main():
 
     print("\n" + "=" * 76)
     if any_over:
-        print("RESULT: FAIL (over budget or bit-exactness mismatch)")
+        print("RESULT: FAIL (observed deadline miss, invalid timing or bit-exactness mismatch)")
         return 1
-    print("RESULT: PASS (all scenarios bit-exact; mean JIT time under budget)")
-    print("Observed deadline misses above are not excused by a passing mean. "
-          "Desktop timing does not establish FPGA cycle or device deadline conformance.")
+    if args.skip_verify:
+        print("RESULT: UNQUALIFIED (reference replay skipped)")
+        return 2
+    print("RESULT: PASS (all scenarios bit-exact; zero observed JIT deadline misses)")
+    print("Desktop timing does not establish FPGA cycle or device deadline conformance.")
     return 0
 
 
