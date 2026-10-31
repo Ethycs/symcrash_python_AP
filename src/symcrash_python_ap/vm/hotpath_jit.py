@@ -785,11 +785,11 @@ def _mode_b_interpolated_coefficients_leaf_order(lut, a_h, b_h, dc, phases, dc_f
             phase = (phases[k]*(h+1)) & 0xffffffff
             sine = _sine_q15_k(lut, phase)
             cosine = _sine_q15_k(lut, (phase+0x40000000) & 0xffffffff)
-            w_sin[h,k] = _rshift_rne(a_h[h]*cosine-b_h[h]*sine, 15)
-            w_cos[h,k] = _rshift_rne(a_h[h]*sine+b_h[h]*cosine, 15)
+            w_sin[h,k] = _mode_b_rne(a_h[h]*cosine-b_h[h]*sine, 15)
+            w_cos[h,k] = _mode_b_rne(a_h[h]*sine+b_h[h]*cosine, 15)
     for leaf in range(NUM_LEAVES):
         for k in range(slots):
-            accumulator = _rshift_rne(dc*np.int64(dc_frame[leaf,k]), 15)
+            accumulator = _mode_b_rne(dc*np.int64(dc_frame[leaf,k]), 15)
             for h in range(harmonics):
                 sine_basis, cosine_basis = np.int64(0), np.int64(0)
                 for anchor in range(4):
@@ -798,10 +798,10 @@ def _mode_b_interpolated_coefficients_leaf_order(lut, a_h, b_h, dc, phases, dc_f
                     sine_offset = source_offsets[h,anchor,1]+leaf*slots+k
                     sine_basis += weight*np.int64(coefficients[sine_offset])
                     cosine_basis += weight*np.int64(coefficients[cosine_offset])
-                sine_basis = _clamp16(_rshift_rne(sine_basis, 30))
-                cosine_basis = _clamp16(_rshift_rne(cosine_basis, 30))
-                accumulator += _rshift_rne(w_sin[h,k]*sine_basis, 15)
-                accumulator += _rshift_rne(w_cos[h,k]*cosine_basis, 15)
+                sine_basis = _clamp16(_mode_b_rne(sine_basis, 30))
+                cosine_basis = _clamp16(_mode_b_rne(cosine_basis, 30))
+                accumulator += _mode_b_rne(w_sin[h,k]*sine_basis, 15)
+                accumulator += _mode_b_rne(w_cos[h,k]*cosine_basis, 15)
             output[leaf*slots+k] = _clamp16(accumulator)
 
 

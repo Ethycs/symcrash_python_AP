@@ -45,8 +45,9 @@ def test_kernel_preserves_every_coefficient_and_output_tail(harmonics, slots):
         np.testing.assert_array_equal(old, new)
 
 
-def test_reordered_h32_path_matches_independent_fraction_arithmetic():
-    args = inputs(32, 4, 752)
+@pytest.mark.parametrize('harmonics', [16, 31, 32])
+def test_interpolated_paths_match_independent_fraction_arithmetic(harmonics):
+    args = inputs(harmonics, 4, 752)
     lut, a, b, dc, phases, dc_frame, anchors, offsets, weights = args
     clip = lambda x: max(-32768, min(32767, x))
     rne = lambda x, shift: round(Fraction(int(x), 1 << shift))
@@ -56,7 +57,7 @@ def test_reordered_h32_path_matches_independent_fraction_arithmetic():
     for leaf in range(64):
         for k in range(4):
             acc = rne(dc * int(dc_frame[leaf, k]), 15)
-            for h in range(32):
+            for h in range(harmonics):
                 sine, cosine = bank.sin_cos_q15((int(phases[k]) * (h + 1)) & 0xffffffff)
                 ws = rne(int(a[h]) * cosine - int(b[h]) * sine, 15)
                 wc = rne(int(a[h]) * sine + int(b[h]) * cosine, 15)
