@@ -2,36 +2,41 @@
 
 ## Current control-path qualification — 2026-10-31
 
-The 2026-10-31 follow-up preserves N/K/P, datatypes, state encoding, payload
-memory and cycle/deadline behavior. Direct state-transition and valid-qualified
-payload proofs pass. Removing hold gates trades extra invalid-cycle activity
-for shorter paths; board power remains unmeasured. Verified ABC9 mapping
-requires clean subtool logs and rejects the observed zero-exit crash.
+The 2026-10-31 FIFO mapping follow-up preserves every RTL operation;
+removing comments and the memory attribute yields the committed token stream.
+Only the same two 128-bit feeder words change physical implementation:
+**+256 FF and -32 distributed-RAM cells**, with measured LUT/mux changes.
+Payload BRAM counts, N/K/P, datatypes, arithmetic, memory geometry, latency
+and deadlines stay fixed. The isolated mapped FIFO passes an all-state,
+all-input read/next-state proof with actual netlist corruption controls.
 
-Current modified-path coverage is **26 RTL simulations plus 57 formal/evidence
-tests**. The 25 unchanged burst/priority/bounds tests retain matching sources:
-108 distinct tests through scoped runs. This is not a fresh whole-root run.
+Current modified-path coverage is **20 RTL simulations, 47 formal/evidence
+tests and four mapped-FIFO tests**. The 41 unchanged owner/burst/priority/
+bounds tests retain matching sources: 112 distinct tests through scoped
+runs. This is not a fresh whole-root run. Audio comparisons cover 141,824
+stream samples and 21,504 windowed samples; cycle assertions are unchanged.
 
 | Current component | 100 MHz routing |
 |---|---|
 | Burst | 3/3 pass; 122.59..132.19 MHz |
 | Priority queue | 3/3 pass; 106.32..116.08 MHz |
 | Owner | 9/9 pass; 110.38..120.26 MHz |
-| Prepared-frame stream | 9/9 pass; 100.20..109.35 MHz |
-| Shared DMA-window top | 4/9 pass; 98.85..110.40 MHz |
+| Prepared-frame stream | 9/9 pass; 105.97..112.03 MHz |
+| Shared DMA-window top | 9/9 pass; 102.82..106.79 MHz |
 
-Combined 100 MHz timing remains unqualified: 9/9 current placements recorded, 4 passing.
-Every result uses ECP5-25K speed 6, CSFBGA285 and seeds 1/2/3. The interrupted
-placement was resumed only after its process was confirmed stopped, with the
-same seed/netlist/100 MHz target; its tool timeout is retained separately.
-The synthesis logs record successful ABC mapping-equivalence checks. FF and
-block/distributed RAM counts remain fixed; actual LUT/carry/mux counts are in
-the implementation profiles and `tests/artifacts/regen_reports/hdl_control_mapping_20261031.txt`.
+Combined prepared-frame transport/decode/window passes all nine 100 MHz out-of-context placements.
+The full matrix uses ECP5-25K speed 6, CSFBGA285 and seeds 1/2/3. Every
+current result and the prior failures are retained. Verified ABC9 mapping
+requires clean subtool logs and successful mapping-equivalence checks.
+Evidence and physical resource costs are in `tests/artifacts/regen_reports/hdl_fifo_mapping_20261031.txt` and the stream/window
+implementation profiles. The preceding signed baseline is root `23377cc`
+with docs `8651481`; its failed payload-BRAM-to-FIFO paths motivated this change.
 
-This qualifies the stated out-of-context path only. The 40,000-clock DMA and
-133,333-clock block budgets remain fixed. Board I/O/global clocks, PHY, bounded
-workload admission, full voice/operator generation and global memory packing
-remain open, along with Mode A storage and K2 tier cost.
+The 40,000-clock DMA window and 133,333-clock block budgets remain fixed.
+The mapped proof covers only the FIFO, and routing is out of context.
+Board I/O/global clocks, PHY, bounded workload admission, full voice/operator
+generation, global memory packing, clock load and board power remain open,
+along with Mode A storage and K2 tier cost.
 
 Earlier milestone measurements below remain historical; this section and
 the linked implementation profiles give the current source-matched results.
@@ -290,7 +295,7 @@ pixi run route-hdl-dma-window
 
 Twenty-seven tests pass, including full-queue and cumulative deadline probes,
 21,504 exact audio samples, actual payload writes and publication ordering.
-Combined 100 MHz timing remains unqualified: 9/9 current placements recorded, 4 passing.
+Combined prepared-frame transport/decode/window passes all nine 100 MHz out-of-context placements.
 The full top uses 6/14/14 block RAMs for K2/K4/K8, equivalent to
 13,824/32,256/32,256 physical bytes. It excludes the adapter/PHY and other
 synth engines. Ready-frame service remains 331/331/642 clocks; fallback 18.

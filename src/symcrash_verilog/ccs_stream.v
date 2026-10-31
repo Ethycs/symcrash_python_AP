@@ -92,7 +92,9 @@ module ccs_stream #(
 
     // Two queued memory words plus a reserved synchronous read. Reservation
     // plus occupancy never exceeds two; consumption can fund a same-edge read.
-    reg [127:0] words [0:1];
+    // This 32-byte FIFO uses 256 FFs instead of 32 distributed-RAM cells.
+    // It preserves depth and latency while shortening the payload-BRAM path.
+    (* ram_style = "logic" *) reg [127:0] words [0:1];
     reg read_pointer, write_pointer, read_pending;
     reg [1:0] word_count, chunk;
     reg [5:0] leaf;
