@@ -124,10 +124,10 @@ def test_request_and_pitch_cap_are_enforced_for_all_spectra(count, kind, executi
     assert vm.mode_b_state.H_active * decode_frame(f).coeff_osc_params.phase_inc <= 9 * 2**31 // 10
 
 
-@pytest.mark.parametrize('note,cents', [(0, 0), (20, -99), (21, 37), (69, 25), (108, 0), (109, 80), (127, -50)])
-def test_actual_basis_matches_independent_sample_phases_at_pitch_extremes(note, cents, execution_path):
+@pytest.mark.parametrize('note', [0, 20, 21, 69, 108, 109, 127])
+def test_source_anchor_basis_matches_independent_sample_phases(note, execution_path):
     from symcrash_python_ap.wavelet.fast_lifting import fwpt_jit
-    f = frame(note=note, cents=cents, waveform_type=0)
+    f = frame(note=note, cents=0, waveform_type=0)
     params = decode_frame(f).coeff_osc_params
     vm_step_block(VMState.create(0), f)
     basis = bank.get_basis_for_pitch(note, params.phase_inc, 1)
@@ -136,6 +136,26 @@ def test_actual_basis_matches_independent_sample_phases_at_pitch_extremes(note, 
         np.testing.assert_array_equal(basis.Usin_h[0, :, lane], fwpt_jit([s for s, _ in samples], headroom_bits=2))
         np.testing.assert_array_equal(basis.Ucos_h[0, :, lane], fwpt_jit([c for _, c in samples], headroom_bits=2))
     assert not basis.Usin_h.flags.writeable
+
+
+@pytest.mark.parametrize('note,cents', [(20, -99), (21, 37), (69, 25), (109, 80), (127, -50)])
+def test_detuned_basis_uses_independent_anchor_oracle_and_exact_phase(note, cents, execution_path):
+    # WSE-STD-210 section 5 specifies fixed pitch anchors and fixed-point
+    # interpolation. It does not require a separately transformed bank at
+    # every target pitch. Retain exact comparisons for both contracts:
+    # original FWPT coefficients at source anchors (above), and the independent
+    # Fraction interpolation oracle between anchors. Phase is never quantized.
+    from tests.conformance.test_basis_resource import reference_basis
+    f = frame(note=note, cents=cents, waveform_type=0)
+    params = decode_frame(f).coeff_osc_params
+    state = VMState.create(0)
+    vm_step_block(state, f)
+    assert state.mode_b_state.phase == (64 * params.phase_inc) % 2**32
+    actual = bank.get_basis_for_pitch(note, params.phase_inc, 1)
+    expected = reference_basis(note, params.phase_inc, 1)
+    np.testing.assert_array_equal(actual.Ucos_h, expected.Ucos_h)
+    np.testing.assert_array_equal(actual.Usin_h, expected.Usin_h)
+    assert not actual.Ucos_h.flags.writeable and not actual.Usin_h.flags.writeable
 
 
 def test_legato_and_cents_sweep_rebuilds_caps_and_restores_removed_high_partials(execution_path):

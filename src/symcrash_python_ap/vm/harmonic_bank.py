@@ -1845,6 +1845,12 @@ def mode_b_generate_coeffs_vectorized(
         phi_k = (phi_k + phase_mod) & PHASE_MASK
 
     if _hot.jit_enabled():
+        from .basis_anchors import InterpolatedBasis
+        if isinstance(basis, InterpolatedBasis):
+            _hot.mode_b_interpolated_coefficients(
+                _hot._get_sine_lut_np(), a_h, b_h, dc, phi_k, basis.DC_frame,
+                basis.coefficients, basis.source_offsets, basis.interpolation_weights, output_coeffs)
+            return
         _hot.mode_b_coefficients(
             _hot._get_sine_lut_np(), a_h, b_h, dc, phi_k,
             basis.DC_frame, basis.Usin_h, basis.Ucos_h, output_coeffs)

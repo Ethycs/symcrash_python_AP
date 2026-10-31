@@ -1,4 +1,4 @@
-"""Prepared exact-pitch Mode B resources; no transforms in the lookup path.
+"""Prepared fixed-anchor Mode B resources; no transforms in the lookup path.
 
 Call prepare_basis_resources at host initialization, before audio callbacks.
 The default atlas covers every output of the current integer MIDI/cents law.
@@ -16,9 +16,12 @@ from threading import Lock
 import numpy as np
 
 from .carrier_spectrum import harmonic_limit
+from .basis_anchors import (ANCHORS, capacity_for_anchor, frequency_directory,
+                           interpolation_grid, frequency_stencil, weights_for_frequency,
+                           compiled_descriptor_arrays)
 
-MAGIC = b'SYMBAS01'
-VERSION = 1
+MAGIC = b'SYMBAS03'
+VERSION = 3
 HEADER = struct.Struct('<8sII32s32s')
 DC_BYTES = 64 * 4 * 2
 HARMONIC_BYTES = 2 * DC_BYTES
@@ -29,9 +32,14 @@ _prepare_lock = Lock()
 
 @lru_cache(maxsize=1)
 def supported_pitch_increments() -> tuple[int, ...]:
-    """Complete image of the frozen integer-cent pitch law, MIDI 0..127."""
-    from ..pitch_rom import MIDI_CENT_PHASE_Q32
-    return MIDI_CENT_PHASE_Q32
+    """Fixed semitone anchors; accepted target pitches retain integer-cent Q32."""
+    return ANCHORS
+
+
+def resource_size(keys=None):
+    keys = supported_pitch_increments() if keys is None else keys
+    return HEADER.size + 4*len(keys) + 12*len(frequency_directory(keys)) + DC_BYTES + sum(
+        capacity_for_anchor(p)*HARMONIC_BYTES for p in keys)
 
 
 @lru_cache(maxsize=1)
@@ -42,9 +50,13 @@ def recipe_digest() -> bytes:
     independent reference comparisons in test_basis_resource guard this rule.
     """
     from .hotpath_jit import _get_sine_lut_np
-    digest = hashlib.sha256(b'ModeB-basis-v1/Fs48000/N64/K4/stride1/H32/headroom2/SineCore-RNE/FWPT-RNE')
+    digest = hashlib.sha256(b'ModeB-basis-v3/Fs48000/N64/K4/stride1/H32/headroom2/'
+        b'SineCore-RNE/FWPT-RNE/shared-harmonic-frequency-anchors/'
+        b'cluster64/outer-span/Lagrange4-Q30-ratio-product-RNE/unity-largest-tie-first')
     digest.update(_get_sine_lut_np().astype('<i4').tobytes())
     digest.update(np.asarray(supported_pitch_increments(), dtype='<u4').tobytes())
+    from ..pitch_rom import MIDI_CENT_PHASE_Q32
+    digest.update(np.asarray(MIDI_CENT_PHASE_Q32, dtype='<u4').tobytes())
     return digest.digest()
 
 
@@ -68,7 +80,12 @@ class PreparedBasisAtlas:
     def __init__(self, path: Path, *, expected_keys=None):
         keys = _validated_keys(supported_pitch_increments() if expected_keys is None else expected_keys)
         data_start = HEADER.size + 4 * len(keys)
-        expected_size = data_start + DC_BYTES + sum(harmonic_limit(p) * HARMONIC_BYTES for p in keys)
+        directory = frequency_directory(keys)
+        directory_bytes = np.asarray(directory,dtype='<u4').tobytes()
+        expected_size = resource_size(keys)
+        from ..budgets.hardware_resources import COEFFICIENT_STORE_BYTES
+        if expected_size > COEFFICIENT_STORE_BYTES:
+            raise ValueError('Mode B resource exceeds the documented coefficient storage budget')
         with Path(path).open('rb') as stream:
             if stream.seek(0, 2) != expected_size:
                 raise ValueError('Basis resource size or pitch coverage mismatch')
@@ -80,7 +97,9 @@ class PreparedBasisAtlas:
             encoded_keys = np.asarray(keys, dtype='<u4').tobytes()
             if mapping[HEADER.size:data_start] != encoded_keys:
                 raise ValueError('Basis resource pitch coverage mismatch')
-            # Digest the mapping without copying the ~857 MiB production image.
+            if mapping[data_start:data_start+len(directory_bytes)] != directory_bytes:
+                raise ValueError('Basis resource frequency directory mismatch')
+            # Validate the complete backing bytes before adoption.
             with memoryview(mapping) as view:
                 actual = hashlib.sha256(view[HEADER.size:]).digest()
             if actual != checksum:
@@ -91,13 +110,44 @@ class PreparedBasisAtlas:
         self._mapping = mapping
         self.path = Path(path)
         self.keys = keys
-        self.dc = np.ndarray((64, 4), dtype='<i2', buffer=mapping, offset=data_start)
-        offset = data_start + DC_BYTES
+        self.frequency_directory = np.ndarray((len(directory),3),dtype='<u4',buffer=mapping,offset=data_start)
+        grid = interpolation_grid(directory)
+        self._grid_indices = grid
+        self._grid_array = np.frombuffer(np.asarray(grid,dtype=np.int32).tobytes(),dtype=np.int32)
+        self._grid_frequencies = tuple(directory[i][0] for i in grid)
+        self._grid_frequency_array = np.frombuffer(
+            np.asarray(self._grid_frequencies,dtype=np.uint32).tobytes(),dtype=np.uint32)
+        self._frequency_offsets = {frequency:(cosine,sine) for frequency,cosine,sine in directory}
+        # Compile the fixed-width port during preparation, before any lookup.
+        # This retains the Python formula, Q30 resolution and every RNE step.
+        if keys == ANCHORS:
+            compiled_descriptor_arrays(ANCHORS[0],0,self.frequency_directory,
+                                       self._grid_array,self._grid_frequency_array)
+        self.dc = np.ndarray((64, 4), dtype='<i2', buffer=mapping, offset=data_start+len(directory_bytes))
+        offset = data_start + len(directory_bytes) + DC_BYTES
+        self.coefficients = np.ndarray(((expected_size-offset)//2,),dtype='<i2',buffer=mapping,offset=offset)
         self._offsets = {}
         for pitch in keys:
-            count = harmonic_limit(pitch)
+            count = capacity_for_anchor(pitch)
             self._offsets[pitch] = (offset, count)
             offset += count * HARMONIC_BYTES
+        if keys == ANCHORS:
+            self._prepare_interpolated_kernel()
+
+    def _prepare_interpolated_kernel(self):
+        """Resolve the new audio-kernel signature during host preparation.
+
+        Zero harmonics touch no basis entries or musical state. Array
+        mutability and layout match actual descriptors, weights and VM output.
+        """
+        from . import hotpath_jit as hot
+        offsets = np.frombuffer(bytes(0),dtype=np.int32).reshape(0,4,2)
+        weights = np.frombuffer(bytes(0),dtype=np.int32).reshape(0,4)
+        harmonics = np.empty(0,dtype=np.int64)
+        phases = np.zeros(4,dtype=np.int64)
+        output = np.empty(64*4,dtype=np.int16)
+        hot.mode_b_interpolated_coefficients(hot._get_sine_lut_np(),
+            harmonics,harmonics,0,phases,self.dc,self.coefficients,offsets,weights,output)
 
     def basis(self, note: int, phase_inc: int, harmonics: int):
         from .harmonic_bank import HarmonicBasisFrames
@@ -105,15 +155,43 @@ class PreparedBasisAtlas:
             raise ValueError('Basis phase increment must be unsigned Q32')
         if type(harmonics) is not int or not 0 <= harmonics <= 32:
             raise ValueError('Basis harmonic count must be in 0..32')
-        try:
-            offset, capacity = self._offsets[phase_inc]
-        except KeyError:
-            raise ValueError(f'Pitch increment {phase_inc} is absent from the prepared basis resource') from None
-        if harmonics > capacity:
+        if harmonics > harmonic_limit(phase_inc):
             raise ValueError('Basis harmonic count exceeds the prepared pitch bandlimit')
-        data = np.ndarray((2, capacity, 64, 4), dtype='<i2', buffer=self._mapping, offset=offset)
-        return HarmonicBasisFrames(self.dc, data[0, :harmonics], data[1, :harmonics],
+        if phase_inc not in self._offsets:
+            if self.keys != ANCHORS:
+                raise ValueError('Pitch increment is absent from the diagnostic basis resource')
+            from .basis_anchors import InterpolatedBasis, pitch_index
+            from .hotpath_jit import jit_enabled
+            pitch_index(phase_inc)
+            if jit_enabled():
+                offsets,weights = compiled_descriptor_arrays(phase_inc,harmonics,
+                    self.frequency_directory,self._grid_array,self._grid_frequency_array)
+            else:
+                offsets = np.empty((harmonics,4,2),dtype=np.int32)
+                weights = np.zeros((harmonics,4),dtype=np.int32)
+                for h in range(harmonics):
+                    frequency=phase_inc*(h+1)
+                    exact=self._frequency_offsets.get(frequency)
+                    if exact is not None:
+                        offsets[h]=exact
+                        weights[h,0]=1<<30
+                    else:
+                        stencil=frequency_stencil(frequency,self._grid_frequencies)
+                        nodes=tuple(self._grid_frequencies[i] for i in stencil)
+                        weights[h]=weights_for_frequency(frequency,nodes)
+                        offsets[h]=[self.frequency_directory[self._grid_indices[i],1:] for i in stencil]
+            offsets=np.frombuffer(offsets.tobytes(),dtype=np.int32).reshape(offsets.shape)
+            weights=np.frombuffer(weights.tobytes(),dtype=np.int32).reshape(weights.shape)
+            return InterpolatedBasis(self.dc,self.coefficients,offsets,weights,harmonics,
+                note, phase_inc*48000/2**32)
+        data = self._anchor(phase_inc, harmonics)
+        return HarmonicBasisFrames(self.dc, data[0], data[1],
                                    harmonics, note, phase_inc * 48000 / 2**32)
+
+    def _anchor(self, phase_inc, harmonics):
+        offset, capacity = self._offsets[phase_inc]
+        data = np.ndarray((2, capacity, 64, 4), dtype='<i2', buffer=self._mapping, offset=offset)
+        return data[:, :harmonics]
 
 
 def prepared_basis_atlas() -> PreparedBasisAtlas:
@@ -144,7 +222,7 @@ def prepare_basis_resources(path=None, *, build_if_missing=True) -> PreparedBasi
             if not build_if_missing:
                 raise
             from .basis_resource_builder import build_basis_resource
-            logging.getLogger(__name__).warning('Preparing Mode B basis resource (%s); first startup requires about 288 MiB of disk space', target)
+            logging.getLogger(__name__).warning('Preparing fixed-anchor Mode B basis resource (%s)', target)
             try:
                 build_basis_resource(target)
             except PermissionError:

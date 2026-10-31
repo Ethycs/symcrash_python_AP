@@ -1,4 +1,4 @@
-"""Offline generation for exact Mode B resources. Never called by lookup."""
+"""Offline generation for fixed-anchor Mode B resources. Never called by lookup."""
 import hashlib
 import os
 from pathlib import Path
@@ -9,8 +9,9 @@ from numba import njit
 
 from ..primitives import Q15_ONE
 from . import hotpath_jit as hot
-from .basis_resource import HEADER, MAGIC, VERSION, _validated_keys, recipe_digest, supported_pitch_increments
-from .carrier_spectrum import harmonic_limit
+from .basis_resource import (HEADER, MAGIC, VERSION, _validated_keys, recipe_digest,
+                            supported_pitch_increments, resource_size)
+from .basis_anchors import capacity_for_anchor, frequency_directory
 
 
 @njit(cache=True)
@@ -37,6 +38,9 @@ def build_basis_resource(path, *, pitch_increments=None, progress=None):
     the complete default domain. Failure never replaces the previous resource.
     """
     keys = _validated_keys(supported_pitch_increments() if pitch_increments is None else pitch_increments)
+    from ..budgets.hardware_resources import COEFFICIENT_STORE_BYTES
+    if resource_size(keys) > COEFFICIENT_STORE_BYTES:
+        raise ValueError('Mode B resource exceeds the documented coefficient storage budget')
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     lut = hot._get_sine_lut_np()
@@ -49,11 +53,12 @@ def build_basis_resource(path, *, pitch_increments=None, progress=None):
             temporary = Path(stream.name)
             stream.write(bytes(HEADER.size))
             digest = hashlib.sha256()
-            for payload in (np.asarray(keys, dtype='<u4').tobytes(), dc.astype('<i2').tobytes()):
+            directory = np.asarray(frequency_directory(keys),dtype='<u4').tobytes()
+            for payload in (np.asarray(keys, dtype='<u4').tobytes(), directory, dc.astype('<i2').tobytes()):
                 stream.write(payload)
                 digest.update(payload)
             for index, pitch in enumerate(keys):
-                payload = _generate_pitch(lut, pitch, harmonic_limit(pitch)).astype('<i2').tobytes()
+                payload = _generate_pitch(lut, pitch, capacity_for_anchor(pitch)).astype('<i2').tobytes()
                 stream.write(payload)
                 digest.update(payload)
                 if progress is not None and (index % 512 == 0 or index + 1 == len(keys)):

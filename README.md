@@ -3,8 +3,8 @@
 A deterministic, real-time audio synthesis engine with hardware control support.
 
 The target is the documented OrangeCrab ECP5-25F with 128 MB LPDDR3 and
-128 KB BRAM. The current exhaustive oscillator images **exceed that target's
-memory limits** and need replacement. Run `pixi run check-hardware-resources`
+128 KB BRAM. The current Mode A image makes combined oscillator storage
+**exceed that target's memory limits** and needs replacement. Run `pixi run check-hardware-resources`
 to check their packed storage; it currently exits with a failure. Passing the
 Python audio tests does not establish hardware conformance. The
 [hardware requirement mapping](symcrash_docs/05%20-%20Standards/01%20-%20Architecture/WSE-IMPL-HARDWARE-CONSTRAINTS-v1.md)
@@ -16,7 +16,7 @@ links the existing normative budgets and the unresolved implementation work.
 # Install dependencies
 pixi install
 
-# Prepare exact Mode A/B coefficients before audio startup (one-time builds)
+# Prepare Mode A tables and Mode B source anchors before audio startup
 pixi run python tools/prepare_mode_a_tables.py
 pixi run python tools/prepare_mode_b_basis.py
 
@@ -31,12 +31,14 @@ pixi run live-synth
 ```
 
 Mode B uses a validated, read-only basis image under `presets/.build/resources/`.
-It occupies about 288 MiB; the current local build took 11 seconds. Hosts also
+Its 128 fixed source anchors occupy 3,124,940 bytes. Between-anchor lookup
+interpolates coefficients while retaining the exact accepted Q32 phase. Hosts
 prepare it automatically during initialization if absent. Preparation must
 finish before starting audio callbacks. Subsequent startups validate and map
 the existing image; pitch changes do not run forward wavelet transforms.
-The [resource profile](symcrash_docs/05%20-%20Standards/06%20-%20CCS/WSE-IMPL-BASIS-RESOURCE-v1.md)
-describes custom locations, regeneration and remaining device-timing limits.
+The [resource profile](symcrash_docs/05%20-%20Standards/06%20-%20CCS/WSE-IMPL-BASIS-RESOURCE-v3.md)
+describes arithmetic, regeneration, measured audio changes and unresolved
+hardware processing/streaming costs.
 
 Mode A uses an exact integer-cent pitch image: 63,508 tables in about
 1.94 GiB, built in 87.7 seconds locally. Hosts prepare both images before playback.

@@ -15,9 +15,9 @@ def main():
     target = Path(args.output) if args.output else default_resource_path()
     start = perf_counter()
     if args.force or not target.exists():
-        build_basis_resource(target, progress=lambda done, total: print(f'{done}/{total} pitches', flush=True))
+        build_basis_resource(target, progress=lambda done, total: print(f'{done}/{total} source anchors', flush=True))
     atlas = PreparedBasisAtlas(target)
-    print(f'Validated {len(atlas.keys)} pitches, {target.stat().st_size} bytes in {perf_counter()-start:.2f}s: {target}')
+    print(f'Validated {len(atlas.keys)} source anchors, {target.stat().st_size} bytes in {perf_counter()-start:.2f}s: {target}')
 
 
 if __name__ == '__main__':

@@ -26,9 +26,12 @@ capsule directory.
 
 The former top-level `preset_library/` and `capsules/` paths are retired.
 
-`presets/.build/resources/` also holds the exact Mode B basis atlas. Generate
+`presets/.build/resources/` also holds the fixed-anchor Mode B basis atlas. Generate
 it with `pixi run python tools/prepare_mode_b_basis.py` before audio startup.
-The current pitch domain uses 301,500,612 bytes (about 288 MiB).
+Its 128 source anchors use 3,124,940 bytes and cover the full integer-cent
+pitch domain by fixed-point interpolation. The accepted Q32 phase is unchanged.
+The former 301,500,612-byte exhaustive image is superseded and cannot be
+adopted by the v3 loader. See the [arithmetic/resource profile](../symcrash_docs/05%20-%20Standards/06%20-%20CCS/WSE-IMPL-BASIS-RESOURCE-v3.md).
 Hosts prepare it at initialization when missing. It is independent of preset
 capsule compilation, and is mapped read-only during playback. Stop running
 hosts before rebuilding an existing image with `--force`, especially on Windows.

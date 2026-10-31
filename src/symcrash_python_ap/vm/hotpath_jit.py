@@ -11,7 +11,7 @@ DESIGN CONTRACT (NON-NEGOTIABLE):
     switchable acceleration layer.
 
     - RSHIFT_RNE (round-to-nearest, ties-to-even) is ported verbatim from
-      fixed.py. All intermediates fit comfortably in int64 (max ~2^31), so
+      fixed.py. Path-specific bounds keep intermediates within int64, so
       Python arbitrary-precision int and numba int64 agree exactly.
     - Products and sums widen before coefficient writes. Pressure gains use
       nearest-even reductions and saturate; gates must not wrap their product.
@@ -746,6 +746,47 @@ def mode_b_coefficients(lut, a_h, b_h, dc, phases, dc_frame, sin_basis,
                 acc += _rshift_rne(w_sin[h, k] * np.int64(sin_basis[h, leaf, k]), 15)
                 acc += _rshift_rne(w_cos[h, k] * np.int64(cos_basis[h, leaf, k]), 15)
             output[leaf * slots + k] = _clamp16(acc)
+
+
+# =============================================================================
+# Fixed pitch-anchor interpolation (WSE-STD-210 section 5)
+# =============================================================================
+
+@njit(cache=True)
+def mode_b_interpolated_coefficients(lut, a_h, b_h, dc, phases, dc_frame,
+                                    coefficients, source_offsets, interpolation_weights, output):
+    """Stream four mapped anchors into the MAC; never materialize a pitch bank.
+
+    The only arrays allocated here are two H-by-K int64 rotation buffers
+    (2048 bytes at H=32/K=4). Interpolation products use signed int64,
+    one RNE at Q30 and SAT16 before the established Mode B accumulation.
+    """
+    harmonics, slots = len(a_h), len(phases)
+    w_sin = np.empty((harmonics, slots), dtype=np.int64)
+    w_cos = np.empty((harmonics, slots), dtype=np.int64)
+    for h in range(harmonics):
+        for k in range(slots):
+            phase = (phases[k]*(h+1)) & 0xffffffff
+            sine = _sine_q15_k(lut, phase)
+            cosine = _sine_q15_k(lut, (phase+0x40000000) & 0xffffffff)
+            w_sin[h,k] = _rshift_rne(a_h[h]*cosine-b_h[h]*sine, 15)
+            w_cos[h,k] = _rshift_rne(a_h[h]*sine+b_h[h]*cosine, 15)
+    for leaf in range(NUM_LEAVES):
+        for k in range(slots):
+            accumulator = _rshift_rne(dc*np.int64(dc_frame[leaf,k]), 15)
+            for h in range(harmonics):
+                sine_basis, cosine_basis = np.int64(0), np.int64(0)
+                for anchor in range(4):
+                    weight = np.int64(interpolation_weights[h,anchor])
+                    cosine_offset = source_offsets[h,anchor,0]+leaf*slots+k
+                    sine_offset = source_offsets[h,anchor,1]+leaf*slots+k
+                    sine_basis += weight*np.int64(coefficients[sine_offset])
+                    cosine_basis += weight*np.int64(coefficients[cosine_offset])
+                sine_basis = _clamp16(_rshift_rne(sine_basis, 30))
+                cosine_basis = _clamp16(_rshift_rne(cosine_basis, 30))
+                accumulator += _rshift_rne(w_sin[h,k]*sine_basis, 15)
+                accumulator += _rshift_rne(w_cos[h,k]*cosine_basis, 15)
+            output[leaf*slots+k] = _clamp16(accumulator)
 
 
 # =============================================================================

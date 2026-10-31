@@ -87,12 +87,8 @@ def oscillator_allocations():
     These are required bytes even when no image has been generated yet.
     """
     from ..vm import mode_a_resource as mode_a, basis_resource as mode_b
-    from ..vm.carrier_spectrum import harmonic_limit
-    keys = mode_b.supported_pitch_increments()
     return (
         ResourceAllocation('Mode A default image', mode_a.HEADER.size +
             mode_a.TABLE_COUNT * (4 + mode_a.TABLE_BYTES), 'coefficients'),
-        ResourceAllocation('Mode B default image', mode_b.HEADER.size + 4*len(keys) +
-            mode_b.DC_BYTES + sum(harmonic_limit(p)*mode_b.HARMONIC_BYTES for p in keys),
-            'coefficients'),
+        ResourceAllocation('Mode B default image', mode_b.resource_size(), 'coefficients'),
     )
