@@ -525,6 +525,8 @@ class CapsuleCompiler:
         # (material ramp, FM6 post-filter, partials/PWM, LFO modulators)
         try:
             sound_extras = self._extract_sound_extras_from_ir(ir)
+            from .native_carrier import extract_filter_enabled
+            voice_param_defaults[VoiceParamID.FILTER_ENABLE] = int(extract_filter_enabled(ir))
         except (ValueError, TypeError) as exc:
             result.errors.append(f'Invalid authored sound/event configuration: {exc}')
             result.success = False

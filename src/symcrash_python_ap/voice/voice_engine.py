@@ -3807,6 +3807,7 @@ class VoiceEngine:
             cmmm_tail_mode=cmmm.tail_mode if cmmm else None,
             cmmm_traction_q15=cmmm.traction_q15 if cmmm else Q15_ONE,
             # Filter parameters (modulated by LFO/macro)
+            filter_enabled=getattr(preset, 'filter_enabled', None),
             filter_cutoff_q15=filter_cutoff_q15,
             filter_reso_q15=filter_reso_q15,
             filter_mode=filter_mode,

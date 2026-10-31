@@ -246,13 +246,13 @@ def snapshot_voice(state):
     data = {name: getattr(state, name) for name in sorted(names)}
     _validate_fields(VoiceState, data)
     _validate_runtime(data)
-    return {'snapshot_version': 6, **{k: encode(v) for k, v in data.items()}}
+    return {'snapshot_version': 7, **{k: encode(v) for k, v in data.items()}}
 
 
 def restore_voice(cls, snapshot, programs):
     from .voice_engine import (VoiceState, VoiceStateWithProgram,
                               INSTRUMENT_PROGRAMS, InstrumentProgram)
-    if type(snapshot) is not dict or type(snapshot.get('snapshot_version')) is not int or snapshot['snapshot_version'] not in (1, 2, 3, 4, 5, 6):
+    if type(snapshot) is not dict or type(snapshot.get('snapshot_version')) is not int or snapshot['snapshot_version'] not in (1, 2, 3, 4, 5, 6, 7):
         raise ValueError('Unsupported voice snapshot version')
     if snapshot['snapshot_version'] == 1:
         # v1 predates authored event programs and their per-voice time state.
@@ -306,6 +306,19 @@ def restore_voice(cls, snapshot, programs):
     if snapshot['snapshot_version'] < 6:
         snapshot = dict(snapshot)
         snapshot.setdefault('unison', None)
+    if snapshot['snapshot_version'] < 7:
+        def migrate_filter(value, depth=0):
+            if depth > 64:
+                raise ValueError('Snapshot nesting is too deep')
+            if type(value) is list:
+                return [migrate_filter(x, depth + 1) for x in value]
+            if type(value) is dict:
+                result = {k: migrate_filter(v, depth + 1) for k, v in value.items()}
+                if result.get('kind') == 'CompiledPreset' and type(result.get('fields')) is dict:
+                    result['fields'].setdefault('filter_enabled', None)
+                return result
+            return value
+        snapshot = migrate_filter(snapshot)
     data = {k: decode(v) for k, v in snapshot.items() if k != 'snapshot_version'}
     _validate_fields(VoiceState, data)
     _validate_runtime(data)

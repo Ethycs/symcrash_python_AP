@@ -214,7 +214,7 @@ def test_version_three_checkpoint_replays_transitions_memory_and_actual_audio(ex
         frame = original.step_block().render_batch[0].frame
         vm_step_block(vm, frame)
     snapshot = json.loads(json.dumps(original.voices[0].snapshot()))
-    assert snapshot['snapshot_version'] == 6
+    assert snapshot['snapshot_version'] == 7
     restored = VoiceEngine()
     restored.voices[0] = VoiceStateWithProgram.restore(snapshot, programs=original.programs)
     restored_vm = VMState.restore(json.loads(json.dumps(vm.snapshot())))

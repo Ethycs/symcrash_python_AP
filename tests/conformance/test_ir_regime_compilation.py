@@ -235,7 +235,7 @@ def test_snapshot_replays_mid_fade_hysteresis_and_future_audio(execution_path):
     for _ in range(5):
         vm_step_block(vm, producer.step_voice_simple(0))
     snapshot = json.loads(json.dumps(producer.voices[0].snapshot()))
-    assert snapshot['snapshot_version'] == 6
+    assert snapshot['snapshot_version'] == 7
     restored = VoiceEngine()
     restored.voices[0] = VoiceStateWithProgram.restore(snapshot)
     restored_vm = VMState.restore(json.loads(json.dumps(vm.snapshot())))

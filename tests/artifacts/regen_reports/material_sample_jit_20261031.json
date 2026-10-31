@@ -1,0 +1,121 @@
+{
+  "status": "Full regression passed; sustained realtime remains open",
+  "roadmap": "06 - Roadmaps/AUTHORING-IMPROVEMENT-PLAN.md / WS4 Phase C; engine handoff E3",
+  "specification": "WSE-STD-MATERIAL v0 sections 3, 4, 6.3, 7.2, 7.3",
+  "baseline": "_maturity73_compat_post_result.json",
+  "candidate_qualification": "_maturity74_retry_qualification.json",
+  "candidate_tests": {
+    "exit_code": 0,
+    "wall_seconds": 59.698358700145036,
+    "log": "_maturity74-retry-tests.log",
+    "log_sha256": "e9ab7278978c485a80d90ce1b3a867cbea620f0a594ad0b3446e18cd2a6d201c",
+    "summary": "67 passed in 56.65s"
+  },
+  "compared_measured_samples": 1536000,
+  "deadline_passed": false,
+  "tail_regressions": [
+    {
+      "workload": "material-1",
+      "voices": 1,
+      "metric": "max_us",
+      "before": 8574.8,
+      "after": 27581.0
+    },
+    {
+      "workload": "material-1",
+      "voices": 4,
+      "metric": "max_us",
+      "before": 17292.0,
+      "after": 17571.4
+    },
+    {
+      "workload": "material-2",
+      "voices": 4,
+      "metric": "max_us",
+      "before": 10519.6,
+      "after": 37771.7
+    }
+  ],
+  "first_failed_candidate": "_maturity74_qualification.json",
+  "preserved": "N/K/P; Q15 stored signal/state; original tanh ROM, rings/windows and RNE/SAT order; capacity, headroom, deadlines; no RTL change",
+  "resource_cost": "512-byte read-only host mirror of existing ROM; temporary int16 input/output/history/sort arrays; int64 products per standard; no FPGA fit claim",
+  "production_source_sha256": {
+    "src\\symcrash_python_ap\\material\\material_engine.py": "dea6fb447ae6e3af3cf59d8faaa58e10afe7d821d7cec0b5f6b87e7bcd0a60d8",
+    "src\\symcrash_python_ap\\material\\material_sample_jit.py": "6f580cd0c902fcfe7d1c896d61b46bddd85318aea92a1b84c28a7d994e94bca2",
+    "tests\\conformance\\test_material_sample_jit.py": "c61ce99d728821c34673663fbb1d0f3f57167d272d055330eb99847ba1f0d223"
+  },
+  "pre_adoption_engine": "build/realtime74/pre_adoption/material_engine.py",
+  "production_tests": {
+    "exit_code": 0,
+    "passed": 613,
+    "elapsed_seconds": 107.01,
+    "log": "_maturity74-production-retry-tests.log",
+    "log_sha256": "acb75a43c5d1e3c74a30890a607966b2e1778a1be4b64eeff53a0e5107499d38",
+    "interpretation": "Verbose diagnostic rerun passed unchanged source; earlier interrupted stall not reproduced, cause unproven"
+  },
+  "production_live": {
+    "exit_code": 1,
+    "report": "build\\realtime74\\production\\report.json",
+    "report_sha256": "cc5e083b31edca14e75d78971f6c6d7dce3399b8e20ae8d948af8cd3a7d31b4e",
+    "measured_samples_exact_to_previous": 960000,
+    "reference_jit_samples_exact": 122880,
+    "deadline_misses": 3906,
+    "measured_blocks": 7500,
+    "interpretation": "All ten cases functionally qualified and preserved prior audio; complete-path deadline still fails"
+  },
+  "full_regression": {
+    "status": "passed",
+    "exit_code": 0,
+    "summary": "6600 passed, 14 skipped, 7 warnings in 1286.50s (0:21:26)",
+    "passed": 6600,
+    "skipped": 14,
+    "warnings": 7,
+    "unchanged_inputs": 1011,
+    "inputs": "_e3_full_inputs_20261031.json",
+    "inputs_sha256": "d694a855b3133957897770c8e998611988957fba6b738bce55c20980cc7e360e",
+    "log": "_e3-full-tests-20261031.log",
+    "log_sha256": "8f1d0c05a17793671b59bc32050cdce688f6c9256fa9e3202c1c99772605abbe",
+    "protected_git": {
+      "root": {
+        "head": "23377cc6b31e90f6d03ad63ee332beb6fb88143a",
+        "staged_patch_sha256": "ad4bf3ccbe8a590a7048b3fc38a37dff3681762dd7d6c79bde0d6f25852945b9"
+      },
+      "docs": {
+        "head": "86514812c317f4b4c7eb0a26a70e017eac0335f5",
+        "staged_patch_sha256": "76a1af380934cc163e477265a5a6847e51248cff08f447e26a45f8fe319acc1b"
+      }
+    },
+    "interpretation": "Full production regression after E3 VM and Tape/Rank changes. Realtime deadlines and hardware fit remain separate open gates."
+  },
+  "production_test_attempts": [
+    {
+      "status": "interrupted after progress stopped; no pass claimed",
+      "exit_code": 1,
+      "log": "_maturity74-production-tests.log",
+      "log_sha256": "321f442bc5f57d57d8dc572ecb40582add2561597fb6d7840ecaf9c698e558db",
+      "last_complete_progress_line": "35%; test identification pending verbose diagnostic"
+    }
+  ],
+  "material_diagnostic": {
+    "exit_code": 0,
+    "passed": 60,
+    "elapsed_seconds": 4.05,
+    "log": "_maturity74-material-diagnostic.log"
+  },
+  "post_regression_format_only": {
+    "status": "Applied after full regression terminal; all AST values and source locations identical",
+    "reason": "Restore the 97 pre-existing LF lines outside the new kernel; no syntax/tree/location change",
+    "tested_source_sha256": "ab34f3d444cacdef13347af62f0b71cfa173caea9ea79ce37ba666b25da55b36",
+    "preserved_source_sha256": "3246ae1c6f707ba1d53595ef84609ba42d5cc77f1d83f73ea2a7c8f9448962b9",
+    "ast_and_locations_identical": true,
+    "fresh_startup_check": {
+      "status": "passed",
+      "exit_code": 0,
+      "passed": 1,
+      "seconds": 11.51,
+      "test": "tests/conformance/test_basis_resource.py::test_fresh_preparation_compiles_detuned_kernels_before_first_audio_block",
+      "log": "_e3-final-startup-check.log",
+      "log_sha256": "866098ac09f8bcce1777558230b04dad4643ccbe5cd3d758f8897a965ce268d1"
+    }
+  }
+}

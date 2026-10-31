@@ -319,7 +319,7 @@ def test_previous_voice_snapshot_version_migrates_without_inventing_events():
     assert restored.authored_event_state == AuthoredEventState()
     assert restored.compiled_preset.event_program is None
     current = restored.snapshot()
-    assert current['snapshot_version'] == 6
+    assert current['snapshot_version'] == 7
     del current['authored_event_state']
     with pytest.raises(ValueError, match='Incomplete'):
         VoiceStateWithProgram.restore(current)

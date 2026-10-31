@@ -170,7 +170,7 @@ def test_old_native_record_and_voice_snapshot_migrate_to_single_voice():
     engine = owner(compiled_preset_from_ir(authored(1)))
     note(engine)
     saved = json.loads(json.dumps(engine.voices[0].snapshot()))
-    assert saved['snapshot_version'] == 6
+    assert saved['snapshot_version'] == 7
     saved['snapshot_version'] = 5
     del saved['unison']
     carrier = saved['compiled_preset']['fields']['native_carrier']['fields']
@@ -181,7 +181,7 @@ def test_old_native_record_and_voice_snapshot_migrate_to_single_voice():
     before = deepcopy(saved)
     restored = VoiceStateWithProgram.restore(saved)
     assert restored.unison is None and restored.compiled_preset.native_carrier.unison_voices == 1
-    assert saved == before and restored.snapshot()['snapshot_version'] == 6
+    assert saved == before and restored.snapshot()['snapshot_version'] == 7
 
 
 @pytest.mark.parametrize('version', [True, 1.0])

@@ -249,7 +249,7 @@ def test_old_voice_json_preserves_legacy_carrier_absence(version):
     restored = VoiceStateWithProgram.restore(saved)
     assert restored.compiled_preset.native_carrier is None and saved == before
     current = restored.snapshot()
-    assert current['snapshot_version'] == 6
+    assert current['snapshot_version'] == 7
     del current['compiled_preset']['fields']['native_carrier']
     with pytest.raises(ValueError, match='Incomplete'):
         VoiceStateWithProgram.restore(current)

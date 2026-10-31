@@ -102,6 +102,16 @@ class NativeCarrierConfig:
         return cls(**data)
 
     def apply(self, frame):
+        # The validated base record contributes only immutable scalar values.
+        # Avoid recursively serializing ignored modulation/owner fields in
+        # every audio block. Preserve asdict semantics for subclasses and
+        # records mutated outside the frozen constructor contract.
+        if type(self) is NativeCarrierConfig:
+            values = tuple(getattr(self, name) for name in _FRAME_FIELD_NAMES)
+            if all(type(value) in _FRAME_ATOMIC_TYPES for value in values):
+                for name, value in zip(_FRAME_FIELD_NAMES, values):
+                    setattr(frame, name, value)
+                return
         # Pitch and filter/LFO parameters are computed by the voice owner.
         for name, value in asdict(self).items():
             if name not in ('version', 'detune_cents', 'filter_cutoff_q15', 'filter_reso_q15', 'filter_mode',
@@ -111,6 +121,26 @@ class NativeCarrierConfig:
     def validate_mode(self, mode):
         if self.classic_modulation is not None and self.classic_modulation.spectral and mode != 1:
             raise ValueError('Classic timbre, body warble and attack brightness require Mode B')
+
+
+# Field names retain dataclass declaration order. These are references to
+# schema metadata, not a new preset layout, numerical table or cache.
+_FRAME_ATOMIC_TYPES = (int, float, bool, type(None))
+_FRAME_FIELD_NAMES = tuple(item.name for item in fields(NativeCarrierConfig)
+    if item.name not in ('version', 'detune_cents', 'filter_cutoff_q15',
+        'filter_reso_q15', 'filter_mode', 'unison_voices', 'unison_spread_cents',
+        'unison_width_q15', 'classic_modulation'))
+
+
+def extract_filter_enabled(ir):
+    """Resolve the existing first-Filter policy, independently of cutoff value."""
+    filt = next((n.params for n in ir.layers.L0_graph.nodes if n.type == 'Filter'), None)
+    if filt is None:
+        return False
+    if type(filt.filter_enable) is not bool:
+        raise ValueError('Filter enable must be boolean')
+    # The documented legacy Hz form implies a filter without an enable key.
+    return filt.filter_enable or filt.cutoff_hz is not None
 
 
 def extract_native_carrier(ir):
@@ -178,7 +208,7 @@ def extract_native_carrier(ir):
         params.update(fm_topo_a_id=morph.topo_a, fm_topo_b_id=morph.topo_b,
                       fm_topo_blend_q15=morph.blend_q15)
     filt = next((n.params for n in ir.layers.L0_graph.nodes if n.type == 'Filter'), None)
-    if filt is not None and (filt.filter_enable or filt.cutoff_hz is not None):
+    if extract_filter_enabled(ir):
         cutoff = filt.filter_cutoff_q15
         if filt.cutoff_hz is not None:
             hz = finite(filt.cutoff_hz, 20, 20000, 'Filter cutoff Hz')

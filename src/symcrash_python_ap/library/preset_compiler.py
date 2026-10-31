@@ -40,7 +40,7 @@ from ..instrument_ir import float_or_q15, _auto_detect_ratios, _auto_detect_leve
 from ..instrument_ir import SafetyConfig, _parse_material_config
 from ..voice.ir_events import CompiledEventProgram, compile_ir_events
 from ..voice.ir_regimes import CompiledRegimeProgram, compile_ir_regimes
-from .native_carrier import NativeCarrierConfig, extract_native_carrier, exact_amp_to_dict, exact_amp_from_dict
+from .native_carrier import NativeCarrierConfig, extract_native_carrier, extract_filter_enabled, exact_amp_to_dict, exact_amp_from_dict
 
 # Import central registry for validation
 from .central_registry import get_central_registry
@@ -354,6 +354,13 @@ class CompiledPreset:
     event_program: Optional[CompiledEventProgram] = None
     regime_program: Optional[CompiledRegimeProgram] = None
     native_carrier: Optional[NativeCarrierConfig] = None
+    # Program-owned FILTER_ENABLE (registry ID 97). None preserves legacy
+    # capsules/flat presets whose authoring enable value was not transported.
+    filter_enabled: Optional[bool] = None
+
+    def __post_init__(self):
+        if self.filter_enabled is not None and type(self.filter_enabled) is not bool:
+            raise ValueError('Compiled filter enable must be boolean or legacy None')
 
     def backbone_ops(self) -> List[str]:
         """Get list of enabled operator names."""
@@ -465,6 +472,7 @@ def compiled_preset_from_ir(ir) -> CompiledPreset:
         event_program=compile_ir_events(ir),
         regime_program=compile_ir_regimes(ir),
         native_carrier=native_carrier,
+        filter_enabled=extract_filter_enabled(ir),
     )
 
 
@@ -531,6 +539,13 @@ def compiled_preset_from_capsule(capsule) -> CompiledPreset:
     from ..control_registry import ControlID
 
     vp = capsule.defaults.voice_param_defaults or {}
+    filter_enabled = None
+    if VoiceParamID.FILTER_ENABLE in vp:
+        value = vp[VoiceParamID.FILTER_ENABLE]
+        if type(value) not in (int, bool):
+            raise ValueError('Capsule filter enable must be an integer')
+        filter_enabled = bool(get_central_registry().voice_engine.clamp(
+            VoiceParamID.FILTER_ENABLE, value))
     cd = capsule.defaults.control_defaults or {}
     extras = getattr(capsule, 'sound_extras', None) or {}
 
@@ -636,6 +651,7 @@ def compiled_preset_from_capsule(capsule) -> CompiledPreset:
         regime_program=(CompiledRegimeProgram.from_dict(extras['regime_program'])
                         if extras.get('regime_program') is not None else None),
         native_carrier=native_carrier,
+        filter_enabled=filter_enabled,
         control_config=(_parse_control_config(extras['control_config'])
                         if extras.get('control_config') is not None else None),
         **kwargs,

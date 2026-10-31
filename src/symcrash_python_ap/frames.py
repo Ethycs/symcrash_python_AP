@@ -361,6 +361,9 @@ class VoiceFrame:
     filter_reso_q15: int = 0            # Resonance (Q15: 0=flat, 32767=self-osc)
     filter_mode: int = 0                # 0=LP, 1=HP, 2=BP, 3=Notch
     filter_env_depth_q15: int = 0       # Envelope modulation depth (signed Q15)
+    # Native host metadata only; frozen VoiceFrame packets are unchanged.
+    # None retains the cutoff-based policy for legacy/raw-frame producers.
+    filter_enabled: Optional[bool] = None
 
     # Legacy compatibility: convert float betas to IDs
     @property

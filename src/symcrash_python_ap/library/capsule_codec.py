@@ -132,7 +132,7 @@ def pack_voice_params(defaults: Dict[int, int]) -> bytes:
         u16 param_id
         u32 value
 
-    Sorted by param_id ascending. Uses VoiceEngineRegistry to determine
+    Sorted by (persistence, domain, param_id). Uses VoiceEngineRegistry to determine
     whether each parameter should be packed as signed, unsigned 16-bit, or 32-bit.
     """
     if not defaults:
@@ -141,19 +141,26 @@ def pack_voice_params(defaults: Dict[int, int]) -> bytes:
     # Get registry for value type lookup
     registry = get_central_registry().voice_engine
 
-    # Sort by param_id
-    sorted_items = sorted(defaults.items(), key=lambda x: x[0])
+    def order(item):
+        entry = registry.get(item[0])
+        return (int(entry.persistence), int(entry.domain), item[0]) if entry else (0, 0, item[0])
+
+    sorted_items = sorted(defaults.items(), key=order)
 
     parts = []
     for param_id, value in sorted_items:
         # Look up value type from registry
         entry = registry.get(param_id)
+        persistence = int(entry.persistence) if entry else 0
 
-        if entry is not None and entry.value_type == ValueType.U32:
+        if entry is not None and entry.value_type == ValueType.BOOL:
+            parts.append(struct.pack('<BBHh', persistence, int(ValueType.BOOL),
+                                     param_id, entry.clamp(value)))
+        elif entry is not None and entry.value_type == ValueType.U32:
             # 32-bit unsigned: 8-byte entry
             parts.append(struct.pack(
                 '<BBHI',
-                0,  # persistence (default PER_VOICE)
+                persistence,  # Registry scope; unknown IDs retain legacy PER_VOICE
                 int(ValueType.U32),
                 param_id,
                 value & 0xFFFFFFFF,  # Ensure u32 range
@@ -162,7 +169,7 @@ def pack_voice_params(defaults: Dict[int, int]) -> bytes:
             # 16-bit unsigned: 6-byte entry
             parts.append(struct.pack(
                 '<BBHH',
-                0,  # persistence (default PER_VOICE)
+                persistence,  # Registry scope; unknown IDs retain legacy PER_VOICE
                 int(entry.value_type),
                 param_id,
                 value & 0xFFFF,  # Ensure u16 range
@@ -171,7 +178,7 @@ def pack_voice_params(defaults: Dict[int, int]) -> bytes:
             # 32-bit signed: 8-byte entry
             parts.append(struct.pack(
                 '<BBHi',
-                0,  # persistence (default PER_VOICE)
+                persistence,  # Registry scope; unknown IDs retain legacy PER_VOICE
                 int(ValueType.I32),
                 param_id,
                 value & 0xFFFFFFFF,  # Mask to 32 bits
@@ -180,7 +187,7 @@ def pack_voice_params(defaults: Dict[int, int]) -> bytes:
             # 16-bit signed: 6-byte entry
             parts.append(struct.pack(
                 '<BBHh',
-                0,  # persistence (default PER_VOICE)
+                persistence,  # Registry scope; unknown IDs retain legacy PER_VOICE
                 int(entry.value_type),
                 param_id,
                 max(Q15_NEG_ONE, min(Q15_ONE, value)),  # Clamp to i16 range
@@ -192,7 +199,7 @@ def pack_voice_params(defaults: Dict[int, int]) -> bytes:
                 # Value requires 32-bit storage
                 parts.append(struct.pack(
                     '<BBHI',
-                    0,  # persistence (default PER_VOICE)
+                    persistence,  # Registry scope; unknown IDs retain legacy PER_VOICE
                     int(ValueType.U32),
                     param_id,
                     value & 0xFFFFFFFF,
@@ -202,7 +209,7 @@ def pack_voice_params(defaults: Dict[int, int]) -> bytes:
                 value_type_id = int(entry.value_type) if entry else int(ValueType.I16)
                 parts.append(struct.pack(
                     '<BBHh',
-                    0,  # persistence (default PER_VOICE)
+                    persistence,  # Registry scope; unknown IDs retain legacy PER_VOICE
                     value_type_id,
                     param_id,
                     value,

@@ -19,6 +19,8 @@ class StereoOutputMixin:
     def _init_output_stage(self, block_size):
         from ..instrument_ir import SafetyConfig
         self.output_block_size = block_size
+        from .mix_jit import prepare
+        prepare()
         self.material = MaterialEngine(block_size)
         self.safety = SafetyEngine(block_size)
         self._material_id = 0
@@ -126,23 +128,28 @@ class StereoOutputMixin:
         block_size = self.output_block_size
         if any(len(samples) != block_size for _, samples in rendered):
             raise ValueError('Output voices must contain complete audio blocks')
-        L, R = [0] * block_size, [0] * block_size
-        send_inputs = self.auxiliary_returns.empty_inputs()
         rendered_frames = [frame for frame, _ in rendered]
-        for frame, samples in rendered:
-            phase = (max(Q15_NEG_ONE, min(Q15_ONE, frame.pan_q15)) + Q15_SCALE) << 14
-            left_gain, right_gain = cosine_q15(phase), sine_q15(phase)
-            left = [mul_q15_sat(int(sample), left_gain) for sample in samples]
-            right = [mul_q15_sat(int(sample), right_gain) for sample in samples]
-            for i in range(block_size):
-                L[i] += left[i]
-                R[i] += right[i]
-            self.auxiliary_returns.add_voice(send_inputs, left, right,
-                                            frame.sendA_q15, frame.sendB_q15)
+        from .mix_jit import try_mix
+        mixed = try_mix(rendered, block_size)
+        if mixed is not None:
+            L, R, send_inputs = mixed
+        else:
+            L, R = [0] * block_size, [0] * block_size
+            send_inputs = self.auxiliary_returns.empty_inputs()
+            for frame, samples in rendered:
+                phase = (max(Q15_NEG_ONE, min(Q15_ONE, frame.pan_q15)) + Q15_SCALE) << 14
+                left_gain, right_gain = cosine_q15(phase), sine_q15(phase)
+                left = [mul_q15_sat(int(sample), left_gain) for sample in samples]
+                right = [mul_q15_sat(int(sample), right_gain) for sample in samples]
+                for i in range(block_size):
+                    L[i] += left[i]
+                    R[i] += right[i]
+                self.auxiliary_returns.add_voice(send_inputs, left, right,
+                                                frame.sendA_q15, frame.sendB_q15)
 
-        # Clip to int16 range
-        L = [max(Q15_NEG_ONE, min(Q15_ONE, s)) for s in L]
-        R = [max(Q15_NEG_ONE, min(Q15_ONE, s)) for s in R]
+            # Clip to int16 range
+            L = [max(Q15_NEG_ONE, min(Q15_ONE, s)) for s in L]
+            R = [max(Q15_NEG_ONE, min(Q15_ONE, s)) for s in R]
 
         # Aggregate filter parameters from active voices
         # Use minimum cutoff (darkest voice wins) for musical coherence
@@ -153,18 +160,24 @@ class StereoOutputMixin:
 
         for frame in rendered_frames:
             if frame is not None:
+                requested = getattr(frame, 'filter_enabled', None)
+                if requested is False:
+                    continue
                 fc = getattr(frame, 'filter_cutoff_q15', Q15_ONE)
                 fr = getattr(frame, 'filter_reso_q15', 0)
                 fm = getattr(frame, 'filter_mode', 0)
                 # Use minimum cutoff (darkest voice)
-                if fc < filter_cutoff_q15:
+                # The first enabled voice also owns the mode at maximum
+                # cutoff. Later equal cutoffs retain the existing tie order.
+                if fc < filter_cutoff_q15 or (requested is True and not filter_enabled):
                     filter_cutoff_q15 = fc
                     filter_mode = fm
                 # Use maximum resonance
                 if fr > filter_reso_q15:
                     filter_reso_q15 = fr
-                # Enable filter if any voice has cutoff below max
-                if fc < Q15_ONE:
+                # Explicit enable is independent of Q15 rounding. Legacy
+                # producers without this metadata retain cutoff inference.
+                if requested is True or fc < Q15_ONE:
                     filter_enabled = True
 
         # Consumer time belongs to the output block, including blocks with no

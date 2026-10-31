@@ -33,6 +33,11 @@ def output_feasible(previous, count, peak, slew, dc, anchor):
                 return False
         else:
             low, high = -peak, peak
+        # With DC disabled, any legal first sample can be repeated for the
+        # rest of the block: constant continuation keeps peak and slew legal.
+        # The checks above still reject an impossible first sample/anchor.
+        if dc < 0:
+            return True
         sum_low += low
         sum_high += high
     return dc < 0 or (sum_low <= count * dc and sum_high >= -count * dc)

@@ -1,0 +1,144 @@
+{
+  "status": "Adopted; full regression passed; complete live realtime gate remains open",
+  "source_sha256": {
+    "src/symcrash_python_ap/vm/coefficient_tail.py": "7e1136bf71e61a94007c25d957fa8463c4184ad806c22fcf9c35d4475972783b",
+    "src/symcrash_python_ap/vm/resources.py": "121899318a0c0553529d67032279092cafe2fa055b592fec2d255db7f3276e1d",
+    "src/symcrash_python_ap/vm/coefficient_tail_jit.py": "14ec0b4096353f08fc945dd210dae1492961f386b6ae9d753827d29a4dc1b1a7",
+    "tests/conformance/test_coefficient_tail_jit.py": "a9a3c4bfaef236b957b229a089b3905949ff92b5f5bcfb0730d0284bc66c2275",
+    "tests/test_ccs_frequency.py": "7899c1dbd72de0c55732c25610cf3ba9c9cea4252c8b2e7e8f115ac84cf44694",
+    "tests/test_fm6_synthesis.py": "c2590934b78b8ce6c9b692dbed4d8e3e8e74f4c1d302f8e66f77f29879cfae70",
+    "tests/test_fm_feedback.py": "b41136bc8c86de38ee36b1635ffa20d72d22c3dfaa4fecc305c2ba31a2538b71",
+    "tests/test_fm_topology_morph.py": "3e89f64755575bec8cb56cece093252bc7c46fa8ddf2893e55027a838d41462b",
+    "tests/test_fx_material.py": "c9ddf6b556bc5a261ace58eff9c7691da1ead0999df9af562fc2d2a57fe30e9f",
+    "tests/test_granular_engine.py": "d44495519719554b1dbe251205dbdd4f6f4fb602cc0752d7f6ba27c6fe79fe9c",
+    "tests/test_polyphase_k4.py": "ecbc08844624117ae76075ce5d30a18e2344489b27e10d27e55d36cc3a069c7a",
+    "tests/test_sample_mode_integration.py": "7dd3b1e44dcd870d0fee3d6e43928074f8de495860b5f49b5fa1cd7fa9d1ccca",
+    "tests/test_sample_morphing.py": "c799d3ec829d02f74df93ce96f1558838c6283634d6c9ac756bf6e166c198353",
+    "tests/test_sample_playback.py": "da1d878fe72b76f1c3c6fc21e203a7dccbe4c39e00eed8a51fb48c27c1c7523c",
+    "tests/test_seam_stitching.py": "daae658e520907cf360ed5a68dbbc59fb05e7f349e58ffa049f718060a940fc7",
+    "tests/test_tail_operators.py": "37181b44a18fdde6e8a346dd37a2bae3265e0b3e9cf526eb26e2ddeb0db2536c",
+    "tests/test_voice_manager.py": "cb86bcbf51f0c72c6c8556a50af64374386d4b15e89db24c71a9e241abe8e1c1",
+    "tests/unit/test_lut_verification.py": "478f6e3c46971a0e63bf22130a687e50cb046fc464bcdd2034f4906d49e1c036",
+    "pyproject.toml": "1275f1fce0f66138c5ab3557424e8e1ca43aa1e0e4caeaa66a4e4bd97081f81f"
+  },
+  "protected_git": {
+    "root": {
+      "head": "23377cc6b31e90f6d03ad63ee332beb6fb88143a",
+      "staged_patch_sha256": "ad4bf3ccbe8a590a7048b3fc38a37dff3681762dd7d6c79bde0d6f25852945b9"
+    },
+    "docs": {
+      "head": "86514812c317f4b4c7eb0a26a70e017eac0335f5",
+      "staged_patch_sha256": "76a1af380934cc163e477265a5a6847e51248cff08f447e26a45f8fe319acc1b"
+    }
+  },
+  "alternating": {
+    "scope": "Two balanced alternating live comparisons; original sequential failure retained",
+    "results": [
+      {
+        "voices": 1,
+        "before": {
+          "blocks": 3000,
+          "mean_us": 1325.9876666666667,
+          "p95_us": 2082.7799999999993,
+          "p99_us": 2853.399999999998,
+          "max_us": 4948.1,
+          "deadline_misses": 894,
+          "mean_within_budget": true,
+          "no_observed_deadline_misses": false
+        },
+        "after": {
+          "blocks": 3000,
+          "mean_us": 1185.8139666666668,
+          "p95_us": 1856.0249999999983,
+          "p99_us": 2646.005,
+          "max_us": 6804.2,
+          "deadline_misses": 571,
+          "mean_within_budget": true,
+          "no_observed_deadline_misses": false
+        },
+        "mean_reduction_percent": 10.571267254119743
+      },
+      {
+        "voices": 4,
+        "before": {
+          "blocks": 3000,
+          "mean_us": 3633.799033333333,
+          "p95_us": 5328.559999999998,
+          "p99_us": 7894.05999999997,
+          "max_us": 31506.0,
+          "deadline_misses": 3000,
+          "mean_within_budget": false,
+          "no_observed_deadline_misses": false
+        },
+        "after": {
+          "blocks": 3000,
+          "mean_us": 3138.3124,
+          "p95_us": 4989.609999999999,
+          "p99_us": 6860.082999999995,
+          "max_us": 16144.6,
+          "deadline_misses": 3000,
+          "mean_within_budget": false,
+          "no_observed_deadline_misses": false
+        },
+        "mean_reduction_percent": 13.635499068279977
+      }
+    ],
+    "compared_samples": 768000,
+    "realtime_ready": false,
+    "sequential_comparison": "_maturity70_quiet_result.json",
+    "sequential_comparison_passed": false,
+    "cpu_timing_note": "Diagnostic thread CPU readings are coarse/noisy on this host; one four-voice repeat reverses CPU mean despite lower elapsed mean. Wall deadlines and misses remain the readiness criterion."
+  },
+  "original_full_regression": "_maturity69_post_result.json",
+  "focused_tests": {
+    "passed": 517,
+    "exit_code": 0
+  },
+  "full_post_change_regression": {
+    "status": "passed",
+    "exit_code": 0,
+    "summary": "6432 passed, 14 skipped, 7 warnings in 1615.24s (0:26:55)",
+    "passed": 6432,
+    "skipped": 14,
+    "warnings": 7,
+    "elapsed_seconds": 1615.24,
+    "failures": [],
+    "log": "_maturity70-post-tests.log",
+    "log_sha256": "792f21f3b91ea74c7ccbbcb7887afecb4c0442814279c9a02ce8465198fe01cc",
+    "inputs": "_maturity70_full_inputs.json",
+    "inputs_sha256": "665bac4819dcbfdb9d302a0021ea2b5556e7fdecf738ef482cb1f20333cc9155",
+    "unchanged_inputs": 707,
+    "protected_git": {
+      "root": {
+        "head": "23377cc6b31e90f6d03ad63ee332beb6fb88143a",
+        "staged_patch_sha256": "ad4bf3ccbe8a590a7048b3fc38a37dff3681762dd7d6c79bde0d6f25852945b9"
+      },
+      "docs": {
+        "head": "86514812c317f4b4c7eb0a26a70e017eac0335f5",
+        "staged_patch_sha256": "76a1af380934cc163e477265a5a6847e51248cff08f447e26a45f8fe319acc1b"
+      }
+    },
+    "interpretation": "Full source-matched regression; no competing tests/benchmarks. Full-live deadline, hardware fit and broader functional contracts remain open."
+  },
+  "pitch_realtime_checks": {
+    "passed": 4,
+    "exit_code": 0
+  },
+  "cold_production_probe": {
+    "blocks": 96,
+    "new_signatures": 0,
+    "exit_code": 0
+  },
+  "production_benchmark_exit_code": 1,
+  "production_exact_samples": 192000,
+  "production_benchmark": "build/realtime70/production/report.json",
+  "logs": {
+    "_maturity70-production-tests.log": "df26deb1f37ff5c461470d51964b82cb2fa44184c54c709ba7ade2bf066075af",
+    "_maturity70-production-cold.log": "3de14c4d37f66b655c2681d555ba8f21684513d0e61121cc7e3d24c7d44131e4",
+    "_maturity70-production-pitch-realtime.log": "8277fddaf09c066dcf35c514f0bc294007e9e7231dfc9533df3298a3273dded9",
+    "_maturity70-production-live.log": "30fb06ff4c34eb9af17f1479f3f5236e7e64d09ab0b7ca8f66c193ae40dad8ec",
+    "_maturity70-quiet-qualification.log": "09fd69c51aa161cf654608fca8a47cd30fb1684f801eb21452d00afb1f3123be",
+    "_maturity70-alternating-1.log": "814d92e783c7ace3a94f968bf77b675bc7e916025ee0eeaf44e8ba3dcd3b4ee9",
+    "_maturity70-alternating-2.log": "092ef69a077ae5bdd2b70fb31e255320276c51ac73bf0eac40d38a74d23279eb"
+  }
+}

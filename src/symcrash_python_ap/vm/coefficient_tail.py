@@ -74,6 +74,9 @@ def _fine_limit(coeffs, policy, traction):
 
 
 def hard_project(coeffs, policy, traction):
+    from .coefficient_tail_jit import try_hard_project
+    if try_hard_project(coeffs, policy, traction):
+        return
     wide = coeffs.astype(np.int64)
     leaf_energies = np.sum(wide * wide, axis=1)
     for index in np.flatnonzero(leaf_energies > policy.leaf_energy_max):
@@ -85,6 +88,9 @@ def hard_project(coeffs, policy, traction):
 
 
 def normalize_scale(coeffs, policy, traction):
+    from .coefficient_tail_jit import try_normalize_scale
+    if try_normalize_scale(coeffs, policy, traction):
+        return
     if traction == 0:
         return
     weights = CURVE_ENERGY_WEIGHTS[policy.normalize_curve]

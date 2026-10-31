@@ -218,6 +218,11 @@ class MaterialEngine:
     
     def __init__(self, block_size: int = 64, *, seed: int = 0):
         self.B = block_size
+        # Load the optional exact SVF kernel before the audio loop.
+        from .svf_jit import prepare
+        prepare()
+        from .material_sample_jit import prepare as prepare_samples
+        prepare_samples()
         self._exciter_prng = PCG32(state=seed)
 
         # Stereo state pairs using StereoState wrapper
@@ -342,6 +347,14 @@ class MaterialEngine:
     
     def _tape_bus(self, L: List[int], R: List[int]) -> Tuple[List[int], List[int]]:
         """Tape bus processing."""
+        if (type(self) is MaterialEngine
+                and type(self.tape_L) is TapeState and type(self.tape_R) is TapeState
+                and getattr(self._tape_sample, '__func__', None) is _TAPE_SAMPLE_REFERENCE
+                and getattr(self._tone_filter, '__func__', None) is _TONE_FILTER_REFERENCE):
+            from .material_sample_jit import try_tape
+            result = try_tape(self, L, R)
+            if result is not None:
+                return result
         outL = []
         outR = []
         
@@ -408,6 +421,13 @@ class MaterialEngine:
     
     def _rank_grit(self, L: List[int], R: List[int]) -> Tuple[List[int], List[int]]:
         """Rank statistics processing with grit."""
+        if (type(self) is MaterialEngine
+                and type(self.rank_L) is RankState and type(self.rank_R) is RankState
+                and getattr(self._rank_sample, '__func__', None) is _RANK_SAMPLE_REFERENCE):
+            from .material_sample_jit import try_rank
+            result = try_rank(self, L, R)
+            if result is not None:
+                return result
         outL = []
         outR = []
         
@@ -920,6 +940,11 @@ class MaterialEngine:
             raise ValueError("Filter mode must be 0 (LP), 1 (HP), 2 (BP), or 3 (notch)")
         coeff = self._svf_coefficients(cutoff_q15, reso_q15)
 
+        from .svf_jit import try_process
+        accelerated = try_process(L, R, self.B, self.svf_L, self.svf_R, coeff, mode)
+        if accelerated is not None:
+            return accelerated
+
         for i in range(self.B):
             yL = self._svf_sample(L[i], self.svf_L, coeff, mode)
             yR = self._svf_sample(R[i], self.svf_R, coeff, mode)
@@ -1074,3 +1099,7 @@ class MaterialEngine:
             noise = mul_q15_sat((self._exciter_prng.next_u32() >> 16) - Q15_SCALE,
                                 noise_level_q15)
             self.ks_R.buffer[i] = noise
+
+_TAPE_SAMPLE_REFERENCE = MaterialEngine._tape_sample
+_TONE_FILTER_REFERENCE = MaterialEngine._tone_filter
+_RANK_SAMPLE_REFERENCE = MaterialEngine._rank_sample
