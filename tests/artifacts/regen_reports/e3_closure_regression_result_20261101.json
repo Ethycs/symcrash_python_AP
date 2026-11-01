@@ -1,0 +1,20 @@
+{
+  "command": [
+    "F:\\Keytone\\Documents\\GitHub\\symcrash_python_AP\\.pixi\\envs\\default\\python.exe",
+    "-u",
+    "-m",
+    "pytest",
+    "tests/",
+    "-q"
+  ],
+  "exit_code": 0,
+  "seconds": 1232.510413599999,
+  "completed_utc": "2026-11-01T00:03:45.654075+00:00",
+  "log": "build\\e3_qualification_20261101\\full_regression_tests.log",
+  "log_sha256": "a9497c75e9e43d601f7ccb44647bb5027711c1a38d69b9d4d548438232005d89",
+  "inputs_sha256": "5629af64cac6235470c444bcf746af423104a731d4e968c6cfa65ccbb2782926",
+  "changed_inputs": [],
+  "bound_inputs": 1014,
+  "summary": "6790 passed, 14 skipped, 7 warnings in 1229.16s (0:20:29)",
+  "preceding_collection_failure": "Unscoped pytest collected ignored historical checkouts; canonical README/pyproject invocation targets tests/. Prior exit 2 and full log retained."
+}

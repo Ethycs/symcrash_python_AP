@@ -1,0 +1,49 @@
+============================================================================
+vm_step_block sustained single-voice benchmark
+Budget: 1333.3 us/block (64 samples @ 48 kHz)
+Blocks: 7500 measured after 100 warm-up
+Numba available: True
+============================================================================
+
+Mode A (LUT sine + partials)
+  bit-exact vs reference: bit-exact
+  jit:        mean=   211.8 us  p95=   280.7 us  p99=   531.6 us  max= 18892.4 us
+              10/7500 observed deadline misses; mean   15.9% of budget [OK ]
+
+Mode B (12 partials + 2 ops)
+  bit-exact vs reference: bit-exact
+  jit:        mean=   219.4 us  p95=   295.4 us  p99=   602.7 us  max=  3267.1 us
+              7/7500 observed deadline misses; mean   16.5% of budget [OK ]
+
+Mode B (saw, 32 harmonics)
+  bit-exact vs reference: bit-exact
+  jit:        mean=   195.3 us  p95=   221.2 us  p99=   269.4 us  max=   733.4 us
+              0/7500 observed deadline misses; mean   14.6% of budget [OK ]
+
+Mode B (detuned saw, 32 harmonics)
+  bit-exact vs reference: bit-exact
+  jit:        mean=   448.0 us  p95=   500.0 us  p99=   708.9 us  max=  1701.0 us
+              4/7500 observed deadline misses; mean   33.6% of budget [OK ]
+
+Mode B (pitch sweep, basis cache misses)
+  bit-exact vs reference: bit-exact
+  jit:        mean=   505.5 us  p95=   601.4 us  p99=   789.1 us  max=  1750.0 us
+              3/7500 observed deadline misses; mean   37.9% of budget [OK ]
+
+Mode A/B (continuous fades + pitch cache misses)
+  bit-exact vs reference: bit-exact
+  jit:        mean=   610.0 us  p95=   688.5 us  p99=   791.2 us  max=  1180.6 us
+              0/7500 observed deadline misses; mean   45.7% of budget [OK ]
+
+Mode B (PWM, harmonic bank)
+  bit-exact vs reference: bit-exact
+  jit:        mean=   208.8 us  p95=   275.0 us  p99=   451.1 us  max=  4046.4 us
+              1/7500 observed deadline misses; mean   15.7% of budget [OK ]
+
+Mode FM6 (alg 5 + feedback)
+  bit-exact vs reference: bit-exact
+  jit:        mean=   173.9 us  p95=   213.8 us  p99=   265.2 us  max=  2860.0 us
+              1/7500 observed deadline misses; mean   13.0% of budget [OK ]
+
+============================================================================
+RESULT: FAIL (observed deadline miss, invalid timing or bit-exactness mismatch)
