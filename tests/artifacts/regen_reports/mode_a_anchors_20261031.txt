@@ -1,0 +1,54 @@
+Mode A MIDI-note and octave candidate audit -- 2026-10-31
+Candidate-only: no production image, synthesis source, golden or deadline changes.
+Command: pixi run python -m tools.audit_mode_a_anchors --output build/mode_a_anchors_20261031.json
+Terminal exit: 0 (experiment completed; NOT a conformance pass).
+Tests: 33 passed (anchor audit + reused lossless codec).
+An earlier attempt completed calculations but failed JSON serialization of a NumPy bool;
+the explicit float conversion and report-serialization test fix that diagnostic defect.
+
+Full JSON SHA256: ed803ae2829feabb3480a2b50d7c2a2f806cbf421b77615a47d0a02157f9239e
+Source image: {'image_bytes': 2081284256, 'recipe_sha256': 'a2c43975afbdad5cfc4d827d841a288ebb4df182f3d5c2cdec7ef6341961b156', 'directory_data_sha256': '7c8f85cfe83eac5ad09038b02c43ae84970c32b51dd468c452e031479f93eed9'}
+Geometry: {'N': 64, 'K': 4, 'P': 64, 'coefficient_bits': 16, 'phase_bits': 32}
+Limits: {'shared_coefficient_bytes': 4194304, 'mode_b_bytes': 3124940, 'working_bytes': 32768}
+
+Storage: source anchors round-trip every int16 coefficient exactly.
+Semitone predictor groups at most 16 adjacent MIDI notes;
+octave-offset predictor groups the same pitch class across octaves (at most 11 notes).
+Octave anchors are MIDI 0,12,...,120,127 (12 per wave). All schemes include 3 legacy tables.
+This is a measured size model using the existing diagnostic DEFLATE codec, not a target decoder.
+midi_anchors: 643 tables; raw image 21072476; compressed image 10246536; combined with Mode B 13371476 bytes; storage fits: False.
+  Largest decoded group: 524288 bytes (output alone, excluding zlib and widened working arrays).
+  Host whole-group decode mean/max: 24447.7/29572.9 us. These are not audio-block timings.
+midi_octave_offsets: 643 tables; raw image 21072476; compressed image 11098738; combined with Mode B 14223678 bytes; storage fits: False.
+  Largest decoded group: 360448 bytes (output alone, excluding zlib and widened working arrays).
+  Host whole-group decode mean/max: 13409.7/23414.5 us. These are not audio-block timings.
+octave_anchors: 63 tables; raw image 2064716; compressed image 1081919; combined with Mode B 4206859 bytes; storage fits: False.
+  Largest decoded group: 393216 bytes (output alone, excluding zlib and widened working arrays).
+  Host whole-group decode mean/max: 16498.7/22444.2 us. These are not audio-block timings.
+
+Quality: 2200 candidate table comparisons at 220 pitches x 5 waves x 2 schemes.
+Covers every semitone midpoint plus immediately before/at/after every source harmonic-cap transition.
+210 carrier-only audio comparisons at 14 pitches x 5 waves x 3 schemes; 12,097,920 candidate/reference sample pairs.
+Candidate interpolation is linear in exact Q32 increment with signed RNE, followed by unchanged
+linear phase interpolation and production IDWPT. Actual phase increment is never rounded to an anchor.
+Octave reuse means MIDI60..71 tables reused by pitch class without coefficient corrections.
+These measurements do not test cubic/per-harmonic interpolation, a new octave leaf mapping,
+B1 phase-FFT compression, or a complete VM/operator/FX render.
+
+Selected sine results (residual peak relative to fitted fundamental; reference included):
+  midi at MIDI 69.00: expected 440.000005 Hz; peak 440.000010 Hz; residual -75.13 dBc (reference -75.13); max PCM error 0.
+  octave at MIDI 69.00: expected 440.000005 Hz; peak 440.000010 Hz; residual -20.13 dBc (reference -75.13); max PCM error 14916.
+  octave_reuse_uncorrected at MIDI 69.00: expected 440.000005 Hz; peak 440.000010 Hz; residual -75.13 dBc (reference -75.13); max PCM error 0.
+  midi at MIDI 69.50: expected 452.892981 Hz; peak 452.893016 Hz; residual -59.91 dBc (reference -74.21); max PCM error 212.
+  octave at MIDI 69.50: expected 452.892981 Hz; peak 452.893015 Hz; residual -21.06 dBc (reference -74.21); max PCM error 13504.
+  octave_reuse_uncorrected at MIDI 69.50: expected 452.892981 Hz; peak 452.893016 Hz; residual -59.91 dBc (reference -74.21); max PCM error 212.
+  midi at MIDI 81.00: expected 879.999999 Hz; peak 880.000009 Hz; residual -72.13 dBc (reference -72.13); max PCM error 0.
+  octave at MIDI 81.00: expected 879.999999 Hz; peak 880.000008 Hz; residual -5.93 dBc (reference -72.13); max PCM error 43368.
+  octave_reuse_uncorrected at MIDI 81.00: expected 879.999999 Hz; peak 130.000009 Hz; residual 3.04 dBc (reference -72.13); max PCM error 65464.
+  midi at MIDI 126.50: expected 12186.754782 Hz; peak 12936.754805 Hz; residual 13.86 dBc (reference -72.13); max PCM error 64584.
+  octave at MIDI 126.50: expected 12186.754782 Hz; peak 12186.754816 Hz; residual -0.87 dBc (reference -72.13); max PCM error 63312.
+  octave_reuse_uncorrected at MIDI 126.50: expected 12186.754782 Hz; peak 186.754806 Hz; residual 34.82 dBc (reference -72.13); max PCM error 65500.
+
+Conclusion: no candidate meets storage, working-memory and audio requirements together.
+Do not generalize these rejected simple variants into a proof that all compact representations fail.
+Production Mode A remains oversized; E3 remains open.
